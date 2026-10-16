@@ -208,3 +208,51 @@ Local-only by design: per-user named pipe, no network listener, no telemetry
 anywhere in the codebase. The engine never reads file contents in Phase 2 and
 never hydrates cloud placeholders. Sensitive files are excluded at the index
 level.
+
+## Durable content batches and deferred embeddings
+
+The two content slots use the sibling `winsearch-extract` process. Text jobs
+request 30 chunks per batch, with the existing 1200-character target and 15%
+overlap. A cursor is a stable chunk ordinal for the current source revision.
+The worker returns a truthful total and `next_cursor`; only a null cursor
+finishes extraction. Continuations receive lower priority than new/short jobs.
+Document parsing currently repeats within the existing 32 MiB input / 16 MiB
+archive XML bounds to reconstruct the requested window; it does not hydrate
+cloud placeholders. Page/media-specific cursors remain dedicated future work.
+
+Additive tables `content_revisions`, `content_progress`, and `content_chunks`
+extend schema version 2. The migration marker is `meta.content_batches_v1`.
+Old FTS text is preserved, including numeric rows without vector segments.
+Legacy locations are copied only when a segment's text actually equals that
+FTS row; unavailable locations remain absent. Fresh chunks have unique
+`(entry_id, job_kind, chunk_index)` identities, text, page/time/line/thumbnail,
+an embedding flag, and durable embedding attempts/state. `content_fts.rowid`
+references the chunk identity. Entries own these rows through cascading FKs.
+
+`IndexStore::begin_content_batch` binds the precise filesystem source snapshot
+(path, length, modification time, and file identity), durable source revision,
+and model-space generation. `commit_content_batch` transactionally writes
+exact text/locations, cursor/completion, and claim release. Replays and stale
+revisions cannot advance a cursor. `content_progress` and `list_content_chunks`
+expose the persisted state to later extractors. Watcher Modified events call
+`invalidate_content_source` even for equal-length, same-second changes; the
+existing entry `mtime` retains its seconds-based recency semantics.
+
+`claim_content_vectors`, `release_content_vectors`, and `commit_content_vectors`
+implement the separate deferred stage. Exact text is searchable before a
+model exists. Production uses typed `EmbedError::ModelNotAvailable` to release
+claims without attempts; transport/protocol/invalid-vector failures have the
+existing three-attempt cap and retain exact text. Model changes call
+`reset_content_vectors`, advancing the durable space generation while keeping
+valid exact rows and parse cursors. The normal supervisor resumes vectors
+without reparsing. Source/revision/policy/space checks guard both commits.
+Empty, zero, and nonfinite vectors never enter `segments` from this stage.
+
+`IndexStore::content_matches` joins matching FTS rows to their own locations.
+`SearchHit.matches` and the additive wire excerpts/matching moments preserve
+multiple matching chunks for a grouped file result. These interfaces carry
+up to 32 moments on the primary result path; `content_matches_page` exposes
+subsequent matching chunks with an offset and a per-page cap of 32. Exact text
+and all locations remain durable regardless of that retrieval cap. They carry
+locations for later PDF/media work; they do not establish native PDF page,
+audio, video, or frontend explorer support.

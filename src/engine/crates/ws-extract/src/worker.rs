@@ -89,6 +89,27 @@ pub fn validate_response(
     {
         return Err("invalid cursor progress".into());
     }
+    // Document units are chunk ordinals. Future page/media protocols must
+    // define their own unit-to-draft relationship rather than reuse this rule.
+    if request.kind == "doc"
+        && matches!(
+            response.output.status,
+            ExtractionStatus::Extracted | ExtractionStatus::ExactOnly
+        )
+    {
+        let end = request
+            .cursor
+            .checked_add(segments.len() as u64)
+            .ok_or("cursor overflow")?;
+        if response
+            .next_cursor
+            .is_some_and(|next| segments.is_empty() || next != end)
+            || (response.next_cursor.is_none()
+                && response.total_units.is_some_and(|total| total != end))
+        {
+            return Err("document cursor does not cover returned chunks".into());
+        }
+    }
     let (mut page, mut time, mut line) = (0, 0, 0);
     for draft in segments {
         let valid_kind =
@@ -158,6 +179,21 @@ mod tests {
             .unwrap();
         assert_eq!(decoded, response);
         validate_response(&request(), &decoded).unwrap();
+    }
+
+    #[test]
+    fn text_batches_reject_empty_progress_and_false_completion() {
+        let mut response = ExtractResponse {
+            output: ExtractOutput::extracted(vec![SegmentDraft::text("doc", "one")]),
+            next_cursor: None,
+            total_units: Some(75),
+        };
+        assert!(validate_response(&request(), &response).is_err());
+        response.next_cursor = Some(30);
+        assert!(validate_response(&request(), &response).is_err());
+        response.output.segments.clear();
+        response.next_cursor = Some(1);
+        assert!(validate_response(&request(), &response).is_err());
     }
 
     #[test]

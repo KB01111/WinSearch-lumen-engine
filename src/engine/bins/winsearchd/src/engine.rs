@@ -621,6 +621,7 @@ impl EngineService {
                 path: Some(entry.path),
                 location: None,
                 thumbnail_path: entry.thumbnail_path,
+                ..Default::default()
             });
         }
         out.sort_by(|a, b| {
@@ -847,6 +848,28 @@ impl EngineService {
             match self.indexer.search(&request) {
                 Ok(hits) => {
                     for hit in hits {
+                        let terms: Vec<&str> = text
+                            .split(|c: char| !c.is_alphanumeric())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        let moments: Vec<ws_protocol::MatchingMoment> = hit
+                            .matches
+                            .iter()
+                            .map(|m| ws_protocol::MatchingMoment {
+                                excerpt: ws_extract::select_excerpt(&m.excerpt, &terms, 240),
+                                location: m
+                                    .page
+                                    .map(|page| MatchLocation::Page { page })
+                                    .or_else(|| {
+                                        m.start_ms.map(|ms| MatchLocation::Timestamp {
+                                            seconds: ms as f64 / 1000.0,
+                                            end_seconds: m.end_ms.unwrap_or(ms) as f64 / 1000.0,
+                                        })
+                                    })
+                                    .or_else(|| m.line.map(|line| MatchLocation::Line { line })),
+                                thumbnail_path: m.thumbnail_path.clone(),
+                            })
+                            .collect();
                         results.push(SearchResult {
                             id: format!("e{}", hit.entry_id),
                             kind: to_result_kind(hit.kind),
@@ -855,8 +878,10 @@ impl EngineService {
                             match_explanation: hit.explanation,
                             score: hit.score,
                             path: Some(hit.path),
-                            location: None,
+                            location: moments.first().and_then(|m| m.location),
                             thumbnail_path: hit.thumbnail_path,
+                            excerpt: moments.first().map(|m| m.excerpt.clone()),
+                            matching_moments: moments,
                         });
                     }
                 }
@@ -1132,6 +1157,33 @@ mod tests {
                 && matches!(r.kind, ResultKind::File | ResultKind::Document)),
             "got {results:?}"
         );
+    }
+
+    #[test]
+    fn task2_no_model_result_carries_actual_excerpt_and_line() {
+        let tree = TempTree::new();
+        fs::write(
+            tree.0.join("invoice.txt"),
+            "Header\nWINSEARCH_INVOICE_42 is outstanding",
+        )
+        .unwrap();
+        let engine = service_with(&tree, &[]);
+        engine
+            .indexer
+            .extract_once_with(&crate::extract::ExtractorRegistry::default(), |_| {
+                Err("model unavailable".into())
+            })
+            .unwrap();
+        let results = engine.plan_results(&query("WINSEARCH_INVOICE_42"));
+        let result = results.iter().find(|r| r.title == "invoice.txt").unwrap();
+        assert!(result
+            .excerpt
+            .as_ref()
+            .unwrap()
+            .contains("WINSEARCH_INVOICE_42"));
+        assert_eq!(result.location, Some(MatchLocation::Line { line: 2 }));
+        assert_eq!(result.matching_moments.len(), 1);
+        assert_eq!(result.matching_moments[0].location, result.location);
     }
 
     #[test]

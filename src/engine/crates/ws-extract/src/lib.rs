@@ -128,6 +128,39 @@ pub enum ExtractError {
 pub trait Extractor: Send + Sync {
     /// Extracts [`SegmentDraft`]s from `path` while respecting `budget`.
     fn extract(&self, path: &Path, budget: &ExtractBudget) -> Result<ExtractOutput, ExtractError>;
+
+    /// Stable chunk ordinal cursor. Parsing stays within the original byte/deadline bounds;
+    /// only the requested window crosses the process boundary.
+    fn extract_batch(
+        &self,
+        path: &Path,
+        budget: &ExtractBudget,
+        cursor: u64,
+    ) -> Result<worker::ExtractResponse, ExtractError> {
+        let full_budget = ExtractBudget {
+            max_segments: usize::MAX,
+            ..budget.clone()
+        };
+        let mut output = self.extract(path, &full_budget)?;
+        budget.check_deadline()?;
+        let total = output.segments.len() as u64;
+        let start = usize::try_from(cursor)
+            .unwrap_or(usize::MAX)
+            .min(output.segments.len());
+        let end = start
+            .saturating_add(budget.max_segments.min(30))
+            .min(output.segments.len());
+        output.segments = output.segments.drain(start..end).collect();
+        let successful = matches!(
+            output.status,
+            ExtractionStatus::Extracted | ExtractionStatus::ExactOnly
+        );
+        Ok(worker::ExtractResponse {
+            output,
+            next_cursor: (successful && (end as u64) < total).then_some(end as u64),
+            total_units: successful.then_some(total),
+        })
+    }
 }
 
 /// Maps a lowercase file extension (without dot) to the `extract_jobs.kind`

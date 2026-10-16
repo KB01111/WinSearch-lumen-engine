@@ -18,16 +18,15 @@ use std::sync::Arc;
 use tracing::warn;
 use ws_extract::{
     DocumentExtractor, ExtractBudget, ExtractError, ExtractOutput, ExtractionStatus, Extractor,
-    ImageExtractor, SegmentDraft,
+    ImageExtractor,
 };
-use ws_index::model::{
-    NewSegment, SEGMENT_KIND_DOC, SEGMENT_KIND_IMAGE, SEGMENT_KIND_OCR, SEGMENT_KIND_PDF,
-};
+use ws_index::model::{SEGMENT_KIND_DOC, SEGMENT_KIND_IMAGE, SEGMENT_KIND_OCR, SEGMENT_KIND_PDF};
 use ws_index::{ExtractJob, StoreError};
 
-use crate::embed_client::{EmbedSupervisor, EMBED_JOB_TIMEOUT};
-use crate::indexer::{Indexer, MAX_EMBED_ATTEMPTS};
+use crate::embed_client::{EmbedError, EmbedSupervisor, EMBED_JOB_TIMEOUT};
 use crate::extract_client::{ArtifactLease, ExtractClient, ExtractClientError};
+use crate::indexer::{Indexer, MAX_EMBED_ATTEMPTS};
+use ws_index::model::{ContentChunk, ContentMatch};
 
 /// Number of background content extraction worker threads (P4.1).
 pub const EXTRACT_WORKER_THREADS: usize = 2;
@@ -146,7 +145,26 @@ impl Indexer {
         F: Fn(&[String]) -> Result<Vec<Vec<f32>>, String>,
         FI: Fn(&Path) -> Result<Option<Vec<f32>>, String>,
     {
-        if self.indexing_pause_reason().is_some() { return Ok(ExtractStepOutcome::default()); }
+        self.extract_once_typed(
+            registry,
+            |texts| embed(texts).map_err(EmbedError::EmbedFailed),
+            |path| embed_image(path).map_err(EmbedError::EmbedFailed),
+        )
+    }
+
+    fn extract_once_typed<F, FI>(
+        &self,
+        registry: &ExtractorRegistry,
+        embed: F,
+        embed_image: FI,
+    ) -> Result<ExtractStepOutcome, StoreError>
+    where
+        F: Fn(&[String]) -> Result<Vec<Vec<f32>>, EmbedError>,
+        FI: Fn(&Path) -> Result<Option<Vec<f32>>, EmbedError>,
+    {
+        if self.indexing_pause_reason().is_some() {
+            return Ok(ExtractStepOutcome::default());
+        }
         if !registry.admission_available() {
             return Ok(ExtractStepOutcome { admission_unavailable: true, ..Default::default() });
         }
@@ -158,10 +176,18 @@ impl Indexer {
                 return Ok(ExtractStepOutcome { admission_unavailable: true, ..Default::default() });
             }
             let Some(job) = store.claim_content_extract_job()? else {
-                return Ok(ExtractStepOutcome::default());
+                drop(store);
+                return self.embed_content_pending(&embed, &embed_image, None);
             };
             match store.get_entry(job.entry_id)? {
-                Some(entry) if !entry.missing && !entry.is_dir => Some((job, entry)),
+                Some(entry)
+                    if !entry.missing
+                        && !entry.is_dir
+                        && ws_extract::modality_kind_for_ext(&entry.ext)
+                            == Some(job.kind.as_str()) =>
+                {
+                    Some((job, entry))
+                }
                 _ => {
                     store.complete_extract_job(job.id)?;
                     return Ok(ExtractStepOutcome {
@@ -203,19 +229,38 @@ impl Indexer {
 
         // 3. Run extraction outside the store lock, enforcing the budget.
         let path = Path::new(&entry.path);
-        let source = std::fs::metadata(path).ok().map(|m| (m.len(), m.modified().ok()));
+        let snapshot = source_snapshot(path);
+        let progress = self
+            .store_lock()
+            .begin_content_batch(job.entry_id, &job.kind, &snapshot)?;
+        let source = std::fs::metadata(path)
+            .ok()
+            .map(|m| (m.len(), m.modified().ok()));
         let identity = ws_platform::identity::file_identity(path);
         let source_unchanged = || source.is_some()
             && std::fs::metadata(path).ok().map(|m| (m.len(), m.modified().ok())) == source
             && ws_platform::identity::file_identity(path) == identity;
         let extract_res = if let Some(client) = &registry.worker {
-            let request = client.request(path.to_path_buf(), &job.kind, budget.max_segments.min(256) as u32);
-            match client.extract_while(&request, budget.deadline.saturating_duration_since(std::time::Instant::now()), || {
-                self.indexing_pause_reason().is_none()
-                    && self.content_path_allowed(path)
-                    && source_unchanged()
-            }) {
-                Ok(response) => Ok(response.output),
+            let mut request = client.request(
+                path.to_path_buf(),
+                &job.kind,
+                budget.max_segments.min(30) as u32,
+            );
+            request.cursor = progress.cursor;
+            match client.extract_while(
+                &request,
+                budget
+                    .deadline
+                    .saturating_duration_since(std::time::Instant::now()),
+                || {
+                    self.indexing_pause_reason().is_none()
+                        && self.content_path_allowed(path)
+                        && source_unchanged()
+                        && self.store_lock().content_revision(job.entry_id).ok()
+                            == Some(progress.revision)
+                },
+            ) {
+                Ok(response) => Ok(response),
                 Err(ExtractClientError::AdmissionUnavailable) => {
                     self.store_lock().requeue_extract_job(job.id)?;
                     return Ok(ExtractStepOutcome { claimed: true, requeued: true, admission_unavailable: true, ..Default::default() });
@@ -224,16 +269,48 @@ impl Indexer {
                     self.store_lock().requeue_extract_job(job.id)?;
                     return Ok(ExtractStepOutcome { claimed: true, requeued: true, ..Default::default() });
                 }
-                Err(ExtractClientError::Unsupported(_)) => Ok(ExtractOutput::unsupported()),
+                Err(ExtractClientError::Unsupported(_)) => {
+                    Ok(ws_extract::worker::ExtractResponse {
+                        output: ExtractOutput::unsupported(),
+                        next_cursor: None,
+                        total_units: None,
+                    })
+                }
                 Err(ExtractClientError::Timeout) => Err(ExtractError::DeadlineExceeded),
                 Err(ExtractClientError::Malformed(message)) => Err(ExtractError::Decode(message)),
                 Err(ExtractClientError::Worker(message)) => Err(ExtractError::Io(std::io::Error::other(message))),
             }
         } else {
-            run_extractor_with_budget(extractor.expect("registered extractor").as_ref(), path, &budget)
+            budget
+                .check_deadline()
+                .and_then(|_| std::fs::metadata(path).map_err(ExtractError::from))
+                .and_then(|m| budget.check_size(m.len()))
+                .and_then(|_| {
+                    extractor.expect("registered extractor").extract_batch(
+                        path,
+                        &budget,
+                        progress.cursor,
+                    )
+                })
         };
 
-        let output = match extract_res {
+        {
+            let mut store = self.store_lock();
+            if !source_unchanged()
+                || store.content_revision(entry.id)? != progress.revision
+                || store.model_generation()? != progress.model_generation
+                || self.indexing_pause_reason().is_some()
+                || !self.content_path_allowed(path)
+            {
+                store.requeue_extract_job(job.id)?;
+                return Ok(ExtractStepOutcome {
+                    claimed: true,
+                    requeued: true,
+                    ..Default::default()
+                });
+            }
+        }
+        let response = match extract_res {
             Ok(out) => out,
             Err(err) => {
                 // Budget violations (FileTooLarge, DeadlineExceeded, SegmentLimitExceeded)
@@ -258,7 +335,9 @@ impl Indexer {
                 );
                 let mut store = self.store_lock();
                 if permanent {
-                    clear_modality_artifacts(&mut store, job.entry_id, &job.kind)?;
+                    if progress.cursor == 0 {
+                        clear_modality_artifacts(&mut store, job.entry_id, &job.kind)?;
+                    }
                     store.mark_extract_failed(job.id)?;
                     drop(store);
                     self.invalidate_vector_cache();
@@ -284,6 +363,8 @@ impl Indexer {
             }
         };
 
+        let next_cursor = response.next_cursor;
+        let output = response.output;
         let mut artifacts = registry.worker.as_ref().map(|_| ArtifactLease::for_output(&output));
 
         if matches!(
@@ -291,7 +372,9 @@ impl Indexer {
             ExtractionStatus::Unsupported | ExtractionStatus::Failed(_)
         ) {
             let mut store = self.store_lock();
-            clear_modality_artifacts(&mut store, job.entry_id, &job.kind)?;
+            if progress.cursor == 0 {
+                clear_modality_artifacts(&mut store, job.entry_id, &job.kind)?;
+            }
             if matches!(output.status, ExtractionStatus::Failed(_)) {
                 store.mark_extract_failed(job.id)?;
             } else {
@@ -306,214 +389,249 @@ impl Indexer {
             });
         }
 
-        // 4. Separate FTS texts and embeddable segments (only when status == Extracted).
-        let fts_texts: Vec<String> = output
-            .segments
-            .iter()
-            .map(|s| s.text.trim().to_string())
-            .filter(|t| !t.is_empty())
-            .collect();
-
-        let embeddable: Vec<&SegmentDraft> = if output.status == ExtractionStatus::Extracted {
-            output
-                .segments
-                .iter()
-                .filter(|s| s.embed && !s.text.trim().is_empty())
-                .collect()
-        } else {
-            Vec::new()
-        };
-
-        // 5. Embed in batches of `EMBED_BATCH` outside the store lock.
-        let mut vectors: Vec<Vec<f32>> = Vec::with_capacity(embeddable.len());
-        if !embeddable.is_empty() {
-            let texts: Vec<String> = embeddable.iter().map(|s| s.text.clone()).collect();
-            for chunk in texts.chunks(crate::indexer::EMBED_BATCH) {
-                match embed(chunk) {
-                    Ok(batch_vecs) if batch_vecs.len() == chunk.len() => {
-                        vectors.extend(batch_vecs);
-                    }
-                    Ok(batch_vecs) => {
-                        warn!(
-                            got = batch_vecs.len(),
-                            want = chunk.len(),
-                            "content embed arity mismatch; releasing job for retry"
-                        );
-                        let mut store = self.store_lock();
-                        let poisoned =
-                            Self::fail_extract_job_capped(&mut store, &job, &entry.name)?;
-                        drop(store);
-                        if poisoned {
-                            self.invalidate_vector_cache();
-                        }
-                        return Ok(ExtractStepOutcome {
-                            claimed: true,
-                            status: Some(output.status),
-                            failed: !poisoned,
-                            poisoned,
-                            ..Default::default()
-                        });
-                    }
-                    Err(e) => {
-                        warn!(
-                            job = job.id,
-                            error = %e,
-                            "content embed failed; releasing job for retry"
-                        );
-                        let mut store = self.store_lock();
-                        let poisoned =
-                            Self::fail_extract_job_capped(&mut store, &job, &entry.name)?;
-                        drop(store);
-                        if poisoned {
-                            self.invalidate_vector_cache();
-                        }
-                        return Ok(ExtractStepOutcome {
-                            claimed: true,
-                            status: Some(output.status),
-                            failed: !poisoned,
-                            poisoned,
-                            ..Default::default()
-                        });
-                    }
-                }
-            }
-        }
-
-        // 5b. For `image` jobs, also compute a visual embedding via `embed_image(path)`
-        // when available (e.g. `mtmd` projector or stub worker).
-        let visual_vec: Option<Vec<f32>> =
-            if output.status == ExtractionStatus::Extracted && job.kind == SEGMENT_KIND_IMAGE {
-                match if self.content_path_allowed(path) { embed_image(path) } else { Ok(None) } {
-                    Ok(v) => v,
-                    Err(e) => {
-                        warn!(
-                            job = job.id,
-                            error = %e,
-                            "visual image embed failed; releasing job for retry"
-                        );
-                        let mut store = self.store_lock();
-                        let poisoned =
-                            Self::fail_extract_job_capped(&mut store, &job, &entry.name)?;
-                        drop(store);
-                        if poisoned {
-                            self.invalidate_vector_cache();
-                        }
-                        return Ok(ExtractStepOutcome {
-                            claimed: true,
-                            status: Some(output.status),
-                            failed: !poisoned,
-                            poisoned,
-                            ..Default::default()
-                        });
-                    }
-                }
-            } else {
-                None
-            };
-
-        // 6. Commit FTS + vector segments under the store lock if the entry is unchanged.
         let mut store = self.store_lock();
-        let Some(fresh) = store.get_entry(job.entry_id)? else {
-            let _ = store.complete_extract_job(job.id);
-            return Ok(ExtractStepOutcome {
-                claimed: true,
-                status: Some(output.status),
-                ..Default::default()
-            });
-        };
-        if self.indexing_pause_reason().is_some() || !self.content_path_allowed(Path::new(&fresh.path)) {
+        let valid = store.get_entry(job.entry_id)?.is_some_and(|e| {
+            !e.missing
+                && e.path == entry.path
+                && ws_extract::modality_kind_for_ext(&e.ext) == Some(job.kind.as_str())
+        }) && source_unchanged()
+            && store.content_revision(job.entry_id)? == progress.revision
+            && store.model_generation()? == progress.model_generation;
+        if !valid || self.indexing_pause_reason().is_some() || !self.content_path_allowed(path) {
             store.requeue_extract_job(job.id)?;
-            return Ok(ExtractStepOutcome { claimed: true, requeued: true, ..Default::default() });
-        }
-        let fresh_job = store.get_extract_job(job.id)?;
-        let changed = (registry.worker.is_some() && !source_unchanged())
-            || fresh.mtime != entry.mtime
-            || fresh.size != entry.size
-            || fresh.path != entry.path
-            || fresh_job
-                .as_ref()
-                .is_some_and(|j| j.priority != job.priority);
-        if changed {
-            if fresh_job.is_some() {
-                let _ = store.requeue_extract_job(job.id);
-            }
             return Ok(ExtractStepOutcome {
                 claimed: true,
-                status: Some(output.status),
                 requeued: true,
                 ..Default::default()
             });
         }
-
-        store.replace_content_fts(job.entry_id, &job.kind, &fts_texts)?;
-        store.remove_segments_for_entry_and_kind(job.entry_id, &job.kind)?;
-        if job.kind == SEGMENT_KIND_IMAGE {
-            store.remove_segments_for_entry_and_kind(job.entry_id, SEGMENT_KIND_OCR)?;
-        }
-
-        if let Some(thumb) = output
+        let mut chunks: Vec<ContentChunk> = output
             .segments
             .iter()
-            .find_map(|s| s.thumbnail_hint.as_ref())
+            .enumerate()
+            .map(|(i, d)| ContentChunk {
+                id: 0,
+                entry_id: job.entry_id,
+                job_kind: job.kind.clone(),
+                kind: d.kind.clone(),
+                chunk_index: (progress.cursor + i as u64) as i64,
+                text: d.text.clone(),
+                location: ContentMatch {
+                    excerpt: String::new(),
+                    page: d.page,
+                    start_ms: d.start_ms,
+                    end_ms: d.end_ms,
+                    line: d.line,
+                    thumbnail_path: d
+                        .thumbnail_hint
+                        .as_ref()
+                        .map(|p| p.to_string_lossy().into_owned()),
+                },
+                embed: d.embed
+                    && !d.text.trim().is_empty()
+                    && output.status == ExtractionStatus::Extracted,
+                visual: false,
+                attempts: 0,
+            })
+            .collect();
+        if progress.cursor == 0
+            && job.kind == SEGMENT_KIND_IMAGE
+            && output.status == ExtractionStatus::Extracted
         {
-            let thumb_str = thumb.to_string_lossy();
-            store.set_entry_thumbnail_path(job.entry_id, Some(&thumb_str))?;
-        }
-
-        // Group chunk_index per segment kind in case an extractor returns
-        // multiple kinds (e.g. `image` + `ocr` or `video` + `audio`).
-        let mut next_chunk_by_kind: HashMap<&str, i64> = HashMap::new();
-        let mut stored = 0usize;
-        if let Some(vvec) = &visual_vec {
-            store.upsert_segment(NewSegment {
+            chunks.push(ContentChunk {
+                id: 0,
                 entry_id: job.entry_id,
-                kind: SEGMENT_KIND_IMAGE,
-                chunk_index: 0,
-                text: &entry.name,
-                page: None,
-                start_ms: None,
-                end_ms: None,
-                line: None,
-                vector: vvec,
-            })?;
-            next_chunk_by_kind.insert(SEGMENT_KIND_IMAGE, 1);
-            stored += 1;
+                job_kind: job.kind.clone(),
+                kind: SEGMENT_KIND_IMAGE.into(),
+                chunk_index: -1,
+                text: entry.name.clone(),
+                location: ContentMatch::default(),
+                embed: true,
+                visual: true,
+                attempts: 0,
+            });
         }
-        for (draft, vec) in embeddable.iter().zip(vectors.iter()) {
-            let kind_str = draft.kind.as_str();
-            let chunk_idx = next_chunk_by_kind.entry(kind_str).or_insert(0);
-            if *chunk_idx == 0 && kind_str != job.kind && kind_str != SEGMENT_KIND_OCR {
-                store.remove_segments_for_entry_and_kind(job.entry_id, kind_str)?;
-            }
-            store.upsert_segment(NewSegment {
-                entry_id: job.entry_id,
-                kind: kind_str,
-                chunk_index: *chunk_idx,
-                text: &draft.text,
-                page: draft.page.map(i64::from),
-                start_ms: draft.start_ms.map(|v| v as i64),
-                end_ms: draft.end_ms.map(|v| v as i64),
-                line: draft.line.map(i64::from),
-                vector: vec,
-            })?;
-            *chunk_idx += 1;
-            stored += 1;
+        if !store.commit_content_batch(&job, &progress, &chunks, next_cursor)? {
+            store.requeue_extract_job(job.id)?;
+            return Ok(ExtractStepOutcome {
+                claimed: true,
+                requeued: true,
+                ..Default::default()
+            });
         }
-
-        store.complete_extract_job(job.id)?;
-        if let Some(artifacts) = artifacts.as_mut() { artifacts.keep(); }
         drop(store);
         self.invalidate_vector_cache();
+        let mut embedded = self.embed_content_pending(&embed, &embed_image, Some(entry.id))?;
+        if job.kind == SEGMENT_KIND_IMAGE && !embedded.requeued && !embedded.failed {
+            let visual = self.embed_content_pending(&embed, &embed_image, Some(entry.id))?;
+            embedded.segments_stored += visual.segments_stored;
+            embedded.requeued |= visual.requeued;
+            embedded.failed |= visual.failed;
+        }
+        if embedded.requeued {
+            embedded.segments_stored = 0;
+        }
+        if source_unchanged()
+            && self.indexing_pause_reason().is_none()
+            && self.content_path_allowed(path)
+            && self.store_lock().content_revision(entry.id)? == progress.revision
+        {
+            if let Some(artifacts) = artifacts.as_mut() {
+                artifacts.keep();
+            }
+        }
         Ok(ExtractStepOutcome {
-            admission_unavailable: false,
             claimed: true,
             status: Some(output.status),
-            segments_stored: stored,
-            fts_chunks_indexed: fts_texts.len(),
-            requeued: false,
-            failed: false,
-            poisoned: false,
+            fts_chunks_indexed: if embedded.requeued {
+                0
+            } else {
+                output
+                    .segments
+                    .iter()
+                    .filter(|d| !d.text.trim().is_empty())
+                    .count()
+            },
+            ..embedded
         })
+    }
+
+    fn embed_content_pending<F, FI>(
+        &self,
+        embed: &F,
+        image: &FI,
+        preferred: Option<i64>,
+    ) -> Result<ExtractStepOutcome, StoreError>
+    where
+        F: Fn(&[String]) -> Result<Vec<Vec<f32>>, EmbedError>,
+        FI: Fn(&Path) -> Result<Option<Vec<f32>>, EmbedError>,
+    {
+        let (chunks, entry, revision, generation, progress) = {
+            let mut store = self.store_lock();
+            let chunks = store.claim_content_vectors(preferred)?;
+            let Some(first) = chunks.first() else {
+                return Ok(ExtractStepOutcome::default());
+            };
+            let entry = store.get_entry(first.entry_id)?.expect("content FK");
+            let revision = store.content_revision(entry.id)?;
+            let generation = store.model_generation()?;
+            let progress = store.content_progress(entry.id, &first.job_kind)?;
+            (chunks, entry, revision, generation, progress)
+        };
+        let path = Path::new(&entry.path);
+        let snapshot = source_snapshot(path);
+        if !self.content_path_allowed(path)
+            || progress
+                .as_ref()
+                .is_none_or(|p| p.revision != revision || p.source != snapshot)
+        {
+            let mut store = self.store_lock();
+            store.release_content_vectors(&chunks, false)?;
+            if self.content_path_allowed(path) && store.content_revision(entry.id)? == revision {
+                store.invalidate_content_source(entry.id)?;
+                store.enqueue_extract_job(entry.id, &chunks[0].job_kind)?;
+                return Ok(ExtractStepOutcome {
+                    claimed: true,
+                    requeued: true,
+                    ..Default::default()
+                });
+            }
+            return Ok(ExtractStepOutcome::default());
+        }
+        let result = (|| {
+            let vectors = if chunks[0].visual {
+                match image(path)? {
+                    Some(vector) => vec![vector],
+                    None => {
+                        return Err(EmbedError::Unsupported(
+                            "visual embedding unavailable".into(),
+                        ))
+                    }
+                }
+            } else {
+                embed(&chunks.iter().map(|c| c.text.clone()).collect::<Vec<_>>())?
+            };
+            if vectors.len() != chunks.len() {
+                return Err(EmbedError::Protocol("content embed arity".into()));
+            }
+            Ok(vectors)
+        })();
+        let mut store = self.store_lock();
+        if store.content_revision(entry.id)? != revision
+            || store.model_generation()? != generation
+            || source_snapshot(path) != snapshot
+            || !self.content_path_allowed(path)
+            || self.indexing_pause_reason().is_some()
+        {
+            if store.model_generation()? == generation {
+                store.release_content_vectors(&chunks, false)?;
+            }
+            if store.get_entry(entry.id)?.is_some()
+                && store.content_revision(entry.id)? == revision
+                && (source_snapshot(path) != snapshot
+                    || !self.content_path_allowed(path)
+                    || self.indexing_pause_reason().is_some())
+            {
+                store.invalidate_content_source(entry.id)?;
+                store.enqueue_extract_job(entry.id, &chunks[0].job_kind)?;
+            }
+            return Ok(ExtractStepOutcome {
+                claimed: true,
+                requeued: true,
+                ..Default::default()
+            });
+        }
+        match result {
+            Ok(vectors) => {
+                match store.commit_content_vectors(&chunks, &vectors, revision, generation) {
+                    Ok(true) => {
+                        drop(store);
+                        self.invalidate_vector_cache();
+                        Ok(ExtractStepOutcome {
+                            claimed: true,
+                            segments_stored: chunks.len(),
+                            ..Default::default()
+                        })
+                    }
+                    Ok(false) => {
+                        store.release_content_vectors(&chunks, false)?;
+                        Ok(ExtractStepOutcome {
+                            claimed: true,
+                            requeued: true,
+                            ..Default::default()
+                        })
+                    }
+                    Err(StoreError::InvalidVector(_)) => {
+                        store.release_content_vectors(&chunks, true)?;
+                        Ok(ExtractStepOutcome {
+                            claimed: true,
+                            failed: true,
+                            ..Default::default()
+                        })
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            Err(error) => {
+                if matches!(error, EmbedError::Unsupported(_)) && chunks.iter().all(|c| c.visual) {
+                    store.complete_optional_visual(&chunks)?;
+                    return Ok(ExtractStepOutcome {
+                        claimed: true,
+                        ..Default::default()
+                    });
+                }
+                let unavailable = matches!(
+                    error,
+                    EmbedError::ModelNotAvailable(_) | EmbedError::Unsupported(_)
+                );
+                store.release_content_vectors(&chunks, !unavailable)?;
+                Ok(ExtractStepOutcome {
+                    claimed: !unavailable,
+                    failed: !unavailable,
+                    ..Default::default()
+                })
+            }
+        }
     }
 
     /// Production entry for one content extraction step using the supervisor.
@@ -522,16 +640,13 @@ impl Indexer {
         registry: &ExtractorRegistry,
         sup: &Arc<EmbedSupervisor>,
     ) -> Result<ExtractStepOutcome, StoreError> {
-        self.extract_once_with_media(
+        self.extract_once_typed(
             registry,
-            |texts| {
-                sup.embed_texts_bounded(texts, EMBED_JOB_TIMEOUT)
-                    .map_err(|e| e.to_string())
-            },
+            |texts| sup.embed_texts_bounded(texts, EMBED_JOB_TIMEOUT),
             |path| match sup.embed_image_bounded(path, EMBED_JOB_TIMEOUT) {
                 Ok(vec) => Ok(Some(vec)),
                 Err(crate::embed_client::EmbedError::Unsupported(_)) => Ok(None),
-                Err(e) => Err(e.to_string()),
+                Err(e) => Err(e),
             },
         )
     }
@@ -590,13 +705,25 @@ impl Indexer {
                 attempts = job.attempts + 1,
                 "content extract job failing repeatedly; poison-pilled"
             );
-            clear_modality_artifacts(store, job.entry_id, &job.kind)?;
             store.mark_extract_failed(job.id)?;
             Ok(true)
         } else {
             store.fail_extract_job(job.id)?;
             Ok(false)
         }
+    }
+}
+
+fn source_snapshot(path: &Path) -> String {
+    match std::fs::metadata(path) {
+        Ok(m) => format!(
+            "{}|{}|{:?}|{:?}",
+            path.display(),
+            m.len(),
+            m.modified().ok(),
+            ws_platform::identity::file_identity(path)
+        ),
+        Err(_) => String::new(),
     }
 }
 
@@ -613,22 +740,6 @@ fn clear_modality_artifacts(
     Ok(())
 }
 
-fn run_extractor_with_budget(
-    extractor: &dyn Extractor,
-    path: &Path,
-    budget: &ExtractBudget,
-) -> Result<ExtractOutput, ExtractError> {
-    budget.check_deadline()?;
-    let meta = std::fs::metadata(path)?;
-    budget.check_size(meta.len())?;
-    let mut out = extractor.extract(path, budget)?;
-    budget.check_deadline()?;
-    if out.segments.len() > budget.max_segments {
-        out.segments.truncate(budget.max_segments);
-    }
-    Ok(out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -637,6 +748,7 @@ mod tests {
     use std::time::Duration;
     use ws_index::model::{SearchRequest, VectorFilter, SEGMENT_KIND_DOC, SEGMENT_KIND_NAME};
     use ws_index::IndexStore;
+    use ws_extract::SegmentDraft;
 
     struct TempTree(PathBuf);
 
@@ -683,6 +795,359 @@ mod tests {
         let mut registry = ExtractorRegistry::production();
         registry.worker = Some(ExtractClient::new(worker, cache.0.clone()));
         registry
+    }
+
+    #[test]
+    fn task2_no_model_keeps_exact_content() {
+        let tree = TempTree::new();
+        fs::write(
+            tree.0.join("invoice.txt"),
+            "Header\nWINSEARCH_INVOICE_42 is outstanding",
+        )
+        .unwrap();
+        let indexer = seeded_indexer(&tree);
+        indexer
+            .extract_once_with(&ExtractorRegistry::default(), |_| {
+                Err("model unavailable".into())
+            })
+            .unwrap();
+        let hits = indexer
+            .search(&SearchRequest {
+                text: "WINSEARCH_INVOICE_42".into(),
+                limit: 5,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(hits.len(), 1, "model failure discarded exact content");
+        assert!(hits[0].matches[0].excerpt.contains("WINSEARCH_INVOICE_42"));
+        assert_eq!(hits[0].matches[0].line, Some(2));
+        assert!(indexer
+            .search_vectors(&[1.0, 0.0], 10, None)
+            .unwrap()
+            .is_empty());
+    }
+
+    fn same_second_write(path: &Path, text: &str) {
+        fs::write(path, text).unwrap();
+        let file = fs::OpenOptions::new().write(true).open(path).unwrap();
+        file.set_times(
+            fs::FileTimes::new()
+                .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(1_750_000_000)),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn task2_same_size_same_second_modified_requeues() {
+        let tree = TempTree::new();
+        let path = tree.0.join("mutable.txt");
+        same_second_write(&path, "uniqueoldtoken statement");
+        let indexer = seeded_indexer(&tree);
+        let reg = ExtractorRegistry::default();
+        indexer.extract_once_with(&reg, fake_embed).unwrap();
+        let root = indexer
+            .store_lock()
+            .find_by_path(&path.to_string_lossy())
+            .unwrap()
+            .unwrap()
+            .root_id;
+        same_second_write(&path, "uniquenewtoken statement");
+        indexer.handle_event(root, crate::watcher::WatchEvent::Modified(path));
+        let step = indexer.extract_once_with(&reg, fake_embed).unwrap();
+        assert!(
+            step.claimed,
+            "same metadata Modified never queued replacement"
+        );
+        assert_eq!(
+            indexer
+                .search(&SearchRequest {
+                    text: "uniquenewtoken".into(),
+                    limit: 5,
+                    ..Default::default()
+                })
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(indexer
+            .search(&SearchRequest {
+                text: "uniqueoldtoken".into(),
+                limit: 5,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn task2_inflight_same_metadata_modified_rejects_old_batch() {
+        let tree = TempTree::new();
+        let path = tree.0.join("inflight.txt");
+        same_second_write(&path, "uniqueoldtoken statement");
+        let indexer = seeded_indexer(&tree);
+        let root = indexer
+            .store_lock()
+            .find_by_path(&path.to_string_lossy())
+            .unwrap()
+            .unwrap()
+            .root_id;
+        let step = indexer
+            .extract_once_with(&ExtractorRegistry::default(), |texts| {
+                same_second_write(&path, "uniquenewtoken statement");
+                indexer.handle_event(root, crate::watcher::WatchEvent::Modified(path.clone()));
+                fake_embed(texts)
+            })
+            .unwrap();
+        assert!(
+            step.requeued,
+            "old batch committed over actual Modified event"
+        );
+        assert!(indexer
+            .search(&SearchRequest {
+                text: "uniqueoldtoken".into(),
+                limit: 5,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn task2_long_document_first_batch_is_thirty() {
+        let tree = TempTree::new();
+        // A single long token gives deterministic 1200-char windows/1020 stride.
+        fs::write(tree.0.join("long.txt"), "a".repeat(1200 + 74 * 1020)).unwrap();
+        let indexer = seeded_indexer(&tree);
+        let step = indexer
+            .extract_once_with(&ExtractorRegistry::default(), fake_embed)
+            .unwrap();
+        assert_eq!(
+            step.fts_chunks_indexed, 30,
+            "long document was not bounded to 30"
+        );
+        assert_eq!(indexer.content_extract_queue_depth().unwrap(), 1);
+    }
+
+    #[test]
+    fn task2_native_worker_seventy_five_chunks_resume_after_restart() {
+        let tree = TempTree::new();
+        let data = TempTree::new();
+        let cache = TempTree::new();
+        let path = tree.0.join("long.txt");
+        fs::write(&path, "a".repeat(1200 + 74 * 1020)).unwrap();
+        let db = data.0.join("index.db");
+        let indexer = Indexer::open(IndexStore::open(&db).unwrap(), &[tree.0.clone()]).unwrap();
+        indexer.enqueue_initial_scan().unwrap();
+        while indexer.scan_available(64) > 0 {}
+        let reg = process_registry(&cache);
+        let first = indexer
+            .extract_once_typed(
+                &reg,
+                |_| Err(EmbedError::ModelNotAvailable("no model".into())),
+                |_| Ok(None),
+            )
+            .unwrap();
+        assert_eq!(first.fts_chunks_indexed, 30);
+        let id = indexer
+            .store_lock()
+            .find_by_path(&path.to_string_lossy())
+            .unwrap()
+            .unwrap()
+            .id;
+        let first_chunks = indexer.store_lock().list_content_chunks(id).unwrap();
+        assert_eq!(first_chunks.len(), 30);
+        assert_eq!(
+            indexer
+                .store_lock()
+                .content_progress(id, "doc")
+                .unwrap()
+                .unwrap()
+                .cursor,
+            30
+        );
+        assert_eq!(
+            indexer
+                .search(&SearchRequest {
+                    text: "aaaaa".into(),
+                    limit: 1,
+                    ..Default::default()
+                })
+                .unwrap()
+                .len(),
+            1
+        );
+        drop(indexer);
+        let indexer = Indexer::open(IndexStore::open(&db).unwrap(), &[tree.0.clone()]).unwrap();
+        // Fresh short files must jump ahead of the continuation.
+        fs::write(tree.0.join("short.txt"), "newshortneedle").unwrap();
+        indexer.enqueue_initial_scan().unwrap();
+        while indexer.scan_available(64) > 0 {}
+        let short = indexer
+            .extract_once_typed(
+                &reg,
+                |_| Err(EmbedError::ModelNotAvailable("no model".into())),
+                |_| Ok(None),
+            )
+            .unwrap();
+        assert_eq!(short.fts_chunks_indexed, 1);
+        for expected in [30, 15] {
+            let step = indexer
+                .extract_once_typed(
+                    &reg,
+                    |_| Err(EmbedError::ModelNotAvailable("no model".into())),
+                    |_| Ok(None),
+                )
+                .unwrap();
+            assert_eq!(step.fts_chunks_indexed, expected);
+        }
+        let chunks = indexer.store_lock().list_content_chunks(id).unwrap();
+        assert_eq!(chunks.len(), 75);
+        assert_eq!(
+            chunks.iter().map(|c| c.chunk_index).collect::<Vec<_>>(),
+            (0..75).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            chunks[..30].iter().map(|c| c.id).collect::<Vec<_>>(),
+            first_chunks.iter().map(|c| c.id).collect::<Vec<_>>()
+        );
+        assert!(chunks.iter().all(|c| c.attempts == 0));
+        assert!(
+            indexer
+                .store_lock()
+                .content_progress(id, "doc")
+                .unwrap()
+                .unwrap()
+                .complete
+        );
+        assert_eq!(indexer.content_extract_queue_depth().unwrap(), 0);
+    }
+
+    #[test]
+    fn task2_native_worker_beyond_legacy_cap_reaches_final_sentinel() {
+        let tree = TempTree::new();
+        let cache = TempTree::new();
+        fs::write(
+            tree.0.join("beyond.txt"),
+            format!(
+                "{}\nfinalsentinelafterlegacycap",
+                "a".repeat(1200 + 299 * 1020)
+            ),
+        )
+        .unwrap();
+        let indexer = seeded_indexer(&tree);
+        let reg = process_registry(&cache);
+        let id = indexer
+            .store_lock()
+            .find_by_path(&tree.0.join("beyond.txt").to_string_lossy())
+            .unwrap()
+            .unwrap()
+            .id;
+        for _ in 0..20 {
+            if indexer.content_extract_queue_depth().unwrap() == 0 {
+                break;
+            }
+            let step = indexer
+                .extract_once_typed(
+                    &reg,
+                    |_| Err(EmbedError::ModelNotAvailable("no model".into())),
+                    |_| Ok(None),
+                )
+                .unwrap();
+            assert!(step.fts_chunks_indexed <= 30);
+        }
+        let chunks = indexer.store_lock().list_content_chunks(id).unwrap();
+        assert!(chunks.len() > 256);
+        assert!(
+            indexer
+                .store_lock()
+                .content_progress(id, "doc")
+                .unwrap()
+                .unwrap()
+                .complete
+        );
+        let hits = indexer
+            .search(&SearchRequest {
+                text: "finalsentinelafterlegacycap".into(),
+                limit: 1,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].matches[0]
+            .excerpt
+            .contains("finalsentinelafterlegacycap"));
+    }
+
+    #[test]
+    fn task2_native_modified_same_second_and_inflight() {
+        for inflight in [false, true] {
+            let tree = TempTree::new();
+            let path = tree.0.join("native.txt");
+            same_second_write(&path, "uniqueoldtoken statement");
+            let indexer = seeded_indexer(&tree);
+            let root = indexer
+                .store_lock()
+                .find_by_path(&path.to_string_lossy())
+                .unwrap()
+                .unwrap()
+                .root_id;
+            let reg = ExtractorRegistry::default();
+            if !inflight {
+                indexer.extract_once_with(&reg, fake_embed).unwrap();
+            }
+            let (tx, rx) = std::sync::mpsc::channel();
+            let watcher = crate::watcher::spawn(&tree.0, move |event| {
+                let _ = tx.send(event);
+            })
+            .unwrap();
+            std::thread::sleep(Duration::from_millis(100));
+            let modify = || {
+                same_second_write(&path, "uniquenewtoken statement");
+                let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                loop {
+                    let event = rx
+                        .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                        .expect("native Modified event");
+                    if matches!(&event,crate::watcher::WatchEvent::Modified(p) if p==&path) {
+                        indexer.handle_event(root, event);
+                        break;
+                    }
+                }
+            };
+            if inflight {
+                let step = indexer
+                    .extract_once_with(&reg, |texts| {
+                        modify();
+                        fake_embed(texts)
+                    })
+                    .unwrap();
+                assert!(step.requeued);
+            } else {
+                modify();
+            }
+            watcher.stop();
+            let step = indexer.extract_once_with(&reg, fake_embed).unwrap();
+            assert!(step.claimed);
+            assert_eq!(
+                indexer
+                    .search(&SearchRequest {
+                        text: "uniquenewtoken".into(),
+                        limit: 1,
+                        ..Default::default()
+                    })
+                    .unwrap()
+                    .len(),
+                1
+            );
+            assert!(indexer
+                .search(&SearchRequest {
+                    text: "uniqueoldtoken".into(),
+                    limit: 1,
+                    ..Default::default()
+                })
+                .unwrap()
+                .is_empty());
+        }
     }
 
     #[test]
@@ -878,7 +1343,15 @@ mod tests {
         assert_eq!(first.segments_stored, 1, "small file should be extracted first");
 
         let second = indexer.extract_once_with(&registry, fake_embed).unwrap();
-        assert!(second.segments_stored > 1, "large file should be extracted second");
+        assert!(
+            second.segments_stored > 1,
+            "large file should be extracted second"
+        );
+        assert_eq!(second.fts_chunks_indexed, 30);
+        while indexer.content_extract_queue_depth().unwrap() > 0 {
+            let step = indexer.extract_once_with(&registry, fake_embed).unwrap();
+            assert!(step.fts_chunks_indexed <= 30);
+        }
         assert_eq!(indexer.content_extract_queue_depth().unwrap(), 0);
     }
 
@@ -1135,6 +1608,13 @@ mod tests {
                 .unwrap();
             assert!(step.claimed);
             assert_eq!(step.status, Some(ExtractionStatus::Extracted));
+        }
+
+        for path in [&photo_path,&shot_path] {
+            let store=indexer.store_lock();
+            let id=store.find_by_path(&path.to_string_lossy()).unwrap().unwrap().id;
+            let actual_units=store.list_content_chunks(id).unwrap().iter().filter(|c|!c.visual).count();
+            assert_eq!(store.content_progress(id,"image").unwrap().unwrap().cursor,actual_units as u64);
         }
 
         // A. EXIF fields are searchable via FTS, while GPS geotags are never indexed.

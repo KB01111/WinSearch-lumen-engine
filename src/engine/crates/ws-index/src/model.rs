@@ -149,6 +149,42 @@ pub struct SearchHit {
     pub explanation: String,
     /// Optional cached thumbnail path on disk.
     pub thumbnail_path: Option<String>,
+    pub matches: Vec<ContentMatch>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct ContentMatch {
+    pub excerpt: String,
+    pub page: Option<u32>,
+    pub start_ms: Option<u64>,
+    pub end_ms: Option<u64>,
+    pub line: Option<u32>,
+    pub thumbnail_path: Option<String>,
+}
+
+/// Exact content persists independently of optional vectors. Chunk ordinals are
+/// stable within one source revision and shared by cursor and vector writes.
+#[derive(Debug, Clone)]
+pub struct ContentChunk {
+    pub id: i64,
+    pub entry_id: i64,
+    pub job_kind: String,
+    pub kind: String,
+    pub chunk_index: i64,
+    pub text: String,
+    pub location: ContentMatch,
+    pub embed: bool,
+    pub visual: bool,
+    pub attempts: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContentProgress {
+    pub cursor: u64,
+    pub complete: bool,
+    pub revision: i64,
+    pub source: String,
+    pub model_generation: i64,
 }
 
 /// Search request against the index (calculator and settings results are

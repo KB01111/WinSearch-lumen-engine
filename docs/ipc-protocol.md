@@ -27,6 +27,16 @@ Each message is a frame:
 The payload encoding is JSON for debuggability; a compact binary encoding is
 only adopted if profiling shows a measurable benefit.
 
+Content results add optional `excerpt` and default-empty `matching_moments`
+without changing protocol version 1. Each moment contains `excerpt`, optional
+`location` (the existing typed `page`, `timestamp`, or `line` union), and
+optional `thumbnail_path`. The primary `location`/`excerpt` come from the first
+matching chunk; metadata is never borrowed from an unrelated chunk in that
+file. Exact content results can include these fields with no embedding model.
+Old result payloads deserialize to a null excerpt and empty moments in both
+Rust and C#. Native page/media extraction and explorer preview consumers are
+separate implementation tasks.
+
 ## Message envelope
 
 All messages carry a `type` discriminator (snake_case). Requests carry `id`

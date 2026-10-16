@@ -936,10 +936,12 @@ pub(crate) mod tests {
         ));
         let mut continuation = client.request(tree.0.join("actual.txt"), "doc", 256);
         continuation.cursor = 1;
-        assert!(matches!(
-            client.extract(&continuation, Duration::from_secs(5)),
-            Err(ExtractClientError::Unsupported(_))
-        ));
+        let completed = client
+            .extract(&continuation, Duration::from_secs(5))
+            .unwrap();
+        assert!(completed.output.segments.is_empty());
+        assert_eq!(completed.next_cursor, None);
+        assert_eq!(completed.total_units, Some(1));
         std::fs::write(
             tree.0.join("actual.txt"),
             "generated chunk words ".repeat(200),
@@ -948,10 +950,8 @@ pub(crate) mod tests {
         let capped = client.request(tree.0.join("actual.txt"), "doc", 1);
         let response = client.extract(&capped, Duration::from_secs(5)).unwrap();
         assert_eq!(response.output.segments.len(), 1);
-        assert_eq!(
-            response.total_units, None,
-            "legacy truncation cannot establish a total"
-        );
+        assert!(response.total_units.is_some_and(|n| n > 1));
+        assert_eq!(response.next_cursor, Some(1));
     }
 
     #[test]

@@ -500,6 +500,7 @@ impl Indexer {
         for kind in ws_index::model::ALL_SEGMENT_KINDS {
             purged += store.purge_segments_by_kind(kind)?;
         }
+        store.reset_content_vectors()?;
         let ids = store.all_entry_ids()?;
         let mut enqueued = 0u64;
         for id in ids {
@@ -512,8 +513,14 @@ impl Indexer {
             if let Some(entry) = store.get_entry(id)? {
                 if !entry.is_dir && !entry.is_app {
                     if let Some(kind) = modality_kind_for_ext(&entry.ext) {
-                        store.enqueue_extract_job_with_priority(id, kind, EXTRACT_PRIORITY_UPDATED)?;
-                        enqueued += 1;
+                        if store.content_progress(id, kind)?.is_none() {
+                            store.enqueue_extract_job_with_priority(
+                                id,
+                                kind,
+                                EXTRACT_PRIORITY_UPDATED,
+                            )?;
+                            enqueued += 1;
+                        }
                     }
                 }
             }
@@ -720,7 +727,7 @@ impl Indexer {
 
     // ---- watcher events ----
 
-    fn handle_event(&self, root_id: i64, event: WatchEvent) {
+    pub(crate) fn handle_event(&self, root_id: i64, event: WatchEvent) {
         if let Err(e) = self.apply_event(root_id, &event) {
             warn!(?event, error = %e, "event handling failed");
         }
@@ -756,6 +763,30 @@ impl Indexer {
             WatchEvent::Modified(path) => {
                 if !self.is_excluded_under_root(root_id, path, path.is_dir()) {
                     self.point_upsert(root_id, path)?;
+                    let mut store = self.store_lock();
+                    if store.root_enabled(root_id)?
+                        && !self.is_excluded_under_root(root_id, path, path.is_dir())
+                    {
+                        if let Some(row) = store.find_by_path(&path.to_string_lossy())? {
+                            if !row.is_dir && !row.is_app {
+                                store.invalidate_content_source(row.id)?;
+                                if let Some(kind) = modality_kind_for_ext(&row.ext) {
+                                    store.enqueue_extract_job_with_priority(
+                                        row.id,
+                                        kind,
+                                        compute_extract_priority(
+                                            row.size,
+                                            row.mtime,
+                                            UpsertOutcome::Updated,
+                                        ),
+                                    )?;
+                                }
+                            }
+                        }
+                    }
+                    drop(store);
+                    self.invalidate_vector_cache();
+                    self.notify_work();
                 }
             }
             WatchEvent::Renamed { from, to } => {
@@ -783,6 +814,20 @@ impl Indexer {
                                 .find_by_path(&parent_of(&to_str))?
                                 .map(|e| e.id);
                             store.move_entry(row.id, parent_id, &to_str, &name, &ext)?;
+                            if !row.is_dir {
+                                store.invalidate_content_source(row.id)?;
+                                if let Some(kind) = modality_kind_for_ext(&ext) {
+                                    store.enqueue_extract_job_with_priority(
+                                        row.id,
+                                        kind,
+                                        compute_extract_priority(
+                                            row.size,
+                                            row.mtime,
+                                            UpsertOutcome::Updated,
+                                        ),
+                                    )?;
+                                }
+                            }
                             // The name changed: the stored name vector is stale.
                             // Re-enqueue so the scheduler embeds the new name;
                             // entry id (and its segment rows) is preserved.

@@ -69,6 +69,295 @@ pub struct IndexStore {
     conn: Connection,
 }
 
+impl IndexStore {
+    pub fn content_revision(&self, entry: i64) -> Result<i64, StoreError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT revision FROM content_revisions WHERE entry_id=?1",
+                [entry],
+                |r| r.get(0),
+            )
+            .optional()?
+            .unwrap_or(0))
+    }
+
+    /// Watch events invalidate even when coarse entry metadata is unchanged.
+    pub fn invalidate_content_source(&mut self, entry: i64) -> Result<(), StoreError> {
+        let tx = self.conn.transaction()?;
+        tx.execute("INSERT INTO content_revisions(entry_id,revision) VALUES(?1,1) ON CONFLICT(entry_id) DO UPDATE SET revision=revision+1", [entry])?;
+        tx.execute("DELETE FROM content_progress WHERE entry_id=?1", [entry])?;
+        tx.execute("DELETE FROM content_chunks WHERE entry_id=?1", [entry])?;
+        tx.execute("DELETE FROM content_fts WHERE entry_id=?1", [entry])?;
+        tx.execute(
+            "DELETE FROM segments WHERE entry_id=?1 AND kind!='name'",
+            [entry],
+        )?;
+        tx.execute(
+            "UPDATE entries SET thumbnail_path=NULL WHERE id=?1",
+            [entry],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn model_generation(&self) -> Result<i64, StoreError> {
+        Ok(self
+            .meta_get("content_model_generation")?
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0))
+    }
+
+    /// Model changes discard only vectors; valid exact content and parse cursors survive.
+    pub fn reset_content_vectors(&mut self) -> Result<(), StoreError> {
+        let tx = self.conn.transaction()?;
+        tx.execute("INSERT INTO meta(key,value) VALUES('content_model_generation','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1", [])?;
+        tx.execute(
+            "UPDATE content_chunks SET embed_state='pending',attempts=0 WHERE embed=1",
+            [],
+        )?;
+        tx.execute("UPDATE content_progress SET model_generation=(SELECT CAST(value AS INTEGER) FROM meta WHERE key='content_model_generation')", [])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn content_progress(
+        &self,
+        entry: i64,
+        kind: &str,
+    ) -> Result<Option<crate::model::ContentProgress>, StoreError> {
+        Ok(self.conn.query_row("SELECT cursor,complete,revision,source,model_generation FROM content_progress WHERE entry_id=?1 AND kind=?2", params![entry,kind], |r| Ok(crate::model::ContentProgress {
+            cursor:r.get::<_,i64>(0)? as u64, complete:r.get(1)?, revision:r.get(2)?, source:r.get(3)?, model_generation:r.get(4)?,
+        })).optional()?)
+    }
+
+    pub fn begin_content_batch(
+        &mut self,
+        entry: i64,
+        kind: &str,
+        source: &str,
+    ) -> Result<crate::model::ContentProgress, StoreError> {
+        let revision = self.content_revision(entry)?;
+        let generation = self.model_generation()?;
+        if let Some(progress) = self.content_progress(entry, kind)? {
+            if !progress.complete && progress.revision == revision && progress.source == source {
+                return Ok(progress);
+            }
+        }
+        self.conn.execute("INSERT INTO content_revisions(entry_id,revision) VALUES(?1,1) ON CONFLICT(entry_id) DO UPDATE SET revision=revision+1",[entry])?;
+        let revision = self.content_revision(entry)?;
+        self.conn.execute("INSERT INTO content_progress(entry_id,kind,revision,source,model_generation) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(entry_id,kind) DO UPDATE SET cursor=0,complete=0,revision=excluded.revision,source=excluded.source,model_generation=excluded.model_generation",params![entry,kind,revision,source,generation])?;
+        Ok(self
+            .content_progress(entry, kind)?
+            .expect("inserted progress"))
+    }
+
+    /// Exact text, locations, next cursor, and release of the claim are one transaction.
+    /// A stale revision/space cannot advance or overwrite a newer source.
+    pub fn commit_content_batch(
+        &mut self,
+        job: &ExtractJob,
+        progress: &crate::model::ContentProgress,
+        chunks: &[crate::model::ContentChunk],
+        next: Option<u64>,
+    ) -> Result<bool, StoreError> {
+        if self.content_revision(job.entry_id)? != progress.revision
+            || self.model_generation()? != progress.model_generation
+        {
+            return Ok(false);
+        }
+        if self.content_progress(job.entry_id, &job.kind)?.as_ref() != Some(progress) {
+            return Ok(false);
+        }
+        if next.is_some_and(|n| n <= progress.cursor) || (chunks.is_empty() && next.is_some()) {
+            return Err(StoreError::InvalidConfig(
+                "cursor advanced without content".into(),
+            ));
+        }
+        let tx = self.conn.transaction()?;
+        if progress.cursor == 0 {
+            tx.execute(
+                "DELETE FROM content_chunks WHERE entry_id=?1 AND job_kind=?2",
+                params![job.entry_id, job.kind],
+            )?;
+            tx.execute(
+                "DELETE FROM content_fts WHERE entry_id=?1 AND kind=?2",
+                params![job.entry_id, job.kind],
+            )?;
+            tx.execute("DELETE FROM segments WHERE entry_id=?1 AND (kind=?2 OR (?2='image' AND kind='ocr'))",params![job.entry_id,job.kind])?;
+            tx.execute(
+                "UPDATE entries SET thumbnail_path=NULL WHERE id=?1",
+                [job.entry_id],
+            )?;
+        }
+        for chunk in chunks {
+            tx.execute("INSERT INTO content_chunks(entry_id,job_kind,kind,chunk_index,text,page,start_ms,end_ms,line,thumbnail_path,embed,visual) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",params![job.entry_id,job.kind,chunk.kind,chunk.chunk_index,chunk.text,chunk.location.page,chunk.location.start_ms.map(|n| n as i64),chunk.location.end_ms.map(|n| n as i64),chunk.location.line,chunk.location.thumbnail_path,chunk.embed,chunk.visual])?;
+            let id = tx.last_insert_rowid();
+            if !chunk.visual && !chunk.text.trim().is_empty() {
+                tx.execute(
+                    "INSERT INTO content_fts(rowid,entry_id,kind,text) VALUES(?1,?2,?3,?4)",
+                    params![id, job.entry_id, job.kind, chunk.text],
+                )?;
+            }
+            if let Some(thumb) = &chunk.location.thumbnail_path {
+                tx.execute(
+                    "UPDATE entries SET thumbnail_path=?2 WHERE id=?1",
+                    params![job.entry_id, thumb],
+                )?;
+            }
+        }
+        tx.execute(
+            "UPDATE content_progress SET cursor=?3,complete=?4 WHERE entry_id=?1 AND kind=?2",
+            params![
+                job.entry_id,
+                job.kind,
+                next.unwrap_or(progress.cursor + chunks.iter().filter(|c|!c.visual).count() as u64) as i64,
+                next.is_none()
+            ],
+        )?;
+        if next.is_some() {
+            tx.execute("UPDATE extract_jobs SET claimed=0,state='pending',priority=-1000000000000,attempts=0 WHERE id=?1",[job.id])?;
+        } else {
+            tx.execute("DELETE FROM extract_jobs WHERE id=?1", [job.id])?;
+        }
+        tx.commit()?;
+        Ok(true)
+    }
+
+    pub fn list_content_chunks(
+        &self,
+        entry: i64,
+    ) -> Result<Vec<crate::model::ContentChunk>, StoreError> {
+        self.content_chunks_by("WHERE entry_id=?1 ORDER BY chunk_index", entry)
+    }
+
+    fn content_chunks_by(
+        &self,
+        suffix: &str,
+        entry: i64,
+    ) -> Result<Vec<crate::model::ContentChunk>, StoreError> {
+        let mut stmt = self.conn.prepare(&format!("SELECT id,entry_id,job_kind,kind,chunk_index,text,page,start_ms,end_ms,line,thumbnail_path,embed,attempts,visual FROM content_chunks {suffix}"))?;
+        let rows = stmt.query_map([entry], |r| {
+            Ok(crate::model::ContentChunk {
+                id: r.get(0)?,
+                entry_id: r.get(1)?,
+                job_kind: r.get(2)?,
+                kind: r.get(3)?,
+                chunk_index: r.get(4)?,
+                text: r.get(5)?,
+                location: crate::model::ContentMatch {
+                    excerpt: String::new(),
+                    page: r.get(6)?,
+                    start_ms: r.get::<_, Option<i64>>(7)?.map(|n| n as u64),
+                    end_ms: r.get::<_, Option<i64>>(8)?.map(|n| n as u64),
+                    line: r.get(9)?,
+                    thumbnail_path: r.get(10)?,
+                },
+                embed: r.get(11)?,
+                attempts: r.get(12)?,
+                visual: r.get(13)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Atomically claims one source's pending vectors; no parser invocation is needed.
+    pub fn claim_content_vectors(
+        &mut self,
+        preferred: Option<i64>,
+    ) -> Result<Vec<crate::model::ContentChunk>, StoreError> {
+        let entry: Option<i64> = self.conn.query_row("SELECT c.entry_id FROM content_chunks c JOIN visible_entries e ON e.id=c.entry_id WHERE (?1 IS NULL OR c.entry_id=?1) AND c.embed=1 AND c.embed_state='pending' AND c.attempts<3 AND e.missing=0 ORDER BY c.attempts,c.id LIMIT 1",[preferred],|r|r.get(0)).optional()?;
+        let Some(entry) = entry else {
+            return Ok(Vec::new());
+        };
+        let chunks = self.content_chunks_by("WHERE entry_id=?1 AND embed=1 AND embed_state='pending' AND attempts<3 AND visual=(SELECT visual FROM content_chunks WHERE entry_id=?1 AND embed=1 AND embed_state='pending' AND attempts<3 ORDER BY visual,id LIMIT 1) ORDER BY id LIMIT 30",entry)?;
+        let tx = self.conn.transaction()?;
+        for chunk in &chunks {
+            tx.execute(
+                "UPDATE content_chunks SET embed_state='claimed' WHERE id=?1",
+                [chunk.id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(chunks)
+    }
+
+    pub fn release_content_vectors(
+        &mut self,
+        chunks: &[crate::model::ContentChunk],
+        failed: bool,
+    ) -> Result<(), StoreError> {
+        let tx = self.conn.transaction()?;
+        for c in chunks {
+            tx.execute("UPDATE content_chunks SET embed_state='pending',attempts=attempts+?2 WHERE id=?1 AND embed_state='claimed'",params![c.id,failed])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn complete_optional_visual(
+        &mut self,
+        chunks: &[crate::model::ContentChunk],
+    ) -> Result<(), StoreError> {
+        for c in chunks {
+            self.conn.execute(
+                "UPDATE content_chunks SET embed_state='done' WHERE id=?1 AND visual=1",
+                [c.id],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn commit_content_vectors(
+        &mut self,
+        chunks: &[crate::model::ContentChunk],
+        vectors: &[Vec<f32>],
+        revision: i64,
+        generation: i64,
+    ) -> Result<bool, StoreError> {
+        if chunks.is_empty() {
+            return Ok(true);
+        }
+        if vectors.len() != chunks.len() {
+            return Err(StoreError::InvalidVector("content vector arity".into()));
+        }
+        if self.content_revision(chunks[0].entry_id)? != revision
+            || self.model_generation()? != generation
+        {
+            return Ok(false);
+        }
+        let encoded = vectors
+            .iter()
+            .map(|v| {
+                if v.is_empty() || v.iter().any(|n| !n.is_finite()) || v.iter().all(|n| *n == 0.0) {
+                    return Err(StoreError::InvalidVector(
+                        "empty, zero or nonfinite content vector".into(),
+                    ));
+                }
+                Ok(encode_normalized_vector(v))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let tx = self.conn.transaction()?;
+        for (c, (blob, norm)) in chunks.iter().zip(encoded) {
+            let exists: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM content_chunks WHERE id=?1 AND embed_state='claimed')",
+                [c.id],
+                |r| r.get(0),
+            )?;
+            if !exists {
+                return Ok(false);
+            }
+            tx.execute("INSERT INTO segments(entry_id,kind,chunk_index,text,page,start_ms,end_ms,line,vector,norm) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) ON CONFLICT(entry_id,kind,chunk_index) DO UPDATE SET text=excluded.text,page=excluded.page,start_ms=excluded.start_ms,end_ms=excluded.end_ms,line=excluded.line,vector=excluded.vector,norm=excluded.norm",params![c.entry_id,c.kind,c.chunk_index,c.text,c.location.page,c.location.start_ms.map(|n|n as i64),c.location.end_ms.map(|n|n as i64),c.location.line,blob,norm])?;
+            tx.execute(
+                "UPDATE content_chunks SET embed_state='done',attempts=0 WHERE id=?1",
+                [c.id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(true)
+    }
+}
+
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
@@ -295,6 +584,56 @@ impl IndexStore {
         // stays "2": the column is a queue-ordering hint, not a format break.
         Self::ensure_extract_jobs_priority_column(&conn)?;
         Self::ensure_crawl_queue_generation_column(&conn)?;
+        conn.execute_batch(
+            r#"
+CREATE TABLE IF NOT EXISTS content_revisions (
+ entry_id INTEGER PRIMARY KEY REFERENCES entries(id) ON DELETE CASCADE,
+ revision INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS content_progress (
+ entry_id INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+ kind TEXT NOT NULL, cursor INTEGER NOT NULL DEFAULT 0, complete INTEGER NOT NULL DEFAULT 0,
+ revision INTEGER NOT NULL, source TEXT NOT NULL, model_generation INTEGER NOT NULL,
+ PRIMARY KEY(entry_id,kind)
+);
+CREATE TABLE IF NOT EXISTS content_chunks (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ entry_id INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+ job_kind TEXT NOT NULL, kind TEXT NOT NULL, chunk_index INTEGER NOT NULL,
+ text TEXT NOT NULL, page INTEGER, start_ms INTEGER, end_ms INTEGER, line INTEGER,
+ thumbnail_path TEXT, embed INTEGER NOT NULL DEFAULT 0, visual INTEGER NOT NULL DEFAULT 0,
+ embed_state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+ UNIQUE(entry_id,job_kind,chunk_index)
+);
+CREATE INDEX IF NOT EXISTS idx_content_pending ON content_chunks(embed,embed_state,id);
+CREATE TRIGGER IF NOT EXISTS content_chunk_delete AFTER DELETE ON content_chunks BEGIN
+ DELETE FROM content_fts WHERE rowid=old.id;
+END;
+UPDATE content_chunks SET embed_state='pending' WHERE embed_state='claimed';
+"#,
+        )?;
+        // Preserve legacy FTS rows, including numeric exact-only text without segments.
+        if conn.query_row(
+            "SELECT COUNT(*) FROM meta WHERE key='content_batches_v1'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )? == 0
+        {
+            conn.execute_batch(r#"
+BEGIN IMMEDIATE;
+INSERT INTO content_chunks(entry_id,job_kind,kind,chunk_index,text,page,start_ms,end_ms,line)
+ SELECT CAST(f.entry_id AS INTEGER),f.kind,f.kind,f.rowid,f.text,
+ (SELECT page FROM segments s WHERE s.entry_id=f.entry_id AND s.text=f.text LIMIT 1),
+ (SELECT start_ms FROM segments s WHERE s.entry_id=f.entry_id AND s.text=f.text LIMIT 1),
+ (SELECT end_ms FROM segments s WHERE s.entry_id=f.entry_id AND s.text=f.text LIMIT 1),
+ (SELECT line FROM segments s WHERE s.entry_id=f.entry_id AND s.text=f.text LIMIT 1)
+ FROM content_fts f JOIN entries e ON e.id=CAST(f.entry_id AS INTEGER);
+DELETE FROM content_fts;
+INSERT INTO content_fts(rowid,entry_id,kind,text) SELECT id,entry_id,job_kind,text FROM content_chunks;
+INSERT INTO meta(key,value) VALUES('content_batches_v1','1');
+COMMIT;
+"#)?;
+        }
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_extract_jobs_priority ON extract_jobs(state, claimed, priority, id);",
         )?;
@@ -1257,6 +1596,10 @@ impl IndexStore {
     /// Deletes all `content_fts` rows for `entry_id` (used when re-extraction
     /// returns `Unsupported` or `Failed`).
     pub fn delete_content_text(&mut self, entry_id: i64) -> Result<u64, StoreError> {
+        self.conn
+            .execute("DELETE FROM content_chunks WHERE entry_id=?1", [entry_id])?;
+        self.conn
+            .execute("DELETE FROM content_progress WHERE entry_id=?1", [entry_id])?;
         let n = self.conn.execute(
             "DELETE FROM content_fts WHERE entry_id = ?1",
             params![entry_id],
@@ -1279,6 +1622,10 @@ impl IndexStore {
             "DELETE FROM content_fts WHERE entry_id = ?1 AND kind = ?2",
             params![entry_id, kind],
         )?;
+        tx.execute(
+            "DELETE FROM content_chunks WHERE entry_id=?1 AND job_kind=?2",
+            params![entry_id, kind],
+        )?;
         let mut combined = String::new();
         for t in texts {
             let s = t.as_ref().trim();
@@ -1290,9 +1637,11 @@ impl IndexStore {
             }
         }
         if !combined.is_empty() {
+            tx.execute("INSERT INTO content_chunks(entry_id,job_kind,kind,chunk_index,text) VALUES(?1,?2,?2,0,?3)",params![entry_id,kind,combined])?;
+            let chunk_id = tx.last_insert_rowid();
             tx.execute(
-                "INSERT INTO content_fts(entry_id, kind, text) VALUES(?1, ?2, ?3)",
-                params![entry_id, kind, combined],
+                "INSERT INTO content_fts(rowid,entry_id, kind, text) VALUES(?1, ?2, ?3,?4)",
+                params![chunk_id, entry_id, kind, combined],
             )?;
         }
         tx.commit()?;
@@ -1944,6 +2293,305 @@ fn fts_keywords(rec: &EntryRecord) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn batch_fixture() -> (IndexStore, ExtractJob, crate::model::ContentProgress) {
+        let mut store = IndexStore::open_in_memory().unwrap();
+        let root = store.ensure_root(r"C:\task2").unwrap();
+        store
+            .apply_batch(
+                root,
+                0,
+                &[rec(r"C:\task2\fixture.txt", "fixture.txt", 1, 1)],
+            )
+            .unwrap();
+        let id = store
+            .find_by_path(r"C:\task2\fixture.txt")
+            .unwrap()
+            .unwrap()
+            .id;
+        store.enqueue_extract_job(id, "doc").unwrap();
+        let job = store.claim_content_extract_job().unwrap().unwrap();
+        let progress = store
+            .begin_content_batch(id, "doc", "fixture-source")
+            .unwrap();
+        (store, job, progress)
+    }
+    fn content_chunk(job: &ExtractJob, index: i64, text: &str) -> crate::model::ContentChunk {
+        crate::model::ContentChunk {
+            id: 0,
+            entry_id: job.entry_id,
+            job_kind: job.kind.clone(),
+            kind: job.kind.clone(),
+            chunk_index: index,
+            text: text.into(),
+            location: Default::default(),
+            embed: true,
+            visual: false,
+            attempts: 0,
+        }
+    }
+
+    #[test]
+    fn task2_content_cursor_and_text_roll_back_together_and_reject_replay() {
+        let (mut store, job, progress) = batch_fixture();
+        let first = (0..30)
+            .map(|i| content_chunk(&job, i, "firstbatchneedle"))
+            .collect::<Vec<_>>();
+        assert!(store
+            .commit_content_batch(&job, &progress, &first, Some(30))
+            .unwrap());
+        assert!(!store
+            .commit_content_batch(&job, &progress, &first, Some(30))
+            .unwrap());
+        let job = store.claim_content_extract_job().unwrap().unwrap();
+        let progress = store
+            .content_progress(job.entry_id, "doc")
+            .unwrap()
+            .unwrap();
+        let second = (30..60)
+            .map(|i| content_chunk(&job, i, "secondbatchneedle"))
+            .collect::<Vec<_>>();
+        store.conn.execute_batch("CREATE TEMP TRIGGER interrupt_batch BEFORE UPDATE ON content_progress WHEN NEW.cursor=60 BEGIN SELECT RAISE(ABORT,'interrupted commit'); END;").unwrap();
+        assert!(store
+            .commit_content_batch(&job, &progress, &second, Some(60))
+            .is_err());
+        assert_eq!(
+            store
+                .content_progress(job.entry_id, "doc")
+                .unwrap()
+                .unwrap()
+                .cursor,
+            30
+        );
+        assert_eq!(store.list_content_chunks(job.entry_id).unwrap().len(), 30);
+        assert!(store.get_extract_job(job.id).unwrap().unwrap().claimed);
+        assert!(store
+            .search(&crate::model::SearchRequest {
+                text: "secondbatchneedle".into(),
+                limit: 1,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty());
+        store
+            .conn
+            .execute_batch("DROP TRIGGER interrupt_batch")
+            .unwrap();
+        assert!(store
+            .commit_content_batch(&job, &progress, &second, Some(60))
+            .unwrap());
+        assert_eq!(store.list_content_chunks(job.entry_id).unwrap().len(), 60);
+        let job = store.claim_content_extract_job().unwrap().unwrap();
+        let progress = store
+            .content_progress(job.entry_id, "doc")
+            .unwrap()
+            .unwrap();
+        store.invalidate_content_source(job.entry_id).unwrap();
+        assert!(!store
+            .commit_content_batch(
+                &job,
+                &progress,
+                &[content_chunk(&job, 60, "staleneedle")],
+                None
+            )
+            .unwrap());
+        assert!(store.list_content_chunks(job.entry_id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn task2_exact_locations_multiple_moments_numeric_and_policy_before_cap() {
+        let (mut store, job, progress) = batch_fixture();
+        let mut chunks = vec![
+            content_chunk(&job, 0, "firstpagetoken repeatedmoment"),
+            content_chunk(&job, 1, "secondpagetoken repeatedmoment"),
+            content_chunk(&job, 2, "timetoken 98017"),
+        ];
+        chunks[0].location.page = Some(2);
+        chunks[1].location.page = Some(9);
+        chunks[2].location.start_ms = Some(42_000);
+        chunks[2].location.end_ms = Some(48_000);
+        for c in &mut chunks {
+            c.embed = false;
+        }
+        store
+            .commit_content_batch(&job, &progress, &chunks, None)
+            .unwrap();
+        for (query, page) in [("firstpagetoken", Some(2)), ("secondpagetoken", Some(9))] {
+            let hits = store
+                .search(&crate::model::SearchRequest {
+                    text: query.into(),
+                    limit: 1,
+                    ..Default::default()
+                })
+                .unwrap();
+            assert_eq!(hits[0].matches.len(), 1);
+            assert_eq!(hits[0].matches[0].page, page);
+            assert!(hits[0].matches[0].excerpt.contains(query));
+        }
+        let hits = store
+            .search(&crate::model::SearchRequest {
+                text: "repeatedmoment".into(),
+                limit: 1,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(hits[0].matches.len(), 2);
+        let first = store
+            .content_matches_page(job.entry_id, &["repeatedmoment".into()], 0, 1)
+            .unwrap();
+        let second = store
+            .content_matches_page(job.entry_id, &["repeatedmoment".into()], 1, 1)
+            .unwrap();
+        assert_eq!(first[0].page, Some(2));
+        assert_eq!(second[0].page, Some(9));
+        let hit = store
+            .search(&crate::model::SearchRequest {
+                text: "98017".into(),
+                limit: 1,
+                ..Default::default()
+            })
+            .unwrap()
+            .remove(0);
+        assert_eq!(hit.matches[0].start_ms, Some(42_000));
+        assert!(store.claim_content_vectors(None).unwrap().is_empty());
+        let root = store.roots().unwrap()[0].id;
+        for i in 0..510 {
+            let name = format!("hidden{i}.txt");
+            let path = format!(r"C:\task2\hidden\{name}");
+            store
+                .apply_batch(root, 0, &[rec(&path, &name, 1, 1)])
+                .unwrap();
+            let id = store.find_by_path(&path).unwrap().unwrap().id;
+            store.replace_content_fts(id, "doc", &["98017"]).unwrap();
+        }
+        let config = ws_protocol::IndexingConfig {
+            roots: vec![r"C:\task2".into()],
+            excluded_paths: vec![r"C:\task2\hidden".into()],
+            ..Default::default()
+        };
+        store.set_indexing_config(&config).unwrap();
+        let hits = store
+            .search(&crate::model::SearchRequest {
+                text: "98017".into(),
+                limit: 1,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].entry_id, job.entry_id);
+        let config = ws_protocol::IndexingConfig {
+            roots: vec![],
+            ..Default::default()
+        };
+        store.set_indexing_config(&config).unwrap();
+        assert!(store
+            .search(&crate::model::SearchRequest {
+                text: "98017".into(),
+                limit: 1,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .content_matches(job.entry_id, &["98017".into()])
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn task2_migrates_legacy_numeric_fts_without_vector_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn.execute_batch(SCHEMA_V2).unwrap();
+        conn.execute_batch("INSERT INTO meta VALUES('schema_version','2'); INSERT INTO roots(id,path) VALUES(1,'C:\\legacy'); INSERT INTO entries(id,root_id,path,name,name_lower,ext) VALUES(7,1,'C:\\legacy\\invoice.csv','invoice.csv','invoice.csv','csv'); INSERT INTO content_fts(entry_id,kind,text) VALUES(7,'doc','98017 2026 10 42');").unwrap();
+        let store = IndexStore::init(conn).unwrap();
+        assert_eq!(store.get_entry(7).unwrap().unwrap().name, "invoice.csv");
+        assert!(store.list_segments_for_entry(7).unwrap().is_empty());
+        let hits = store
+            .search(&crate::model::SearchRequest {
+                text: "98017".into(),
+                limit: 5,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].matches[0].excerpt.contains("98017"));
+        assert!(!store.list_content_chunks(7).unwrap()[0].embed);
+        // The migration marker makes reopen idempotent, preserving row identity.
+        let id = store.list_content_chunks(7).unwrap()[0].id;
+        let store = IndexStore::init(store.conn).unwrap();
+        assert_eq!(store.list_content_chunks(7).unwrap()[0].id, id);
+    }
+
+    #[test]
+    fn task2_deferred_vector_failures_never_remove_exact_and_space_change_rejects_inflight() {
+        let (mut store, job, progress) = batch_fixture();
+        store
+            .commit_content_batch(
+                &job,
+                &progress,
+                &[content_chunk(&job, 0, "durableexactneedle")],
+                None,
+            )
+            .unwrap();
+        for _ in 0..3 {
+            let chunks = store.claim_content_vectors(None).unwrap();
+            assert_eq!(chunks.len(), 1);
+            assert!(store
+                .commit_content_vectors(
+                    &chunks,
+                    &[vec![]],
+                    progress.revision,
+                    progress.model_generation
+                )
+                .is_err());
+            assert!(store
+                .commit_content_vectors(
+                    &chunks,
+                    &[vec![0., 0.]],
+                    progress.revision,
+                    progress.model_generation
+                )
+                .is_err());
+            store.release_content_vectors(&chunks, true).unwrap();
+        }
+        assert!(store.claim_content_vectors(None).unwrap().is_empty());
+        assert_eq!(store.list_content_chunks(job.entry_id).unwrap().len(), 1);
+        assert!(store
+            .list_segments_for_entry(job.entry_id)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            store
+                .search(&crate::model::SearchRequest {
+                    text: "durableexactneedle".into(),
+                    limit: 1,
+                    ..Default::default()
+                })
+                .unwrap()
+                .len(),
+            1
+        );
+        store.reset_content_vectors().unwrap();
+        let chunks = store.claim_content_vectors(None).unwrap();
+        let generation = store.model_generation().unwrap();
+        store.reset_content_vectors().unwrap();
+        assert!(!store
+            .commit_content_vectors(&chunks, &[vec![1., 0.]], progress.revision, generation)
+            .unwrap());
+        let chunks = store.claim_content_vectors(None).unwrap();
+        assert!(store
+            .commit_content_vectors(
+                &chunks,
+                &[vec![1., 0.]],
+                progress.revision,
+                store.model_generation().unwrap()
+            )
+            .unwrap());
+        assert_eq!(
+            store.list_segments_for_entry(job.entry_id).unwrap().len(),
+            1
+        );
+    }
     #[test]
     fn active_policy_sparse_search_does_not_classify_unmatched_index_rows() {
         use rusqlite::functions::FunctionFlags;

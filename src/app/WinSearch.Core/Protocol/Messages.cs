@@ -267,6 +267,15 @@ public sealed class SearchResult
     public string? Path { get; set; }
     public MatchLocation? Location { get; set; }
     public string? ThumbnailPath { get; set; }
+    public string? Excerpt { get; set; }
+    public List<MatchingMoment> MatchingMoments { get; set; } = new();
+}
+
+public sealed class MatchingMoment
+{
+    public string Excerpt { get; set; } = "";
+    public MatchLocation? Location { get; set; }
+    public string? ThumbnailPath { get; set; }
 }
 
 public sealed class EngineStatus

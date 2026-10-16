@@ -279,6 +279,14 @@ pub enum MatchLocation {
     Line { line: u32 },
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct MatchingMoment {
+    pub excerpt: String,
+    pub location: Option<MatchLocation>,
+    pub thumbnail_path: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct SearchResult {
@@ -296,6 +304,8 @@ pub struct SearchResult {
     pub location: Option<MatchLocation>,
     /// Absolute path of a cached thumbnail, when one exists.
     pub thumbnail_path: Option<String>,
+    pub excerpt: Option<String>,
+    pub matching_moments: Vec<MatchingMoment>,
 }
 
 impl Default for SearchResult {
@@ -310,6 +320,8 @@ impl Default for SearchResult {
             path: None,
             location: None,
             thumbnail_path: None,
+            excerpt: None,
+            matching_moments: Vec::new(),
         }
     }
 }
@@ -377,6 +389,12 @@ mod tests {
                 path: Some("C:\\Docs\\rental-agreement.pdf".into()),
                 location: Some(MatchLocation::Page { page: 14 }),
                 thumbnail_path: None,
+                excerpt: Some("rental clause".into()),
+                matching_moments: vec![MatchingMoment {
+                    excerpt: "rental clause".into(),
+                    location: Some(MatchLocation::Page { page: 14 }),
+                    thumbnail_path: None,
+                }],
             }],
             done: true,
         };

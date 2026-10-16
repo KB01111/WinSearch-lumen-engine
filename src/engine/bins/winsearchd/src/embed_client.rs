@@ -1243,6 +1243,116 @@ mod tests {
         HangFirst,
     }
 
+    #[test]
+    fn task2_supervisor_model_recovery_embeds_persisted_exact_without_reparse() {
+        use crate::extract::ExtractorRegistry;
+        use crate::indexer::Indexer;
+        use ws_index::{IndexStore, SearchRequest};
+        struct CountParser(Arc<AtomicUsize>);
+        impl ws_extract::Extractor for CountParser {
+            fn extract(
+                &self,
+                path: &std::path::Path,
+                budget: &ws_extract::ExtractBudget,
+            ) -> Result<ws_extract::ExtractOutput, ws_extract::ExtractError> {
+                self.0.fetch_add(1, AtomicOrdering::SeqCst);
+                ws_extract::DocumentExtractor.extract(path, budget)
+            }
+        }
+        let dir = std::env::temp_dir().join(format!(
+            "winsearch-task2-model-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("invoice.txt"),
+            "Header\nWINSEARCH_INVOICE_42 deferred genuine stage",
+        )
+        .unwrap();
+        let indexer = Indexer::open(IndexStore::open_in_memory().unwrap(), &[dir.clone()]).unwrap();
+        indexer.enqueue_initial_scan().unwrap();
+        while indexer.scan_available(64) > 0 {}
+        let parses = Arc::new(AtomicUsize::new(0));
+        let mut registry = ExtractorRegistry::default();
+        registry.register("doc", Arc::new(CountParser(parses.clone())));
+        let unavailable = FakeWorker::start(Mode::AlwaysUnavailable);
+        let sup = Arc::new(test_supervisor(unavailable.pipe_name.clone()));
+        for _ in 0..5 {
+            indexer
+                .extract_once_with_supervisor(&registry, &sup)
+                .unwrap();
+        }
+        let hits = indexer
+            .search(&SearchRequest {
+                text: "WINSEARCH_INVOICE_42".into(),
+                limit: 1,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        let id = hits[0].entry_id;
+        let chunks = indexer.store_lock().list_content_chunks(id).unwrap();
+        assert_eq!(chunks[0].attempts, 0);
+        assert!(indexer
+            .store_lock()
+            .list_segments_for_entry(id)
+            .unwrap()
+            .is_empty());
+        assert_eq!(parses.load(AtomicOrdering::SeqCst), 1);
+        let available = FakeWorker::start(Mode::Serve);
+        let sup = Arc::new(test_supervisor(available.pipe_name.clone()));
+        let outcome = indexer
+            .extract_once_with_supervisor(&registry, &sup)
+            .unwrap();
+        assert_eq!(outcome.segments_stored, 1);
+        assert_eq!(parses.load(AtomicOrdering::SeqCst), 1);
+        assert_eq!(
+            indexer.store_lock().list_content_chunks(id).unwrap()[0].id,
+            chunks[0].id
+        );
+        assert_eq!(
+            indexer
+                .store_lock()
+                .list_segments_for_entry(id)
+                .unwrap()
+                .len(),
+            1
+        );
+        // An incompatible space preserves exact rows and schedules fresh vectors.
+        indexer.purge_model_vectors_and_requeue().unwrap();
+        assert!(indexer
+            .store_lock()
+            .list_segments_for_entry(id)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            indexer
+                .search(&SearchRequest {
+                    text: "WINSEARCH_INVOICE_42".into(),
+                    limit: 1,
+                    ..Default::default()
+                })
+                .unwrap()
+                .len(),
+            1
+        );
+        indexer
+            .extract_once_with_supervisor(&registry, &sup)
+            .unwrap();
+        assert_eq!(parses.load(AtomicOrdering::SeqCst), 1);
+        assert_eq!(
+            indexer
+                .store_lock()
+                .list_segments_for_entry(id)
+                .unwrap()
+                .len(),
+            1
+        );
+        drop(indexer);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     static PIPE_SEQ: AtomicUsize = AtomicUsize::new(0);
 
     impl FakeWorker {

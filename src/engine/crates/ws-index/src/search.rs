@@ -95,13 +95,79 @@ impl IndexStore {
                     score,
                     explanation,
                     thumbnail_path: c.row.thumbnail_path,
+                    matches: Vec::new(),
                 })
             })
             .collect();
 
         hits.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.name.cmp(&b.name)));
         hits.truncate(req.limit.max(1));
+        for hit in &mut hits {
+            hit.matches = self.content_matches(hit.entry_id, &tokens)?;
+        }
         Ok(hits)
+    }
+
+    /// All matching chunks for one visible file. Metadata is joined by exact FTS
+    /// row identity, never by whichever segment happens to share the file.
+    pub fn content_matches(
+        &self,
+        entry: i64,
+        tokens: &[String],
+    ) -> Result<Vec<crate::model::ContentMatch>, StoreError> {
+        self.content_matches_page(entry, tokens, 0, 32)
+    }
+
+    /// Bounded preview pages retain access to every matching moment without
+    /// materializing an entire long document on the primary result path.
+    pub fn content_matches_page(
+        &self,
+        entry: i64,
+        tokens: &[String],
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<crate::model::ContentMatch>, StoreError> {
+        let expression = tokens
+            .iter()
+            .map(|t| format!("\"{}\"*", t.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(" ");
+        if expression.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut stmt=self.conn().prepare("SELECT f.text,c.page,c.start_ms,c.end_ms,c.line,c.thumbnail_path,highlight(content_fts,2,char(1),char(2)) FROM content_fts f LEFT JOIN content_chunks c ON c.id=f.rowid AND c.entry_id=CAST(f.entry_id AS INTEGER) WHERE content_fts MATCH ?1 AND CAST(f.entry_id AS INTEGER)=?2 AND EXISTS(SELECT 1 FROM visible_entries e WHERE e.id=?2 AND e.missing=0) ORDER BY f.rowid LIMIT ?3 OFFSET ?4")?;
+        let rows = stmt.query_map(
+            params![
+                expression,
+                entry,
+                limit.min(32) as i64,
+                offset.min(i64::MAX as usize) as i64
+            ],
+            |r| {
+                let line: Option<u32> = r.get(4)?;
+                let highlighted: String = r.get(6)?;
+                let line = line.map(|n| {
+                    n.saturating_add(
+                        highlighted
+                            .split('\u{1}')
+                            .next()
+                            .unwrap_or("")
+                            .bytes()
+                            .filter(|b| *b == b'\n')
+                            .count() as u32,
+                    )
+                });
+                Ok(crate::model::ContentMatch {
+                    excerpt: r.get(0)?,
+                    page: r.get(1)?,
+                    start_ms: r.get::<_, Option<i64>>(2)?.map(|n| n as u64),
+                    end_ms: r.get::<_, Option<i64>>(3)?.map(|n| n as u64),
+                    line,
+                    thumbnail_path: r.get(5)?,
+                })
+            },
+        )?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
     /// Whole-name equality: an index point lookup.
@@ -187,7 +253,7 @@ impl IndexStore {
                     size, mtime, missing, thumbnail_path
              FROM visible_entries
              WHERE id IN (
-                 SELECT CAST(entry_id AS INTEGER) FROM content_fts
+                 SELECT DISTINCT CAST(entry_id AS INTEGER) FROM content_fts
                  WHERE content_fts MATCH ?1
                  AND EXISTS (SELECT 1 FROM visible_entries v WHERE v.id = CAST(content_fts.entry_id AS INTEGER)) LIMIT ?2
              )",
