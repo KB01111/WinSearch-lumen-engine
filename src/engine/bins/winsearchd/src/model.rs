@@ -11,6 +11,7 @@
 //! purges model vectors and requeues name/content jobs per entry so the
 //! new model re-embeds everything (P3.5 pipeline consumes the queue).
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -43,6 +44,12 @@ struct ActiveOp {
     id: u64,
     kind: OpKind,
     cancel: Arc<AtomicBool>,
+}
+
+#[derive(Default)]
+struct Notifications {
+    pending: VecDeque<ModelStatus>,
+    delivering: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,6 +105,7 @@ pub struct ModelService {
     /// Terminal state of the last op (cleared when the next one starts).
     outcome: Mutex<Option<Outcome>>,
     notifier: Mutex<Option<PushFn>>,
+    notifications: Mutex<Notifications>,
 }
 
 impl ModelService {
@@ -114,6 +122,7 @@ impl ModelService {
             progress: Mutex::new(ModelStatus::default()),
             outcome: Mutex::new(None),
             notifier: Mutex::new(None),
+            notifications: Mutex::new(Notifications::default()),
         });
         // Changed model identity, weights, or width invalidates every stored
         // vector: purge and enqueue name/content jobs per entry so the
@@ -155,6 +164,33 @@ impl ModelService {
                 id: None,
                 status: status.clone(),
             });
+        }
+    }
+
+    // Enqueue while holding `active` so messages follow lifecycle changes across operations.
+    fn queue_notification(&self, status: ModelStatus) {
+        self.notifications
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .pending
+            .push_back(status);
+    }
+
+    fn push_pending_notifications(&self) {
+        let mut notifications = self.notifications.lock().unwrap_or_else(|p| p.into_inner());
+        if notifications.delivering {
+            return;
+        }
+        notifications.delivering = true;
+        loop {
+            let Some(status) = notifications.pending.pop_front() else {
+                notifications.delivering = false;
+                return;
+            };
+            // Callbacks may read state or enqueue more work; no mutex may span delivery.
+            drop(notifications);
+            self.push(&status);
+            notifications = self.notifications.lock().unwrap_or_else(|p| p.into_inner());
         }
     }
 
@@ -205,9 +241,10 @@ impl ModelService {
         }
         *self.outcome.lock().unwrap_or_else(|p| p.into_inner()) = None;
         let status = self.manager.delete().map_err(|e| e.to_string())?;
+        self.queue_notification(status.clone());
         drop(active);
         info!("model files deleted");
-        self.push(&status);
+        self.push_pending_notifications();
         Ok(status)
     }
 
@@ -273,15 +310,11 @@ impl ModelService {
             ..Default::default()
         };
         *self.progress.lock().unwrap_or_else(|p| p.into_inner()) = started.clone();
-        let notification_order = Arc::new(Mutex::new(()));
-        let started_guard = notification_order.lock().unwrap_or_else(|p| p.into_inner());
-
         let this = Arc::clone(self);
         let thread_cancel = Arc::clone(&cancel);
-        let thread_order = Arc::clone(&notification_order);
         if let Err(e) = std::thread::Builder::new()
             .name("winsearch-model".into())
-            .spawn(move || this.run_op(id, kind, path.as_deref(), &thread_cancel, &thread_order))
+            .spawn(move || this.run_op(id, kind, path.as_deref(), &thread_cancel))
         {
             let msg = format!("cannot spawn model thread: {e}");
             let failed_status = ModelStatus {
@@ -294,20 +327,21 @@ impl ModelService {
             *self.outcome.lock().unwrap_or_else(|p| p.into_inner()) =
                 Some(Outcome::Failed(msg.clone()));
             *active = None;
+            self.queue_notification(failed_status);
             drop(active);
-            self.push(&failed_status);
+            self.push_pending_notifications();
             return Err(msg);
         }
         *active = Some(ActiveOp { id, kind, cancel });
+        self.queue_notification(started.clone());
         drop(active);
-        self.push(&started);
-        drop(started_guard);
+        self.push_pending_notifications();
 
         info!(?kind, "model operation started");
         Ok(started)
     }
 
-    fn run_op(&self, id: u64, kind: OpKind, path: Option<&Path>, cancel: &AtomicBool, notification_order: &Mutex<()>) {
+    fn run_op(&self, id: u64, kind: OpKind, path: Option<&Path>, cancel: &AtomicBool) {
         let last_push = Mutex::new(Instant::now());
         let progress_cb = |downloaded: u64, total: u64| {
             let snapshot = ModelStatus {
@@ -316,13 +350,18 @@ impl ModelService {
                 total_bytes: total,
                 error: None,
             };
+            let active = self.active.lock().unwrap_or_else(|p| p.into_inner());
+            if !active.as_ref().is_some_and(|op| op.id == id) {
+                return;
+            }
             *self.progress.lock().unwrap_or_else(|p| p.into_inner()) = snapshot.clone();
             let mut last = last_push.lock().unwrap_or_else(|p| p.into_inner());
             if last.elapsed() >= PUSH_THROTTLE {
                 *last = Instant::now();
-                if let Ok(_order) = notification_order.try_lock() {
-                    self.push(&snapshot);
-                }
+                self.queue_notification(snapshot);
+                drop(last);
+                drop(active);
+                self.push_pending_notifications();
             }
         };
 
@@ -376,9 +415,9 @@ impl ModelService {
         };
         *self.progress.lock().unwrap_or_else(|p| p.into_inner()) = status.clone();
         *active = None;
+        self.queue_notification(status);
         drop(active);
-        let _order = notification_order.lock().unwrap_or_else(|p| p.into_inner());
-        self.push(&status);
+        self.push_pending_notifications();
     }
 
     fn record_compat(&self) -> Result<(), String> {
@@ -582,6 +621,104 @@ mod tests {
     }
 
     #[test]
+    fn blocked_first_notification_cannot_publish_terminal_after_second_start() {
+        use std::io::Read as _;
+        use std::sync::mpsc;
+
+        let body = vec![3u8; 1024];
+        let blobs = vec![("tiny.gguf".to_string(), body.clone())];
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let (download_started_tx, download_started_rx) = mpsc::channel();
+        let (download_release_tx, download_release_rx) = mpsc::channel();
+        let fx = Fixture {
+            base_url,
+            _thread: std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0u8; 8192];
+                stream.read(&mut request).unwrap();
+                download_started_tx.send(()).unwrap();
+                download_release_rx.recv().unwrap();
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
+                stream.write_all(&body).unwrap();
+            }),
+        };
+        let srcdir = temp_dir("notification-order-src");
+        std::fs::write(srcdir.join("tiny.gguf"), &blobs[0].1).unwrap();
+        let dir = temp_dir("notification-order");
+        let service = tiny_service(dir.clone(), &fx, &blobs);
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let release_rx = StdMutex::new(release_rx);
+        let statuses = Arc::new(StdMutex::new(Vec::new()));
+        let recorded = Arc::clone(&statuses);
+        let first = AtomicBool::new(true);
+        let weak = Arc::downgrade(&service);
+        service.set_notifier(Arc::new(move |msg| {
+            // Reading lifecycle state from a callback must remain deadlock-free.
+            let _ = weak.upgrade().unwrap().status();
+            if let ServerMessage::ModelStatus { status, .. } = msg {
+                recorded.lock().unwrap().push(status.state);
+                if first.swap(false, Ordering::Relaxed) {
+                    entered_tx.send(()).unwrap();
+                    release_rx.lock().unwrap().recv().unwrap();
+                }
+            }
+        }));
+        let other = Arc::clone(&service);
+        let source = srcdir.join("tiny.gguf");
+        let caller = std::thread::spawn(move || other.start_import(source));
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let imported = wait_until(Duration::from_secs(2), || service.active.lock().unwrap().is_none());
+        std::fs::remove_file(dir.join("tiny.gguf")).unwrap();
+        assert_eq!(service.start_download().state, ModelState::Downloading);
+        download_started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        release_tx.send(()).unwrap();
+        caller.join().unwrap().unwrap();
+        let delivered = wait_until(Duration::from_secs(2), || statuses.lock().unwrap().len() >= 3);
+        let observed = statuses.lock().unwrap().clone();
+        download_release_tx.send(()).unwrap();
+        assert!(wait_until(Duration::from_secs(2), || service.status().state == ModelState::Ready));
+        assert!(imported, "blocked delivery stopped the first import");
+        assert!(delivered, "ordered lifecycle notifications were not drained");
+        assert_eq!(observed, vec![ModelState::Downloading, ModelState::Ready, ModelState::Downloading]);
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(srcdir);
+    }
+
+    #[test]
+    fn notification_callback_can_delete_finished_import() {
+        let blobs = vec![("tiny.gguf".to_string(), vec![3u8; 1024])];
+        let fx = Fixture::serve(HashMap::new(), Duration::ZERO);
+        let srcdir = temp_dir("reentrant-notify-src");
+        std::fs::write(srcdir.join("tiny.gguf"), &blobs[0].1).unwrap();
+        let dir = temp_dir("reentrant-notify");
+        let service = tiny_service(dir.clone(), &fx, &blobs);
+        let weak = Arc::downgrade(&service);
+        let (deleted_tx, deleted_rx) = std::sync::mpsc::channel();
+        let statuses = Arc::new(StdMutex::new(Vec::new()));
+        let recorded = Arc::clone(&statuses);
+        service.set_notifier(Arc::new(move |msg| {
+            if let ServerMessage::ModelStatus { status, .. } = msg {
+                recorded.lock().unwrap().push(status.state);
+                if status.state == ModelState::Ready {
+                    let result = weak.upgrade().unwrap().delete();
+                    deleted_tx.send(result).unwrap();
+                }
+            }
+        }));
+        service.start_import(srcdir.join("tiny.gguf")).unwrap();
+        assert_eq!(deleted_rx.recv_timeout(Duration::from_secs(2)).unwrap().unwrap().state,
+            ModelState::NotDownloaded);
+        assert!(wait_until(Duration::from_secs(2), || statuses.lock().unwrap().len() == 3));
+        assert_eq!(*statuses.lock().unwrap(),
+            vec![ModelState::Downloading, ModelState::Ready, ModelState::NotDownloaded]);
+        assert!(!dir.join("tiny.gguf").exists());
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(srcdir);
+    }
+
+    #[test]
     fn superseded_operation_cannot_overwrite_newer_outcome() {
         let dir = temp_dir("superseded-op");
         let service = ModelService::new(dir.clone(), test_indexer());
@@ -591,7 +728,7 @@ mod tests {
             cancel: Arc::new(AtomicBool::new(false)),
         });
         *service.outcome.lock().unwrap() = Some(Outcome::Ok);
-        service.run_op(1, OpKind::Import, Some(&dir.join("absent")), &AtomicBool::new(false), &Mutex::new(()));
+        service.run_op(1, OpKind::Import, Some(&dir.join("absent")), &AtomicBool::new(false));
         assert_eq!(*service.outcome.lock().unwrap(), Some(Outcome::Ok));
         assert_eq!(service.active.lock().unwrap().as_ref().unwrap().id, 2);
         let _ = std::fs::remove_dir_all(dir);
