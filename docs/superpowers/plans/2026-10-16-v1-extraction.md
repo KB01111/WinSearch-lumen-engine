@@ -65,7 +65,7 @@ Create one private scratch directory per request under the app cache. Worker
 does no input parsing until assigned to its Windows job and sent the request.
 The job owns child decoder processes too, enforces a1GiB job memory limit,
 and kills descendants when its handle closes. Default elapsed deadline is
-120seconds per batch. Parent must bound both output reads and waits and kill,
+120seconds per batch. Parent must bound request writes, output reads and waits and kill,
 reap, close pipes, and clean scratch artifacts on timeout/crash/cancel. Never
 kill an unrelated process by executable name. Limit concurrency to the
 existing2 extraction slots. The worker launches without a visible console.
@@ -76,6 +76,13 @@ the caller; validate source containment first and use unique cache names. Do
 not return paths and then delete the files behind them. Clean unreferenced
 scratch artifacts and remove the private directory after promotion. Failure,
 timeout and stale-policy paths must not retain an abandoned scratch tree.
+
+Bound encoded requests to256KiB as well. A child that never reads stdin must
+not trap the parent while a long Unicode path fills the pipe: use cancellable
+owned writer/read tasks or an independent job deadline that closes the child
+tree and unblocks both sides. Include a transport fixture whose bounded request
+exceeds pipe capacity and whose child never reads it; timeout must still kill,
+reap and close handles within the configured deadline.
 
 Keep existing per-format byte/decompression/pixel/segment limits. Streaming
 PDF/media work in later slices needs per-batch limits rather than rejecting
