@@ -123,6 +123,7 @@ bypasses the safety limit when the worker is missing.
 - Modify: src/engine/bins/winsearchd/src/{extract,indexer,engine,model}.rs
 - Modify: src/engine/bins/winsearch-extract/src/main.rs
 - Test: migrations, long text batches, extraction restart/failure, lexical locations, no-model recovery
+- Modify: src/engine/crates/ws-protocol/src/messages.rs and C# Core/Protocol/Messages.cs plus serialization/consumer tests if excerpts/moments require additive public result fields
 - Modify: docs/architecture.md and docs/ipc-protocol.md if result fields grow
 
 **Interfaces:**
