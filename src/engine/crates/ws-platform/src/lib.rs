@@ -3,6 +3,7 @@
 
 pub mod identity;
 pub mod content;
+pub mod child_job;
 pub mod ifilter;
 pub mod ocr;
 pub mod paths;

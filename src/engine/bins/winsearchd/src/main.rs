@@ -8,6 +8,7 @@ mod crawl;
 mod embed_client;
 mod engine;
 mod extract;
+mod extract_client;
 mod indexer;
 mod model;
 mod policy;
@@ -81,7 +82,7 @@ fn main() -> anyhow::Result<()> {
     // priority order (small + recent files first) under per-file budgets.
     indexer.start_extract_workers(
         engine.embed_supervisor(),
-        Arc::new(extract::ExtractorRegistry::default()),
+        Arc::new(extract::ExtractorRegistry::production()),
     );
     spawn_status_pusher(Arc::clone(&engine));
     // Model progress/completion pushes fan out to every connected client.

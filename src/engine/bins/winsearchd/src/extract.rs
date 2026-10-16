@@ -27,6 +27,7 @@ use ws_index::{ExtractJob, StoreError};
 
 use crate::embed_client::{EmbedSupervisor, EMBED_JOB_TIMEOUT};
 use crate::indexer::{Indexer, MAX_EMBED_ATTEMPTS};
+use crate::extract_client::{ArtifactLease, ExtractClient, ExtractClientError};
 
 /// Number of background content extraction worker threads (P4.1).
 pub const EXTRACT_WORKER_THREADS: usize = 2;
@@ -55,6 +56,7 @@ pub struct ExtractStepOutcome {
 pub struct ExtractorRegistry {
     extractors: HashMap<String, Arc<dyn Extractor>>,
     budget_factory: Box<dyn Fn(&str) -> ExtractBudget + Send + Sync>,
+    worker: Option<ExtractClient>,
 }
 
 impl Default for ExtractorRegistry {
@@ -62,6 +64,7 @@ impl Default for ExtractorRegistry {
         let mut reg = Self {
             extractors: HashMap::new(),
             budget_factory: Box::new(|_kind| ExtractBudget::default()),
+            worker: None,
         };
         reg.register(SEGMENT_KIND_DOC, Arc::new(DocumentExtractor));
         reg.register(SEGMENT_KIND_PDF, Arc::new(DocumentExtractor));
@@ -75,6 +78,14 @@ impl Default for ExtractorRegistry {
 pub type ExtractionPool = ExtractorRegistry;
 
 impl ExtractorRegistry {
+    /// Production never opens content through an in-process parser.
+    pub fn production() -> Self {
+        Self {
+            extractors: HashMap::new(),
+            budget_factory: Box::new(|_| ExtractBudget::default()),
+            worker: Some(ExtractClient::production()),
+        }
+    }
     /// Registers (or replaces) the extractor for `kind`.
     pub fn register(&mut self, kind: impl Into<String>, extractor: Arc<dyn Extractor>) {
         self.extractors.insert(kind.into(), extractor);
@@ -164,7 +175,8 @@ impl Indexer {
         // 2. Look up extractor for this modality; if unregistered yet (e.g.
         // audio/video before P4.5/P4.6), complete cleanly as Unsupported so
         // the file remains searchable by exact/semantic name.
-        let Some(extractor) = registry.get(&job.kind) else {
+        let extractor = registry.get(&job.kind);
+        if extractor.is_none() && registry.worker.is_none() {
             let mut store = self.store_lock();
             clear_modality_artifacts(&mut store, job.entry_id, &job.kind)?;
             store.complete_extract_job(job.id)?;
@@ -175,11 +187,35 @@ impl Indexer {
                 status: Some(ExtractionStatus::Unsupported),
                 ..Default::default()
             });
-        };
+        }
 
         // 3. Run extraction outside the store lock, enforcing the budget.
         let path = Path::new(&entry.path);
-        let extract_res = run_extractor_with_budget(extractor.as_ref(), path, &budget);
+        let source = std::fs::metadata(path).ok().map(|m| (m.len(), m.modified().ok()));
+        let identity = ws_platform::identity::file_identity(path);
+        let source_unchanged = || source.is_some()
+            && std::fs::metadata(path).ok().map(|m| (m.len(), m.modified().ok())) == source
+            && ws_platform::identity::file_identity(path) == identity;
+        let extract_res = if let Some(client) = &registry.worker {
+            let request = client.request(path.to_path_buf(), &job.kind, budget.max_segments.min(256) as u32);
+            match client.extract_while(&request, budget.deadline.saturating_duration_since(std::time::Instant::now()), || {
+                self.indexing_pause_reason().is_none()
+                    && self.content_path_allowed(path)
+                    && source_unchanged()
+            }) {
+                Ok(response) => Ok(response.output),
+                Err(ExtractClientError::Cancelled) => {
+                    self.store_lock().requeue_extract_job(job.id)?;
+                    return Ok(ExtractStepOutcome { claimed: true, requeued: true, ..Default::default() });
+                }
+                Err(ExtractClientError::Unsupported(_)) => Ok(ExtractOutput::unsupported()),
+                Err(ExtractClientError::Timeout) => Err(ExtractError::DeadlineExceeded),
+                Err(ExtractClientError::Malformed(message)) => Err(ExtractError::Decode(message)),
+                Err(ExtractClientError::Worker(message)) => Err(ExtractError::Io(std::io::Error::other(message))),
+            }
+        } else {
+            run_extractor_with_budget(extractor.expect("registered extractor").as_ref(), path, &budget)
+        };
 
         let output = match extract_res {
             Ok(out) => out,
@@ -231,6 +267,8 @@ impl Indexer {
                 });
             }
         };
+
+        let mut artifacts = registry.worker.as_ref().map(|_| ArtifactLease::for_output(&output));
 
         if matches!(
             output.status,
@@ -367,12 +405,13 @@ impl Indexer {
                 ..Default::default()
             });
         };
-        if !self.content_path_allowed(Path::new(&fresh.path)) {
+        if self.indexing_pause_reason().is_some() || !self.content_path_allowed(Path::new(&fresh.path)) {
             store.requeue_extract_job(job.id)?;
             return Ok(ExtractStepOutcome { claimed: true, requeued: true, ..Default::default() });
         }
         let fresh_job = store.get_extract_job(job.id)?;
-        let changed = fresh.mtime != entry.mtime
+        let changed = (registry.worker.is_some() && !source_unchanged())
+            || fresh.mtime != entry.mtime
             || fresh.size != entry.size
             || fresh.path != entry.path
             || fresh_job
@@ -446,6 +485,7 @@ impl Indexer {
         }
 
         store.complete_extract_job(job.id)?;
+        if let Some(artifacts) = artifacts.as_mut() { artifacts.keep(); }
         drop(store);
         self.invalidate_vector_cache();
         Ok(ExtractStepOutcome {
@@ -614,6 +654,71 @@ mod tests {
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
         indexer
+    }
+
+    fn process_registry(cache: &TempTree) -> ExtractorRegistry {
+        let worker = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/debug/winsearch-extract.exe");
+        assert!(worker.is_file(), "build winsearch-extract before integration tests");
+        let mut registry = ExtractorRegistry::production();
+        registry.worker = Some(ExtractClient::new(worker, cache.0.clone()));
+        registry
+    }
+
+    #[test]
+    fn real_worker_production_registry_indexes_generated_text_without_inline_provider() {
+        let tree = TempTree::new();
+        let cache = TempTree::new();
+        fs::write(tree.0.join("actual.txt"), "uniqueworkerfixture actual generated text").unwrap();
+        let indexer = seeded_indexer(&tree);
+        let registry = process_registry(&cache);
+        assert!(registry.extractors.is_empty());
+        let result = indexer.extract_once_with(&registry, fake_embed).unwrap();
+        assert_eq!(result.status, Some(ExtractionStatus::Extracted));
+        assert_eq!(result.segments_stored, 1);
+        let hits = indexer.search(&SearchRequest { text: "uniqueworkerfixture".into(), limit: 10, ..Default::default() }).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(fs::read_dir(cache.0.join("extract")).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn real_worker_missing_binary_cannot_fall_back_to_registered_inline_extractor() {
+        let tree = TempTree::new();
+        let cache = TempTree::new();
+        fs::write(tree.0.join("actual.txt"), "uniquemissingworkerfixture").unwrap();
+        let indexer = seeded_indexer(&tree);
+        let mut registry = ExtractorRegistry::default();
+        registry.worker = Some(ExtractClient::new(cache.0.join("missing.exe"), cache.0.clone()));
+        let result = indexer.extract_once_with(&registry, fake_embed).unwrap();
+        assert!(matches!(result.status, Some(ExtractionStatus::Failed(_))));
+        assert_eq!(result.segments_stored, 0);
+        assert!(indexer.search(&SearchRequest { text: "uniquemissingworkerfixture".into(), limit: 10, ..Default::default() }).unwrap().is_empty());
+    }
+
+    #[test]
+    fn real_worker_discards_promoted_artifacts_when_pause_or_source_changes_before_commit() {
+        for pause in [true, false] {
+            let tree = TempTree::new();
+            let cache = TempTree::new();
+            let path = tree.0.join("fixture.png");
+            ws_platform::wic::write_bgra_thumbnail_png(&vec![140; 32 * 32 * 4], 32, 32, 32, &path).unwrap();
+            let indexer = seeded_indexer(&tree);
+            let registry = process_registry(&cache);
+            let result = indexer.extract_once_with_media(&registry, fake_embed, |_| {
+                if pause {
+                    let mut config = indexer.get_indexing_config().unwrap();
+                    config.paused = true;
+                    indexer.set_indexing_config(&config).unwrap();
+                } else {
+                    fs::write(&path, "source changed while embedding").unwrap();
+                }
+                Ok(None)
+            }).unwrap();
+            assert!(result.requeued);
+            assert_eq!(result.segments_stored, 0);
+            assert!(fs::read_dir(cache.0.join("extract")).unwrap().next().is_none());
+            assert!(fs::read_dir(cache.0.join("thumbs")).unwrap().next().is_none());
+        }
     }
 
     #[test]

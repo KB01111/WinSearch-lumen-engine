@@ -6,6 +6,7 @@ pub mod chunk;
 pub mod docs;
 pub mod image;
 pub mod ocr;
+pub mod worker;
 
 use std::path::{Path, PathBuf};
 
@@ -31,7 +32,7 @@ pub use ocr::{
 };
 
 /// Outcome status of running an [`Extractor`] on a file.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ExtractionStatus {
     /// Content was extracted (into embeddable and/or FTS-indexed segments).
     Extracted,
@@ -45,7 +46,7 @@ pub enum ExtractionStatus {
 }
 
 /// One extracted segment draft before embedding / storage in `ws-index`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SegmentDraft {
     pub kind: String,
     pub text: String,
@@ -77,7 +78,7 @@ impl SegmentDraft {
 }
 
 /// Output produced by an [`Extractor::extract`] call.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ExtractOutput {
     pub status: ExtractionStatus,
     pub segments: Vec<SegmentDraft>,

@@ -13,8 +13,8 @@ use crate::ExtractError;
 
 /// Default maximum bytes an extractor may read from one file (32 MiB).
 pub const DEFAULT_MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
-/// Default wall-clock budget for extracting one file (10 seconds).
-pub const DEFAULT_EXTRACT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Default wall-clock budget per extraction batch (also enforced by the parent).
+pub const DEFAULT_EXTRACT_TIMEOUT: Duration = Duration::from_secs(120);
 /// Default cap on segments emitted by one file extraction.
 pub const DEFAULT_MAX_SEGMENTS: usize = 256;
 

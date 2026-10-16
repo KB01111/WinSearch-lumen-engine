@@ -1255,6 +1255,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "winsearch-extract"
+version = "0.1.0"
+dependencies = [
+ "ws-extract",
+ "ws-platform",
+ "ws-protocol",
+]
+
+[[package]]
 name = "winsearchd"
 version = "0.1.0"
 dependencies = [
@@ -1323,6 +1332,7 @@ dependencies = [
  "tracing",
  "ws-index",
  "ws-platform",
+ "ws-protocol",
  "zip",
 ]
 
