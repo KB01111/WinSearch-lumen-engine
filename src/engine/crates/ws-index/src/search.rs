@@ -109,7 +109,7 @@ impl IndexStore {
         self.rows_by(
             "SELECT id, root_id, parent_id, path, name, name_lower, ext, is_dir, is_app,
                     size, mtime, missing, thumbnail_path
-             FROM entries
+             FROM visible_entries
              WHERE missing = 0 AND name_lower = ?1
              LIMIT 8",
             params![query_lower],
@@ -126,7 +126,7 @@ impl IndexStore {
         self.rows_by(
             "SELECT id, root_id, parent_id, path, name, name_lower, ext, is_dir, is_app,
                     size, mtime, missing, thumbnail_path
-             FROM entries
+             FROM visible_entries
              WHERE missing = 0 AND name_lower >= ?1 AND name_lower < ?2
              LIMIT ?3",
             params![query_lower, end, CANDIDATE_CAP as i64],
@@ -145,9 +145,9 @@ impl IndexStore {
         self.rows_by(
             "SELECT id, root_id, parent_id, path, name, name_lower, ext, is_dir, is_app,
                     size, mtime, missing, thumbnail_path
-             FROM entries
+             FROM visible_entries
              WHERE id IN (
-                 SELECT rowid FROM entries_tri WHERE entries_tri MATCH ?1 LIMIT ?2
+                 SELECT rowid FROM entries_tri WHERE entries_tri MATCH ?1 AND rowid IN (SELECT id FROM visible_entries) LIMIT ?2
              )",
             params![format!("\"{escaped}\""), CANDIDATE_CAP as i64],
         )
@@ -165,9 +165,9 @@ impl IndexStore {
         self.rows_by(
             "SELECT id, root_id, parent_id, path, name, name_lower, ext, is_dir, is_app,
                     size, mtime, missing, thumbnail_path
-             FROM entries
+             FROM visible_entries
              WHERE id IN (
-                 SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?1 LIMIT ?2
+                 SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?1 AND rowid IN (SELECT id FROM visible_entries) LIMIT ?2
              )",
             params![match_expr, CANDIDATE_CAP as i64],
         )
@@ -183,10 +183,10 @@ impl IndexStore {
         self.rows_by(
             "SELECT id, root_id, parent_id, path, name, name_lower, ext, is_dir, is_app,
                     size, mtime, missing, thumbnail_path
-             FROM entries
+             FROM visible_entries
              WHERE id IN (
                  SELECT CAST(entry_id AS INTEGER) FROM content_fts
-                 WHERE content_fts MATCH ?1 LIMIT ?2
+                 WHERE content_fts MATCH ?1 AND CAST(entry_id AS INTEGER) IN (SELECT id FROM visible_entries) LIMIT ?2
              )",
             params![match_expr, CANDIDATE_CAP as i64],
         )
@@ -203,9 +203,9 @@ impl IndexStore {
         self.rows_by(
             "SELECT id, root_id, parent_id, path, name, name_lower, ext, is_dir, is_app,
                     size, mtime, missing, thumbnail_path
-             FROM entries
+             FROM visible_entries
              WHERE missing = 0 AND id IN (
-                 SELECT rowid FROM entries_path_tri WHERE entries_path_tri MATCH ?1 LIMIT ?2
+                 SELECT rowid FROM entries_path_tri WHERE entries_path_tri MATCH ?1 AND rowid IN (SELECT id FROM visible_entries) LIMIT ?2
              )",
             params![escaped, CANDIDATE_CAP as i64],
         )

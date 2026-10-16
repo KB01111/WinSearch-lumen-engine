@@ -13,6 +13,8 @@ pub enum IdentityError {
     Win32(#[from] windows::core::Error),
     #[error("token user buffer was malformed")]
     MalformedSid,
+    #[error("WINSEARCH_INSTANCE_ID must be 1..48 ASCII letters, digits, underscore or hyphen")]
+    InvalidInstanceId,
 }
 
 /// Returns the current user's SID as an SDDL string, e.g. `S-1-5-21-...`.
@@ -81,14 +83,52 @@ unsafe fn sid_to_string(sid: PSID) -> Option<String> {
 /// The engine's named pipe is suffixed with the user SID so two accounts on one
 /// machine never share a pipe.
 pub fn pipe_name() -> Result<String, IdentityError> {
-    Ok(format!(r"\\.\pipe\winsearch-{}", current_user_sid()?))
+    Ok(format!(
+        r"\\.\pipe\winsearch-{}{}",
+        current_user_sid()?,
+        instance_suffix()?
+    ))
 }
 
 /// The embed worker's private pipe (winsearchd is its only client), also
 /// per-user. The `winsearch-embed-` prefix keeps it distinct from the
 /// frontend pipe above; both share the same DACL machinery.
 pub fn embed_pipe_name() -> Result<String, IdentityError> {
-    Ok(format!(r"\\.\pipe\winsearch-embed-{}", current_user_sid()?))
+    Ok(format!(
+        r"\\.\pipe\winsearch-embed-{}{}",
+        current_user_sid()?,
+        instance_suffix()?
+    ))
+}
+
+pub fn validate_instance_id(value: &str) -> Result<(), IdentityError> {
+    if value.is_empty()
+        || value.len() > 48
+        || !value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    {
+        return Err(IdentityError::InvalidInstanceId);
+    }
+    Ok(())
+}
+pub fn instance_suffix() -> Result<String, IdentityError> {
+    match std::env::var("WINSEARCH_INSTANCE_ID") {
+        Ok(value) => {
+            validate_instance_id(&value)?;
+            Ok(format!("-{value}"))
+        }
+        Err(std::env::VarError::NotPresent) => Ok(String::new()),
+        Err(_) => Err(IdentityError::InvalidInstanceId),
+    }
+}
+pub fn isolated_object_name(base: &str) -> Result<String, IdentityError> {
+    let suffix = instance_suffix()?;
+    Ok(if suffix.is_empty() {
+        base.to_owned()
+    } else {
+        format!("{base}-{}{suffix}", current_user_sid()?)
+    })
 }
 
 /// Captures `(volume_serial, file_id)` for `path` via `GetFileInformationByHandleEx`
@@ -96,12 +136,12 @@ pub fn embed_pipe_name() -> Result<String, IdentityError> {
 pub fn file_identity(path: &std::path::Path) -> Option<(u32, u64)> {
     use std::ffi::c_void;
     use std::mem::size_of;
+    use windows::core::PCWSTR;
     use windows::Win32::Storage::FileSystem::{
         CreateFileW, FileIdInfo, GetFileInformationByHandleEx, FILE_FLAGS_AND_ATTRIBUTES,
         FILE_ID_INFO, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
         OPEN_EXISTING,
     };
-    use windows::core::PCWSTR;
 
     let wide: Vec<u16> = path
         .to_string_lossy()
@@ -128,8 +168,7 @@ pub fn file_identity(path: &std::path::Path) -> Option<(u32, u64)> {
         );
         let _ = CloseHandle(handle);
         result.ok()?;
-        let file_id =
-            u64::from_le_bytes(info.FileId.Identifier[..8].try_into().unwrap_or([0; 8]));
+        let file_id = u64::from_le_bytes(info.FileId.Identifier[..8].try_into().unwrap_or([0; 8]));
         Some((info.VolumeSerialNumber as u32, file_id))
     }
 }
@@ -137,6 +176,15 @@ pub fn file_identity(path: &std::path::Path) -> Option<(u32, u64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn instance_id_validation() {
+        for value in ["", "a/b", "a b", "å", &"a".repeat(49)] {
+            assert!(validate_instance_id(value).is_err());
+        }
+        for value in ["test-A_1", &"a".repeat(48)] {
+            assert!(validate_instance_id(value).is_ok());
+        }
+    }
 
     #[test]
     fn reads_a_plausible_current_user_sid() {

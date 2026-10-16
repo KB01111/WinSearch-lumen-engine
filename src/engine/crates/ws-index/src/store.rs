@@ -186,6 +186,23 @@ CREATE VIRTUAL TABLE IF NOT EXISTS content_fts USING fts5(
 /// a migration and `meta.schema_version` stays "2" (same pattern as the
 /// `priority`-column exception: a policy hint, not a format break).
 const SCHEMA_CONFIG: &str = r#"
+CREATE VIEW IF NOT EXISTS visible_entries AS
+WITH policy AS (SELECT value AS config FROM meta WHERE key='indexing_config'),
+normalized AS (SELECT *, policy_fold(path) AS policy_path FROM entries)
+SELECT e.id,e.root_id,e.parent_id,e.path,e.name,e.name_lower,e.ext,e.is_dir,e.is_app,e.size,e.mtime,e.missing,e.thumbnail_path
+FROM normalized e
+WHERE e.is_app=1 OR NOT EXISTS(SELECT 1 FROM policy) OR (
+ EXISTS(SELECT 1 FROM roots WHERE roots.id=e.root_id AND enabled=1)
+ AND EXISTS(SELECT 1 FROM policy,json_each(config,'$.roots') r
+ WHERE (e.policy_path=policy_fold(r.value)
+ OR substr(e.policy_path,1,length(policy_fold(r.value))+1)=policy_fold(r.value)||'\')
+ AND NOT EXISTS(SELECT 1 FROM json_each(config,'$.excluded_paths') x
+ WHERE length(policy_fold(x.value))>=length(policy_fold(r.value))
+ AND (e.policy_path=policy_fold(x.value)
+ OR substr(e.policy_path,1,length(policy_fold(x.value))+1)=policy_fold(x.value)||'\')))
+ AND NOT EXISTS(SELECT 1 FROM policy,json_each(config,'$.excluded_extensions') x WHERE lower(e.ext)=x.value)
+);
+
 CREATE TABLE IF NOT EXISTS config (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -197,6 +214,56 @@ pub const CONFIG_KEY_SEMANTIC_ENABLED: &str = "semantic_enabled";
 pub const CONFIG_KEY_PREFERRED_BACKEND: &str = "preferred_backend";
 
 impl IndexStore {
+    pub fn entry_visible(&self, id: i64) -> Result<bool, StoreError> {
+        Ok(self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM visible_entries WHERE id=?1)",
+            [id],
+            |r| r.get(0),
+        )?)
+    }
+    pub fn root_enabled(&self, id: i64) -> Result<bool, StoreError> {
+        Ok(self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM roots WHERE id=?1 AND enabled=1)",
+            [id],
+            |r| r.get(0),
+        )?)
+    }
+    /// Loads policy once, migrating only roots already registered by legacy engines.
+    pub fn get_or_migrate_indexing_config(
+        &mut self,
+    ) -> Result<ws_protocol::IndexingConfig, StoreError> {
+        if let Some(json) = self.meta_get("indexing_config")? {
+            return serde_json::from_str(&json)
+                .map_err(|e| StoreError::InvalidConfig(e.to_string()));
+        }
+        let mut config = ws_protocol::IndexingConfig::default();
+        config.roots = self
+            .roots()?
+            .into_iter()
+            .filter(|r| r.enabled && r.path != "@apps")
+            .map(|r| r.path)
+            .collect();
+        self.set_indexing_config(&config)?;
+        Ok(config)
+    }
+
+    /// Policy and root visibility share a single SQLite transaction.
+    pub fn set_indexing_config(
+        &mut self,
+        config: &ws_protocol::IndexingConfig,
+    ) -> Result<(), StoreError> {
+        let json =
+            serde_json::to_string(config).map_err(|e| StoreError::InvalidConfig(e.to_string()))?;
+        let tx = self.conn.transaction()?;
+        tx.execute("UPDATE roots SET enabled = 0 WHERE path != '@apps'", [])?;
+        for path in &config.roots {
+            tx.execute("INSERT INTO roots(path, enabled) VALUES(?1, 1) ON CONFLICT(path) DO UPDATE SET enabled = 1", [path])?;
+        }
+        tx.execute("INSERT INTO meta(key,value) VALUES('indexing_config',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [json])?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn open(path: &Path) -> Result<Self, StoreError> {
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -209,6 +276,10 @@ impl IndexStore {
     }
 
     fn init(conn: Connection) -> Result<Self, StoreError> {
+        use rusqlite::functions::FunctionFlags;
+        conn.create_scalar_function("policy_fold", 1,
+            FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+            |ctx| Ok(ctx.get::<String>(0)?.replace('/', "\\").trim_end_matches('\\').to_lowercase()))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
@@ -820,7 +891,7 @@ impl IndexStore {
         self.conn
             .query_row(
                 "UPDATE crawl_queue SET claimed = 1
-                 WHERE id = (SELECT id FROM crawl_queue WHERE claimed = 0 ORDER BY id LIMIT 1)
+                 WHERE id = (SELECT id FROM crawl_queue WHERE claimed = 0 AND root_id IN (SELECT id FROM roots WHERE enabled=1) ORDER BY id LIMIT 1)
                  RETURNING id, root_id, dir_path, generation",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
@@ -1124,7 +1195,7 @@ impl IndexStore {
         let mut stmt = self.conn.prepare(
             "SELECT id, entry_id, kind, chunk_index, text, page, start_ms, end_ms,
                     line, vector, norm
-             FROM segments ORDER BY id",
+             FROM segments WHERE entry_id IN (SELECT id FROM visible_entries) ORDER BY id",
         )?;
         let rows = stmt.query_map([], map_segment_row)?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -1136,7 +1207,7 @@ impl IndexStore {
         &self,
     ) -> Result<Vec<(i64, i64, String, Vec<u8>, f32)>, StoreError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, entry_id, kind, vector, norm FROM segments ORDER BY id",
+            "SELECT id, entry_id, kind, vector, norm FROM segments WHERE entry_id IN (SELECT id FROM visible_entries) ORDER BY id",
         )?;
         let rows = stmt.query_map([], |row| {
             let bytes: Vec<u8> = row.get(3)?;
@@ -1278,7 +1349,7 @@ impl IndexStore {
         let mut sql = String::from(
             "SELECT id, entry_id, kind, chunk_index, text, page, start_ms, end_ms,
                     line, vector, norm
-             FROM segments",
+             FROM segments WHERE entry_id IN (SELECT id FROM visible_entries)",
         );
         // Own the bound values so the prepared statement can borrow them.
         let kinds_owned: Vec<String>;
@@ -1325,7 +1396,7 @@ impl IndexStore {
                 entries_owned = Vec::new();
             }
             if !clauses.is_empty() {
-                sql.push_str(" WHERE ");
+                sql.push_str(" AND ");
                 sql.push_str(&clauses.join(" AND "));
             }
             let mut stmt = self.conn.prepare(&sql)?;
@@ -1441,7 +1512,7 @@ impl IndexStore {
             .query_row(
                 "UPDATE extract_jobs SET claimed = 1, state = 'claimed'
                  WHERE id = (SELECT id FROM extract_jobs
-                             WHERE claimed = 0 AND state = 'pending'
+                             WHERE claimed = 0 AND state = 'pending' AND entry_id IN (SELECT id FROM visible_entries)
                              ORDER BY priority DESC, id DESC LIMIT 1)
                  RETURNING id, entry_id, kind, state, claimed, attempts, priority",
                 [],
@@ -1481,7 +1552,7 @@ impl IndexStore {
                 .query_row(
                     "UPDATE extract_jobs SET claimed = 1, state = 'claimed'
                      WHERE id = (SELECT id FROM extract_jobs
-                                 WHERE claimed = 0 AND state = 'pending' AND kind = ?1
+                                 WHERE claimed = 0 AND state = 'pending' AND entry_id IN (SELECT id FROM visible_entries) AND kind = ?1
                                  ORDER BY priority DESC, id DESC LIMIT 1)
                      RETURNING id, entry_id, kind, state, claimed, attempts, priority",
                     params![kind],
@@ -1581,7 +1652,7 @@ impl IndexStore {
             .query_row(
                 "UPDATE extract_jobs SET claimed = 1, state = 'claimed'
                  WHERE id = (SELECT id FROM extract_jobs
-                             WHERE claimed = 0 AND state = 'pending' AND kind != ?1
+                             WHERE claimed = 0 AND state = 'pending' AND entry_id IN (SELECT id FROM visible_entries) AND kind != ?1
                              ORDER BY priority DESC, id DESC LIMIT 1)
                  RETURNING id, entry_id, kind, state, claimed, attempts, priority",
                 params![crate::model::SEGMENT_KIND_NAME],
@@ -1668,7 +1739,7 @@ impl IndexStore {
         kinds: &[crate::model::HitKind],
     ) -> Result<Vec<i64>, StoreError> {
         let mut sql = String::from(
-            "SELECT id, path, ext, is_dir, is_app FROM entries WHERE missing = 0",
+            "SELECT id, path, ext, is_dir, is_app FROM visible_entries WHERE missing = 0",
         );
         if apps_only {
             sql.push_str(" AND is_app = 1");
@@ -1873,6 +1944,105 @@ fn fts_keywords(rec: &EntryRecord) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn policy_visibility_uses_unicode_case_and_component_boundaries() {
+        let mut store = IndexStore::open_in_memory().unwrap();
+        let id = store.ensure_root(r"C:\DÄTA").unwrap();
+        store
+            .apply_batch(
+                id,
+                0,
+                &[
+                    rec(r"C:\DÄTA\note.txt", "note.txt", 1, 1),
+                    rec(r"C:\DÄTABASE\leak.txt", "leak.txt", 1, 1),
+                ],
+            )
+            .unwrap();
+        let mut c = ws_protocol::IndexingConfig::default();
+        c.roots = vec![r"C:\DÄTA".into()];
+        c.excluded_paths = vec![r"c:\däta\note.txt".into()];
+        store.set_indexing_config(&c).unwrap();
+        assert!(!store
+            .entry_visible(store.find_by_path(r"C:\DÄTA\note.txt").unwrap().unwrap().id)
+            .unwrap());
+        assert!(!store
+            .entry_visible(
+                store
+                    .find_by_path(r"C:\DÄTABASE\leak.txt")
+                    .unwrap()
+                    .unwrap()
+                    .id
+            )
+            .unwrap());
+    }
+    #[test]
+    fn indexing_policy_migrates_once_and_fresh_is_empty() {
+        let mut fresh = IndexStore::open_in_memory().unwrap();
+        assert!(fresh
+            .get_or_migrate_indexing_config()
+            .unwrap()
+            .roots
+            .is_empty());
+        let mut legacy = IndexStore::open_in_memory().unwrap();
+        let id = legacy.ensure_root(r"Z:\offline").unwrap();
+        legacy.ensure_root("@apps").unwrap();
+        let c = legacy.get_or_migrate_indexing_config().unwrap();
+        assert_eq!(c.roots, vec![r"Z:\offline"]);
+        legacy.ensure_root(r"D:\later").unwrap();
+        assert_eq!(legacy.get_or_migrate_indexing_config().unwrap(), c);
+        assert_eq!(legacy.roots().unwrap()[0].id, id);
+    }
+    #[test]
+    fn indexing_policy_write_failure_keeps_policy_and_visibility() {
+        let mut store = IndexStore::open_in_memory().unwrap();
+        let mut c = ws_protocol::IndexingConfig::default();
+        c.roots = vec![r"C:\A".into()];
+        store.set_indexing_config(&c).unwrap();
+        let before = store.roots().unwrap();
+        store.conn.execute_batch("CREATE TRIGGER fail_policy BEFORE UPDATE ON meta WHEN new.key='indexing_config' BEGIN SELECT RAISE(ABORT,'fixture write failure'); END;").unwrap();
+        let mut next = c.clone();
+        next.roots = vec![r"C:\B".into()];
+        assert!(store.set_indexing_config(&next).is_err());
+        assert_eq!(store.get_or_migrate_indexing_config().unwrap(), c);
+        assert_eq!(store.roots().unwrap(), before);
+    }
+    #[test]
+    fn policy_filter_precedes_candidate_limits_and_keeps_rows() {
+        let mut store = IndexStore::open_in_memory().unwrap();
+        let a = store.ensure_root(r"C:\A").unwrap();
+        let b = store.ensure_root(r"C:\B").unwrap();
+        let rows: Vec<_> = (0..600)
+            .map(|i| {
+                rec(
+                    &format!(r"C:\A\match{i}.txt"),
+                    &format!("match{i}.txt"),
+                    1,
+                    1,
+                )
+            })
+            .collect();
+        store.apply_batch(a, 0, &rows).unwrap();
+        store
+            .apply_batch(b, 0, &[rec(r"C:\B\matchgood.txt", "matchgood.txt", 1, 1)])
+            .unwrap();
+        let mut c = ws_protocol::IndexingConfig::default();
+        c.roots = vec![r"C:\B".into()];
+        store.set_indexing_config(&c).unwrap();
+        let hits = store
+            .search(&crate::model::SearchRequest {
+                text: "match".into(),
+                limit: 1,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(hits[0].path, r"C:\B\matchgood.txt");
+        assert!(store.find_by_path(r"C:\A\match0.txt").unwrap().is_some());
+        store.enqueue_dir(a, r"C:\A").unwrap();
+        assert!(store.claim_dir().unwrap().is_none());
+        c.roots.push(r"C:\A".into());
+        store.set_indexing_config(&c).unwrap();
+        assert!(store.claim_dir().unwrap().is_some());
+    }
 
     fn rec(path: &str, name: &str, size: u64, mtime: i64) -> EntryRecord {
         EntryRecord {

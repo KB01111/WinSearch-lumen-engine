@@ -2,6 +2,7 @@
 //! data paths, current-user identity, and single-instance guards.
 
 pub mod identity;
+pub mod content;
 pub mod ifilter;
 pub mod ocr;
 pub mod paths;

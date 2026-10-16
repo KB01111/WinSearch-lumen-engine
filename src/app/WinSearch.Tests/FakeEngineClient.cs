@@ -10,6 +10,18 @@ internal sealed class FakeEngineClient : IEngineClient
     public event EventHandler<EngineStatus>? StatusChanged;
     public event EventHandler<ModelStatus>? ModelStatusChanged;
     public event EventHandler<EngineConfig>? ConfigChanged;
+    public event EventHandler<IndexingConfig>? IndexingConfigChanged;
+    public IndexingConfig CurrentIndexingConfig { get; set; } = new();
+    public List<IndexingConfig> SetIndexingConfigCalls { get; } = new();
+    public Task<IndexingConfig> GetIndexingConfigAsync(CancellationToken cancellationToken = default) => Task.FromResult(CurrentIndexingConfig);
+    public Task<IndexingConfig> SetIndexingConfigAsync(IndexingConfig config, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CurrentIndexingConfig = config;
+        SetIndexingConfigCalls.Add(config);
+        IndexingConfigChanged?.Invoke(this, config);
+        return Task.FromResult(config);
+    }
     public event EventHandler? Disconnected;
     public event EventHandler? Reconnected;
 

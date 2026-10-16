@@ -16,6 +16,9 @@ public interface IEngineClient : IAsyncDisposable
     event EventHandler<EngineStatus>? StatusChanged;
     event EventHandler<ModelStatus>? ModelStatusChanged;
     event EventHandler<EngineConfig>? ConfigChanged;
+    event EventHandler<IndexingConfig>? IndexingConfigChanged;
+    Task<IndexingConfig> GetIndexingConfigAsync(CancellationToken cancellationToken = default);
+    Task<IndexingConfig> SetIndexingConfigAsync(IndexingConfig config, CancellationToken cancellationToken = default);
     event EventHandler? Disconnected;
     event EventHandler? Reconnected;
 
@@ -66,6 +69,12 @@ public sealed class EngineClient : IEngineClient
 
     /// <summary>Raised when the engine search policy arrives (Get/SetConfig answers).</summary>
     public event EventHandler<EngineConfig>? ConfigChanged;
+    public event EventHandler<IndexingConfig>? IndexingConfigChanged;
+
+    public Task<IndexingConfig> GetIndexingConfigAsync(CancellationToken cancellationToken = default)
+        => UnaryAsync(static id => new GetIndexingConfigMessage { Id = id }, static m => ((IndexingConfigMessage)m).Config, cancellationToken);
+    public Task<IndexingConfig> SetIndexingConfigAsync(IndexingConfig config, CancellationToken cancellationToken = default)
+        => UnaryAsync(id => new SetIndexingConfigMessage { Id = id, Config = config }, static m => ((IndexingConfigMessage)m).Config, cancellationToken);
 
     /// <summary>Raised when the pipe drops and reconnect attempts begin.</summary>
     public event EventHandler? Disconnected;
@@ -218,10 +227,9 @@ public sealed class EngineClient : IEngineClient
             _ = TryCancelAsync(id);
         });
 
-        await WriteAsync(new SearchMessage { Id = id, Query = query }, cancellationToken);
-
         try
         {
+            await WriteAsync(new SearchMessage { Id = id, Query = query }, cancellationToken);
             await foreach (var batch in channel.Reader.ReadAllAsync(cancellationToken))
             {
                 yield return batch;
@@ -255,9 +263,13 @@ public sealed class EngineClient : IEngineClient
         var tcs = new TaskCompletionSource<ServerMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         _unary[id] = tcs;
         await using var registration = cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken)).ConfigureAwait(false);
-        await WriteAsync(factory(id), cancellationToken);
-        var message = await tcs.Task;
-        return selector(message);
+        try
+        {
+            await WriteAsync(factory(id), cancellationToken);
+            var message = await tcs.Task;
+            return selector(message);
+        }
+        finally { _unary.TryRemove(id, out _); }
     }
 
     private ulong NextRequestId() => (ulong)Interlocked.Increment(ref _nextRequestId);
@@ -367,6 +379,11 @@ public sealed class EngineClient : IEngineClient
     {
         switch (message)
         {
+            case IndexingConfigMessage indexing:
+                if (indexing.Id is { } indexingId && _unary.TryRemove(indexingId, out var indexingTcs))
+                    indexingTcs.TrySetResult(indexing);
+                IndexingConfigChanged?.Invoke(this, indexing.Config);
+                break;
             case HelloAckMessage ack:
                 _helloAck?.TrySetResult(ack);
                 break;

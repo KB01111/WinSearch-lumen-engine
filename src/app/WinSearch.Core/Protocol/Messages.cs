@@ -19,6 +19,8 @@ namespace WinSearch.Core.Protocol;
 [JsonDerivedType(typeof(GetModelStatusMessage), "get_model_status")]
 [JsonDerivedType(typeof(GetConfigMessage), "get_config")]
 [JsonDerivedType(typeof(SetConfigMessage), "set_config")]
+[JsonDerivedType(typeof(GetIndexingConfigMessage), "get_indexing_config")]
+[JsonDerivedType(typeof(SetIndexingConfigMessage), "set_indexing_config")]
 public abstract class ClientMessage;
 
 public sealed class HelloMessage : ClientMessage
@@ -86,6 +88,13 @@ public sealed class SetConfigMessage : ClientMessage
     public EngineConfig Config { get; set; } = new();
 }
 
+public sealed class GetIndexingConfigMessage : ClientMessage { public ulong Id { get; set; } }
+public sealed class SetIndexingConfigMessage : ClientMessage
+{
+    public ulong Id { get; set; }
+    public IndexingConfig Config { get; set; } = new();
+}
+
 // ---------------------------------------------------------------------------
 // Engine -> client
 // ---------------------------------------------------------------------------
@@ -97,6 +106,7 @@ public sealed class SetConfigMessage : ClientMessage
 [JsonDerivedType(typeof(StatusMessage), "status")]
 [JsonDerivedType(typeof(ModelStatusMessage), "model_status")]
 [JsonDerivedType(typeof(ConfigMessage), "config")]
+[JsonDerivedType(typeof(IndexingConfigMessage), "indexing_config")]
 [JsonDerivedType(typeof(ErrorMessage), "error")]
 public abstract class ServerMessage;
 
@@ -138,6 +148,28 @@ public sealed class ConfigMessage : ServerMessage
     /// <summary>Set when answering GetConfig/SetConfig.</summary>
     public ulong? Id { get; set; }
     public EngineConfig Config { get; set; } = new();
+}
+
+public sealed class IndexingConfigMessage : ServerMessage
+{
+    public ulong? Id { get; set; }
+    public IndexingConfig Config { get; set; } = new();
+}
+
+public enum IndexingMode { Always, Scheduled, Manual }
+public sealed class IndexingConfig
+{
+    public List<string> Roots { get; set; } = new();
+    public List<string> ExcludedPaths { get; set; } = new();
+    public List<string> ExcludedExtensions { get; set; } = new();
+    public bool CodeEnabled { get; set; }
+    public List<string> CodeRoots { get; set; } = new();
+    public bool Paused { get; set; }
+    public IndexingMode Mode { get; set; } = IndexingMode.Always;
+    public bool IndexOnBattery { get; set; } = true;
+    public bool RespectBatterySaver { get; set; } = true;
+    public ushort HoursStart { get; set; } = 60;
+    public ushort HoursEnd { get; set; } = 420;
 }
 
 public sealed class ErrorMessage : ServerMessage

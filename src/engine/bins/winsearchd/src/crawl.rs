@@ -85,6 +85,7 @@ pub fn scan_directory(
     if depth >= MAX_DEPTH {
         return Ok(scan);
     }
+    if !ws_platform::content::metadata_path_allowed(Path::new(dir_path), false) { return Ok(scan); }
     if depth > 0 {
         match std::fs::symlink_metadata(dir_path) {
             Ok(meta) => {

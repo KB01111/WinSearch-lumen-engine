@@ -114,11 +114,90 @@ pub struct Indexer {
     counters: Mutex<Counters>,
     wake: (Mutex<bool>, Condvar),
     shutdown: AtomicBool,
-    roots: Vec<RootInfo>,
+    roots: std::sync::RwLock<Vec<Arc<RootInfo>>>,
+    policy: std::sync::RwLock<ws_protocol::IndexingConfig>,
     watchers: Mutex<Vec<Watcher>>,
+    configuration_change: Mutex<()>,
 }
 
 impl Indexer {
+    fn root_snapshot(&self) -> Vec<Arc<RootInfo>> {
+        self.roots.read().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+
+    pub fn get_indexing_config(&self) -> Result<ws_protocol::IndexingConfig, StoreError> {
+        Ok(self
+            .policy
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone())
+    }
+    pub fn set_indexing_config(
+        self: &Arc<Self>,
+        config: &ws_protocol::IndexingConfig,
+    ) -> Result<(), StoreError> {
+        let _change = self
+            .configuration_change
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let config = crate::policy::validate(config)?;
+        let mut store = self.store_lock();
+        store.set_indexing_config(&config)?;
+        *self.policy.write().unwrap_or_else(|p| p.into_inner()) = config.clone();
+        let mut roots = Vec::new();
+        for row in store
+            .roots()?
+            .into_iter()
+            .filter(|r| r.enabled && r.path != CATALOG_ROOT)
+        {
+            let path = PathBuf::from(row.path);
+            let present = path.is_dir();
+            if !present { store.set_missing_for_root(row.id, true)?; }
+            roots.push(Arc::new(RootInfo {
+                id: row.id,
+                path,
+                offline: AtomicBool::new(!present),
+                missing_mark_pending: AtomicBool::new(false),
+            }));
+        }
+        *self.roots.write().unwrap_or_else(|p| p.into_inner()) = roots.clone();
+        self.invalidate_vector_cache();
+        drop(store);
+        // Dropping a watcher joins its callback: never hold store/root locks here.
+        let old = std::mem::take(&mut *self.watchers.lock().unwrap_or_else(|p| p.into_inner()));
+        drop(old);
+        let watchers: Vec<_> = roots.iter().filter_map(|r| self.spawn_watcher(r)).collect();
+        *self.watchers.lock().unwrap_or_else(|p| p.into_inner()) = watchers;
+        self.enqueue_initial_scan()?;
+        self.notify_work();
+        Ok(())
+    }
+    pub fn indexing_pause_reason(&self) -> Option<String> {
+        crate::policy::native_pause_reason(&self.policy.read().unwrap_or_else(|p| p.into_inner()))
+    }
+    pub(crate) fn name_path_allowed(&self, path: &Path) -> bool {
+        crate::policy::path_allowed(
+            &self.policy.read().unwrap_or_else(|p| p.into_inner()),
+            &path.to_string_lossy(),
+        ) && crate::policy::metadata_safe(path, false)
+    }
+    pub fn content_path_allowed(&self, path: &Path) -> bool {
+        self.name_path_allowed(path)
+            && crate::policy::metadata_safe(path, true)
+            && crate::policy::ordinary_content_allowed(
+                &self.policy.read().unwrap_or_else(|p| p.into_inner()),
+                path,
+            )
+    }
+    pub(crate) fn wait_for_work(&self) {
+        let guard = self.wake.0.lock().unwrap_or_else(|p| p.into_inner());
+        let _ = self
+            .wake
+            .1
+            .wait_timeout(guard, std::time::Duration::from_secs(5))
+            .unwrap_or_else(|p| p.into_inner());
+    }
+
     /// Opens the index and registers the given roots (idempotent).
     pub fn open(store: IndexStore, roots: &[PathBuf]) -> Result<Arc<Self>, StoreError> {
         let mut store = store;
@@ -129,20 +208,28 @@ impl Indexer {
         if released > 0 {
             info!(released, "released embed claims left by a previous run");
         }
+        let mut config = store.get_or_migrate_indexing_config()?;
+        if !roots.is_empty() {
+            config.roots = roots.iter().map(|r| r.to_string_lossy().into_owned()).collect();
+            config = crate::policy::validate(&config)?;
+            store.set_indexing_config(&config)?;
+        }
+        let config = crate::policy::validate(&config)?;
+        let selected: Vec<PathBuf> = config.roots.iter().map(PathBuf::from).collect();
         let mut infos = Vec::new();
-        for root in roots {
+        for root in &selected {
             let path = root.to_string_lossy().into_owned();
             let id = store.ensure_root(&path)?;
             let present = root.is_dir();
             if !present {
                 store.set_missing_for_root(id, true)?;
             }
-            infos.push(RootInfo {
+            infos.push(Arc::new(RootInfo {
                 id,
                 offline: AtomicBool::new(!present),
                 missing_mark_pending: AtomicBool::new(false),
                 path: root.clone(),
-            });
+            }));
         }
         Ok(Arc::new(Self {
             store: Mutex::new(store),
@@ -151,8 +238,10 @@ impl Indexer {
             counters: Mutex::new(Counters::default()),
             wake: (Mutex::new(false), Condvar::new()),
             shutdown: AtomicBool::new(false),
-            roots: infos,
+            roots: std::sync::RwLock::new(infos),
+            policy: std::sync::RwLock::new(config),
             watchers: Mutex::new(Vec::new()),
+            configuration_change: Mutex::new(()),
         }))
     }
 
@@ -170,7 +259,7 @@ impl Indexer {
 
         {
             let mut watchers = self.watchers.lock().unwrap_or_else(|p| p.into_inner());
-            for root in &self.roots {
+            for root in &self.root_snapshot() {
                 match self.spawn_watcher(root) {
                     Some(w) => watchers.push(w),
                     None => warn!(root = %root.path.display(), "root not present yet; watching after reconnect"),
@@ -196,7 +285,7 @@ impl Indexer {
     /// Enqueues a full scan of every root (first run, reconnect, or rescan).
     pub fn enqueue_initial_scan(&self) -> Result<(), StoreError> {
         let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
-        for root in &self.roots {
+        for root in &self.root_snapshot() {
             if !root.path.is_dir() {
                 continue; // disconnected volume: preserved until it returns
             }
@@ -268,6 +357,7 @@ impl Indexer {
         let mut out = Vec::with_capacity(hits.len());
         for hit in hits {
             if let Some(segment) = store.get_segment(hit.id)? {
+                if !store.entry_visible(segment.entry_id)? { continue; }
                 out.push(ScoredSegment {
                     segment,
                     cosine: hit.cosine,
@@ -297,10 +387,9 @@ impl Indexer {
     /// One entry by id (the semantic stage resolves names/paths/mtimes for
     /// scored segments through this).
     pub fn get_entry_by_id(&self, id: i64) -> Result<Option<EntryRow>, StoreError> {
-        self.store
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .get_entry(id)
+        let store = self.store_lock();
+        if !store.entry_visible(id)? { return Ok(None); }
+        store.get_entry(id)
     }
 
     /// Non-missing entry ids matching the given mode/category filters.
@@ -451,11 +540,10 @@ impl Indexer {
     pub fn scan_available(&self, max_dirs: usize) -> usize {
         let mut processed = 0;
         for _ in 0..max_dirs {
-            let work = self
-                .store
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .claim_dir_with_generation();
+            if self.indexing_pause_reason().is_some() { break; }
+            let work = { let mut store = self.store_lock();
+                if self.indexing_pause_reason().is_some() { Ok(None) } else { store.claim_dir_with_generation() }
+            };
             match work {
                 Ok(Some((queue_id, root_id, dir_path, claimed_gen))) => {
                     if let Err(e) = self.process_dir(queue_id, root_id, &dir_path, claimed_gen) {
@@ -474,11 +562,10 @@ impl Indexer {
             if self.shutdown.load(Ordering::SeqCst) {
                 return;
             }
-            let work = self
-                .store
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .claim_dir_with_generation();
+            if self.indexing_pause_reason().is_some() { self.wait_for_work(); continue; }
+            let work = { let mut store = self.store_lock();
+                if self.indexing_pause_reason().is_some() { Ok(None) } else { store.claim_dir_with_generation() }
+            };
             match work {
                 Ok(Some((queue_id, root_id, dir_path, claimed_gen))) => {
                     if let Err(e) = self.process_dir(queue_id, root_id, &dir_path, claimed_gen) {
@@ -507,7 +594,7 @@ impl Indexer {
     }
 
     fn relative_depth(&self, root_id: i64, dir_path: &str) -> usize {
-        self.roots
+        self.root_snapshot()
             .iter()
             .find(|r| r.id == root_id)
             .and_then(|root| Path::new(dir_path).strip_prefix(&root.path).ok())
@@ -516,8 +603,9 @@ impl Indexer {
     }
 
     fn is_excluded_under_root(&self, root_id: i64, path: &Path, is_dir: bool) -> bool {
-        let rel = self
-            .roots
+        if !self.name_path_allowed(path) { return true; }
+        let roots = self.root_snapshot();
+        let rel = roots
             .iter()
             .find(|r| r.id == root_id)
             .and_then(|r| path.strip_prefix(&r.path).ok());
@@ -548,6 +636,7 @@ impl Indexer {
         dir_path: &str,
         claimed_generation: i64,
     ) -> Result<(), StoreError> {
+        if !self.name_path_allowed(Path::new(dir_path)) { self.store_lock().complete_dir(queue_id)?; return Ok(()); }
         let depth = self.relative_depth(root_id, dir_path);
         let parent_id = self
             .store
@@ -557,7 +646,7 @@ impl Indexer {
             .map(|e| e.id);
 
         let mut scan_failed = false;
-        let scan = match crawl::scan_directory(root_id, dir_path, parent_id, depth) {
+        let mut scan = match crawl::scan_directory(root_id, dir_path, parent_id, depth) {
             Ok(s) => s,
             Err(e) => {
                 warn!(dir = %dir_path, error = %e, "scan error");
@@ -567,8 +656,10 @@ impl Indexer {
         };
 
         let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+        scan.entries.retain(|e| self.name_path_allowed(Path::new(&e.path)));
+        scan.subdirs.retain(|p| self.name_path_allowed(Path::new(p)));
         let generation = self.current_generation(&store, root_id)?;
-        let superseded = claimed_generation != generation;
+        let superseded = claimed_generation != generation || !self.name_path_allowed(Path::new(dir_path));
         if !superseded {
             if scan_failed {
                 store.touch_subtree_generation(root_id, dir_path, generation)?;
@@ -603,7 +694,7 @@ impl Indexer {
                 .count() as u64;
         }
 
-        if root_done {
+        if root_done && !superseded {
             // The scan of this root is complete: drop everything not seen in
             // this generation (files deleted while we were away).
             let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
@@ -636,6 +727,7 @@ impl Indexer {
     }
 
     fn apply_event(&self, root_id: i64, event: &WatchEvent) -> Result<(), StoreError> {
+        if !self.root_snapshot().iter().any(|r| r.id == root_id) { return Ok(()); }
         match event {
             WatchEvent::Created(path) => {
                 let is_dir = path.is_dir();
@@ -643,6 +735,7 @@ impl Indexer {
                     let path_str = path.to_string_lossy().into_owned();
                     if is_dir {
                         let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+                if !store.root_enabled(root_id)? { return Ok(()); }
                         store.enqueue_dir(root_id, &path_str)?;
                         drop(store);
                         self.notify_work();
@@ -653,6 +746,7 @@ impl Indexer {
             }
             WatchEvent::Deleted(path) => {
                 let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+                if !store.root_enabled(root_id)? { return Ok(()); }
                 let removed = store.remove_tree(&path.to_string_lossy())?;
                 drop(store);
                 if removed > 0 {
@@ -667,6 +761,7 @@ impl Indexer {
             WatchEvent::Renamed { from, to } => {
                 let to_excluded = self.is_excluded_under_root(root_id, to, to.is_dir());
                 let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+                if !store.root_enabled(root_id)? { return Ok(()); }
                 let from_str = from.to_string_lossy().into_owned();
                 if to_excluded {
                     let removed = store.remove_tree(&from_str)?;
@@ -745,8 +840,9 @@ impl Indexer {
             }
             WatchEvent::Overflow => {
                 let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+                if !store.root_enabled(root_id)? { return Ok(()); }
                 let root = self
-                    .roots
+                    .root_snapshot()
                     .iter()
                     .find(|r| r.id == root_id)
                     .map(|r| r.path.to_string_lossy().into_owned());
@@ -792,6 +888,7 @@ impl Indexer {
         };
 
         let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+                if !store.root_enabled(root_id)? { return Ok(()); }
         let generation = self.current_generation(&store, root_id)?;
         let outcomes = store.apply_batch(root_id, generation, std::slice::from_ref(&record))?;
         let mut changed = false;
@@ -944,8 +1041,10 @@ impl Indexer {
     where
         F: Fn(&[String]) -> Result<Vec<Vec<f32>>, String>,
     {
+        if self.indexing_pause_reason().is_some() { return Ok(EmbedBatchOutcome::default()); }
         let claimed: Vec<ClaimedNameJob> = {
             let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+            if self.indexing_pause_reason().is_some() { return Ok(EmbedBatchOutcome::default()); }
             let jobs = store.claim_extract_jobs_batch_for_kind(SEGMENT_KIND_NAME, EMBED_BATCH)?;
             let mut out = Vec::with_capacity(jobs.len());
             for job in jobs {
@@ -1031,6 +1130,9 @@ impl Indexer {
                     let _ = store.complete_extract_job(c.job_id);
                     continue;
                 };
+                if !fresh.is_app && !self.name_path_allowed(Path::new(&fresh.path)) {
+                    store.requeue_extract_job(c.job_id)?; continue;
+                }
                 // I2: the entry changed under our claimed batch (the
                 // concurrent write already bumped the job's priority via the
                 // `ON CONFLICT ... priority` path). Requeue the fresh data
@@ -1141,7 +1243,7 @@ impl Indexer {
                     }
                     match indexer.embed_once_with_supervisor(&embed) {
                         Ok(out) if out.claimed == 0 => {
-                            std::thread::sleep(std::time::Duration::from_millis(500));
+                            indexer.wait_for_work();
                         }
                         Ok(_) => {}
                         Err(e) => {
@@ -1171,7 +1273,7 @@ impl Indexer {
     /// One reconciliation pass over all roots: flags vanished volumes as
     /// missing (index preserved) and rescans roots that came back.
     fn reconcile_drives(self: &Arc<Self>) {
-        for root in &self.roots {
+        for root in &self.root_snapshot() {
             let present = root.path.is_dir();
             let was_offline = root.offline.load(Ordering::Acquire);
             let has_missing = self.root_marked_missing(root.id).unwrap_or(false);
@@ -1206,6 +1308,8 @@ impl Indexer {
     }
 
     fn reconnect_root(self: &Arc<Self>, root: &RootInfo) -> Result<(), StoreError> {
+        let _change = self.configuration_change.lock().unwrap_or_else(|p| p.into_inner());
+        if !self.store_lock().root_enabled(root.id)? { return Ok(()); }
         {
             let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
             store.set_missing_for_root(root.id, false)?;
@@ -1268,6 +1372,172 @@ impl Drop for Indexer {
 mod tests {
     use super::*;
     use std::fs;
+    #[test]
+    fn removed_root_readded_offline_preserves_identity_and_reconciles() {
+        let tree=TempTree::new(); let drive=tree.0.join("drive"); fs::create_dir_all(&drive).unwrap();
+        let file=drive.join("offline.txt"); fs::write(&file,"old").unwrap();
+        let indexer=Indexer::open(IndexStore::open_in_memory().unwrap(),&[drive.clone()]).unwrap();
+        indexer.enqueue_initial_scan().unwrap(); while indexer.scan_available(64)>0 {}
+        let id=indexer.store_lock().find_by_path(&file.to_string_lossy()).unwrap().unwrap().id;
+        let selected=indexer.get_indexing_config().unwrap(); let mut empty=selected.clone(); empty.roots.clear();
+        indexer.set_indexing_config(&empty).unwrap();
+        fs::remove_file(&file).unwrap(); fs::remove_dir(&drive).unwrap();
+        indexer.set_indexing_config(&selected).unwrap();
+        let row=indexer.store_lock().get_entry(id).unwrap().unwrap(); assert!(row.missing); assert_eq!(row.id,id);
+        fs::create_dir_all(&drive).unwrap(); fs::write(&file,"reconnected").unwrap();
+        indexer.reconcile_drives(); while indexer.scan_available(64)>0 {}
+        let row=indexer.store_lock().find_by_path(&file.to_string_lossy()).unwrap().unwrap(); assert_eq!(row.id,id); assert!(!row.missing);
+    }
+    #[test]
+    fn dynamic_policy_revokes_claims_results_and_resumes_durable_work() {
+        let tree = TempTree::new();
+        let a = tree.0.join("A");
+        let b = tree.0.join("B");
+        fs::create_dir_all(&a).unwrap();
+        fs::create_dir_all(&b).unwrap();
+        fs::write(a.join("uniquealpha.txt"), "ultrauniquepolicyalpha").unwrap();
+        fs::write(b.join("uniquebeta.txt"), "beta content").unwrap();
+        let indexer = Indexer::open(IndexStore::open_in_memory().unwrap(), &[a.clone()]).unwrap();
+        indexer.enqueue_initial_scan().unwrap();
+        while indexer.scan_available(64) > 0 {}
+        indexer
+            .embed_once_with(|t| Ok(t.iter().map(|_| vec![1., 0.]).collect()))
+            .unwrap();
+        indexer
+            .extract_once_with(&crate::extract::ExtractorRegistry::default(), |t| {
+                Ok(t.iter().map(|_| vec![1., 0.]).collect())
+            })
+            .unwrap();
+        assert_eq!(
+            indexer
+                .search(&SearchRequest {
+                    text: "ultrauniquepolicyalpha".into(),
+                    limit: 10,
+                    ..Default::default()
+                })
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(!indexer.search_vectors(&[1.,0.],10,None).unwrap().is_empty());
+        let aid = indexer.root_snapshot()[0].id;
+        indexer
+            .store_lock()
+            .enqueue_dir(aid, &a.to_string_lossy())
+            .unwrap();
+        let stale = indexer
+            .store_lock()
+            .claim_dir_with_generation()
+            .unwrap()
+            .unwrap();
+        let mut c = indexer.get_indexing_config().unwrap();
+        c.roots = vec![b.to_string_lossy().into_owned()];
+        c.paused = true;
+        indexer.set_indexing_config(&c).unwrap();
+        assert!(indexer
+            .search(&SearchRequest {
+                text: "alpha".into(),
+                limit: 10,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty());
+        assert!(indexer
+            .search_vectors(&[1., 0.], 10, None)
+            .unwrap()
+            .is_empty());
+        assert!(indexer
+            .search(&SearchRequest {
+                text: "ultrauniquepolicyalpha".into(),
+                limit: 10,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty());
+        indexer
+            .process_dir(stale.0, stale.1, &stale.2, stale.3)
+            .unwrap();
+        let depth = indexer.status().unwrap().queue_depth;
+        assert!(depth > 0);
+        assert_eq!(indexer.scan_available(64), 0);
+        assert_eq!(indexer.status().unwrap().queue_depth, depth);
+        assert_eq!(
+            indexer
+                .embed_once_with(|_| panic!("paused"))
+                .unwrap()
+                .claimed,
+            0
+        );
+        c.paused = false;
+        indexer.set_indexing_config(&c).unwrap();
+        while indexer.scan_available(64) > 0 {}
+        assert_eq!(
+            indexer
+                .search(&SearchRequest {
+                    text: "beta".into(),
+                    limit: 10,
+                    ..Default::default()
+                })
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(indexer
+            .store_lock()
+            .find_by_path(&a.join("uniquealpha.txt").to_string_lossy())
+            .unwrap()
+            .is_some());
+        c.roots.push(a.to_string_lossy().into_owned());
+        indexer.set_indexing_config(&c).unwrap();
+        while indexer.scan_available(64) > 0 {}
+        assert_eq!(
+            indexer
+                .search(&SearchRequest {
+                    text: "alpha".into(),
+                    limit: 10,
+                    ..Default::default()
+                })
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+    #[test]
+    fn revoked_inflight_name_and_content_jobs_cannot_commit() {
+        let tree = TempTree::new();
+        fs::write(tree.0.join("consent.txt"), "uniquepolicycontent").unwrap();
+        let indexer = seeded(&tree);
+        let mut allowed = indexer.get_indexing_config().unwrap();
+        let mut revoked = allowed.clone();
+        revoked.roots.clear();
+        let out = indexer
+            .embed_once_with(|texts| {
+                indexer.set_indexing_config(&revoked).unwrap();
+                Ok(texts.iter().map(|_| vec![1., 0.]).collect())
+            })
+            .unwrap();
+        assert_eq!(out.embedded, 0);
+        allowed.paused = false;
+        indexer.set_indexing_config(&allowed).unwrap();
+        while indexer.scan_available(64) > 0 {}
+        let out = indexer
+            .extract_once_with(&crate::extract::ExtractorRegistry::default(), |texts| {
+                indexer.set_indexing_config(&revoked).unwrap();
+                Ok(texts.iter().map(|_| vec![1., 0.]).collect())
+            })
+            .unwrap();
+        assert!(out.requeued);
+        assert_eq!(out.segments_stored, 0);
+        assert_eq!(out.fts_chunks_indexed, 0);
+        assert!(indexer
+            .search(&SearchRequest {
+                text: "uniquepolicycontent".into(),
+                limit: 10,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty());
+    }
 
     struct TempTree(PathBuf);
 
@@ -1334,7 +1604,7 @@ mod tests {
         // Rename on disk, then deliver the watcher event.
         let renamed = tree.0.join("final.txt");
         fs::rename(&file, &renamed).unwrap();
-        let root_id = indexer.roots[0].id;
+        let root_id = indexer.root_snapshot()[0].id;
         indexer.handle_event(
             root_id,
             WatchEvent::Renamed {
@@ -1370,7 +1640,7 @@ mod tests {
         let tree = TempTree::new();
         fs::write(tree.0.join("obsolete.log"), b"x").unwrap();
         let indexer = seeded(&tree);
-        let root_id = indexer.roots[0].id;
+        let root_id = indexer.root_snapshot()[0].id;
 
         let path = tree.0.join("obsolete.log");
         fs::remove_file(&path).unwrap();
@@ -1558,7 +1828,7 @@ mod tests {
         // An update (low priority) enqueued before a new file (high priority):
         // the new file must embed first even though it arrived later.
         fs::write(tree.0.join("old.txt"), b"changed-contents-longer").unwrap();
-        let root_id = indexer.roots[0].id;
+        let root_id = indexer.root_snapshot()[0].id;
         indexer
             .handle_event(
                 root_id,
@@ -1601,7 +1871,7 @@ mod tests {
         // stays attached (identity), and a re-embed job is queued.
         let renamed = tree.0.join("final.txt");
         fs::rename(tree.0.join("draft.txt"), &renamed).unwrap();
-        let root_id = indexer.roots[0].id;
+        let root_id = indexer.root_snapshot()[0].id;
         indexer.handle_event(
             root_id,
             WatchEvent::Renamed {
@@ -1644,7 +1914,7 @@ mod tests {
         }
         fs::remove_file(tree.0.join("obsolete.txt")).unwrap();
         indexer.handle_event(
-            indexer.roots[0].id,
+            indexer.root_snapshot()[0].id,
             WatchEvent::Deleted(tree.0.join("obsolete.txt")),
         );
         {
@@ -1809,7 +2079,7 @@ mod tests {
         // now-stale names. Closure borrows `indexer` shared — safe: the
         // pipeline holds no store lock across the embed call.
         fs::write(tree.0.join("mid-batch.txt"), b"longer contents here").unwrap();
-        let root_id = indexer.roots[0].id;
+        let root_id = indexer.root_snapshot()[0].id;
         indexer.handle_event(root_id, WatchEvent::Modified(tree.0.join("mid-batch.txt")));
         assert!(indexer.embed_queue_depth().unwrap() >= 1);
 
@@ -1889,7 +2159,7 @@ mod tests {
         let tree = TempTree::new();
         fs::write(tree.0.join("visible.txt"), b"ok").unwrap();
         let indexer = seeded(&tree);
-        let root_id = indexer.roots[0].id;
+        let root_id = indexer.root_snapshot()[0].id;
 
         let git_dir = tree.0.join(".git");
         let nm_dir = tree.0.join("node_modules").join("pkg");
@@ -1937,7 +2207,7 @@ mod tests {
         fs::create_dir_all(&sub).unwrap();
         fs::write(sub.join("protected.txt"), b"keep").unwrap();
         let indexer = seeded(&tree);
-        let root_id = indexer.roots[0].id;
+        let root_id = indexer.root_snapshot()[0].id;
 
         // Simulate a new generation where `sub` failed to scan with a non-NotFound
         // error: touching the subtree generation must keep `protected.txt` across sweep.
@@ -2056,7 +2326,7 @@ mod tests {
         let keep = sub.join("keep.txt");
         fs::write(&keep, b"keep").unwrap();
         let indexer = seeded(&tree);
-        let root_id = indexer.roots[0].id;
+        let root_id = indexer.root_snapshot()[0].id;
         let (qid, _, dir, generation) = {
             let mut store = indexer.store_lock();
             store.enqueue_dir(root_id, &sub.to_string_lossy()).unwrap();
@@ -2076,7 +2346,7 @@ mod tests {
         let to = tree.0.join("report.txt");
         fs::write(&from, b"fixture").unwrap();
         let indexer = seeded(&tree);
-        let root_id = indexer.roots[0].id;
+        let root_id = indexer.root_snapshot()[0].id;
         let id = indexer.store_lock().find_by_path(&from.to_string_lossy()).unwrap().unwrap().id;
         {
             let mut store = indexer.store_lock();
@@ -2110,7 +2380,7 @@ mod tests {
         fs::write(&keep, b"stay").unwrap();
 
         let indexer = seeded(&tree);
-        let root_id = indexer.roots[0].id;
+        let root_id = indexer.root_snapshot()[0].id;
         let sub_str = sub.to_string_lossy().to_string();
 
         // Enqueue and claim `sub` under the pre-overflow generation.

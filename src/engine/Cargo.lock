@@ -1267,6 +1267,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "windows",
+ "ws-code",
  "ws-embed-protocol",
  "ws-extract",
  "ws-index",
@@ -1335,6 +1336,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tracing",
+ "ws-protocol",
 ]
 
 [[package]]

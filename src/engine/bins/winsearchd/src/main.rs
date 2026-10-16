@@ -10,10 +10,10 @@ mod engine;
 mod extract;
 mod indexer;
 mod model;
+mod policy;
 mod server;
 mod watcher;
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use tracing::{info, warn};
@@ -43,6 +43,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     paths::ensure_layout()?;
+    identity::instance_suffix()?;
     init_logging();
     info!(version = server::ENGINE_VERSION, "winsearchd starting");
 
@@ -57,7 +58,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     let store = IndexStore::open(&paths::index_db_path())?;
-    let indexer = Indexer::open(store, &default_roots())?;
+    let indexer = Indexer::open(store, &[])?;
     indexer.start_background()?;
 
     let pipe_name = identity::pipe_name()?;
@@ -154,21 +155,6 @@ fn run_crawl_bench(file_count: usize) -> anyhow::Result<()> {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&db_dir);
     Ok(())
-}
-
-/// Default indexing roots: the user's standard content folders. Configurable
-/// roots land with the Settings "Folders" section (Phase 6).
-fn default_roots() -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    if let Some(profile) = std::env::var_os("USERPROFILE") {
-        for dir in ["Desktop", "Documents", "Downloads", "Pictures", "Music", "Videos"] {
-            let path = PathBuf::from(&profile).join(dir);
-            if path.is_dir() {
-                roots.push(path);
-            }
-        }
-    }
-    roots
 }
 
 /// Pushes an engine-status update to connected clients whenever the indexing

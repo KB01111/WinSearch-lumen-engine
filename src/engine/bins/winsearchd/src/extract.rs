@@ -129,9 +129,11 @@ impl Indexer {
         F: Fn(&[String]) -> Result<Vec<Vec<f32>>, String>,
         FI: Fn(&Path) -> Result<Option<Vec<f32>>, String>,
     {
+        if self.indexing_pause_reason().is_some() { return Ok(ExtractStepOutcome::default()); }
         // 1. Claim highest-priority non-name job and snapshot entry metadata.
         let claimed = {
             let mut store = self.store_lock();
+            if self.indexing_pause_reason().is_some() { return Ok(ExtractStepOutcome::default()); }
             let Some(job) = store.claim_content_extract_job()? else {
                 return Ok(ExtractStepOutcome::default());
             };
@@ -149,6 +151,14 @@ impl Indexer {
         };
 
         let (job, entry) = claimed.expect("checked Some above");
+        if !self.content_path_allowed(Path::new(&entry.path)) {
+            let mut store = self.store_lock();
+            clear_modality_artifacts(&mut store, job.entry_id, &job.kind)?;
+            store.complete_extract_job(job.id)?;
+            drop(store);
+            self.invalidate_vector_cache();
+            return Ok(ExtractStepOutcome { claimed: true, status: Some(ExtractionStatus::Unsupported), ..Default::default() });
+        }
         let budget = registry.budget_for(&job.kind);
 
         // 2. Look up extractor for this modality; if unregistered yet (e.g.
@@ -319,7 +329,7 @@ impl Indexer {
         // when available (e.g. `mtmd` projector or stub worker).
         let visual_vec: Option<Vec<f32>> =
             if output.status == ExtractionStatus::Extracted && job.kind == SEGMENT_KIND_IMAGE {
-                match embed_image(path) {
+                match if self.content_path_allowed(path) { embed_image(path) } else { Ok(None) } {
                     Ok(v) => v,
                     Err(e) => {
                         warn!(
@@ -357,6 +367,10 @@ impl Indexer {
                 ..Default::default()
             });
         };
+        if !self.content_path_allowed(Path::new(&fresh.path)) {
+            store.requeue_extract_job(job.id)?;
+            return Ok(ExtractStepOutcome { claimed: true, requeued: true, ..Default::default() });
+        }
         let fresh_job = store.get_extract_job(job.id)?;
         let changed = fresh.mtime != entry.mtime
             || fresh.size != entry.size
@@ -488,7 +502,7 @@ impl Indexer {
                         }
                         match indexer.extract_once_with_supervisor(&reg, &sup) {
                             Ok(out) if !out.claimed => {
-                                std::thread::sleep(std::time::Duration::from_millis(500));
+                                indexer.wait_for_work();
                             }
                             Ok(_) => {}
                             Err(e) => {

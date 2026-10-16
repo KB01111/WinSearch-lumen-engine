@@ -20,50 +20,88 @@ pub enum ClientMessage {
         client_version: String,
     },
     /// Heartbeat; answered with `Pong`.
-    Ping { id: RequestId },
+    Ping {
+        id: RequestId,
+    },
     /// Execute a search. Results stream back as `Results` frames with the same
     /// id; the last frame has `done: true`. Superseded/cancelled requests are
     /// closed early with `done: true`.
-    Search { id: RequestId, query: SearchQuery },
+    Search {
+        id: RequestId,
+        query: SearchQuery,
+    },
     /// Cancel the in-flight request with this id.
-    Cancel { id: RequestId },
+    Cancel {
+        id: RequestId,
+    },
     /// Snapshot of engine/indexing status.
-    GetStatus { id: RequestId },
+    GetStatus {
+        id: RequestId,
+    },
     /// Begin (or resume) the embedding-model download. Answered by
     /// `ModelStatus` with `id` set; progress arrives as pushed `ModelStatus`
     /// frames (`id: None`) until the download completes or is cancelled.
-    ModelDownloadStart { id: RequestId },
+    ModelDownloadStart {
+        id: RequestId,
+    },
     /// Cancel the in-flight model download; the partial files stay on disk
     /// so a later start resumes (status `paused`).
-    ModelDownloadCancel { id: RequestId },
+    ModelDownloadCancel {
+        id: RequestId,
+    },
     /// Copy model files from a local `path` (file or directory) into the
     /// model dir, verifying size (and SHA-256 when pinned).
-    ModelImport { id: RequestId, path: String },
+    ModelImport {
+        id: RequestId,
+        path: String,
+    },
     /// Delete the downloaded model files.
-    ModelDelete { id: RequestId },
+    ModelDelete {
+        id: RequestId,
+    },
     /// Snapshot of the model lifecycle state.
-    GetModelStatus { id: RequestId },
+    GetModelStatus {
+        id: RequestId,
+    },
     /// Snapshot of the engine search policy (`semantic_enabled`,
     /// `preferred_backend`). Answered by `Config` with `id` set.
-    GetConfig { id: RequestId },
+    GetConfig {
+        id: RequestId,
+    },
     /// Persist the engine search policy. Answered by `Config` with `id` set;
     /// an unknown `preferred_backend` spelling is refused with
     /// `Error{invalid_request}` (the typed store only holds
     /// `auto|cuda|vulkan|cpu`).
-    SetConfig { id: RequestId, config: EngineConfig },
+    SetConfig {
+        id: RequestId,
+        config: EngineConfig,
+    },
+    GetIndexingConfig {
+        id: RequestId,
+    },
+    SetIndexingConfig {
+        id: RequestId,
+        config: IndexingConfig,
+    },
 }
 
 /// Messages sent by the engine to a client.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
+    IndexingConfig {
+        id: Option<RequestId>,
+        config: IndexingConfig,
+    },
     HelloAck {
         protocol_version: u32,
         engine_version: String,
         /// Capability tags, e.g. "search.exact", "search.semantic", "code".
         features: Vec<String>,
     },
-    Pong { id: RequestId },
+    Pong {
+        id: RequestId,
+    },
     Results {
         id: RequestId,
         batch: Vec<SearchResult>,
@@ -94,6 +132,48 @@ pub enum ServerMessage {
         code: ErrorCode,
         message: String,
     },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexingMode {
+    #[default]
+    Always,
+    Scheduled,
+    Manual,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct IndexingConfig {
+    pub roots: Vec<String>,
+    pub excluded_paths: Vec<String>,
+    pub excluded_extensions: Vec<String>,
+    pub code_enabled: bool,
+    pub code_roots: Vec<String>,
+    pub paused: bool,
+    pub mode: IndexingMode,
+    pub index_on_battery: bool,
+    pub respect_battery_saver: bool,
+    pub hours_start: u16,
+    pub hours_end: u16,
+}
+impl Default for IndexingConfig {
+    fn default() -> Self {
+        Self {
+            roots: vec![],
+            excluded_paths: vec![],
+            excluded_extensions: vec![],
+            code_enabled: false,
+            code_roots: vec![],
+            paused: false,
+            mode: IndexingMode::Always,
+            index_on_battery: true,
+            respect_battery_saver: true,
+            hours_start: 60,
+            hours_end: 420,
+        }
+    }
 }
 
 /// Engine search policy (P3.6): the semantic-stage kill switch plus the
@@ -409,13 +489,11 @@ mod tests {
         assert_eq!(cfg.preferred_backend, "auto");
         // Unknown backend spellings still parse on the wire; the engine
         // refuses them at `set_config` application time.
-        let cfg: EngineConfig = serde_json::from_str(
-            r#"{"semantic_enabled":true,"preferred_backend":"opencl"}"#,
-        )
-        .unwrap();
+        let cfg: EngineConfig =
+            serde_json::from_str(r#"{"semantic_enabled":true,"preferred_backend":"opencl"}"#)
+                .unwrap();
         assert_eq!(cfg.preferred_backend, "opencl");
-        let msg: ClientMessage =
-            serde_json::from_str(r#"{"type":"get_config","id":3}"#).unwrap();
+        let msg: ClientMessage = serde_json::from_str(r#"{"type":"get_config","id":3}"#).unwrap();
         assert_eq!(msg, ClientMessage::GetConfig { id: 3 });
     }
 }

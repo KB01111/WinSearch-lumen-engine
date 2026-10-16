@@ -91,6 +91,8 @@ pub fn handle_connection(stream: PipeStream, engine: SharedEngine) {
         };
 
         match msg {
+            ClientMessage::GetIndexingConfig { id } => engine.get_indexing_config(&client, id),
+            ClientMessage::SetIndexingConfig { id, config } => engine.set_indexing_config(&client, id, config),
             ClientMessage::Hello { .. } => {
                 let _ = client.send(&ServerMessage::Error {
                     id: None,
@@ -218,6 +220,44 @@ mod tests {
                 None => panic!("pipe closed before Results frame"),
             }
         }
+    }
+
+    #[test]
+    fn indexing_config_roundtrips_over_pipe_and_survives_reconnect() {
+        let indexer = Indexer::open(ws_index::IndexStore::open_in_memory().unwrap(), &[]).unwrap();
+        let engine = EngineService::new_with_model_dir(indexer, std::env::temp_dir().join("winsearch-policy-unused-models"));
+        let pipe = unique_pipe(); let server_pipe=pipe.clone(); let server_engine=engine.clone();
+        std::thread::spawn(move || { let _ = ws_platform::pipe::serve(&server_pipe,move |stream| handle_connection(stream,server_engine.clone())); });
+        fn hello(pipe: &str) -> PipeStream {
+            let mut c=connect_retry(pipe);
+            write_message(&mut c,&ClientMessage::Hello { protocol_version:1,client:"policy-test".into(),client_version:"1".into() }).unwrap();
+            assert!(matches!(read_message::<_,ServerMessage>(&mut c).unwrap(),Some(ServerMessage::HelloAck {..})));
+            c
+        }
+        fn reply(c: &mut PipeStream, id: u64) -> ServerMessage {
+            loop { let m=read_message::<_,ServerMessage>(c).unwrap().unwrap();
+                if matches!(&m,ServerMessage::IndexingConfig {id:Some(i),..}|ServerMessage::Error {id:Some(i),..}|ServerMessage::Config {id:Some(i),..} if *i==id) { return m; }
+            }
+        }
+        let mut c=hello(&pipe);
+        write_message(&mut c,&ClientMessage::GetIndexingConfig {id:1}).unwrap();
+        assert!(matches!(reply(&mut c,1),ServerMessage::IndexingConfig {config,..} if config.roots.is_empty()));
+        let mut config=ws_protocol::IndexingConfig::default();
+        config.roots=vec![r"Z:\offline-policy-fixture".into()]; config.code_roots=vec![r"Z:\code-fixture".into()];
+        config.excluded_paths=vec![r"Z:\offline-policy-fixture\skip".into()]; config.excluded_extensions=vec![".PDF".into()];
+        config.mode=ws_protocol::IndexingMode::Scheduled; config.hours_start=1320; config.hours_end=360; config.paused=true;
+        write_message(&mut c,&ClientMessage::SetIndexingConfig {id:2,config:config.clone()}).unwrap();
+        config.excluded_extensions=vec!["pdf".into()];
+        assert_eq!(reply(&mut c,2),ServerMessage::IndexingConfig {id:Some(2),config:config.clone()});
+        let mut invalid=config.clone(); invalid.roots=vec!["relative".into()];
+        write_message(&mut c,&ClientMessage::SetIndexingConfig {id:3,config:invalid}).unwrap();
+        assert!(matches!(reply(&mut c,3),ServerMessage::Error {code:ErrorCode::InvalidRequest,..}));
+        write_message(&mut c,&ClientMessage::SetConfig {id:4,config:ws_protocol::EngineConfig {semantic_enabled:false,preferred_backend:"cpu".into()}}).unwrap();
+        assert!(matches!(reply(&mut c,4),ServerMessage::Config {..}));
+        drop(c);
+        let mut c=hello(&pipe);
+        write_message(&mut c,&ClientMessage::GetIndexingConfig {id:5}).unwrap();
+        assert_eq!(reply(&mut c,5),ServerMessage::IndexingConfig {id:Some(5),config});
     }
 
     #[test]

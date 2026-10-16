@@ -48,6 +48,8 @@ All messages carry a `type` discriminator (snake_case). Requests carry `id`
 | `get_model_status` | `id` | Snapshot request; answered by `model_status` with `id` set. |
 | `get_config` | `id` | Snapshot of engine search policy; answered by `config` with `id` set. |
 | `set_config` | `id`, `config` | Persist engine search policy; answered by `config` with `id` set (`invalid_request` on unknown `preferred_backend`). |
+| `get_indexing_config` | `id` | Read durable folder, exclusion, code and pause policy. |
+| `set_indexing_config` | `id`, `config` | Validate and atomically save indexing policy and root visibility; answers `indexing_config` and pushes it to connected clients. Invalid paths, hours, extensions or list limits return `invalid_request`. |
 
 ### Engine → client (`ServerMessage`)
 
@@ -59,6 +61,7 @@ All messages carry a `type` discriminator (snake_case). Requests carry `id`
 | `status` | `id?`, `status` | `id: null` is a pushed update (indexing progress); `id` set answers `get_status`. |
 | `model_status` | `id?`, `status` | `id: null` is a pushed update (download progress / completion); `id` set answers a model request. |
 | `config` | `id?`, `config` | `id` set answers `get_config` or `set_config`. |
+| `indexing_config` | `id?`, `config` | `id` set answers get/set; absent/null is a policy change notification. |
 | `error` | `id?`, `code`, `message` | `id: null` is connection-scoped (e.g. handshake failure). |
 
 ### Payload models
@@ -76,8 +79,52 @@ All messages carry a `type` discriminator (snake_case). Requests carry `id`
   `bytes`, `total_bytes`, `error?`.
 - `EngineConfig`: `semantic_enabled` (default `true`), `preferred_backend`
   (`auto|cuda|vulkan|cpu`, default `"auto"`).
+- `IndexingConfig`: `roots[]`, `excluded_paths[]`, `excluded_extensions[]`,
+  `code_enabled`, `code_roots[]`, `paused`, `mode` (`always|scheduled|manual`),
+  `index_on_battery`, `respect_battery_saver`, `hours_start`, `hours_end`.
+  Defaults: empty lists, code and pause false, mode `always`, both power flags
+  true, hours 60 and 420. Missing fields use these defaults; protocol stays v1.
 - `ErrorCode`: `protocol_version_mismatch`, `invalid_request`, `internal`,
   `not_ready`, `cancelled`, `unsupported`.
+
+Indexing minutes range from 0 through 1439; windows include the start and
+exclude the end. Overnight windows wrap; equal endpoints mean all day.
+Manual mode runs when the user has not paused it. Pause precedence is manual
+pause, battery saver, disallowed battery power, then schedule. An unknown
+battery state pauses when `index_on_battery` is false; otherwise it permits
+work unless another rule pauses it. Unknown saver state alone permits work.
+Paused status includes the actual reason; exact interactive searches continue.
+
+Root and excluded-path membership uses case-insensitive Windows component
+boundaries; an explicitly selected subroot can override an excluded ancestor.
+Paths must be absolute, without NUL or parent traversal. Limits are 128 roots
+per kind, 512 excluded paths and 256 extension rules. Extensions normalize one
+leading dot and ASCII case, then must contain only ASCII letters/digits.
+Missing/offline roots remain stored. Fresh installations select no personal
+roots. Legacy enabled roots migrate once, excluding the synthetic `@apps`
+catalog; no extra standard folders are added. The complete policy is one JSON
+record at `meta.indexing_config`, in the same transaction as `roots.enabled`.
+Removing roots preserves rows but hides names/content/vectors immediately and
+prevents worker claims/commits. Adding them back starts reconciliation.
+
+Reparse ancestors and configured reparse roots are never traversed. Before
+content and visual-embedding opens, the shared metadata-only guard rejects
+OFFLINE, RECALL_ON_OPEN and RECALL_ON_DATA_ACCESS file attributes and reparse
+paths. Those files can remain searchable by name. Ordinary content inside
+recognized projects is restricted to screenshots; secrets/generated files
+remain excluded. Non-explicit media folders with at least 300 files of one
+kind and at least 70% machine-like names are name-only. Classification examines
+at most 4096 directory entries without reading content; explicit roots bypass
+dataset classification. Camera/screenshot prefixes are not machine-like.
+
+For native tests, `WINSEARCH_DATA_DIR` overrides the whole data root with an
+absolute path; relative values fail clearly. `WINSEARCH_INSTANCE_ID` optionally
+adds an instance suffix and must be 1..48 ASCII letters/digits/underscore/hyphen.
+Pipes retain their existing per-user SID and append `-<id>`; overridden engine,
+embed and app mutexes/show events use `<existing-name>-<SID>-<id>`.
+Without the override all default names remain compatible. Child processes
+inherit both environment variables. `scripts/test-indexing-isolation.ps1`
+exercises two generated-data daemon instances and independent shutdown.
 
 ## Semantics
 

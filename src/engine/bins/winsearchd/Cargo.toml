@@ -13,6 +13,7 @@ path = "src/main.rs"
 ws-protocol.workspace = true
 ws-platform.workspace = true
 ws-index.workspace = true
+ws-code.workspace = true
 ws-modelmgr.workspace = true
 ws-embed-protocol.workspace = true
 ws-extract.workspace = true

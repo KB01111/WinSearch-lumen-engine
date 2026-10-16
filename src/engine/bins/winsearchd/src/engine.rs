@@ -195,6 +195,7 @@ impl EngineService {
                 }
             }
         }
+        if let Some(reason) = self.indexer.indexing_pause_reason() { status.state = EngineRunState::Paused; status.current_activity = reason; }
         status
     }
 
@@ -337,6 +338,51 @@ impl EngineService {
         EngineConfig {
             semantic_enabled: stored.semantic_enabled,
             preferred_backend: stored.preferred_backend.as_str().to_string(),
+        }
+    }
+
+    pub fn get_indexing_config(&self, client: &ClientHandle, id: RequestId) {
+        match self.indexer.get_indexing_config() {
+            Ok(config) => {
+                let _ = client.send(&ServerMessage::IndexingConfig {
+                    id: Some(id),
+                    config,
+                });
+            }
+            Err(e) => {
+                let _ = client.send(&ServerMessage::Error {
+                    id: Some(id),
+                    code: ErrorCode::Internal,
+                    message: e.to_string(),
+                });
+            }
+        }
+    }
+    pub fn set_indexing_config(
+        &self,
+        client: &ClientHandle,
+        id: RequestId,
+        config: ws_protocol::IndexingConfig,
+    ) {
+        match self.indexer.set_indexing_config(&config) {
+            Ok(()) => {
+                self.get_indexing_config(client, id);
+                if let Ok(config) = self.indexer.get_indexing_config() {
+                    self.broadcast(&ServerMessage::IndexingConfig { id: None, config });
+                }
+            }
+            Err(e) => {
+                let code = if matches!(e, ws_index::StoreError::InvalidConfig(_)) {
+                    ErrorCode::InvalidRequest
+                } else {
+                    ErrorCode::Internal
+                };
+                let _ = client.send(&ServerMessage::Error {
+                    id: Some(id),
+                    code,
+                    message: e.to_string(),
+                });
+            }
         }
     }
 
