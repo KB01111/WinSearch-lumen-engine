@@ -183,10 +183,17 @@ fn validate_pdf_progress(
         return Err("invalid PDF total pages".into());
     }
     let end_page = (page + request.max_units.min(30)).min(total as u32);
+    let mut page_draft_counts = [0u32; 30];
     for draft in &response.output.segments {
         let p = draft.page.ok_or("PDF draft missing page")?;
         if p <= page || p > end_page || draft.start_ms.is_some() || draft.end_ms.is_some() {
             return Err("PDF draft outside page batch".into());
+        }
+        let count = &mut page_draft_counts[(p - page - 1) as usize];
+        *count += 1;
+        let start = if p == page + 1 { chunk } else { 0 };
+        if start + *count > crate::pdf::MAX_PAGE_DRAFTS {
+            return Err("PDF page draft ordinals exceed bounds".into());
         }
         if draft.kind == crate::pdf::VISUAL_KIND
             && (!draft.text.is_empty() || draft.thumbnail_hint.is_none() || draft.line.is_some())
@@ -338,6 +345,35 @@ mod tests {
         response.next_cursor = Some(1 << 32);
         response.diagnostics = vec!["x".repeat(1025)];
         assert!(validate_response(&req, &response).is_err());
+    }
+
+    #[test]
+    fn pdf_transport_rejects_completed_or_advancing_page_draft_overflow() {
+        let mut req = request();
+        req.kind = "pdf".into();
+        req.cursor = 8191;
+        let mut draft = SegmentDraft::text("pdf", "last valid draft");
+        draft.page = Some(1);
+        let mut response = ExtractResponse {
+            output: ExtractOutput::extracted(vec![draft.clone()]),
+            next_cursor: None,
+            total_units: Some(1),
+            diagnostics: vec![],
+        };
+        validate_response(&req, &response).unwrap();
+        response.output.segments.push(draft);
+        assert!(
+            validate_response(&req, &response).is_err(),
+            "terminal page emitted ordinal 8192"
+        );
+        response.total_units = Some(2);
+        response.next_cursor = Some(1 << 32);
+        assert!(
+            validate_response(&req, &response).is_err(),
+            "page advance emitted ordinal 8192"
+        );
+        response.output.segments.pop();
+        validate_response(&req, &response).unwrap();
     }
 
     #[test]

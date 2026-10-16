@@ -297,6 +297,17 @@ primary thumbnail until source invalidation. Deferred visual embeddings open
 the promoted page PNG rather than the source PDF. Real visual-model quality
 is a separate media-runtime gate.
 
+Every first-batch PDF replacement transaction removes previous `pdf`, `ocr`
+and `pdf_visual` vectors, including snapshot-driven replacement or a completed
+job requeued without a watcher event. Failed/unsupported initial replacements
+clear the same derived kinds. Before a PDF parse, a changed persisted source
+snapshot uses durable source invalidation to remove stale exact/derived content
+and invalidate the semantic cache even if the new parse fails. An unchanged
+source requeued with a missing dependency/transient failure retains its valid
+prior content; a later continuation failure retains committed earlier pages.
+Parent transport validation also bounds cumulative per-page
+draft ordinals when completing or advancing a page, not only when continuing it.
+
 PDFium handles are RAII-managed under a serial lock. Unicode paths use native
 File reads and bounded `FPDF_LoadCustomDocument` callbacks (Windows unsigned
 long is 32 bits), without buffering the whole source. Text extraction allocates

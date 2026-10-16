@@ -184,7 +184,7 @@ impl IndexStore {
                 "DELETE FROM content_fts WHERE entry_id=?1 AND kind=?2",
                 params![job.entry_id, job.kind],
             )?;
-            tx.execute("DELETE FROM segments WHERE entry_id=?1 AND (kind=?2 OR (?2='image' AND kind='ocr'))",params![job.entry_id,job.kind])?;
+            tx.execute("DELETE FROM segments WHERE entry_id=?1 AND (kind=?2 OR (?2 IN ('image','pdf') AND kind='ocr') OR (?2='pdf' AND kind='pdf_visual'))",params![job.entry_id,job.kind])?;
             tx.execute(
                 "UPDATE entries SET thumbnail_path=NULL WHERE id=?1",
                 [job.entry_id],

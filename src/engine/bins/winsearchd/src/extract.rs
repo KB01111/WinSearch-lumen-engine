@@ -230,9 +230,23 @@ impl Indexer {
         // 3. Run extraction outside the store lock, enforcing the budget.
         let path = Path::new(&entry.path);
         let snapshot = source_snapshot(path);
-        let progress = self
-            .store_lock()
-            .begin_content_batch(job.entry_id, &job.kind, &snapshot)?;
+        let (progress, pdf_source_replaced) = {
+            let mut store = self.store_lock();
+            let pdf_source_replaced = job.kind == SEGMENT_KIND_PDF
+                && store
+                    .content_progress(job.entry_id, &job.kind)?
+                    .is_some_and(|previous| previous.source != snapshot);
+            if pdf_source_replaced {
+                store.invalidate_content_source(job.entry_id)?;
+            }
+            (
+                store.begin_content_batch(job.entry_id, &job.kind, &snapshot)?,
+                pdf_source_replaced,
+            )
+        };
+        if pdf_source_replaced {
+            self.invalidate_vector_cache();
+        }
         let source = std::fs::metadata(path)
             .ok()
             .map(|m| (m.len(), m.modified().ok()));
@@ -758,8 +772,11 @@ fn clear_modality_artifacts(
 ) -> Result<(), StoreError> {
     store.delete_content_text(entry_id)?;
     store.remove_segments_for_entry_and_kind(entry_id, job_kind)?;
-    if job_kind == SEGMENT_KIND_IMAGE {
+    if matches!(job_kind, SEGMENT_KIND_IMAGE | SEGMENT_KIND_PDF) {
         store.remove_segments_for_entry_and_kind(entry_id, SEGMENT_KIND_OCR)?;
+    }
+    if job_kind == SEGMENT_KIND_PDF {
+        store.remove_segments_for_entry_and_kind(entry_id, ws_extract::pdf::VISUAL_KIND)?;
     }
     Ok(())
 }
@@ -826,6 +843,208 @@ mod tests {
             .join("../../../..")
             .join("artifacts/pdf-fixtures")
             .join(name)
+    }
+
+    fn pdf_native_replacement_clears_derived_vectors(replacement: Option<&str>) {
+        let tree = TempTree::new();
+        let cache = TempTree::new();
+        let path = tree.0.join("snapshot.pdf");
+        fs::copy(pdf_fixture("scanned.pdf"), &path).unwrap();
+        let indexer = seeded_indexer(&tree);
+        let registry = process_registry(&cache);
+        let entry = indexer
+            .store_lock()
+            .find_by_path(&path.to_string_lossy())
+            .unwrap()
+            .unwrap();
+        indexer
+            .extract_once_typed(
+                &registry,
+                |t| Ok(t.iter().map(|_| vec![1.0, 0.0]).collect()),
+                |_| Ok(Some(vec![0.0, 1.0])),
+            )
+            .unwrap();
+        indexer
+            .extract_once_typed(
+                &registry,
+                |t| Ok(t.iter().map(|_| vec![1.0, 0.0]).collect()),
+                |_| Ok(Some(vec![0.0, 1.0])),
+            )
+            .unwrap();
+        let derived = VectorFilter {
+            kinds: vec![SEGMENT_KIND_OCR.into(), ws_extract::pdf::VISUAL_KIND.into()],
+            entry_ids: vec![entry.id],
+        };
+        // Populate the production semantic cache with both actual old page modalities.
+        let old = indexer
+            .search_vectors(&[1.0, 1.0], 10, Some(&derived))
+            .unwrap();
+        assert_eq!(old.len(), 2);
+        assert!(old
+            .iter()
+            .any(|s| s.segment.kind == SEGMENT_KIND_OCR && s.segment.text.contains("INVOICE")));
+        assert!(old
+            .iter()
+            .any(|s| s.segment.kind == ws_extract::pdf::VISUAL_KIND));
+        let original = indexer
+            .store_lock()
+            .content_progress(entry.id, "pdf")
+            .unwrap()
+            .unwrap();
+        assert!(original.complete);
+        if let Some(name) = replacement {
+            fs::copy(pdf_fixture(name), &path).unwrap();
+        }
+        // No watcher notification or invalidate_content_source: exercise snapshot/requeue cleanup.
+        indexer
+            .store_lock()
+            .enqueue_extract_job(entry.id, "pdf")
+            .unwrap();
+        let step = indexer
+            .extract_once_typed(
+                &registry,
+                |_| {
+                    Err(EmbedError::ModelNotAvailable(
+                        "replacement exact content only".into(),
+                    ))
+                },
+                |_| panic!("replacement model unavailable"),
+            )
+            .unwrap();
+        assert!(step.claimed);
+        assert!(
+            indexer
+                .search_vectors(&[1.0, 1.0], 10, Some(&derived))
+                .unwrap()
+                .is_empty(),
+            "old PDF OCR/visual semantic/cache matches survived {replacement:?}"
+        );
+        assert!(
+            indexer
+                .store_lock()
+                .list_segments_for_entry(entry.id)
+                .unwrap()
+                .iter()
+                .all(|s| s.kind != SEGMENT_KIND_OCR && s.kind != ws_extract::pdf::VISUAL_KIND),
+            "old PDF-derived rows survived {replacement:?}"
+        );
+        if replacement == Some("corrupt.pdf") {
+            assert!(step.failed);
+        } else {
+            let current = indexer
+                .store_lock()
+                .content_progress(entry.id, "pdf")
+                .unwrap()
+                .unwrap();
+            assert!(current.revision > original.revision);
+            assert_eq!(current.source == original.source, replacement.is_none());
+        }
+        if replacement.is_some() {
+            assert!(indexer
+                .search(&SearchRequest {
+                    text: "INVOICE".into(),
+                    limit: 1,
+                    ..Default::default()
+                })
+                .unwrap()
+                .is_empty());
+        }
+    }
+
+    #[test]
+    fn pdf_native_snapshot_replacement_clears_derived_vectors() {
+        for name in ["empty.pdf", "fyrtio-Å界.pdf"] {
+            pdf_native_replacement_clears_derived_vectors(Some(name));
+        }
+    }
+
+    #[test]
+    fn pdf_native_completed_requeue_clears_derived_vectors() {
+        pdf_native_replacement_clears_derived_vectors(None);
+    }
+
+    #[test]
+    fn pdf_native_failed_replacement_clears_derived_vectors() {
+        pdf_native_replacement_clears_derived_vectors(Some("corrupt.pdf"));
+    }
+
+    #[test]
+    fn pdf_native_unchanged_requeue_missing_dependency_preserves_content() {
+        let tree = TempTree::new();
+        let cache = TempTree::new();
+        let binaries = TempTree::new();
+        let path = tree.0.join("unchanged.pdf");
+        fs::copy(pdf_fixture("scanned.pdf"), &path).unwrap();
+        let indexer = seeded_indexer(&tree);
+        let registry = process_registry(&cache);
+        for _ in 0..2 {
+            indexer
+                .extract_once_typed(
+                    &registry,
+                    |t| Ok(t.iter().map(|_| vec![1.0, 0.0]).collect()),
+                    |_| Ok(Some(vec![0.0, 1.0])),
+                )
+                .unwrap();
+        }
+        let entry = indexer
+            .store_lock()
+            .find_by_path(&path.to_string_lossy())
+            .unwrap()
+            .unwrap();
+        let before = indexer.store_lock().list_content_chunks(entry.id).unwrap();
+        let vectors = indexer.search_vectors(&[1.0, 1.0], 10, None).unwrap();
+        assert_eq!(vectors.len(), 2);
+        let worker = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/debug/winsearch-extract.exe");
+        let no_dll = binaries.0.join("winsearch-extract.exe");
+        fs::copy(worker, &no_dll).unwrap();
+        let mut missing = ExtractorRegistry::production();
+        missing.worker = Some(ExtractClient::new(no_dll, cache.0.clone()));
+        indexer
+            .store_lock()
+            .enqueue_extract_job(entry.id, "pdf")
+            .unwrap();
+        let step = indexer
+            .extract_once_typed(
+                &missing,
+                |_| panic!("missing DLL cannot embed"),
+                |_| panic!("missing DLL cannot render"),
+            )
+            .unwrap();
+        assert!(step.failed);
+        assert_eq!(
+            indexer
+                .store_lock()
+                .list_content_chunks(entry.id)
+                .unwrap()
+                .iter()
+                .map(|c| c.id)
+                .collect::<Vec<_>>(),
+            before.iter().map(|c| c.id).collect::<Vec<_>>()
+        );
+        let retained = indexer.search_vectors(&[1.0, 1.0], 10, None).unwrap();
+        assert_eq!(
+            retained.iter().map(|s| s.segment.id).collect::<Vec<_>>(),
+            vectors.iter().map(|s| s.segment.id).collect::<Vec<_>>()
+        );
+        let hits = indexer
+            .search(&SearchRequest {
+                text: "INVOICE".into(),
+                limit: 1,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].matches[0].page, Some(1));
+        assert_eq!(
+            indexer
+                .store_lock()
+                .get_entry(entry.id)
+                .unwrap()
+                .unwrap()
+                .thumbnail_path,
+            entry.thumbnail_path
+        );
     }
 
     #[test]
