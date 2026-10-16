@@ -190,9 +190,6 @@ pub fn ordinary_content_reason(c: &IndexingConfig, path: &Path) -> Option<&'stat
         return Some("Sensitive or generated file");
     }
     for dir in path.parent().into_iter().flat_map(Path::ancestors) {
-        if !c.roots.iter().any(|r| contains(r, &dir.to_string_lossy())) {
-            break;
-        }
         if [
             ".git",
             "package.json",
@@ -228,6 +225,12 @@ pub fn ordinary_content_reason(c: &IndexingConfig, path: &Path) -> Option<&'stat
             {
                 return Some("Project content is reserved for code search");
             }
+        }
+    }
+    // Explicit selections bypass dataset classification, never project ancestry.
+    for dir in path.parent().into_iter().flat_map(Path::ancestors) {
+        if !c.roots.iter().any(|r| contains(r, &dir.to_string_lossy())) {
+            break;
         }
         if !c
             .roots
@@ -376,5 +379,29 @@ mod tests {
             Some("Project content is reserved for code search")
         );
         std::fs::remove_dir_all(&base).unwrap();
+    }
+    #[test]
+    fn selected_project_subfolder_keeps_documents_name_only() {
+        let base =
+            std::env::temp_dir().join(format!("winsearch-project-subroot-{}", std::process::id()));
+        let docs = base.join("repo").join("nested").join("docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        let document = docs.join("design.txt");
+        let screenshot = docs.join("Screenshot 2026.png");
+        std::fs::write(&document, b"private repository design").unwrap();
+        std::fs::write(&screenshot, []).unwrap();
+        let mut config = IndexingConfig::default();
+        config.roots = vec![docs.to_string_lossy().into_owned()];
+        for marker in [".git", "package.json"] {
+            let marker = base.join("repo").join(marker);
+            std::fs::write(&marker, []).unwrap();
+            assert_eq!(
+                ordinary_content_reason(&config, &document),
+                Some("Project content is reserved for code search")
+            );
+            assert_eq!(ordinary_content_reason(&config, &screenshot), None);
+            std::fs::remove_file(marker).unwrap();
+        }
+        std::fs::remove_dir_all(base).unwrap();
     }
 }

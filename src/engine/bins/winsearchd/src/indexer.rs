@@ -735,7 +735,7 @@ impl Indexer {
                     let path_str = path.to_string_lossy().into_owned();
                     if is_dir {
                         let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
-                if !store.root_enabled(root_id)? { return Ok(()); }
+                        if !store.root_enabled(root_id)? || self.is_excluded_under_root(root_id, path, true) { return Ok(()); }
                         store.enqueue_dir(root_id, &path_str)?;
                         drop(store);
                         self.notify_work();
@@ -759,9 +759,9 @@ impl Indexer {
                 }
             }
             WatchEvent::Renamed { from, to } => {
-                let to_excluded = self.is_excluded_under_root(root_id, to, to.is_dir());
                 let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
                 if !store.root_enabled(root_id)? { return Ok(()); }
+                let to_excluded = self.is_excluded_under_root(root_id, to, to.is_dir());
                 let from_str = from.to_string_lossy().into_owned();
                 if to_excluded {
                     let removed = store.remove_tree(&from_str)?;
@@ -822,7 +822,9 @@ impl Indexer {
                                     self.invalidate_vector_cache();
                                 }
                                 let mut s = self.store.lock().unwrap_or_else(|p| p.into_inner());
-                                s.enqueue_dir(root_id, &to_str)?;
+                                if s.root_enabled(root_id)? && !self.is_excluded_under_root(root_id, to, true) {
+                                    s.enqueue_dir(root_id, &to_str)?;
+                                }
                                 drop(s);
                                 self.notify_work();
                             } else if invalidate_cache {
@@ -887,10 +889,18 @@ impl Indexer {
             }
         };
 
+        self.commit_point_record(root_id, &record)
+    }
+
+    fn commit_point_record(&self, root_id: i64, record: &EntryRecord) -> Result<(), StoreError> {
         let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
-                if !store.root_enabled(root_id)? { return Ok(()); }
+        if !store.root_enabled(root_id)?
+            || self.is_excluded_under_root(root_id, Path::new(&record.path), record.is_dir)
+        {
+            return Ok(());
+        }
         let generation = self.current_generation(&store, root_id)?;
-        let outcomes = store.apply_batch(root_id, generation, std::slice::from_ref(&record))?;
+        let outcomes = store.apply_batch(root_id, generation, std::slice::from_ref(record))?;
         let mut changed = false;
         for outcome in &outcomes {
             if *outcome != UpsertOutcome::Unchanged {
@@ -900,7 +910,11 @@ impl Indexer {
             }
         }
         if changed {
-            Self::enqueue_name_jobs_for_outcomes(&mut store, std::slice::from_ref(&record), &outcomes)?;
+            Self::enqueue_name_jobs_for_outcomes(
+                &mut store,
+                std::slice::from_ref(record),
+                &outcomes,
+            )?;
         }
         Ok(())
     }
@@ -1372,6 +1386,46 @@ impl Drop for Indexer {
 mod tests {
     use super::*;
     use std::fs;
+    #[test]
+    fn watcher_point_commit_rechecks_exclusions_after_metadata_collection() {
+        let tree = TempTree::new();
+        let indexer =
+            Indexer::open(IndexStore::open_in_memory().unwrap(), &[tree.0.clone()]).unwrap();
+        let root_id = indexer.root_snapshot()[0].id;
+        for extension_rule in [false, true] {
+            let file = tree.0.join(if extension_rule {
+                "extension.race"
+            } else {
+                "path.race"
+            });
+            fs::write(&file, b"must never be committed").unwrap();
+            assert!(!indexer.is_excluded_under_root(root_id, &file, false));
+            let record = crawl::record_for_path(root_id, None, &file)
+                .unwrap()
+                .unwrap();
+            // Deterministically revoke consent after the real metadata snapshot,
+            // before the same commit function used by point_upsert takes its lock.
+            let mut config = indexer.get_indexing_config().unwrap();
+            if extension_rule {
+                config.excluded_extensions.push("race".into());
+            } else {
+                config
+                    .excluded_paths
+                    .push(file.to_string_lossy().into_owned());
+            }
+            indexer.set_indexing_config(&config).unwrap();
+            indexer.commit_point_record(root_id, &record).unwrap();
+            let store = indexer.store_lock();
+            assert!(store.find_by_path(&record.path).unwrap().is_none());
+            assert_eq!(
+                store
+                    .extract_queue_depth_for_kind(SEGMENT_KIND_NAME)
+                    .unwrap(),
+                0
+            );
+        }
+    }
+
     #[test]
     fn removed_root_readded_offline_preserves_identity_and_reconciles() {
         let tree=TempTree::new(); let drive=tree.0.join("drive"); fs::create_dir_all(&drive).unwrap();

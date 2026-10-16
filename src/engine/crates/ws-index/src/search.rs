@@ -147,7 +147,8 @@ impl IndexStore {
                     size, mtime, missing, thumbnail_path
              FROM visible_entries
              WHERE id IN (
-                 SELECT rowid FROM entries_tri WHERE entries_tri MATCH ?1 AND rowid IN (SELECT id FROM visible_entries) LIMIT ?2
+                 SELECT rowid FROM entries_tri WHERE entries_tri MATCH ?1
+                 AND EXISTS (SELECT 1 FROM visible_entries v WHERE v.id = entries_tri.rowid) LIMIT ?2
              )",
             params![format!("\"{escaped}\""), CANDIDATE_CAP as i64],
         )
@@ -167,7 +168,8 @@ impl IndexStore {
                     size, mtime, missing, thumbnail_path
              FROM visible_entries
              WHERE id IN (
-                 SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?1 AND rowid IN (SELECT id FROM visible_entries) LIMIT ?2
+                 SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?1
+                 AND EXISTS (SELECT 1 FROM visible_entries v WHERE v.id = entries_fts.rowid) LIMIT ?2
              )",
             params![match_expr, CANDIDATE_CAP as i64],
         )
@@ -186,7 +188,8 @@ impl IndexStore {
              FROM visible_entries
              WHERE id IN (
                  SELECT CAST(entry_id AS INTEGER) FROM content_fts
-                 WHERE content_fts MATCH ?1 AND CAST(entry_id AS INTEGER) IN (SELECT id FROM visible_entries) LIMIT ?2
+                 WHERE content_fts MATCH ?1
+                 AND EXISTS (SELECT 1 FROM visible_entries v WHERE v.id = CAST(content_fts.entry_id AS INTEGER)) LIMIT ?2
              )",
             params![match_expr, CANDIDATE_CAP as i64],
         )
@@ -205,7 +208,8 @@ impl IndexStore {
                     size, mtime, missing, thumbnail_path
              FROM visible_entries
              WHERE missing = 0 AND id IN (
-                 SELECT rowid FROM entries_path_tri WHERE entries_path_tri MATCH ?1 AND rowid IN (SELECT id FROM visible_entries) LIMIT ?2
+                 SELECT rowid FROM entries_path_tri WHERE entries_path_tri MATCH ?1
+                 AND EXISTS (SELECT 1 FROM visible_entries v WHERE v.id = entries_path_tri.rowid) LIMIT ?2
              )",
             params![escaped, CANDIDATE_CAP as i64],
         )

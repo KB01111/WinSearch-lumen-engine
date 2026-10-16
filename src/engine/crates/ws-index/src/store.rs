@@ -1195,7 +1195,7 @@ impl IndexStore {
         let mut stmt = self.conn.prepare(
             "SELECT id, entry_id, kind, chunk_index, text, page, start_ms, end_ms,
                     line, vector, norm
-             FROM segments WHERE entry_id IN (SELECT id FROM visible_entries) ORDER BY id",
+             FROM segments WHERE EXISTS (SELECT 1 FROM visible_entries v WHERE v.id = segments.entry_id) ORDER BY id",
         )?;
         let rows = stmt.query_map([], map_segment_row)?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -1207,7 +1207,7 @@ impl IndexStore {
         &self,
     ) -> Result<Vec<(i64, i64, String, Vec<u8>, f32)>, StoreError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, entry_id, kind, vector, norm FROM segments WHERE entry_id IN (SELECT id FROM visible_entries) ORDER BY id",
+            "SELECT id, entry_id, kind, vector, norm FROM segments WHERE EXISTS (SELECT 1 FROM visible_entries v WHERE v.id = segments.entry_id) ORDER BY id",
         )?;
         let rows = stmt.query_map([], |row| {
             let bytes: Vec<u8> = row.get(3)?;
@@ -1349,7 +1349,7 @@ impl IndexStore {
         let mut sql = String::from(
             "SELECT id, entry_id, kind, chunk_index, text, page, start_ms, end_ms,
                     line, vector, norm
-             FROM segments WHERE entry_id IN (SELECT id FROM visible_entries)",
+             FROM segments WHERE EXISTS (SELECT 1 FROM visible_entries v WHERE v.id = segments.entry_id)",
         );
         // Own the bound values so the prepared statement can borrow them.
         let kinds_owned: Vec<String>;
@@ -1944,6 +1944,139 @@ fn fts_keywords(rec: &EntryRecord) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn active_policy_sparse_search_does_not_classify_unmatched_index_rows() {
+        use rusqlite::functions::FunctionFlags;
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        let mut store = IndexStore::open_in_memory().unwrap();
+        let root = store.ensure_root(r"C:\scale").unwrap();
+        let mut config = ws_protocol::IndexingConfig::default();
+        config.roots = vec![r"C:\scale".into()];
+        store.set_indexing_config(&config).unwrap();
+        let records: Vec<_> = (0..50_000)
+            .map(|i| {
+                let name = if i == 49_999 {
+                    "singleneedle.txt".to_string()
+                } else {
+                    format!("ordinary{i}.txt")
+                };
+                rec(&format!(r"C:\scale\{name}"), &name, 1, 1)
+            })
+            .collect();
+        store.apply_batch(root, 0, &records).unwrap();
+        let content_entry = store
+            .find_by_path(r"C:\scale\ordinary0.txt")
+            .unwrap()
+            .unwrap()
+            .id;
+        store
+            .replace_content_fts(
+                content_entry,
+                crate::model::SEGMENT_KIND_DOC,
+                &["contentsingleneedle"],
+            )
+            .unwrap();
+        store
+            .upsert_segment(NewSegment {
+                entry_id: content_entry,
+                kind: crate::model::SEGMENT_KIND_NAME,
+                chunk_index: 0,
+                text: "ordinary0",
+                page: None,
+                start_ms: None,
+                end_ms: None,
+                line: None,
+                vector: &[0., 1.],
+            })
+            .unwrap();
+        let hidden = store
+            .find_by_path(r"C:\scale\ordinary1.txt")
+            .unwrap()
+            .unwrap()
+            .id;
+        store
+            .upsert_segment(NewSegment {
+                entry_id: hidden,
+                kind: crate::model::SEGMENT_KIND_NAME,
+                chunk_index: 0,
+                text: "ordinary1",
+                page: None,
+                start_ms: None,
+                end_ms: None,
+                line: None,
+                vector: &[1., 0.],
+            })
+            .unwrap();
+        config.excluded_paths.push(r"C:\scale\ordinary1.txt".into());
+        store.set_indexing_config(&config).unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        store
+            .conn
+            .create_scalar_function(
+                "policy_fold",
+                1,
+                FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+                move |ctx| {
+                    observed.fetch_add(1, Ordering::Relaxed);
+                    Ok(ctx
+                        .get::<String>(0)?
+                        .replace('/', "\\")
+                        .trim_end_matches('\\')
+                        .to_lowercase())
+                },
+            )
+            .unwrap();
+        for (query, expected_hits) in [
+            ("singleneedle", 1),
+            ("contentsingleneedle", 1),
+            ("zzz-no-match", 0),
+        ] {
+            calls.store(0, Ordering::Relaxed);
+            let hits = store
+                .search(&crate::model::SearchRequest {
+                    text: query.into(),
+                    limit: 20,
+                    ..Default::default()
+                })
+                .unwrap();
+            assert_eq!(hits.len(), expected_hits);
+            // Count actual policy evaluations, independent of host speed: unmatched
+            // rows must not be materialized by any production candidate source.
+            assert!(
+                calls.load(Ordering::Relaxed) < 1000,
+                "{query} policy folds: {}",
+                calls.load(Ordering::Relaxed)
+            );
+        }
+        calls.store(0, Ordering::Relaxed);
+        let vectors = store.search_vectors(&[1., 0.], 1, None).unwrap();
+        assert_eq!(vectors.len(), 1);
+        assert_eq!(vectors[0].segment.entry_id, content_entry);
+        assert!(
+            calls.load(Ordering::Relaxed) < 1000,
+            "vector search policy folds: {}",
+            calls.load(Ordering::Relaxed)
+        );
+        calls.store(0, Ordering::Relaxed);
+        assert_eq!(store.all_segments().unwrap().len(), 1);
+        assert!(
+            calls.load(Ordering::Relaxed) < 1000,
+            "segment load policy folds: {}",
+            calls.load(Ordering::Relaxed)
+        );
+        calls.store(0, Ordering::Relaxed);
+        assert_eq!(store.all_segment_vectors_raw().unwrap().len(), 1);
+        assert!(
+            calls.load(Ordering::Relaxed) < 1000,
+            "raw vector load policy folds: {}",
+            calls.load(Ordering::Relaxed)
+        );
+    }
+
     #[test]
     fn policy_visibility_uses_unicode_case_and_component_boundaries() {
         let mut store = IndexStore::open_in_memory().unwrap();
