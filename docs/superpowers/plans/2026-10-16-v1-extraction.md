@@ -130,6 +130,11 @@ bypasses the safety limit when the worker is missing.
 Keep ExtractRequest/ExtractResponse from Task1. Persist a per-job cursor and
 source snapshot (entry identity/path/size/mtime/model-space generation) so
 restarts resume, while source or model changes invalidate stale work.
+Do not rely only on the existing Unix-second mtime. A watcher Modified event
+must invalidate/requeue content even when file size and whole-second mtime
+are unchanged. Use a durable source/job revision and precise metadata as
+needed; keep the existing seconds field's recency semantics. Recheck the
+actual source and current revision before committing a batch or its vectors.
 Transactionally commit the batch's exact text, page/time/line/thumbnail
 metadata and next cursor before releasing its claim. Retries must not duplicate
 chunks, erase prior batches, or advance progress without content. A null
@@ -170,6 +175,13 @@ remove/requeue the correct state without mixing embedding spaces.
   restart the indexer, resume at30, and finish exactly75 stable chunks without
   duplicates. Interrupt a commit and verify progress/content roll back together.
   Change the file during a batch and verify stale drafts cannot overwrite it.
+- [ ] Add a same-size, same-second edit regression: index a generated text file,
+  overwrite it with a different equal-length token, and deliver the actual
+  watcher Modified event while preserving the whole-second timestamp (distinct
+  subsecond timestamps are allowed). The new token must replace the old exact
+  text after re-extraction. Repeat inside an in-flight callback and prove the
+  earlier batch cannot commit. Observe the current unchanged-metadata queue
+  failure before fixing it; do not just sleep until the next timestamp second.
 - [ ] Add exact location tests with distinct tokens on different pages/times,
   plus numeric content without vectors. Verify policy-revoked chunks are absent
   and cannot crowd permitted hits out of the limit.

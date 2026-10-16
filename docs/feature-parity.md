@@ -51,17 +51,21 @@ implemented **and** verified. Legend: `[x]` done+verified · `[~]` partial ·
 - [x] llama.cpp integration, CUDA > Vulkan > CPU backend detection (Phase 3)
 - [x] Lazy load / warm-up / idle unload / explicit GPU release (Phase 3)
 - [x] Vector store (FP16, 768-d) + cosine scan (Phase 3)
-- [x] Hybrid ranking + exact boost + explanations + thresholds (Phase 3)
+- [~] Hybrid ranking + exact boost + explanations + thresholds (Phase 3) —
+      deterministic fixture passes; actual model fails negative controls
 - [x] Query-embedding cache, cancellation-aware semantic pass (Phase 3)
 
 ## Multimodal content
 
-- [x] Image semantic search (JPEG/PNG/WebP/HEIC/AVIF/TIFF/BMP/GIF/RAW) + EXIF (Phase 4)
-- [x] Screenshot search: visual + OCR text, exact error codes (Phase 4)
+- [~] Image semantic search (JPEG/PNG/WebP/HEIC/AVIF/TIFF/BMP/GIF/RAW) + EXIF (Phase 4) —
+      decoder/worker plumbing exists; mixed-encoder correctness fix pending
+- [~] Screenshot search: visual + OCR text, exact error codes (Phase 4) —
+      OCR exists; genuine visual discrimination/reference checks pending
 - [ ] PDF page-level search, scanned-page OCR, page numbers/thumbnails,
       first-30-pages fast path, 5,000-page cap, resumable (Phase 4)
-- [x] Document search (txt/md/rtf/doc/docx/odt/html) with chunking, excerpts,
-      numeric-content exact-only routing (Phase 4)
+- [~] Document search (txt/md/rtf/doc/docx/odt/html) with chunking, excerpts,
+      numeric-content exact-only routing (Phase 4) — no-model exact persistence
+      and durable long-document continuation pending
 - [ ] Audio: 30 s overlapping windows, timestamp matches, player with
       seek-to-match (Phase 4)
 - [ ] Video: periodic + shot-change frames, audio-track indexing, timestamp
@@ -71,7 +75,8 @@ implemented **and** verified. Legend: `[x]` done+verified · `[~]` partial ·
 
 - [x] Separate code index (never mixes with normal results) (Phase 5)
 - [x] Repository detection, .gitignore, language detection (Phase 5)
-- [x] Tree-sitter chunking + symbols, definitions over references (Phase 5)
+- [ ] Tree-sitter chunking + symbols, definitions over references (Phase 5) —
+      existing parser uses line heuristics; no Tree-sitter dependency yet
 - [x] Notebook cells (without outputs), line-number preservation (Phase 5)
 - [ ] `code:` queries (semantic + exact identifier) (Phase 5)
 - [ ] Editor detection + open-at-line (VS Code, Cursor, VS, JetBrains,
