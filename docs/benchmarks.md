@@ -82,17 +82,26 @@ Measured via `cargo run --release -p ws-index --example bench 50000` on 768-dime
 | `IndexStore::search_vectors` (warm SQLite `segments` scan) | 1,000 | 1,536 B/row | **6.25 ms** | 6.58 ms | ~160,000 vecs/s |
 | `IndexStore::search_vectors` (warm SQLite `segments` scan) | 10,000 | 1,536 B/row | **64.83 ms** | 78.98 ms | ~154,200 vecs/s |
 
-### Retrieval evaluation baseline (`evals/names.json`)
+### Deterministic pipeline fixture (`evals/names.json`)
 
 Run via `cargo run -p winsearch-cli -- eval names` (24 fixture entries, 18 queries across semantic paraphrases, German/Japanese multilingual queries, exact matches, and negative controls):
 
 | Suite | Queries | Recall@5 (gate ≥ 0.90) | MRR (gate ≥ 0.85) | Negative-control FP rate (gate ≤ 0.00) |
 |---|---|---|---|---|
-| `names` | 15 positive + 3 negative | **1.000** | **1.000** | **0.000** |
+| `names`, ConceptStubEmbedder | 15 positive + 3 negative | **1.000** | **1.000** | **0.000** |
+
+That default embedder is a deterministic concept fixture, not a real model.
+An actual CPU Q8_0 worker evaluation on 2026-10-16 passed all 15 positive
+queries (Recall@5/MRR 1.000) but failed all three negative controls (FP 1.000
+against the unchanged 0.000 gate). Prompt formatting alone did not resolve
+the failure. Real retrieval acceptance remains pending its dedicated fix;
+the earlier fixture result must not be presented as model-quality evidence.
 
 ### Tuned semantic & hybrid ranking thresholds
 
-- `MIN_SEMANTIC_COSINE = 0.35`: suppresses unrelated vectors (negative controls score `< 0.15`) while admitting paraphrases and cross-lingual matches (`0.70–0.99`).
+- `MIN_SEMANTIC_COSINE = 0.35`: the deterministic fixture's negative controls
+  score below 0.15. Real unrelated filename matches scored approximately
+  0.66–0.73, so this cutoff does not establish real-model rejection quality.
 - `SEMANTIC_TOP_K = 200`: candidate pool before per-entry deduplication and hybrid scoring.
 - Hybrid score band `0.45 + 0.45 * cosine` (`[0.45, 0.90]`): places semantic matches below exact/prefix matches (`>= 0.92`) and above weak FTS token matches (`0.50`), with `+0.10` exact-token boost and `+0.02` 30-day recency boost.
 - `QUERY_CACHE_CAP = 64`: LRU cache for query embeddings so repeated/backspaced queries in an overlay session avoid re-embedding.
@@ -107,12 +116,38 @@ Run via `cargo run -p winsearch-cli -- eval names` (24 fixture entries, 18 queri
 - The remaining p95 gap at 200k comes from two-token substring phrases (e.g.
   `presentation final`) with thousands of matches in the trigram index;
   measured at ~11 ms worst case.
-- Idle cost: indexing threads block on the work queue (500 ms condvar wait)
-  and watchers block in `ReadDirectoryChangesW`; the idle process does no
-  polling.
+- Idle paths use work-queue waits and `ReadDirectoryChangesW`, with timed
+  wakeups for policy/catalog checks. Actual idle CPU/GPU measurements remain
+  an acceptance gate; blocking primitives alone do not prove zero resource use.
+
+## Active-policy scale check (2026-10-16)
+
+The reviewed policy implementation initially materialized unrelated visible
+entry IDs inside search sources. At 50,000 generated rows, `report` took
+1.3–1.7 seconds, `report-2024` about 7.85–9.72 seconds, and a no-hit phrase
+15.35 seconds. That baseline run was stopped; it has no reported p95.
+Correlated candidate/segment permission checks fixed that regression while
+preserving filtering before the existing caps.
+
+After commit `9673ee8`, the same active-policy release probe completed:
+
+| Path | Size | p50 | p95 |
+|---|---:|---:|---:|
+| Exact/name queries | 50,000 entries | 11.01 ms | 18.62 ms |
+| SQLite vector search | 1,000 segments | 7.03 ms | 7.59 ms |
+| SQLite vector search | 10,000 segments | 73.78 ms | 78.26 ms |
+| Cached FP16 VectorIndex | 50,000 segments | 58.13 ms | 62.22 ms |
+
+This probe derives from `ws-index/examples/bench.rs`, adding an active
+IndexingConfig and using five iterations of each of ten queries (50 samples).
+It uses an optimized standalone Cargo profile rather than the older thin-LTO
+500-sample run, so the historical 3.8 ms p95 is not established by this check.
+Vectors and filenames are generated fixtures; these are latency measurements,
+not real-model retrieval evidence. Large denied-root populations, directory
+classification cost, installed-app contention and broader hardware remain
+in the final performance acceptance scope.
 
 ## Targets (Phase 7 power/performance items)
 
-- Idle CPU/GPU ≈ 0: already true by construction (blocking waits only); a
-  resource-behavior test is still on the Phase 7 checklist.
+- Idle CPU/GPU ≈ 0: resource-behavior measurements remain on the Phase 7 checklist.
 - Power-aware indexing policies (AC / battery saver / quiet hours): Phase 7.
