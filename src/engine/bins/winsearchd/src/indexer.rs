@@ -104,6 +104,7 @@ struct RootInfo {
     id: i64,
     path: PathBuf,
     offline: AtomicBool,
+    missing_mark_pending: AtomicBool,
 }
 
 pub struct Indexer {
@@ -139,6 +140,7 @@ impl Indexer {
             infos.push(RootInfo {
                 id,
                 offline: AtomicBool::new(!present),
+                missing_mark_pending: AtomicBool::new(false),
                 path: root.clone(),
             });
         }
@@ -400,13 +402,15 @@ impl Indexer {
     }
 
     /// Model-swap recovery (Task3-S4): when `check_compat` reports
-    /// `Incompatible`, purge every `segments(kind='name')` vector (they belong
-    /// to the old model) and enqueue one `extract_jobs(kind='name')` per
-    /// surviving entry so the new model re-embeds everything. Returns
+    /// `Incompatible`, purge every vector produced by the old model and enqueue
+    /// name and content jobs so the new model re-embeds everything. Returns
     /// `(purged_segments, enqueued_jobs)`.
-    pub fn purge_name_vectors_and_requeue(&self) -> Result<(u64, u64), StoreError> {
+    pub fn purge_model_vectors_and_requeue(&self) -> Result<(u64, u64), StoreError> {
         let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
-        let purged = store.purge_segments_by_kind(SEGMENT_KIND_NAME)?;
+        let mut purged = 0;
+        for kind in ws_index::model::ALL_SEGMENT_KINDS {
+            purged += store.purge_segments_by_kind(kind)?;
+        }
         let ids = store.all_entry_ids()?;
         let mut enqueued = 0u64;
         for id in ids {
@@ -416,6 +420,14 @@ impl Indexer {
                 EXTRACT_PRIORITY_UPDATED,
             )?;
             enqueued += 1;
+            if let Some(entry) = store.get_entry(id)? {
+                if !entry.is_dir && !entry.is_app {
+                    if let Some(kind) = modality_kind_for_ext(&entry.ext) {
+                        store.enqueue_extract_job_with_priority(id, kind, EXTRACT_PRIORITY_UPDATED)?;
+                        enqueued += 1;
+                    }
+                }
+            }
         }
         drop(store);
         self.invalidate_vector_cache();
@@ -688,26 +700,24 @@ impl Indexer {
                             if !row.is_dir && !row.ext.eq_ignore_ascii_case(&ext) {
                                 let old_mod = ws_extract::modality_kind_for_ext(&row.ext);
                                 let new_mod = ws_extract::modality_kind_for_ext(&ext);
-                                if old_mod != new_mod {
-                                    store.delete_content_text(row.id)?;
-                                    if let Some(om) = old_mod {
-                                        store.remove_segments_for_entry_and_kind(row.id, om)?;
-                                        if om == ws_index::model::SEGMENT_KIND_IMAGE {
-                                            store.remove_segments_for_entry_and_kind(
-                                                row.id,
-                                                ws_index::model::SEGMENT_KIND_OCR,
-                                            )?;
-                                        }
-                                        invalidate_cache = true;
+                                store.delete_content_text(row.id)?;
+                                if let Some(om) = old_mod {
+                                    store.remove_segments_for_entry_and_kind(row.id, om)?;
+                                    if om == ws_index::model::SEGMENT_KIND_IMAGE {
+                                        store.remove_segments_for_entry_and_kind(
+                                            row.id,
+                                            ws_index::model::SEGMENT_KIND_OCR,
+                                        )?;
                                     }
-                                    if let Some(nm) = new_mod {
-                                        let prio = compute_extract_priority(
-                                            row.size,
-                                            row.mtime,
-                                            UpsertOutcome::Updated,
-                                        );
-                                        store.enqueue_extract_job_with_priority(row.id, nm, prio)?;
-                                    }
+                                    invalidate_cache = true;
+                                }
+                                if let Some(nm) = new_mod {
+                                    let prio = compute_extract_priority(
+                                        row.size,
+                                        row.mtime,
+                                        UpsertOutcome::Updated,
+                                    );
+                                    store.enqueue_extract_job_with_priority(row.id, nm, prio)?;
                                 }
                             }
                             if row.is_dir {
@@ -1168,18 +1178,22 @@ impl Indexer {
             if present {
                 if was_offline || has_missing {
                     info!(root = %root.path.display(), "volume reconnected; reconciling");
-                    root.offline.store(false, Ordering::Release);
                     if let Err(e) = self.reconnect_root(root) {
                         warn!(error = %e, "reconnect failed");
+                    } else {
+                        root.offline.store(false, Ordering::Release);
+                        root.missing_mark_pending.store(false, Ordering::Release);
                     }
                 }
-            } else if !was_offline {
+            } else if !was_offline || root.missing_mark_pending.load(Ordering::Acquire) {
                 info!(root = %root.path.display(), "volume disconnected; preserving index");
                 root.offline.store(true, Ordering::Release);
+                root.missing_mark_pending.store(true, Ordering::Release);
                 let mut store =
                     self.store.lock().unwrap_or_else(|p| p.into_inner());
-                if let Err(e) = store.set_missing_for_root(root.id, true) {
-                    warn!(error = %e, "marking missing failed");
+                match store.set_missing_for_root(root.id, true) {
+                    Ok(_) => root.missing_mark_pending.store(false, Ordering::Release),
+                    Err(e) => warn!(error = %e, "marking missing failed"),
                 }
             }
         }
@@ -1859,13 +1873,14 @@ mod tests {
         let segs_before = indexer.segments_indexed().unwrap();
         assert!(segs_before >= 2);
 
-        let (purged, enqueued) = indexer.purge_name_vectors_and_requeue().unwrap();
+        let (purged, enqueued) = indexer.purge_model_vectors_and_requeue().unwrap();
         assert_eq!(purged, segs_before);
         assert!(enqueued >= 2);
         assert_eq!(indexer.segments_indexed().unwrap(), 0);
 
         let (embedded, _) = drain_embed_queue(&indexer);
-        assert_eq!(embedded as u64, enqueued);
+        assert_eq!(embedded as u64, segs_before);
+        assert_eq!(indexer.content_extract_queue_depth().unwrap(), enqueued - segs_before);
         assert_eq!(indexer.segments_indexed().unwrap(), segs_before);
     }
 
@@ -2003,6 +2018,85 @@ mod tests {
 
         drop(indexer);
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn failed_disconnect_update_is_retried_without_repeating_successful_writes() {
+        let tree = TempTree::new();
+        let root = tree.0.join("drive");
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("keep.txt");
+        fs::write(&file, b"keep").unwrap();
+        let db = tree.0.join("index.db");
+        let indexer = Indexer::open(IndexStore::open(&db).unwrap(), &[root.clone()]).unwrap();
+        indexer.enqueue_initial_scan().unwrap();
+        while indexer.scan_available(64) > 0 {}
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute_batch("CREATE TRIGGER fail_disconnect BEFORE UPDATE OF missing ON entries
+            BEGIN SELECT RAISE(FAIL, 'simulated write failure'); END;").unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        indexer.reconcile_drives();
+        conn.execute_batch("DROP TRIGGER fail_disconnect;").unwrap();
+        indexer.reconcile_drives();
+        assert!(indexer.store_lock().find_by_path(&file.to_string_lossy()).unwrap().unwrap().missing);
+        // Count actual writes, including the empty-root case, on later polls.
+        conn.execute_batch("CREATE TABLE writes(n INTEGER); INSERT INTO writes VALUES(0);
+            CREATE TRIGGER count_disconnect AFTER UPDATE OF missing ON entries
+            BEGIN UPDATE writes SET n = n + 1; END;").unwrap();
+        indexer.reconcile_drives();
+        let writes: i64 = conn.query_row("SELECT n FROM writes", [], |r| r.get(0)).unwrap();
+        assert_eq!(writes, 0);
+    }
+
+    #[test]
+    fn overflow_rescans_claimed_descendants_before_sweeping() {
+        let tree = TempTree::new();
+        let sub = tree.0.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        let keep = sub.join("keep.txt");
+        fs::write(&keep, b"keep").unwrap();
+        let indexer = seeded(&tree);
+        let root_id = indexer.roots[0].id;
+        let (qid, _, dir, generation) = {
+            let mut store = indexer.store_lock();
+            store.enqueue_dir(root_id, &sub.to_string_lossy()).unwrap();
+            store.claim_dir_with_generation().unwrap().unwrap()
+        };
+        indexer.apply_event(root_id, &WatchEvent::Overflow).unwrap();
+        assert_eq!(indexer.scan_available(1), 1); // Root sees the claimed child.
+        indexer.process_dir(qid, root_id, &dir, generation).unwrap();
+        while indexer.scan_available(64) > 0 {}
+        assert!(indexer.store_lock().find_by_path(&keep.to_string_lossy()).unwrap().is_some());
+    }
+
+    #[test]
+    fn extension_rename_within_modality_clears_content_and_requeues() {
+        let tree = TempTree::new();
+        let from = tree.0.join("report.docx");
+        let to = tree.0.join("report.txt");
+        fs::write(&from, b"fixture").unwrap();
+        let indexer = seeded(&tree);
+        let root_id = indexer.roots[0].id;
+        let id = indexer.store_lock().find_by_path(&from.to_string_lossy()).unwrap().unwrap().id;
+        {
+            let mut store = indexer.store_lock();
+            store.upsert_segment(NewSegment {
+                entry_id: id, kind: "doc", chunk_index: 0,
+                page: None, start_ms: None, end_ms: None, line: None,
+                text: "obsolete", vector: &[1.0, 0.0],
+            }).unwrap();
+            while let Some(job) = store.claim_extract_jobs_batch_for_kind("doc", 1).unwrap().first() {
+                store.complete_extract_job(job.id).unwrap();
+            }
+        }
+        indexer.search_vectors(&[1.0, 0.0], 10, None).unwrap();
+        fs::rename(&from, &to).unwrap();
+        indexer.apply_event(root_id, &WatchEvent::Renamed { from, to }).unwrap();
+        let store = indexer.store_lock();
+        assert!(store.list_segments_for_entry(id).unwrap().iter().all(|s| s.kind != "doc"));
+        assert_eq!(store.extract_queue_depth_for_kind("doc").unwrap(), 1);
+        drop(store);
+        assert!(indexer.search_vectors(&[1.0, 0.0], 10, None).unwrap().is_empty());
     }
 
     #[test]

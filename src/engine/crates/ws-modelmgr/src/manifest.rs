@@ -116,7 +116,9 @@ impl ModelCompat {
 
     /// True when stored vectors produced under `other` are still usable.
     pub fn is_compatible_with(&self, other: &ModelCompat) -> bool {
-        self.model_id == other.model_id && self.embedding_dim == other.embedding_dim
+        self.model_id == other.model_id
+            && self.embedding_dim == other.embedding_dim
+            && self.repo_commit == other.repo_commit
     }
 }
 
@@ -169,12 +171,12 @@ mod tests {
         };
         assert!(!current.is_compatible_with(&other_model));
 
-        // A repo-commit bump alone does not invalidate vectors.
+        // Different pinned weights define a different embedding space.
         let bumped_commit = ModelCompat {
             repo_commit: "deadbeef".into(),
             ..current.clone()
         };
-        assert!(current.is_compatible_with(&bumped_commit));
+        assert!(!current.is_compatible_with(&bumped_commit));
 
         assert!(ModelCompat::from_json("not json").is_none());
     }
