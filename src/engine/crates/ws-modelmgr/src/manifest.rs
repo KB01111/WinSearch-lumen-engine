@@ -7,12 +7,9 @@
 //!   [`MODEL_ID`] at commit [`REPO_COMMIT`]: `HEAD` requests against
 //!   `https://huggingface.co/<id>/resolve/main/<file>` return
 //!   `X-Linked-Size` (309855456 for the text GGUF, 554821024 for mmproj).
-//! - SHA-256 values were computed 2026-10-22 by downloading both files once
-//!   from those same `resolve/main` URLs to a temp dir (sizes re-verified
-//!   byte-exact against the manifest before hashing) and hashing the bytes
-//!   with two independent implementations (PowerShell `Get-FileHash` and the
-//!   crate's own `sha256_of`, which agreed). They also match the quoted
-//!   `X-Linked-ETag` header values the repo metadata serves for these files.
+//! - SHA-256 pins are independently checked against the downloaded bytes for
+//!   this exact revision. They also match the linked LFS hashes in the public
+//!   model metadata. Imports never trust a filename or size alone.
 //!   Downloads and imports are therefore hash-verified, not just size-checked.
 //! - `EMBEDDING_DIM` (768) is the unified EmbeddingGemma 2 space recorded in
 //!   the plan; the compat record below binds the index to it.
@@ -27,6 +24,9 @@ pub const REPO_COMMIT: &str = "bfcd298762cc34d0357ece5ebdd31791a3a374d8";
 
 /// Unified EmbeddingGemma 2 embedding width.
 pub const EMBEDDING_DIM: u32 = 768;
+
+/// One-pass mixed-media encoding and reference-compatible image sizing.
+pub const VECTOR_PIPELINE_VERSION: u32 = 1;
 
 /// Text-embedding weights (Q8_0, ~310 MB).
 pub const TEXT_FILE: &str = "embeddinggemma-2-Q8_0.gguf";
@@ -81,11 +81,13 @@ pub const TOTAL_BYTES: u64 = EXPECTED_FILES[0].size + EXPECTED_FILES[1].size;
 /// different model id or embedding width invalidates every vector and queues
 /// a full re-embed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
 pub struct ModelCompat {
     pub model_id: String,
     pub embedding_dim: u32,
     pub repo_commit: String,
+    /// Missing means the legacy incremental-media pipeline, never current.
+    #[serde(default)]
+    pub vector_pipeline_version: u32,
 }
 
 impl Default for ModelCompat {
@@ -101,6 +103,7 @@ impl ModelCompat {
             model_id: MODEL_ID.to_string(),
             embedding_dim: EMBEDDING_DIM,
             repo_commit: REPO_COMMIT.to_string(),
+            vector_pipeline_version: VECTOR_PIPELINE_VERSION,
         }
     }
 
@@ -119,12 +122,35 @@ impl ModelCompat {
         self.model_id == other.model_id
             && self.embedding_dim == other.embedding_dim
             && self.repo_commit == other.repo_commit
+            && self.vector_pipeline_version == other.vector_pipeline_version
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_vector_pipeline_is_incompatible_even_with_matching_weights() {
+        let current = ModelCompat::current();
+        let mut json = serde_json::to_value(&current).unwrap();
+        json.as_object_mut()
+            .unwrap()
+            .remove("vector_pipeline_version");
+        let legacy = ModelCompat::from_json(&json.to_string()).unwrap();
+        assert!(
+            !current.is_compatible_with(&legacy),
+            "legacy media vectors must be requeued"
+        );
+        assert_eq!(
+            serde_json::to_value(&legacy).unwrap()["vector_pipeline_version"],
+            0
+        );
+        assert!(
+            ModelCompat::from_json("{}").is_none(),
+            "partial records cannot silently become current"
+        );
+    }
 
     #[test]
     fn manifest_covers_both_ggufs() {
