@@ -70,6 +70,13 @@ reap, close pipes, and clean scratch artifacts on timeout/crash/cancel. Never
 kill an unrelated process by executable name. Limit concurrency to the
 existing2 extraction slots. The worker launches without a visible console.
 
+On success, promote referenced thumbnail artifacts from that request's scratch
+directory into the existing app-owned cache before returning usable paths to
+the caller; validate source containment first and use unique cache names. Do
+not return paths and then delete the files behind them. Clean unreferenced
+scratch artifacts and remove the private directory after promotion. Failure,
+timeout and stale-policy paths must not retain an abandoned scratch tree.
+
 Keep existing per-format byte/decompression/pixel/segment limits. Streaming
 PDF/media work in later slices needs per-batch limits rather than rejecting
 all large input files on the old32MiB metadata check. Do not loosen document
