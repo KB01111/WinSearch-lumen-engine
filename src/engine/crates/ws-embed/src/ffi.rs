@@ -80,7 +80,14 @@ extern "C" {
         rgb: *const u8,
         width: u32,
         height: u32,
-        n_batch: i32,
+        n_embd: i32,
+        out: *mut f32,
+    ) -> i32;
+    pub fn wse_mtmd_embed_audio(
+        mctx: *mut MtmdContext,
+        lctx: *mut LlamaContext,
+        pcm: *const f32,
+        n_samples: usize,
         n_embd: i32,
         out: *mut f32,
     ) -> i32;

@@ -104,8 +104,8 @@ The search index — no Windows dependencies, fully unit-tested anywhere.
   at **5 attempts** the job is poison-pilled (`failed`, never auto-claimed)
   with a health log. Deletes cascade via FK (`sweep`/`remove_tree`); claims left by a
   crash are released on open (`release_extract_claims`). A model swap
-  (`check_compat == Incompatible`) purges `segments(kind='name')` and
-  requeues one name job per entry at startup.
+  (`check_compat == Incompatible`) purges all model vectors and requeues
+  names and deferred content vectors, preserving exact chunks and locations.
 - `catalog.rs` — Start Menu/Desktop scan; `.lnk` targets resolved via the
   shell's `IShellLinkW`.
 - `engine.rs` — the search pipeline: calculator → settings → index hits,
@@ -177,8 +177,8 @@ The search index — no Windows dependencies, fully unit-tested anywhere.
 1. Startup: open DB, release claims left by a crash (crawl + embed queues),
    enqueue every present root, start workers/watchers/catalog/drive
    supervisor and the embed scheduler. A model swap (`check_compat ==
-   Incompatible`) first purges `segments(kind='name')` and requeues one name
-   job per entry.
+   Incompatible`) first purges model vectors and requeues name/content
+   embeddings while preserving exact text and durable parser progress.
 2. Crawl workers claim directories, scan them, upsert children and enqueue
    subdirectories in per-directory batches, then mark the directory done.
    Every changed entry also enqueues a name-embed job (new files first, LIFO
@@ -332,3 +332,51 @@ Pillow/reportlab, then the fetcher with an isolated output (or use the independe
 verified archive cache). Worker acceptance tests use the debug dependency override;
 daemon native tests use the verified `pdfium.dll` beside the rebuilt debug worker.
 `tools/test-fetch-pdfium.ps1` checks the fetcher against the pinned cached archive.
+
+### Native media embeddings
+
+The pinned mtmd helper incrementally DECODEs chunks, which loses the shared
+bidirectional context for this encoder. The shim now collects special/text
+tokens and each media encoder row in one `llama_batch_ext`, assigns positions
+and embedding outputs, then calls `llama_process(ENCODE)` once. Rows use the
+model's input width512, independently of its768-dimensional pooled output.
+Mean pooling and L2 normalization include the complete sequence. Media contexts
+reserve2048 logical/physical tokens; existing short-text batching stays512.
+Native RAII frees bitmaps/chunks/batches on every return; invalid/nonfinite or
+zero vectors fail rather than becoming semantic content.
+
+`EmbedRuntime::embed_image_with_budget` accepts70/140/280 tokens (default280
+through `embed_image`). Reference sizing fills the budget in48-pixel multiples
+using attributed Pillow-compatible bicubic resampling before mtmd; the projector
+does not resize those already-budgeted pixels again. Image input is bounded to
+16M pixels. `embed_audio` accepts1..480000 finite mono16k float samples. The
+worker's PCM16 mono16k WAV reader scans bounded headers, validates sizes/formats,
+seeks to an optional forward window of at most30seconds, and reads at most960000
+PCM bytes. Longer complete files are rejected, not silently cut. Compressed
+formats and recording windows belong to the subsequent extraction slice.
+
+Internal `EmbedImage.token_budget` is optional/default280; no public C# wire
+change is needed. Image/audio share the supervisor's bounded cancellation and
+restart path. An explicit text model uses its own sibling projector. Capability
+tags require a loaded supporting projector (or explicit test-only stub mode).
+`ModelCompat.vector_pipeline_version=1` participates in compatibility; a missing
+field deserializes as legacy0, and malformed/partial identities fail closed.
+Vector replacement preserves durable exact text, locations and parser progress.
+
+Independent public synthetic reference inputs/vectors are pinned with license
+and hashes in `ws-embed/tests/fixtures/media`. `cargo test -p ws-embed --test media
+-- --ignored --nocapture --test-threads=1` requires verified model files. The
+upstream WAV is formant noise, not intelligible speech. Generate separate local
+spoken fixtures with `tools/generate-spoken-fixtures.ps1` and
+`tools/assemble-spoken-fixtures.py`; these write files without playback, external
+services or language installation. `tools/test-media-runtime.py` tests the actual
+worker plus image descriptions/spoken retrieval. These checks do not establish
+long-media extraction, UI playback, full-format decoding or final GPU/package
+acceptance; those remain required downstream gates.
+
+The engine is also intended to power [Lumen](https://github.com/KB-Helios/Lumen).
+Its Rust host should consume the typed headless engine contract and dedicated
+profile; the current WinUI app remains another consumer. Lumen's React
+SearchService, Zod validation, consent, cancellation and native process/model
+ownership remain boundaries. Actual client/host integration and engine-only
+package verification are required work, not established by the media tests.

@@ -300,16 +300,14 @@ fn dispatch(req: &EmbedRequest, shared: &Shared) -> Action {
             id,
             path,
             window_ms,
-        } => {
-            let seed = match window_ms {
-                Some((s, e)) => format!("audio:{path}:{s}-{e}"),
-                None => format!("audio:{path}"),
-            };
-            job_guard(shared, || embed_media_job(shared, *id, &seed, "audio"))
-        }
-        EmbedRequest::EmbedImage { id, path } => {
-            job_guard(shared, || embed_image_job(shared, *id, path))
-        }
+        } => job_guard(shared, || embed_audio_job(shared, *id, path, *window_ms)),
+        EmbedRequest::EmbedImage {
+            id,
+            path,
+            token_budget,
+        } => job_guard(shared, || {
+            embed_image_job(shared, *id, path, token_budget.unwrap_or(280))
+        }),
         EmbedRequest::Status { id } => reply(status_response(shared, *id)),
         EmbedRequest::Shutdown { id } => {
             Action::RespondAndExit(EmbedResponse::ShutdownAck { id: *id })
@@ -362,11 +360,20 @@ fn status_response(shared: &Shared, id: u64) -> EmbedResponse {
 
 fn features(eng: &std::sync::MutexGuard<'_, EngineSlot>, stub: bool) -> Vec<String> {
     let mut f = vec!["embed_texts".to_string()];
-    // Audio/image need the mtmd projector (Phase 4); the stub path fakes
-    // them so the plumbing is testable before then.
-    let media_ready = stub || eng.runtime.as_ref().is_some_and(|r| r.has_mtmd());
-    if media_ready {
+    if stub
+        || eng
+            .runtime
+            .as_ref()
+            .is_some_and(|r| r.mtmd_supports_audio())
+    {
         f.push("embed_audio".to_string());
+    }
+    if stub
+        || eng
+            .runtime
+            .as_ref()
+            .is_some_and(|r| r.mtmd_supports_vision())
+    {
         f.push("embed_image".to_string());
     }
     f
@@ -423,7 +430,14 @@ fn embed_texts_job(shared: &Shared, id: u64, texts: &[String]) -> EmbedResponse 
     }
 }
 
-fn embed_image_job(shared: &Shared, id: u64, path_str: &str) -> EmbedResponse {
+fn embed_image_job(shared: &Shared, id: u64, path_str: &str, token_budget: u32) -> EmbedResponse {
+    if !matches!(token_budget, 70 | 140 | 280) {
+        return EmbedResponse::Error {
+            id: Some(id),
+            code: EmbedErrorCode::InvalidRequest,
+            message: "image token budget must be70,140or280".into(),
+        };
+    }
     if shared.cfg.stub {
         if !shared.cfg.stub_delay.is_zero() {
             std::thread::sleep(shared.cfg.stub_delay);
@@ -440,7 +454,14 @@ fn embed_image_job(shared: &Shared, id: u64, path_str: &str) -> EmbedResponse {
     }
 
     let path = std::path::Path::new(path_str);
-    let wic = match ws_platform::wic::decode_image_wic(path, 1024) {
+    if !path.is_absolute() || !ws_platform::content::local_content_allowed(path) {
+        return EmbedResponse::Error {
+            id: Some(id),
+            code: EmbedErrorCode::InvalidRequest,
+            message: "image is not an allowed local file".into(),
+        };
+    }
+    let wic = match ws_platform::wic::decode_image_wic(path, 4096) {
         Ok(img) => img,
         Err(e) => {
             return EmbedResponse::Error {
@@ -458,7 +479,7 @@ fn embed_image_job(shared: &Shared, id: u64, path_str: &str) -> EmbedResponse {
             let dim = rt.n_embd();
             (
                 dim,
-                rt.embed_image(&rgb, wic.scaled_width, wic.scaled_height)
+                rt.embed_image_with_budget(&rgb, wic.scaled_width, wic.scaled_height, token_budget)
                     .map_err(|e| e.to_string()),
             )
         }
@@ -497,7 +518,19 @@ fn embed_image_job(shared: &Shared, id: u64, path_str: &str) -> EmbedResponse {
     }
 }
 
-fn embed_media_job(shared: &Shared, id: u64, seed: &str, _kind: &str) -> EmbedResponse {
+fn embed_audio_job(
+    shared: &Shared,
+    id: u64,
+    path: &str,
+    window: Option<(u64, u64)>,
+) -> EmbedResponse {
+    if window.is_some_and(|(s, e)| e <= s || e - s > 30_000 || e.checked_mul(16).is_none()) {
+        return EmbedResponse::Error {
+            id: Some(id),
+            code: EmbedErrorCode::InvalidRequest,
+            message: "invalid audio window".into(),
+        };
+    }
     if shared.cfg.stub {
         if !shared.cfg.stub_delay.is_zero() {
             std::thread::sleep(shared.cfg.stub_delay);
@@ -505,29 +538,58 @@ fn embed_media_job(shared: &Shared, id: u64, seed: &str, _kind: &str) -> EmbedRe
         served(shared);
         return EmbedResponse::Embeddings {
             id,
-            vecs: vec![stub_vector(seed, STUB_DIM)],
+            vecs: vec![stub_vector(&format!("audio:{path}:{window:?}"), STUB_DIM)],
             dim: STUB_DIM,
             backend: "stub".to_string(),
             stub: true,
         };
     }
+    let pcm = match crate::wav::read_pcm16(std::path::Path::new(path), window) {
+        Ok(pcm) => pcm,
+        Err(error) => {
+            return EmbedResponse::Error {
+                id: Some(id),
+                code: EmbedErrorCode::InvalidRequest,
+                message: format!("invalid PCM16 mono16k WAV: {error}"),
+            }
+        }
+    };
     let mut eng = shared.engine.lock().unwrap_or_else(|p| p.into_inner());
-    match ensure_runtime(&mut eng, shared) {
-        Ok(rt) if rt.has_mtmd() => EmbedResponse::Error {
-            // mtmd entry points return typed stubs until Phase 4 wires them.
+    let rt = match ensure_runtime(&mut eng, shared) {
+        Ok(rt) if rt.mtmd_supports_audio() => rt,
+        Ok(_) => {
+            return EmbedResponse::Error {
+                id: Some(id),
+                code: EmbedErrorCode::Unsupported,
+                message: "audio embedding requires a usable audio projector".into(),
+            }
+        }
+        Err(message) => {
+            return EmbedResponse::Error {
+                id: Some(id),
+                code: EmbedErrorCode::ModelNotAvailable,
+                message,
+            }
+        }
+    };
+    let dim = rt.n_embd();
+    let result = rt.embed_audio(&pcm);
+    let backend = eng.backend.clone().unwrap_or_else(|| "?".into());
+    match result {
+        Ok(vector) => {
+            eng.jobs_served += 1;
+            EmbedResponse::Embeddings {
+                id,
+                vecs: vec![vector],
+                dim,
+                backend,
+                stub: false,
+            }
+        }
+        Err(error) => EmbedResponse::Error {
             id: Some(id),
-            code: EmbedErrorCode::Unsupported,
-            message: "image/audio embedding is wired in Phase 4".into(),
-        },
-        Ok(_) => EmbedResponse::Error {
-            id: Some(id),
-            code: EmbedErrorCode::Unsupported,
-            message: "image/audio embedding needs the multimodal projector (Phase 4)".into(),
-        },
-        Err(message) => EmbedResponse::Error {
-            id: Some(id),
-            code: EmbedErrorCode::ModelNotAvailable,
-            message,
+            code: EmbedErrorCode::EmbedFailed,
+            message: error.to_string(),
         },
     }
 }
@@ -558,7 +620,7 @@ fn ensure_runtime<'a>(
                 path.display()
             ));
         }
-        let mmproj = paths::model_dir().join(MMPROJ_FILE);
+        let mmproj = path.with_file_name(MMPROJ_FILE);
         let opts = ws_embed::LoadOptions {
             backend: shared.cfg.backend,
             n_threads: std::thread::available_parallelism()
@@ -699,6 +761,7 @@ mod tests {
             &EmbedRequest::EmbedImage {
                 id: 4,
                 path: "C:\\p.png".into(),
+                token_budget: None,
             },
             &shared,
         ) else {
@@ -720,6 +783,63 @@ mod tests {
             panic!("expected shutdown_ack");
         };
         assert_eq!(id, 6);
+    }
+
+    #[test]
+    fn audio_worker_rejects_malformed_and_oversized_wav_before_loading() {
+        let path =
+            std::env::temp_dir().join(format!("winsearch-audio-red-{}.wav", std::process::id()));
+        let mut cfg = test_config();
+        cfg.stub = false;
+        cfg.model_path = Some(PathBuf::from("missing-model-for-wav-test.gguf"));
+        let shared = Shared::for_config(cfg);
+        for bytes in [b"not a wave".to_vec(), {
+            let mut wav = b"RIFF".to_vec();
+            wav.extend(u32::MAX.to_le_bytes());
+            wav.extend(b"WAVEfmt ");
+            wav.extend(u32::MAX.to_le_bytes());
+            wav
+        }] {
+            std::fs::write(&path, bytes).unwrap();
+            let Action::Respond(EmbedResponse::Error { code, .. }) = dispatch(
+                &EmbedRequest::EmbedAudio {
+                    id: 12,
+                    path: path.to_string_lossy().into_owned(),
+                    window_ms: None,
+                },
+                &shared,
+            ) else {
+                panic!("expected malformed WAV error")
+            };
+            assert_eq!(code, EmbedErrorCode::InvalidRequest);
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn audio_worker_rejects_invalid_windows_before_model_load() {
+        let mut cfg = test_config();
+        cfg.stub = false;
+        cfg.model_path = Some(PathBuf::from("missing-model-for-window-test.gguf"));
+        let shared = Shared::for_config(cfg);
+        for window_ms in [
+            Some((10, 10)),
+            Some((20, 10)),
+            Some((0, 30_001)),
+            Some((u64::MAX - 1, u64::MAX)),
+        ] {
+            let Action::Respond(EmbedResponse::Error { code, .. }) = dispatch(
+                &EmbedRequest::EmbedAudio {
+                    id: 11,
+                    path: "missing.wav".into(),
+                    window_ms,
+                },
+                &shared,
+            ) else {
+                panic!("expected invalid audio request")
+            };
+            assert_eq!(code, EmbedErrorCode::InvalidRequest);
+        }
     }
 
     #[test]

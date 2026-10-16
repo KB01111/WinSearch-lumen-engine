@@ -9,12 +9,11 @@
 #include "ggml-backend.h"
 #include "ggml.h"
 #include "mtmd.h"
-#include "mtmd-helper.h"
 
 #include <cstdint>
 #include <cstring>
-#include <string>
-#include <vector>
+#include <cmath>
+#include <memory>
 
 extern "C" {
 
@@ -125,17 +124,18 @@ int32_t wse_model_n_embd(const struct llama_model * model) {
 // multi-text batch fail with -1. Callers chunk to this size.
 #define WSE_N_SEQ_MAX 32
 
-// Creates an embedding-mode context. The pooling type is taken from the model
-// (pooling_type = UNSPECIFIED).
+// Creates an embedding-mode context with reference mean pooling.
 struct llama_context * wse_context_new(struct llama_model * model, uint32_t n_ctx, uint32_t n_batch, int32_t n_threads) {
     llama_context_params params = llama_context_default_params();
     params.n_ctx = n_ctx;
     params.n_batch = n_batch;
     params.n_ubatch = n_batch;
     params.n_seq_max = WSE_N_SEQ_MAX;
+    params.kv_unified = true;
     params.n_threads = n_threads;
     params.n_threads_batch = n_threads;
     params.embeddings = true;
+    params.pooling_type = LLAMA_POOLING_TYPE_MEAN;
     params.no_perf = true;
     return llama_init_from_model(model, params);
 }
@@ -220,12 +220,14 @@ int32_t wse_embed_batch(struct llama_context * ctx, const int32_t * tokens, cons
 // ---- multimodal (mtmd) -------------------------------------------------------
 
 // Opens the mmproj. use_gpu=false forces the projector onto CPU. Returns NULL on
-// failure. Vision/audio entry points are stubs until Phase 4 wires them.
+// failure. Inputs arrive at the reference's final pixel/token budget.
 mtmd_context * wse_mtmd_init(const char * mmproj_path, const struct llama_model * text_model, bool use_gpu, int32_t n_threads) {
     mtmd_context_params p = mtmd_context_params_default();
     p.use_gpu = use_gpu;
     p.n_threads = n_threads;
     p.warmup = false;
+    p.image_min_tokens = 1;
+    p.image_max_tokens = 1120;
     return mtmd_init_from_file(mmproj_path, text_model, p);
 }
 
@@ -241,16 +243,71 @@ int32_t wse_mtmd_supports_audio(const mtmd_context * ctx) {
     return mtmd_support_audio(ctx) ? 1 : 0;
 }
 
-// Encodes an RGB8 image (`width * height * 3` bytes) through the mtmd vision
-// projector + text model context and copies the pooled `n_embd` vector into `out`.
-// Returns 0 on success, non-zero on failure.
+// Bidirectional pooling needs BOS/media/EOS together, rather than incremental DECODE.
+static int32_t wse_embed_media(mtmd_context * mctx, llama_context * lctx,
+                               const mtmd_bitmap * bmp, int32_t n_embd, float * out) {
+    const llama_model * model = llama_get_model(lctx);
+    const int32_t stride = llama_model_n_embd_inp(model);
+    if (stride <= 0 || stride > 16384 || n_embd != llama_model_n_embd_out(model)) return -1;
+    const char * marker = mtmd_default_marker();
+    if (!marker) return -2;
+    std::unique_ptr<mtmd_input_chunks, decltype(&mtmd_input_chunks_free)> chunks(
+        mtmd_input_chunks_init(), mtmd_input_chunks_free);
+    std::unique_ptr<llama_batch_ext, decltype(&llama_batch_ext_free)> batch(
+        llama_batch_ext_init(lctx), llama_batch_ext_free);
+    if (!chunks || !batch) return -3;
+    mtmd_input_text text{marker, std::strlen(marker), true, true};
+    const mtmd_bitmap * bitmaps[] = {bmp};
+    if (mtmd_tokenize(mctx, chunks.get(), &text, bitmaps, 1) != 0) return -4;
+    const size_t count = mtmd_input_chunks_size(chunks.get());
+    if (count == 0 || count > 2048) return -4;
+    size_t total = 0;
+    for (size_t i = 0; i < count; ++i) {
+        const size_t n = mtmd_input_chunk_get_n_tokens(mtmd_input_chunks_get(chunks.get(), i));
+        if (n > 2048 - total) return -5;
+        total += n;
+    }
+    if (total == 0 || total > llama_n_batch(lctx) || total > llama_n_ubatch(lctx)) return -5;
+    llama_pos position = 0;
+    for (size_t i = 0; i < count; ++i) {
+        const mtmd_input_chunk * chunk = mtmd_input_chunks_get(chunks.get(), i);
+        const bool is_text = mtmd_input_chunk_get_type(chunk) == MTMD_INPUT_CHUNK_TYPE_TEXT;
+        size_t n = mtmd_input_chunk_get_n_tokens(chunk);
+        const llama_token * tokens = nullptr;
+        float * rows = nullptr;
+        if (is_text) {
+            tokens = mtmd_input_chunk_get_tokens_text(chunk, &n);
+            if (n != mtmd_input_chunk_get_n_tokens(chunk) || (n && !tokens)) return -6;
+        } else {
+            if (mtmd_encode_chunk(mctx, chunk) != 0) return -6;
+            rows = mtmd_get_output_embd(mctx);
+            if (n && !rows) return -6;
+        }
+        for (size_t row = 0; row < n; ++row) {
+            const int32_t index = is_text
+                ? llama_batch_ext_add_token(batch.get(), 0, tokens[row])
+                : llama_batch_ext_add_embd(batch.get(), 0, {rows + row * stride, 1, (size_t) stride});
+            const llama_pos pos[] = {position, 0, 0, 0};
+            if (index < 0 || !llama_batch_ext_set_pos(batch.get(), index, pos) ||
+                !llama_batch_ext_set_output_embd(batch.get(), index, true)) return -7;
+            ++position;
+        }
+    }
+    llama_memory_clear(llama_get_memory(lctx), true);
+    const int32_t rc = llama_process(lctx, LLAMA_PROCESS_TYPE_ENCODE, batch.get());
+    if (rc != 0) return rc;
+    const float * pooled = llama_get_embeddings_seq(lctx, 0);
+    if (!pooled) return -8;
+    std::memcpy(out, pooled, sizeof(float) * (size_t) n_embd);
+    return 0;
+}
+
 int32_t wse_mtmd_embed_image(
     mtmd_context * mctx,
     struct llama_context * lctx,
     const unsigned char * rgb,
     uint32_t width,
     uint32_t height,
-    int32_t n_batch,
     int32_t n_embd,
     float * out
 ) {
@@ -260,57 +317,24 @@ int32_t wse_mtmd_embed_image(
     if (!mtmd_support_vision(mctx)) {
         return -2;
     }
-    mtmd_bitmap * bmp = mtmd_bitmap_init(width, height, rgb);
-    if (!bmp) {
-        return -3;
-    }
-    const char * marker = mtmd_default_marker();
-    if (!marker) {
-        marker = "<__media__>";
-    }
-    mtmd_input_text inp_text;
-    inp_text.text = marker;
-    inp_text.text_len = std::strlen(marker);
-    inp_text.add_special = true;
-    inp_text.parse_special = true;
+    if (width > 13440 || height > 13440 || (uint64_t)width * height > 280 * 48 * 48) return -1;
+    try {
+        std::unique_ptr<mtmd_bitmap, decltype(&mtmd_bitmap_free)> bmp(
+            mtmd_bitmap_init(width, height, rgb), mtmd_bitmap_free);
+        return bmp ? wse_embed_media(mctx, lctx, bmp.get(), n_embd, out) : -3;
+    } catch (...) { return -9; }
+}
 
-    mtmd_input_chunks * chunks = mtmd_input_chunks_init();
-    const mtmd_bitmap * bitmaps[1] = { bmp };
-    int32_t tok_rc = mtmd_tokenize(mctx, chunks, &inp_text, bitmaps, 1);
-    if (tok_rc != 0) {
-        mtmd_input_chunks_free(chunks);
-        mtmd_bitmap_free(bmp);
-        return -4;
-    }
-
-    llama_memory_clear(llama_get_memory(lctx), true);
-    llama_pos new_n_past = 0;
-    int32_t eval_rc = mtmd_helper_eval_chunks(
-        mctx,
-        lctx,
-        chunks,
-        0,
-        0,
-        n_batch > 0 ? n_batch : 512,
-        true,
-        &new_n_past
-    );
-    int32_t rc = eval_rc;
-    if (rc == 0) {
-        float * e = llama_get_embeddings_seq(lctx, 0);
-        if (!e) {
-            e = llama_get_embeddings_ith(lctx, -1);
-        }
-        if (!e) {
-            rc = -5;
-        } else {
-            std::memcpy(out, e, sizeof(float) * (size_t) n_embd);
-        }
-    }
-
-    mtmd_input_chunks_free(chunks);
-    mtmd_bitmap_free(bmp);
-    return rc;
+int32_t wse_mtmd_embed_audio(mtmd_context * mctx, llama_context * lctx,
+                            const float * pcm, size_t n_samples, int32_t n_embd, float * out) {
+    if (!mctx || !lctx || !pcm || !out || n_embd <= 0 || n_samples == 0 || n_samples > 480000) return -1;
+    if (!mtmd_support_audio(mctx)) return -2;
+    for (size_t i = 0; i < n_samples; ++i) if (!std::isfinite(pcm[i])) return -1;
+    try {
+        std::unique_ptr<mtmd_bitmap, decltype(&mtmd_bitmap_free)> bmp(
+            mtmd_bitmap_init_from_audio(n_samples, pcm), mtmd_bitmap_free);
+        return bmp ? wse_embed_media(mctx, lctx, bmp.get(), n_embd, out) : -3;
+    } catch (...) { return -9; }
 }
 
 } // extern "C"

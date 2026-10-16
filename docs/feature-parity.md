@@ -58,9 +58,11 @@ implemented **and** verified. Legend: `[x]` done+verified · `[~]` partial ·
 ## Multimodal content
 
 - [~] Image semantic search (JPEG/PNG/WebP/HEIC/AVIF/TIFF/BMP/GIF/RAW) + EXIF (Phase 4) —
-      decoder/worker plumbing exists; mixed-encoder correctness fix pending
+      real CPU mixed encoder/reference and image retrieval pass; full format/EXIF,
+      final installed payload and UI acceptance remain required
 - [~] Screenshot search: visual + OCR text, exact error codes (Phase 4) —
-      OCR exists; genuine visual discrimination/reference checks pending
+      actual OCR and genuine visual discrimination/reference checks pass;
+      final combined screenshot retrieval/UI acceptance remains required
 - [~] PDF page-level search, scanned-page OCR, page numbers/thumbnails,
       first-30-pages fast path, 5,000-page cap, resumable (Phase 4) — native
       PDFium text/raster and installed WinRT OCR verified with generated PDFs;
@@ -69,9 +71,10 @@ implemented **and** verified. Legend: `[x]` done+verified · `[~]` partial ·
       distribution acceptance remain separate gates.
 - [~] Document search (txt/md/rtf/doc/docx/odt/html) with chunking, excerpts,
       numeric-content exact-only routing (Phase 4) — no-model exact persistence
-      and durable long-document continuation pending
+      and durable long-document continuation verified; final UI/package gates pending
 - [ ] Audio: 30 s overlapping windows, timestamp matches, player with
-      seek-to-match (Phase 4)
+      seek-to-match (Phase 4) — real bounded PCM runtime/reference/spoken retrieval
+      verified; decoder windows, durable extraction and player remain required
 - [ ] Video: periodic + shot-change frames, audio-track indexing, timestamp
       navigation, timeline markers (Phase 4)
 

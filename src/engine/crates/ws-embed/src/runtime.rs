@@ -214,7 +214,8 @@ impl EmbedRuntime {
 
         // SAFETY: model is live and owned by rt.
         let ctx_raw = unsafe {
-            ffi::wse_context_new(model.as_ptr(), DEFAULT_N_CTX, DEFAULT_N_BATCH, opts.n_threads)
+            ffi::wse_context_new(model.as_ptr(), DEFAULT_N_CTX,
+                if opts.mmproj.is_some() { DEFAULT_N_CTX } else { DEFAULT_N_BATCH }, opts.n_threads)
         };
         rt.ctx = Some(
             NonNull::new(ctx_raw)
@@ -277,16 +278,17 @@ impl EmbedRuntime {
         width: u32,
         height: u32,
     ) -> Result<Vec<f32>, EmbedError> {
-        let expected_len = (width as usize)
-            .checked_mul(height as usize)
-            .and_then(|px| px.checked_mul(3))
-            .ok_or_else(|| EmbedError::MtmdFailed("image dimensions overflow".into()))?;
-        if width == 0 || height == 0 || rgb.len() < expected_len {
-            return Err(EmbedError::MtmdFailed(format!(
-                "invalid RGB8 buffer: got {} bytes for {width}x{height}",
-                rgb.len()
-            )));
-        }
+        self.embed_image_with_budget(rgb, width, height, 280)
+    }
+
+    pub fn embed_image_with_budget(
+        &mut self,
+        rgb: &[u8],
+        width: u32,
+        height: u32,
+        token_budget: u32,
+    ) -> Result<Vec<f32>, EmbedError> {
+        let (rgb, width, height) = crate::image::prepare(rgb, width, height, token_budget)?;
         let mctx = self
             .mtmd
             .ok_or_else(|| EmbedError::MtmdFailed("mmproj not loaded".into()))?;
@@ -307,7 +309,6 @@ impl EmbedRuntime {
                 rgb.as_ptr(),
                 width,
                 height,
-                DEFAULT_N_BATCH as i32,
                 self.n_embd as i32,
                 out.as_mut_ptr(),
             )
@@ -315,13 +316,48 @@ impl EmbedRuntime {
         if rc != 0 {
             return Err(EmbedError::Decode(rc));
         }
-        l2_normalize(&mut out);
+        normalize_media(&mut out)?;
         Ok(out)
     }
 
-    /// Audio embedding entry point. Stubbed until Phase 4 wires mtmd encode.
-    pub fn embed_audio(&mut self, _pcm_f32_16k: &[f32]) -> Result<Vec<f32>, EmbedError> {
-        Err(EmbedError::MtmdFailed("audio embedding is wired in Phase 4".into()))
+    /// Embed finite mono16k PCM, at most30seconds; long recordings are windowed by extraction.
+    pub fn embed_audio(&mut self, pcm_f32_16k: &[f32]) -> Result<Vec<f32>, EmbedError> {
+        if pcm_f32_16k.is_empty()
+            || pcm_f32_16k.len() > 480_000
+            || pcm_f32_16k.iter().any(|v| !v.is_finite())
+        {
+            return Err(EmbedError::MtmdFailed(
+                "audio must contain 1..480000 finite mono16k samples".into(),
+            ));
+        }
+        let mctx = self
+            .mtmd
+            .ok_or_else(|| EmbedError::MtmdFailed("mmproj not loaded".into()))?;
+        let lctx = self
+            .ctx
+            .ok_or_else(|| EmbedError::ContextFailed("context released".into()))?;
+        if !self.mtmd_supports_audio() {
+            return Err(EmbedError::MtmdFailed(
+                "loaded mmproj does not support audio".into(),
+            ));
+        }
+        let mut out = vec![0f32; self.n_embd];
+        // SAFETY: live owned handles and validated bounded slices; native output is n_embd wide.
+        let rc = unsafe {
+            ffi::wse_mtmd_embed_audio(
+                mctx.as_ptr(),
+                lctx.as_ptr(),
+                pcm_f32_16k.as_ptr(),
+                pcm_f32_16k.len(),
+                self.n_embd as i32,
+                out.as_mut_ptr(),
+            )
+        };
+        if rc != 0 {
+            return Err(EmbedError::Decode(rc));
+        }
+        normalize_media(&mut out)?;
+        Ok(out)
     }
 
     /// Embed a batch of texts. Returns one L2-normalized vector per input, in order.
@@ -473,6 +509,17 @@ impl EmbedRuntime {
             unsafe { ffi::wse_model_free(m.as_ptr()) };
         }
     }
+}
+
+fn normalize_media(out: &mut [f32]) -> Result<(), EmbedError> {
+    if out.is_empty() || out.iter().any(|v| !v.is_finite()) || !out.iter().any(|v| *v != 0.0) {
+        return Err(EmbedError::MtmdFailed("invalid media vector".into()));
+    }
+    l2_normalize(out);
+    if out.iter().any(|v| !v.is_finite()) || !out.iter().any(|v| *v != 0.0) {
+        return Err(EmbedError::MtmdFailed("invalid normalized media vector".into()));
+    }
+    Ok(())
 }
 
 fn open_mtmd(

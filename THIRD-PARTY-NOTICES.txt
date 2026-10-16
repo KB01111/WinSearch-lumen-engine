@@ -104,3 +104,11 @@ WinSearch incorporates or references the following third-party software.
     Pin/hash: src/engine/third_party/pdfium.json; tools/fetch-pdfium.ps1 verifies
               the archive before extraction. Retain its LICENSE and licenses/*
               alongside the packaged extraction worker and pdfium.dll.
+
+17. DigUp reference sizing and synthetic media fixtures/vectors
+    Project:  https://github.com/ARahim3/DigUp
+    Snapshot: ec28973268b81f836be72187ff23b3a16ef4fd97
+    License:  MIT; Copyright (c) 2026 Abdur Rahim
+    Usage:    Pillow-compatible bicubic sizing port in ws-embed/src/image.rs;
+              independent native image/audio tests. Full license/provenance:
+              src/engine/crates/ws-embed/tests/fixtures/media/.

@@ -857,6 +857,103 @@ mod tests {
     }
 
     #[test]
+    fn legacy_media_pipeline_requeues_vectors_and_preserves_exact_chunks() {
+        let dir = temp_dir("legacy-media-pipeline");
+        let root = dir.join("source");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("keep.txt"), b"durableexact").unwrap();
+        let indexer = crate::indexer::Indexer::open(
+            ws_index::IndexStore::open_in_memory().unwrap(),
+            &[root.clone()],
+        )
+        .unwrap();
+        indexer.enqueue_initial_scan().unwrap();
+        while indexer.scan_available(64) > 0 {}
+        let (entry, before, generation) = {
+            let mut store = indexer.store_lock();
+            let entry = store
+                .find_by_path(&root.join("keep.txt").to_string_lossy())
+                .unwrap()
+                .unwrap()
+                .id;
+            let job = store
+                .claim_extract_jobs_batch_for_kind("doc", 1)
+                .unwrap()
+                .pop()
+                .unwrap();
+            let progress = store
+                .begin_content_batch(entry, "doc", "source-identity")
+                .unwrap();
+            let mut chunk = ws_index::model::ContentChunk {
+                id: 0,
+                entry_id: entry,
+                job_kind: "doc".into(),
+                kind: "doc".into(),
+                chunk_index: 0,
+                text: "durableexact".into(),
+                location: Default::default(),
+                embed: true,
+                visual: false,
+                attempts: 0,
+            };
+            chunk.location.line = Some(4);
+            assert!(store
+                .commit_content_batch(&job, &progress, &[chunk], None)
+                .unwrap());
+            let chunks = store.claim_content_vectors(Some(entry)).unwrap();
+            assert_eq!(chunks.len(), 1);
+            let generation = store.model_generation().unwrap();
+            assert!(store
+                .commit_content_vectors(&chunks, &[vec![1.0, 0.0]], progress.revision, generation)
+                .unwrap());
+            (
+                entry,
+                store.list_content_chunks(entry).unwrap(),
+                store.model_generation().unwrap(),
+            )
+        };
+        let mut legacy = serde_json::to_value(ModelCompat::current()).unwrap();
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("vector_pipeline_version");
+        indexer
+            .meta_set(EMBEDDING_MODEL_META_KEY, &legacy.to_string())
+            .unwrap();
+        let _service = ModelService::with_manager(
+            ws_modelmgr::ModelManager::new(dir.join("models")),
+            Arc::clone(&indexer),
+        );
+        let mut store = indexer.store_lock();
+        let retained = store.list_content_chunks(entry).unwrap();
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0].id, before[0].id);
+        assert_eq!(retained[0].text, "durableexact");
+        assert_eq!(retained[0].location.line, Some(4));
+        assert_eq!(
+            store
+                .content_matches(entry, &["durableexact".into()])
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(store.list_segments_for_entry(entry).unwrap().is_empty());
+        assert!(store.model_generation().unwrap() > generation);
+        assert!(
+            store
+                .content_progress(entry, "doc")
+                .unwrap()
+                .unwrap()
+                .complete
+        );
+        let pending = store.claim_content_vectors(Some(entry)).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, before[0].id);
+        drop(store);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn cancel_download_does_not_cancel_an_import() {
         let service = ModelService::new(temp_dir("import-cancel"), test_indexer());
         let cancel = Arc::new(AtomicBool::new(false));

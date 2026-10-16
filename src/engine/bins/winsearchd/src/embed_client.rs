@@ -593,10 +593,61 @@ impl EmbedSupervisor {
         path: &std::path::Path,
         timeout: Duration,
     ) -> Result<Vec<f32>, EmbedError> {
+        self.embed_image_with_budget_bounded(path, 280, timeout)
+    }
+
+    pub fn embed_image_with_budget_bounded(
+        self: &std::sync::Arc<Self>,
+        path: &std::path::Path,
+        token_budget: u32,
+        timeout: Duration,
+    ) -> Result<Vec<f32>, EmbedError> {
+        if !matches!(token_budget, 70 | 140 | 280) {
+            return Err(EmbedError::InvalidRequest(
+                "invalid image token budget".into(),
+            ));
+        }
+        self.embed_media_bounded(
+            EmbedRequest::EmbedImage {
+                id: 0,
+                path: path.to_string_lossy().into_owned(),
+                token_budget: Some(token_budget),
+            },
+            timeout,
+        )
+    }
+
+    pub fn embed_audio_bounded(
+        self: &std::sync::Arc<Self>,
+        path: &std::path::Path,
+        window_ms: Option<(u64, u64)>,
+        timeout: Duration,
+    ) -> Result<Vec<f32>, EmbedError> {
+        if window_ms.is_some_and(|(s, e)| e <= s || e - s > 30_000 || e.checked_mul(16).is_none()) {
+            return Err(EmbedError::InvalidRequest("invalid audio window".into()));
+        }
+        self.embed_media_bounded(
+            EmbedRequest::EmbedAudio {
+                id: 0,
+                path: path.to_string_lossy().into_owned(),
+                window_ms,
+            },
+            timeout,
+        )
+    }
+
+    fn embed_media_bounded(
+        self: &std::sync::Arc<Self>,
+        request: EmbedRequest,
+        timeout: Duration,
+    ) -> Result<Vec<f32>, EmbedError> {
         use std::sync::mpsc;
-        let path_str = path.to_string_lossy().into_owned();
-        if path_str.is_empty() {
-            return Err(EmbedError::InvalidRequest("empty image path".into()));
+        let path = match &request {
+            EmbedRequest::EmbedImage { path, .. } | EmbedRequest::EmbedAudio { path, .. } => path,
+            _ => unreachable!(),
+        };
+        if path.is_empty() {
+            return Err(EmbedError::InvalidRequest("empty media path".into()));
         }
         let call_id = self.cancel_seq.fetch_add(1, Ordering::Relaxed);
         self.begin_bounded();
@@ -606,15 +657,15 @@ impl EmbedSupervisor {
         let deadline = Instant::now() + timeout;
         let (tx, rx) = mpsc::channel();
         let spawned = std::thread::Builder::new()
-            .name("winsearch-embed-img".into())
+            .name("winsearch-embed-media".into())
             .spawn(move || {
-                let r = sup.embed_image_cancelable(call_id, &path_str, &cancel2, deadline);
+                let r = sup.embed_media_cancelable(call_id, request, &cancel2, deadline);
                 let _ = tx.send(r);
             });
         if let Err(e) = spawned {
             self.finish_bounded(false);
             return Err(EmbedError::Transport(format!(
-                "cannot spawn image embed helper: {e}"
+                "cannot spawn media embed helper: {e}"
             )));
         }
         let outcome = rx.recv_timeout(timeout);
@@ -627,39 +678,48 @@ impl EmbedSupervisor {
                 cancel.store(true, Ordering::Relaxed);
                 self.cancel_inflight_read_for(call_id);
                 self.finish_bounded(true);
-                warn!("image embed job timed out after {timeout:?}; helper cancelled");
+                warn!("media embed job timed out after {timeout:?}; helper cancelled");
                 Err(EmbedError::Transport(format!(
-                    "image embed job timed out after {timeout:?}"
+                    "media embed job timed out after {timeout:?}"
                 )))
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 self.finish_bounded(false);
                 Err(EmbedError::Transport(
-                    "image embed helper died before answering".into(),
+                    "media embed helper died before answering".into(),
                 ))
             }
         }
     }
 
-    fn embed_image_cancelable(
+    fn embed_media_cancelable(
         &self,
         call_id: u64,
-        path: &str,
+        request: EmbedRequest,
         cancel: &AtomicBool,
         deadline: Instant,
     ) -> Result<Vec<f32>, EmbedError> {
         if cancel.load(Ordering::Relaxed) || Instant::now() >= deadline {
-            return Err(EmbedError::Transport("image embed job cancelled".into()));
+            return Err(EmbedError::Transport("media embed job cancelled".into()));
         }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let req = EmbedRequest::EmbedImage {
-            id,
-            path: path.to_string(),
+        let make_request = |id| {
+            let mut req = request.clone();
+            match &mut req {
+                EmbedRequest::EmbedImage { id: request_id, .. }
+                | EmbedRequest::EmbedAudio { id: request_id, .. } => *request_id = id,
+                _ => unreachable!(),
+            }
+            req
         };
+        let req = make_request(id);
         let extract_first = |vecs: Vec<Vec<f32>>| -> Result<Vec<f32>, EmbedError> {
-            vecs.into_iter().next().ok_or_else(|| {
-                EmbedError::Protocol("embed_image returned empty vector list".into())
-            })
+            if vecs.len() != 1 {
+                return Err(EmbedError::Protocol(
+                    "media embedding returned wrong vector count".into(),
+                ));
+            }
+            Ok(vecs.into_iter().next().unwrap())
         };
         let mut used_gen = self.worker_gen.load(Ordering::Acquire);
         match self.transact_bounded(call_id, req, cancel, deadline, &mut used_gen) {
@@ -668,30 +728,23 @@ impl EmbedSupervisor {
                 extract_first(vecs)
             }
             Ok(other) => Err(EmbedError::Protocol(format!(
-                "unexpected reply to embed_image: {}",
+                "unexpected reply to media request: {}",
                 response_kind(&other)
             ))),
             Err(EmbedError::Transport(_)) => {
                 self.stats.lock().unwrap_or_else(|p| p.into_inner()).retries += 1;
-                info!("image embed job interrupted; restarting worker and retrying once");
+                info!("media embed job interrupted; restarting worker and retrying once");
                 let retry_id = self.next_id.fetch_add(1, Ordering::Relaxed);
-                let retry = EmbedRequest::EmbedImage {
-                    id: retry_id,
-                    path: path.to_string(),
-                };
-                match self.transact_bounded_after_restart(
-                    call_id,
-                    retry,
-                    cancel,
-                    deadline,
-                    used_gen,
-                ) {
+                let retry = make_request(retry_id);
+                match self
+                    .transact_bounded_after_restart(call_id, retry, cancel, deadline, used_gen)
+                {
                     Ok(EmbedResponse::Embeddings { vecs, .. }) => {
                         self.stats.lock().unwrap_or_else(|p| p.into_inner()).jobs += 1;
                         extract_first(vecs)
                     }
                     Ok(other) => Err(EmbedError::Protocol(format!(
-                        "unexpected reply to retried embed_image: {}",
+                        "unexpected reply to retried media request: {}",
                         response_kind(&other)
                     ))),
                     Err(e) => Err(e),
@@ -1864,7 +1917,7 @@ mod tests {
         #[test]
         fn real_worker_round_trips_a_text_batch() {
             let _serial = serial();
-            let sup = real_supervisor(&["--stub", "--idle-secs", "60"]);
+            let sup = std::sync::Arc::new(real_supervisor(&["--stub", "--idle-secs", "60"]));
             assert!(!sup.is_worker_running(), "nothing spawned yet (lazy)");
 
             let texts = vec![
@@ -1887,6 +1940,13 @@ mod tests {
             let snap = sup.ping().expect("health ping");
             assert!(snap.stub);
             assert!(snap.jobs_served >= 2);
+            let image = sup.embed_image_with_budget_bounded(std::path::Path::new(r"C:\fixture.png"), 70, Duration::from_secs(5)).unwrap();
+            let audio = sup.embed_audio_bounded(std::path::Path::new(r"C:\fixture.wav"), Some((0,30_000)), Duration::from_secs(5)).unwrap();
+            assert_eq!(image.len(), ws_embed_protocol::STUB_DIM);
+            assert_eq!(audio.len(), ws_embed_protocol::STUB_DIM);
+            assert_ne!(image, audio);
+            assert!(sup.embed_image_with_budget_bounded(std::path::Path::new(r"C:\fixture.png"), 71, Duration::from_secs(5)).is_err());
+            assert!(sup.embed_audio_bounded(std::path::Path::new(r"C:\fixture.wav"), Some((0,30_001)), Duration::from_secs(5)).is_err());
             sup.terminate_worker();
         }
 
