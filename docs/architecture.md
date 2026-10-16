@@ -249,6 +249,10 @@ without reparsing. Source/revision/policy/space checks guard both commits.
 Empty, zero, and nonfinite vectors never enter `segments` from this stage.
 
 `IndexStore::content_matches` joins matching FTS rows to their own locations.
+Its query-time `ContentMatch.match_byte` is the original UTF-8 byte offset of
+the first highlighted FTS token. Line and excerpt use this same anchor, so
+accent-normalized queries retain the actual matching source text. Literal
+highlight-marker data is handled with a marker absent from that source row.
 `SearchHit.matches` and the additive wire excerpts/matching moments preserve
 multiple matching chunks for a grouped file result. These interfaces carry
 up to 32 moments on the primary result path; `content_matches_page` exposes

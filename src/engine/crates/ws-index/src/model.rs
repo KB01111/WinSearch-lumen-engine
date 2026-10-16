@@ -155,6 +155,9 @@ pub struct SearchHit {
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct ContentMatch {
     pub excerpt: String,
+    /// Original UTF-8 byte offset of the first FTS match; independent of query normalization.
+    #[serde(default)]
+    pub match_byte: Option<usize>,
     pub page: Option<u32>,
     pub start_ms: Option<u64>,
     pub end_ms: Option<u64>,

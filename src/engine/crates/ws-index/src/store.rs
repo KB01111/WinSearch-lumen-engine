@@ -247,6 +247,7 @@ impl IndexStore {
                 text: r.get(5)?,
                 location: crate::model::ContentMatch {
                     excerpt: String::new(),
+                    match_byte: None,
                     page: r.get(6)?,
                     start_ms: r.get::<_, Option<i64>>(7)?.map(|n| n as u64),
                     end_ms: r.get::<_, Option<i64>>(8)?.map(|n| n as u64),

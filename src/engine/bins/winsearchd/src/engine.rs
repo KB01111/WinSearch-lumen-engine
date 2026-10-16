@@ -856,7 +856,10 @@ impl EngineService {
                             .matches
                             .iter()
                             .map(|m| ws_protocol::MatchingMoment {
-                                excerpt: ws_extract::select_excerpt(&m.excerpt, &terms, 240),
+                                excerpt: match m.match_byte {
+                                    Some(offset) => ws_extract::select_excerpt_at(&m.excerpt, offset, 240),
+                                    None => ws_extract::select_excerpt(&m.excerpt, &terms, 240),
+                                },
                                 location: m
                                     .page
                                     .map(|page| MatchLocation::Page { page })
@@ -1184,6 +1187,36 @@ mod tests {
         assert_eq!(result.location, Some(MatchLocation::Line { line: 2 }));
         assert_eq!(result.matching_moments.len(), 1);
         assert_eq!(result.matching_moments[0].location, result.location);
+    }
+
+    #[test]
+    fn task2_normalized_fts_excerpts_anchor_primary_and_all_moments() {
+        for matched in ["café", "cafe\u{301}"] {
+            let tree = TempTree::new();
+            // The first source marker is literal data, and multibyte leading text
+            // makes an original byte offset differ from a character offset.
+            let padding = format!("\u{1}界 {}", "decafélate intro ".repeat(60));
+            let body = format!("{padding}\n{matched} invoice detail\n{padding}\n{matched} second detail\n");
+            fs::write(tree.0.join("normalized.txt"), &body).unwrap();
+            let engine = service_with(&tree, &[]);
+            engine.indexer.extract_once_with(&crate::extract::ExtractorRegistry::default(), |_| {
+                Err("model unavailable".into())
+            }).unwrap();
+            let results = engine.plan_results(&query("cafe"));
+            let result = results.iter().find(|r| r.title == "normalized.txt").unwrap();
+            let excerpt = result.excerpt.as_ref().unwrap();
+            assert!(excerpt.contains(&format!("{matched} invoice detail")), "primary excerpt omitted normalized match: {excerpt:?}");
+            assert_eq!(result.location, Some(MatchLocation::Line { line: 2 }));
+            assert!(result.matching_moments.len() >= 2);
+            assert!(result.matching_moments.iter().any(|m| m.location == Some(MatchLocation::Line { line: 4 })));
+            for moment in &result.matching_moments {
+                assert!(moment.excerpt.contains(&format!("{matched} ")), "moment omitted normalized match: {:?}", moment.excerpt);
+                assert!(moment.excerpt.chars().count() <= 240);
+                assert!(matches!(moment.location, Some(MatchLocation::Line { line: 2 | 4 })));
+            }
+            assert_eq!(Some(&result.matching_moments[0].excerpt), result.excerpt.as_ref());
+            assert_eq!(result.matching_moments[0].location, result.location);
+        }
     }
 
     #[test]

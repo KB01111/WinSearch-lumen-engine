@@ -135,7 +135,7 @@ impl IndexStore {
         if expression.is_empty() {
             return Ok(Vec::new());
         }
-        let mut stmt=self.conn().prepare("SELECT f.text,c.page,c.start_ms,c.end_ms,c.line,c.thumbnail_path,highlight(content_fts,2,char(1),char(2)) FROM content_fts f LEFT JOIN content_chunks c ON c.id=f.rowid AND c.entry_id=CAST(f.entry_id AS INTEGER) WHERE content_fts MATCH ?1 AND CAST(f.entry_id AS INTEGER)=?2 AND EXISTS(SELECT 1 FROM visible_entries e WHERE e.id=?2 AND e.missing=0) ORDER BY f.rowid LIMIT ?3 OFFSET ?4")?;
+        let mut stmt=self.conn().prepare("SELECT f.text,c.page,c.start_ms,c.end_ms,c.line,c.thumbnail_path,highlight(content_fts,2,char(1),char(2)),f.rowid FROM content_fts f LEFT JOIN content_chunks c ON c.id=f.rowid AND c.entry_id=CAST(f.entry_id AS INTEGER) WHERE content_fts MATCH ?1 AND CAST(f.entry_id AS INTEGER)=?2 AND EXISTS(SELECT 1 FROM visible_entries e WHERE e.id=?2 AND e.missing=0) ORDER BY f.rowid LIMIT ?3 OFFSET ?4")?;
         let rows = stmt.query_map(
             params![
                 expression,
@@ -144,21 +144,34 @@ impl IndexStore {
                 offset.min(i64::MAX as usize) as i64
             ],
             |r| {
+                let text: String = r.get(0)?;
+                let mut marker = "\u{1}".to_string();
+                while text.contains(&marker) {
+                    marker = marker.repeat(2);
+                }
+                // Literal control characters in source text must not masquerade as highlights.
+                let highlighted: String = if marker.len() == 1 {
+                    r.get(6)?
+                } else {
+                    self.conn().query_row(
+                        "SELECT highlight(content_fts,2,?1,'') FROM content_fts WHERE content_fts MATCH ?2 AND rowid=?3",
+                        params![marker, expression, r.get::<_, i64>(7)?],
+                        |row| row.get(0),
+                    )?
+                };
+                let match_byte = highlighted.find(&marker);
                 let line: Option<u32> = r.get(4)?;
-                let highlighted: String = r.get(6)?;
                 let line = line.map(|n| {
                     n.saturating_add(
-                        highlighted
-                            .split('\u{1}')
-                            .next()
-                            .unwrap_or("")
+                        text[..match_byte.unwrap_or(0)]
                             .bytes()
                             .filter(|b| *b == b'\n')
                             .count() as u32,
                     )
                 });
                 Ok(crate::model::ContentMatch {
-                    excerpt: r.get(0)?,
+                    excerpt: text,
+                    match_byte,
                     page: r.get(1)?,
                     start_ms: r.get::<_, Option<i64>>(2)?.map(|n| n as u64),
                     end_ms: r.get::<_, Option<i64>>(3)?.map(|n| n as u64),

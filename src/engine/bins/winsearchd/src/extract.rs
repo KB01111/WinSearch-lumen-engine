@@ -418,6 +418,7 @@ impl Indexer {
                 text: d.text.clone(),
                 location: ContentMatch {
                     excerpt: String::new(),
+                    match_byte: None,
                     page: d.page,
                     start_ms: d.start_ms,
                     end_ms: d.end_ms,

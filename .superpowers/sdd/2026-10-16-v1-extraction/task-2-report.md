@@ -1,6 +1,6 @@
 # Task 2 implementation report
 
-Status: DONE. Final selected-suite verification passed on the committed source. Scope is durable existing text/image extraction, exact match locations, and deferred vectors. Native PDF pages, audio/video, and frontend explorer are separate tasks.
+Status: DONE. Initial implementation selected-suite verification passed at `c142d96`; the subsequent review fix and its scoped verification are recorded below. Scope is durable existing text/image extraction, exact match locations, and deferred vectors. Native PDF pages, audio/video, and frontend explorer are separate tasks.
 
 ## Changes
 
@@ -69,7 +69,7 @@ Additional green behavior in the selected suite:
 
 There were also development-only compile/setup failures (test handler visibility/import fixes, new additive fields missing from one old Rust literal, a selective formatting import reorder, PowerShell stderr redirection, a Python encoding/newline issue in the temporary native-red helper, and one overlapping Windows test executable linker lock). These were corrected; none is represented as a behavioral RED or a passing gate. No test was disabled or ignored. The old native assertions that nonzero document cursors were unsupported and capped totals unknown were replaced with stronger continuation/known-total assertions because those Task 1 limitations are precisely removed here. The small-file scheduling test now explicitly drains 30-chunk continuations before its original zero-backlog assertion.
 
-## Final verification
+## Initial implementation verification (`c142d96`)
 
 - `rtk cargo build -p winsearch-extract -p winsearchd`: passed before native batch tests; seven preexisting daemon dead-code warning groups remain. No blanket warning suppression or warning-only scope added.
 - `rtk proxy powershell -NoProfile -File target/task2-checks.ps1` runs the build and isolated selected suite: `cargo test -p ws-protocol -p ws-platform -p ws-index -p ws-extract -p ws-embed-protocol -p winsearchd -p winsearch-extract -- --test-threads=1`.
@@ -85,3 +85,21 @@ Reviewed transaction rollback/replay behavior, FK/FTS cleanup and legacy numeric
 Generated fixtures and injected vectors are explicitly identified above. Existing real-binary embedding transport tests reuse the unchanged ignored `winsearch-embed.exe`/DLLs and their existing stub modes; no embedding inference binary was rebuilt and no new live-model inference claim is made. No normal personal-content daemon or UI was launched. No personal content was read, no download was needed, and no provider data was sent.
 
 Current document continuation reconstructs and rechunks bounded source text for each batch rather than saving parser-internal state. The durable chunk cursor prevents duplicate commits and full reparsing for deferred embeddings, but does not make long-document parsing itself streaming. Exact legacy rows with no authoritative location retain a missing location. The primary result carries the first 32 matching moments; the remaining persisted moments require the index-local paged API. Dedicated PDF/native audio/video, explorer consumers, packaging, real model quality/latency and other tasks retain their own acceptance gates.
+
+## Review fix round 1
+
+Addressed Important I1 from `task-2-review.md` against fix base `c142d96cfb3360f54edebe54cb156713f7e202bd`. The review correctly identified that FTS `unicode61 remove_diacritics 2` can match `cafe` against late source `café`, while the literal query-based excerpt selector falls back to the opening text. FTS normalization, ranking, thresholds, and policy filtering are unchanged.
+
+- Added optional, default-compatible index-local `ContentMatch.match_byte`, computed from the first FTS-highlighted token in original UTF-8 text. The same original-text prefix determines the actual match line. If source text contains the normal highlight marker, the query uses an absent marker before deriving that offset, so literal marker data cannot become a false anchor. This is query metadata rather than persisted schema or new public IPC content.
+- Added `ws_extract::select_excerpt_at` and reused the existing excerpt renderer for bounded 240-character excerpts and whitespace collapse. The authoritative original byte offset maps through that collapse without searching the query again. Both the primary excerpt and every `matching_moments` excerpt use this common mapping. Existing literal query-based selection remains available for callers without an authoritative anchor.
+- The public engine regression uses a generated file with the match near character 1000, unrelated `decafélate` substrings in earlier padding, multibyte leading text, literal highlight-marker data, composed `café` and decomposed `cafe\u{301}` variants, and matching moments on actual lines 2 and 4. It asserts actual matching source text in the primary excerpt and all moments, the relevant line, shared primary/first-moment metadata, and the 240-character bound. A focused selector regression verifies original byte anchoring through collapsed Unicode/ASCII whitespace, plus a zero-length excerpt budget.
+
+Runtime RED, before the fix: `rtk cargo test -p winsearchd task2_normalized_fts_excerpts_anchor_primary_and_all_moments --bin winsearchd -- --test-threads=1` produced **0 passed, 1 failed, 133 filtered out**. Assertion: `primary excerpt omitted normalized match`, with the returned excerpt consisting of opening `decafélate intro` padding. Runtime GREEN after the fix: the same command passed **1 test**, 133 filtered out, in 0.07 seconds.
+
+Focused covering verification on the amended source:
+
+- `rtk cargo test -p ws-index -p ws-extract --lib -- --test-threads=1`: **103 passed, 0 failed, 0 ignored** (index 74, extract 29), 1.25 seconds.
+- `rtk cargo test -p winsearchd engine::tests --bin winsearchd -- --test-threads=1`: **27 passed, 0 failed, 0 ignored**, 107 filtered out, 0.36 seconds.
+- `rtk git diff --check`: passed.
+
+No unchanged broad/native worker/model suite or .NET/WinUI checks were repeated for this index-local excerpt correction; the earlier checks remain identified by their implementation revision above. No C# or wire schema changed. The seven baseline warning groups remain ledgered for final whole-v1 review as requested. Native PDF/media/model-quality and complete-v1 acceptance stay with their downstream tasks. No new scratch report or planning files were added to Git.

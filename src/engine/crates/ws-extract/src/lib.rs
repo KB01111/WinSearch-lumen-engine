@@ -18,7 +18,7 @@ pub use budget::{
     ExtractBudget, DEFAULT_EXTRACT_TIMEOUT, DEFAULT_MAX_FILE_BYTES, DEFAULT_MAX_SEGMENTS,
 };
 pub use chunk::{
-    chunk_text, chunk_text_default, chunk_text_with_lines, select_excerpt, TextChunk,
+    chunk_text, chunk_text_default, chunk_text_with_lines, select_excerpt, select_excerpt_at, TextChunk,
     DEFAULT_CHUNK_CHARS, DEFAULT_EXCERPT_CHARS, DEFAULT_OVERLAP_CHARS, DEFAULT_OVERLAP_RATIO,
 };
 pub use docs::{build_document_output, is_numeric_dominated, strip_rtf, DocumentExtractor};
