@@ -24,6 +24,8 @@ use ws_platform::child_job::ChildJob;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExtractClientError {
+    #[error("extraction admission unavailable while previous cleanup is pending")]
+    AdmissionUnavailable,
     #[error("extraction batch timed out")]
     Timeout,
     #[error("extraction cancelled by policy or source change")]
@@ -51,6 +53,10 @@ pub struct ExtractClient {
 }
 
 impl ExtractClient {
+    pub fn admission_available(&self) -> bool {
+        self.cleanup_pending.load(Ordering::Acquire) == 0
+    }
+
     pub fn new(worker_bin: PathBuf, cache_dir: PathBuf) -> Self {
         Self {
             worker_bin,
@@ -102,10 +108,8 @@ impl ExtractClient {
         timeout: Duration,
         allowed: impl Fn() -> bool,
     ) -> Result<ExtractResponse, ExtractClientError> {
-        if self.cleanup_pending.load(Ordering::Acquire) != 0 {
-            return Err(ExtractClientError::Worker(
-                "previous extraction cleanup is still pending".into(),
-            ));
+        if !self.admission_available() {
+            return Err(ExtractClientError::AdmissionUnavailable);
         }
         let deadline = Instant::now() + timeout;
         let frame = encode_request(request).map_err(ExtractClientError::Malformed)?;
@@ -588,7 +592,7 @@ fn retain_cleanup(cleanup: RetainedCleanup) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::path::Path;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -660,6 +664,63 @@ mod tests {
                     "owned process {pid} survived cleanup"
                 );
                 CloseHandle(handle).unwrap();
+            }
+        }
+    }
+
+    pub(crate) struct CleanupFixture {
+        release: Option<mpsc::Sender<()>>,
+        pending: Arc<AtomicUsize>,
+    }
+    impl Drop for CleanupFixture {
+        fn drop(&mut self) {
+            self.release.take();
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while self.pending.load(Ordering::Acquire) != 0 && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
+
+    pub(crate) fn cleanup_trigger(
+        client: &ExtractClient,
+        root: PathBuf,
+    ) -> impl Fn() -> CleanupFixture + Send + Sync + 'static {
+        let pending = Arc::clone(&client.cleanup_pending);
+        let binary = fixture();
+        move || {
+            let mut command = Command::new(&binary);
+            command
+                .arg("never-read")
+                .arg(root.join("cleanup-fixture.pid"))
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped());
+            let mut job = ChildJob::spawn(&mut command).unwrap();
+            let stdin = job.child_mut().stdin.take().unwrap();
+            let stdout = job.child_mut().stdout.take().unwrap();
+            let (release, released) = mpsc::channel();
+            let task = thread::spawn(move || {
+                let _ = released.recv();
+                drop((stdin, stdout));
+            });
+            let mut exchange = Exchange {
+                job: Some(job),
+                writer: Some(task),
+                reader: None,
+                closed: false,
+            };
+            assert!(exchange.close().is_err());
+            let scratch = root.join("retained-cleanup-scratch");
+            std::fs::create_dir(&scratch).unwrap();
+            pending.fetch_add(1, Ordering::AcqRel);
+            retain_cleanup(RetainedCleanup {
+                exchange: exchange.take_owned(),
+                scratch: Scratch(Some(scratch)),
+                pending: Some(Arc::clone(&pending)),
+            });
+            CleanupFixture {
+                release: Some(release),
+                pending: Arc::clone(&pending),
             }
         }
     }
@@ -764,9 +825,10 @@ mod tests {
         assert_eq!(pending.load(Ordering::Acquire), 1);
         let denied = client.request(tree.0.join("fixture.txt"), "doc", 256);
         let denied_result = client.extract_while(&denied, Duration::from_secs(1), || true);
-        assert!(
-            matches!(denied_result, Err(ExtractClientError::Worker(ref message)) if message.contains("cleanup is still pending"))
-        );
+        assert!(matches!(
+            denied_result,
+            Err(ExtractClientError::AdmissionUnavailable)
+        ));
         assert!(
             !denied.scratch_dir.exists(),
             "pending cleanup must block another child before setup"

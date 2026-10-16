@@ -35,6 +35,8 @@ pub const EXTRACT_WORKER_THREADS: usize = 2;
 /// Outcome of processing at most one content extraction job (`extract_once_with`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ExtractStepOutcome {
+    /// Worker admission is temporarily unavailable; wait without charging a file failure.
+    pub admission_unavailable: bool,
     /// True if a pending content job was claimed.
     pub claimed: bool,
     /// Status reported by the extractor (when a job ran).
@@ -78,6 +80,10 @@ impl Default for ExtractorRegistry {
 pub type ExtractionPool = ExtractorRegistry;
 
 impl ExtractorRegistry {
+    fn admission_available(&self) -> bool {
+        self.worker.as_ref().is_none_or(ExtractClient::admission_available)
+    }
+
     /// Production never opens content through an in-process parser.
     pub fn production() -> Self {
         Self {
@@ -141,10 +147,16 @@ impl Indexer {
         FI: Fn(&Path) -> Result<Option<Vec<f32>>, String>,
     {
         if self.indexing_pause_reason().is_some() { return Ok(ExtractStepOutcome::default()); }
+        if !registry.admission_available() {
+            return Ok(ExtractStepOutcome { admission_unavailable: true, ..Default::default() });
+        }
         // 1. Claim highest-priority non-name job and snapshot entry metadata.
         let claimed = {
             let mut store = self.store_lock();
             if self.indexing_pause_reason().is_some() { return Ok(ExtractStepOutcome::default()); }
+            if !registry.admission_available() {
+                return Ok(ExtractStepOutcome { admission_unavailable: true, ..Default::default() });
+            }
             let Some(job) = store.claim_content_extract_job()? else {
                 return Ok(ExtractStepOutcome::default());
             };
@@ -204,6 +216,10 @@ impl Indexer {
                     && source_unchanged()
             }) {
                 Ok(response) => Ok(response.output),
+                Err(ExtractClientError::AdmissionUnavailable) => {
+                    self.store_lock().requeue_extract_job(job.id)?;
+                    return Ok(ExtractStepOutcome { claimed: true, requeued: true, admission_unavailable: true, ..Default::default() });
+                }
                 Err(ExtractClientError::Cancelled) => {
                     self.store_lock().requeue_extract_job(job.id)?;
                     return Ok(ExtractStepOutcome { claimed: true, requeued: true, ..Default::default() });
@@ -489,6 +505,7 @@ impl Indexer {
         drop(store);
         self.invalidate_vector_cache();
         Ok(ExtractStepOutcome {
+            admission_unavailable: false,
             claimed: true,
             status: Some(output.status),
             segments_stored: stored,
@@ -541,6 +558,9 @@ impl Indexer {
                             return;
                         }
                         match indexer.extract_once_with_supervisor(&reg, &sup) {
+                            Ok(out) if out.admission_unavailable => {
+                                std::thread::sleep(std::time::Duration::from_millis(100));
+                            }
                             Ok(out) if !out.claimed => {
                                 indexer.wait_for_work();
                             }
@@ -679,6 +699,77 @@ mod tests {
         let hits = indexer.search(&SearchRequest { text: "uniqueworkerfixture".into(), limit: 10, ..Default::default() }).unwrap();
         assert_eq!(hits.len(), 1);
         assert!(fs::read_dir(cache.0.join("extract")).unwrap().next().is_none());
+    }
+
+    fn retained_cleanup_preserves_unrelated_jobs(after_claim: bool) {
+        use crate::extract_client::tests::cleanup_trigger;
+        use std::sync::Mutex;
+        let tree = TempTree::new();
+        let cache = TempTree::new();
+        let words = ["unrelatedcleanupalpha", "unrelatedcleanupbeta"];
+        let paths: Vec<_> = words.iter().enumerate().map(|(i, word)| {
+            let path = tree.0.join(format!("fixture{i}.txt"));
+            fs::write(&path, word).unwrap(); path
+        }).collect();
+        let indexer = seeded_indexer(&tree);
+        let initial = ExtractorRegistry::default();
+        while indexer.content_extract_queue_depth().unwrap() > 0 {
+            indexer.extract_once_with(&initial, fake_embed).unwrap();
+        }
+        let before: Vec<_> = paths.iter().map(|path| {
+            let mut store = indexer.store_lock();
+            let entry = store.find_by_path(&path.to_string_lossy()).unwrap().unwrap();
+            let segments = store.list_segments_for_entry(entry.id).unwrap();
+            store.enqueue_extract_job(entry.id, SEGMENT_KIND_DOC).unwrap();
+            let job = store.find_extract_job(entry.id, SEGMENT_KIND_DOC).unwrap().unwrap();
+            (job, segments)
+        }).collect();
+        let mut registry = process_registry(&cache);
+        let trigger = cleanup_trigger(registry.worker.as_ref().unwrap(), cache.0.clone());
+        let held = Arc::new(Mutex::new(None));
+        if after_claim {
+            let slot = Arc::clone(&held);
+            registry.set_budget_factory(move |_| {
+                let mut fixture = slot.lock().unwrap();
+                if fixture.is_none() { *fixture = Some(trigger()); }
+                ExtractBudget::default()
+            });
+        } else {
+            *held.lock().unwrap() = Some(trigger());
+        }
+        for step in 0..8 {
+            let outcome = indexer.extract_once_with(&registry, fake_embed).unwrap();
+            assert!(outcome.admission_unavailable);
+            assert!(!outcome.failed && !outcome.poisoned && outcome.status.is_none());
+            assert_eq!(outcome.claimed, after_claim && step == 0);
+            assert_eq!(outcome.requeued, after_claim && step == 0);
+        }
+        for (job, segments) in &before {
+            let store = indexer.store_lock();
+            assert_eq!(store.get_extract_job(job.id).unwrap().as_ref(), Some(job), "admission unavailability consumed unrelated job state/attempts");
+            assert_eq!(&store.list_segments_for_entry(job.entry_id).unwrap(), segments, "admission unavailability erased existing vectors");
+        }
+        for word in words {
+            assert_eq!(indexer.search(&SearchRequest { text: word.into(), limit: 10, ..Default::default() }).unwrap().len(), 1, "admission unavailability erased existing FTS artifacts");
+        }
+        registry.set_budget_factory(|_| ExtractBudget::default());
+        drop(held.lock().unwrap().take());
+        for _ in 0..2 {
+            let result = indexer.extract_once_with(&registry, fake_embed).unwrap();
+            assert_eq!(result.status, Some(ExtractionStatus::Extracted));
+            assert_eq!(result.segments_stored, 1);
+        }
+        assert_eq!(indexer.content_extract_queue_depth().unwrap(), 0);
+    }
+
+    #[test]
+    fn native_retained_cleanup_before_claim_preserves_unrelated_queue_and_artifacts() {
+        retained_cleanup_preserves_unrelated_jobs(false);
+    }
+
+    #[test]
+    fn native_retained_cleanup_after_claim_preserves_unrelated_queue_and_artifacts() {
+        retained_cleanup_preserves_unrelated_jobs(true);
     }
 
     #[test]

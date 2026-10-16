@@ -74,3 +74,18 @@ GREEN after the respective fixes: each command above passed **1 test**, 121 filt
 The seven previously captured daemon warning diagnostics were at `catalog.rs:65` (`scan_catalog`), `embed_client.rs:111` (`WorkerSnapshot`), `embed_client.rs:300` (unused supervisor methods, also lines 307/386/706/742/766/861), `engine.rs:103` (unused entrypoints/hooks, also 113/153/158/261), `extract.rs:95` (`set_budget_factory`), `extract.rs:119` (`extract_once_with`), and `indexer.rs:473` (fixture statistics methods, also 478/486). Their cleanup is deferred per controller instruction; no blanket warning suppression or extra warning-only build was added.
 
 If Windows cannot verify termination, cleanup remains explicitly pending and owned, and that client stays blocked; this is not reported as successful cleanup. Later batching/media/package acceptance remains outside Task 1.
+
+## Review fix round 2
+
+Addressed the new Important queue-integration finding from `task-1-rereview-1.md` without changing store schema or failure thresholds.
+
+- Added a distinct `ExtractClientError::AdmissionUnavailable` result and a read-only admission query. Pending retained cleanup is no longer classified as an extraction/IO failure.
+- The indexer checks admission before claiming and again under the store lock. If cleanup starts between claim and client admission, the existing no-failure `requeue_extract_job` operation releases the claim without incrementing attempts or touching FTS, vectors, or thumbnails. The explicit `ExtractStepOutcome::admission_unavailable` flag keeps this state separate from idle work and actual per-file failures.
+- Both production extraction slots take a 100 ms backoff on admission unavailability, then recheck readiness. They neither consume claims in a busy loop nor wait for an unrelated index notification to resume.
+- Added two indexer-level regressions using an actual owned native child, a delayed thread owning its real pipe endpoints, and the retained reaper. One holds cleanup before the claim; the other triggers it from the budget factory after a real claim. Each repeatedly attempts unrelated queued files, verifies exact unchanged job state/claimed flags/attempts/priority, preserves complete stored vector segments and searchable FTS artifacts, releases cleanup, and verifies successful actual-worker processing of both files afterward. The fixture utility exists only under `cfg(test)` and does not change production providers.
+
+RED: `rtk cargo test -p winsearchd native_retained_cleanup_ --bin winsearchd -- --test-threads=1` produced **0 passed, 2 failed, 122 filtered out**. Both assertions reported `admission unavailability consumed unrelated job state/attempts`: the actual jobs had **attempts: 3** instead of their original **attempts: 0**, reproducing the caller/store failure-budget bug before either production fix.
+
+GREEN: the same command passed **2 tests, 0 failures, 122 filtered out** in 3.63 seconds. After final outcome assertions, `rtk cargo test -p winsearchd extract --bin winsearchd` passed **21 tests, 0 failures, 0 ignored, 103 filtered out** in 2.20 seconds, covering the native transport/retained-owner/junction cases and the new queue integration regressions. `rtk git diff --check` and focused `rustfmt --check` for `extract_client.rs` passed. No unrelated suite/build or warning-only cleanup was added.
+
+Changed source is limited to `extract_client.rs`, `extract.rs`, and this report. Existing seven build warnings and later batching/media/package gates remain deferred. Review of the final error path confirms admission unavailability returns before `fail_extract_job_capped` and artifact clearing; existing actual extraction failures retain their previous retry/poison policy.
