@@ -1,5 +1,6 @@
 //! Task-owned hostile transport fixture. Never installed with the application.
 use std::io::{Read, Write};
+use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -40,7 +41,24 @@ fn main() {
             std::io::stdout().write_all(&40u32.to_le_bytes()).unwrap();
             std::io::stdout().write_all(b"{}").unwrap();
         }
-        "outside" => {
+        "outside" | "replace-root" => {
+            if mode == "replace-root" {
+                let scratch = std::path::Path::new(&args[4]);
+                std::fs::remove_dir(scratch).unwrap();
+                let external = std::path::Path::new(&args[3]).parent().unwrap();
+                let result = Command::new("cmd")
+                    .creation_flags(0x08000000)
+                    .args(["/C", "mklink", "/J"])
+                    .arg(scratch)
+                    .arg(external)
+                    .output()
+                    .unwrap();
+                assert!(
+                    result.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&result.stderr)
+                );
+            }
             let path = args[3].replace('\\', "\\\\").replace('"', "\\\"");
             frame(&format!(
                 r#"{{"output":{{"status":"Extracted","segments":[{{"kind":"doc","text":"x","page":null,"line":1,"start_ms":null,"end_ms":null,"thumbnail_hint":"{path}","embed":true}}]}},"next_cursor":null,"total_units":1}}"#

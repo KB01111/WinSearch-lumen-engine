@@ -1,13 +1,19 @@
 //! A fresh, job-owned extraction child per batch; no in-process fallback.
 use std::io::{Read, Write};
-use std::os::windows::io::AsRawHandle;
-use std::path::PathBuf;
+use std::os::windows::ffi::OsStrExt;
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{mpsc, Arc, Condvar, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
+use windows::Win32::Storage::FileSystem::{
+    CreateFileW, FileIdInfo, GetFileInformationByHandleEx, FILE_FLAG_BACKUP_SEMANTICS,
+    FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_INFO, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+};
 use windows::Win32::System::Threading::WaitForSingleObject;
 use windows::Win32::System::IO::CancelSynchronousIo;
 use ws_extract::worker::{
@@ -39,6 +45,7 @@ impl ExtractClientError {
 pub struct ExtractClient {
     worker_bin: PathBuf,
     cache_dir: PathBuf,
+    cleanup_pending: Arc<AtomicUsize>,
     #[cfg(test)]
     worker_args: Vec<String>,
 }
@@ -48,6 +55,7 @@ impl ExtractClient {
         Self {
             worker_bin,
             cache_dir,
+            cleanup_pending: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
             worker_args: Vec::new(),
         }
@@ -94,6 +102,11 @@ impl ExtractClient {
         timeout: Duration,
         allowed: impl Fn() -> bool,
     ) -> Result<ExtractResponse, ExtractClientError> {
+        if self.cleanup_pending.load(Ordering::Acquire) != 0 {
+            return Err(ExtractClientError::Worker(
+                "previous extraction cleanup is still pending".into(),
+            ));
+        }
         let deadline = Instant::now() + timeout;
         let frame = encode_request(request).map_err(ExtractClientError::Malformed)?;
         if !allowed() {
@@ -117,6 +130,7 @@ impl ExtractClient {
         }
         std::fs::create_dir(&request.scratch_dir).map_err(ExtractClientError::worker)?;
         let mut scratch = Scratch(Some(request.scratch_dir.clone()));
+        let anchor = ScratchAnchor::capture(&request.scratch_dir)?;
         let mut promoted = ArtifactLease::default();
         let result = (|| {
             let mut command = Command::new(&self.worker_bin);
@@ -163,7 +177,7 @@ impl ExtractClient {
                 let _ = sender.send(Event::Response(result));
             });
             let mut exchange = Exchange {
-                job,
+                job: Some(job),
                 writer: Some(writer),
                 reader: Some(reader),
                 closed: false,
@@ -201,6 +215,8 @@ impl ExtractClient {
                     if written && response.is_some() {
                         if let Some(status) = exchange
                             .job
+                            .as_mut()
+                            .expect("owned extraction job")
                             .child_mut()
                             .try_wait()
                             .map_err(ExtractClientError::worker)?
@@ -215,7 +231,12 @@ impl ExtractClient {
                 Ok(response.expect("received response"))
             })();
             // All child writers are gone before validating or promoting artifacts.
-            exchange.close()?;
+            if let Err(error) = exchange.close() {
+                if !exchange.closed {
+                    self.retain_cleanup(exchange.take_owned(), Scratch(scratch.0.take()));
+                }
+                return Err(error);
+            }
             let mut response = outcome?;
             validate_response(request, &response).map_err(ExtractClientError::Malformed)?;
             match &response.output.status {
@@ -230,7 +251,7 @@ impl ExtractClient {
             if !allowed() {
                 return Err(ExtractClientError::Cancelled);
             }
-            self.promote(request, &mut response, &mut promoted)?;
+            self.promote(request, &anchor, &mut response, &mut promoted)?;
             if !allowed() {
                 return Err(ExtractClientError::Cancelled);
             }
@@ -242,16 +263,23 @@ impl ExtractClient {
         Ok(response)
     }
 
+    fn retain_cleanup(&self, exchange: Exchange, scratch: Scratch) {
+        self.cleanup_pending.fetch_add(1, Ordering::AcqRel);
+        retain_cleanup(RetainedCleanup {
+            exchange,
+            scratch,
+            pending: Some(Arc::clone(&self.cleanup_pending)),
+        });
+    }
+
     fn promote(
         &self,
         request: &ExtractRequest,
+        anchor: &ScratchAnchor,
         response: &mut ExtractResponse,
         promoted: &mut ArtifactLease,
     ) -> Result<(), ExtractClientError> {
-        let scratch = request
-            .scratch_dir
-            .canonicalize()
-            .map_err(ExtractClientError::worker)?;
+        anchor.validate(&request.scratch_dir)?;
         let destination = self.cache_dir.join("thumbs");
         std::fs::create_dir_all(&destination).map_err(ExtractClientError::worker)?;
         if !ws_platform::content::local_content_allowed(&destination) {
@@ -271,7 +299,7 @@ impl ExtractClient {
             let canonical = source
                 .canonicalize()
                 .map_err(|e| ExtractClientError::Malformed(e.to_string()))?;
-            if !canonical.starts_with(&scratch) || !canonical.is_file() {
+            if !canonical.starts_with(&anchor.canonical) || !canonical.is_file() {
                 return Err(ExtractClientError::Malformed(
                     "thumbnail outside scratch".into(),
                 ));
@@ -341,6 +369,58 @@ enum Event {
     Written(Result<(), ExtractClientError>),
     Response(Result<ExtractResponse, ExtractClientError>),
 }
+struct ScratchAnchor {
+    canonical: PathBuf,
+    identity: (u64, [u8; 16]),
+}
+impl ScratchAnchor {
+    fn capture(path: &Path) -> Result<Self, ExtractClientError> {
+        if !ws_platform::content::local_content_allowed(path) {
+            return Err(ExtractClientError::Malformed("unsafe scratch root".into()));
+        }
+        Ok(Self {
+            canonical: path.canonicalize().map_err(ExtractClientError::worker)?,
+            identity: directory_identity(path).map_err(ExtractClientError::worker)?,
+        })
+    }
+
+    fn validate(&self, path: &Path) -> Result<(), ExtractClientError> {
+        let current = Self::capture(path)?;
+        if current.canonical != self.canonical || current.identity != self.identity {
+            return Err(ExtractClientError::Malformed(
+                "scratch root was replaced".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn directory_identity(path: &Path) -> std::io::Result<(u64, [u8; 16])> {
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    unsafe {
+        let raw = CreateFileW(
+            windows::core::PCWSTR(wide.as_ptr()),
+            FILE_READ_ATTRIBUTES.0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            None,
+        )
+        .map_err(std::io::Error::other)?;
+        let handle = OwnedHandle::from_raw_handle(raw.0);
+        let mut info = FILE_ID_INFO::default();
+        GetFileInformationByHandleEx(
+            HANDLE(handle.as_raw_handle()),
+            FileIdInfo,
+            &mut info as *mut _ as _,
+            std::mem::size_of_val(&info) as u32,
+        )
+        .map_err(std::io::Error::other)?;
+        Ok((info.VolumeSerialNumber, info.FileId.Identifier))
+    }
+}
+
 struct Scratch(Option<PathBuf>);
 impl Scratch {
     fn clean(&mut self) -> std::io::Result<()> {
@@ -357,7 +437,7 @@ impl Drop for Scratch {
     }
 }
 struct Exchange {
-    job: ChildJob,
+    job: Option<ChildJob>,
     writer: Option<JoinHandle<()>>,
     reader: Option<JoinHandle<()>>,
     closed: bool,
@@ -367,10 +447,11 @@ impl Exchange {
         if self.closed {
             return Ok(());
         }
-        self.closed = true;
         let child_result = self
             .job
-            .terminate_and_reap()
+            .as_mut()
+            .map(|job| job.terminate_and_reap())
+            .unwrap_or(Ok(()))
             .map_err(ExtractClientError::worker);
         let deadline = Instant::now() + Duration::from_secs(1);
         // Repeated cancellation also covers a task scheduled after the first
@@ -391,10 +472,11 @@ impl Exchange {
             thread::sleep(Duration::from_millis(1));
         }
         let mut complete = true;
+        let mut panicked = false;
         for task in [&mut self.writer, &mut self.reader] {
-            if let Some(task) = task.take() {
-                if stopped(&task) {
-                    complete &= task.join().is_ok();
+            if let Some(handle) = task.as_ref() {
+                if stopped(handle) {
+                    panicked |= task.take().expect("verified pipe task").join().is_err();
                 } else {
                     complete = false;
                 }
@@ -406,13 +488,103 @@ impl Exchange {
                 "pipe task cleanup did not complete".into(),
             ));
         }
+        self.closed = true;
+        if panicked {
+            return Err(ExtractClientError::Worker("pipe task panicked".into()));
+        }
         Ok(())
+    }
+
+    fn take_owned(&mut self) -> Self {
+        Self {
+            job: self.job.take(),
+            writer: self.writer.take(),
+            reader: self.reader.take(),
+            closed: false,
+        }
     }
 }
 impl Drop for Exchange {
     fn drop(&mut self) {
-        let _ = self.close();
+        if self.close().is_err() && !self.closed {
+            retain_cleanup(RetainedCleanup {
+                exchange: self.take_owned(),
+                scratch: Scratch(None),
+                pending: None,
+            });
+        }
     }
+}
+
+struct RetainedCleanup {
+    exchange: Exchange,
+    scratch: Scratch,
+    pending: Option<Arc<AtomicUsize>>,
+}
+struct CleanupQueue {
+    items: Mutex<Vec<RetainedCleanup>>,
+    ready: Condvar,
+}
+struct CleanupReaper {
+    queue: Arc<CleanupQueue>,
+    _thread: JoinHandle<()>,
+}
+
+fn retain_cleanup(cleanup: RetainedCleanup) {
+    // One permanent owner retains both queued work and the reaper's native
+    // thread handle. A client's pending count prevents repeated failed jobs
+    // from accumulating while its original pipe tasks are still alive.
+    static REAPER: OnceLock<CleanupReaper> = OnceLock::new();
+    let reaper = REAPER.get_or_init(|| {
+        let queue = Arc::new(CleanupQueue {
+            items: Mutex::new(Vec::new()),
+            ready: Condvar::new(),
+        });
+        let owned_queue = Arc::clone(&queue);
+        let thread = thread::spawn(move || loop {
+            let mut batch = {
+                let mut items = owned_queue.items.lock().unwrap_or_else(|p| p.into_inner());
+                while items.is_empty() {
+                    items = owned_queue
+                        .ready
+                        .wait(items)
+                        .unwrap_or_else(|p| p.into_inner());
+                }
+                std::mem::take(&mut *items)
+            };
+            let mut pending = Vec::new();
+            for mut cleanup in batch.drain(..) {
+                if cleanup.exchange.close().is_ok() && cleanup.scratch.clean().is_ok() {
+                    let counter = cleanup.pending.take();
+                    drop(cleanup);
+                    if let Some(counter) = counter {
+                        counter.fetch_sub(1, Ordering::AcqRel);
+                    }
+                } else {
+                    pending.push(cleanup);
+                }
+            }
+            if !pending.is_empty() {
+                owned_queue
+                    .items
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .extend(pending);
+                thread::sleep(Duration::from_millis(25));
+            }
+        });
+        CleanupReaper {
+            queue,
+            _thread: thread,
+        }
+    });
+    reaper
+        .queue
+        .items
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .push(cleanup);
+    reaper.queue.ready.notify_one();
 }
 
 #[cfg(test)]
@@ -522,6 +694,102 @@ mod tests {
                 "task-owned outside artifact"
             );
         }
+    }
+
+    #[test]
+    fn native_extract_rejects_replaced_scratch_root_and_preserves_external_file() {
+        let tree = Tree::new();
+        let mut client = ExtractClient::new(fixture(), tree.0.join("cache"));
+        let external_dir = tree.0.join("external");
+        std::fs::create_dir(&external_dir).unwrap();
+        let external_file = external_dir.join("artifact.png");
+        std::fs::write(&external_file, "generated external artifact").unwrap();
+        let pid = tree.0.join("pid");
+        let request = client.request(tree.0.join("fixture.txt"), "doc", 256);
+        client.worker_args = vec![
+            "replace-root".into(),
+            pid.to_string_lossy().into_owned(),
+            external_file.to_string_lossy().into_owned(),
+            request.scratch_dir.to_string_lossy().into_owned(),
+        ];
+        let result = client.extract(&request, Duration::from_secs(5));
+        dead(&pid);
+        assert_eq!(
+            std::fs::read_to_string(&external_file).unwrap(),
+            "generated external artifact"
+        );
+        assert!(!request.scratch_dir.exists());
+        assert!(
+            matches!(result, Err(ExtractClientError::Malformed(_))),
+            "replacement accepted: {result:?}"
+        );
+    }
+
+    #[test]
+    fn native_cleanup_failure_retains_live_thread_and_pipe_ownership() {
+        let tree = Tree::new();
+        let mut command = Command::new(fixture());
+        command
+            .arg("never-read")
+            .arg(tree.0.join("pid"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped());
+        let mut job = ChildJob::spawn(&mut command).unwrap();
+        let stdin = job.child_mut().stdin.take().unwrap();
+        let stdout = job.child_mut().stdout.take().unwrap();
+        let (release, released) = mpsc::channel();
+        let (done, completed) = mpsc::channel();
+        let task = thread::spawn(move || {
+            let _ = released.recv();
+            drop((stdin, stdout));
+            let _ = done.send(());
+        });
+        let mut exchange = Exchange {
+            job: Some(job),
+            writer: Some(task),
+            reader: None,
+            closed: false,
+        };
+        let started = Instant::now();
+        let result = exchange.close();
+        let retained = !exchange.closed && exchange.writer.is_some();
+        let client = ExtractClient::new(tree.0.join("missing.exe"), tree.0.join("cache"));
+        let pending = Arc::clone(&client.cleanup_pending);
+        let retained_scratch = tree.0.join("retained-scratch");
+        std::fs::create_dir(&retained_scratch).unwrap();
+        client.retain_cleanup(
+            exchange.take_owned(),
+            Scratch(Some(retained_scratch.clone())),
+        );
+        assert_eq!(pending.load(Ordering::Acquire), 1);
+        let denied = client.request(tree.0.join("fixture.txt"), "doc", 256);
+        let denied_result = client.extract_while(&denied, Duration::from_secs(1), || true);
+        assert!(
+            matches!(denied_result, Err(ExtractClientError::Worker(ref message)) if message.contains("cleanup is still pending"))
+        );
+        assert!(
+            !denied.scratch_dir.exists(),
+            "pending cleanup must block another child before setup"
+        );
+        drop(client);
+        release.send(()).unwrap();
+        completed.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(matches!(result, Err(ExtractClientError::Worker(_))));
+        assert!(
+            retained,
+            "cleanup failure detached the task owning both pipe endpoints"
+        );
+        let finish_deadline = Instant::now() + Duration::from_secs(3);
+        while pending.load(Ordering::Acquire) != 0 && Instant::now() < finish_deadline {
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(
+            pending.load(Ordering::Acquire),
+            0,
+            "retained cleanup did not finish after task release"
+        );
+        assert!(!retained_scratch.exists());
     }
 
     #[test]
