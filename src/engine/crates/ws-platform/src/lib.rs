@@ -7,6 +7,7 @@ pub mod child_job;
 pub mod ifilter;
 pub mod ocr;
 pub mod paths;
+pub mod pdfium;
 pub mod pipe;
 pub mod single_instance;
 pub mod wic;

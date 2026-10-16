@@ -68,7 +68,7 @@ impl Default for ExtractorRegistry {
             worker: None,
         };
         reg.register(SEGMENT_KIND_DOC, Arc::new(DocumentExtractor));
-        reg.register(SEGMENT_KIND_PDF, Arc::new(DocumentExtractor));
+        reg.register(SEGMENT_KIND_PDF, Arc::new(ws_extract::pdf::PdfExtractor));
         reg.register(SEGMENT_KIND_IMAGE, Arc::new(ImageExtractor::default()));
         reg
     }
@@ -274,6 +274,7 @@ impl Indexer {
                         output: ExtractOutput::unsupported(),
                         next_cursor: None,
                         total_units: None,
+                        diagnostics: Vec::new(),
                     })
                 }
                 Err(ExtractClientError::Timeout) => Err(ExtractError::DeadlineExceeded),
@@ -363,6 +364,9 @@ impl Indexer {
             }
         };
 
+        for diagnostic in &response.diagnostics {
+            warn!(entry_id = job.entry_id, diagnostic, "extraction source limit");
+        }
         let next_cursor = response.next_cursor;
         let output = response.output;
         let mut artifacts = registry.worker.as_ref().map(|_| ArtifactLease::for_output(&output));
@@ -405,6 +409,8 @@ impl Indexer {
                 ..Default::default()
             });
         }
+        let mut pdf_page = 0;
+        let mut pdf_chunk = 0;
         let mut chunks: Vec<ContentChunk> = output
             .segments
             .iter()
@@ -414,7 +420,20 @@ impl Indexer {
                 entry_id: job.entry_id,
                 job_kind: job.kind.clone(),
                 kind: d.kind.clone(),
-                chunk_index: (progress.cursor + i as u64) as i64,
+                chunk_index: if job.kind == SEGMENT_KIND_PDF {
+                    let page = d.page.expect("validated PDF page") - 1;
+                    if pdf_page != page || i == 0 {
+                        pdf_page = page;
+                        let (start, offset) = ws_extract::pdf::decode_cursor(progress.cursor)
+                            .expect("validated PDF cursor");
+                        pdf_chunk = if page == start { offset } else { 0 };
+                    }
+                    let ordinal = ws_extract::pdf::encode_cursor(page, pdf_chunk) as i64;
+                    pdf_chunk += 1;
+                    ordinal
+                } else {
+                    (progress.cursor + i as u64) as i64
+                },
                 text: d.text.clone(),
                 location: ContentMatch {
                     excerpt: String::new(),
@@ -429,9 +448,9 @@ impl Indexer {
                         .map(|p| p.to_string_lossy().into_owned()),
                 },
                 embed: d.embed
-                    && !d.text.trim().is_empty()
+                    && (!d.text.trim().is_empty() || d.kind == ws_extract::pdf::VISUAL_KIND)
                     && output.status == ExtractionStatus::Extracted,
-                visual: false,
+                visual: d.kind == ws_extract::pdf::VISUAL_KIND,
                 attempts: 0,
             })
             .collect();
@@ -541,14 +560,18 @@ impl Indexer {
         }
         let result = (|| {
             let vectors = if chunks[0].visual {
-                match image(path)? {
-                    Some(vector) => vec![vector],
-                    None => {
-                        return Err(EmbedError::Unsupported(
-                            "visual embedding unavailable".into(),
-                        ))
-                    }
-                }
+                chunks.iter().map(|chunk| {
+                    let artifact = if chunk.kind == ws_extract::pdf::VISUAL_KIND {
+                        Path::new(chunk.location.thumbnail_path.as_deref().ok_or_else(|| {
+                            EmbedError::Protocol("PDF visual artifact missing".into())
+                        })?)
+                    } else {
+                        path
+                    };
+                    image(artifact)?.ok_or_else(|| {
+                        EmbedError::Unsupported("visual embedding unavailable".into())
+                    })
+                }).collect::<Result<Vec<_>, _>>()?
             } else {
                 embed(&chunks.iter().map(|c| c.text.clone()).collect::<Vec<_>>())?
             };
@@ -796,6 +819,399 @@ mod tests {
         let mut registry = ExtractorRegistry::production();
         registry.worker = Some(ExtractClient::new(worker, cache.0.clone()));
         registry
+    }
+
+    fn pdf_fixture(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../..")
+            .join("artifacts/pdf-fixtures")
+            .join(name)
+    }
+
+    #[test]
+    fn pdf_native_durable_restart_exact_pages_primary_thumbnail_and_policy() {
+        let tree = TempTree::new();
+        let data = TempTree::new();
+        let cache = TempTree::new();
+        let path = tree.0.join("unicode-Å界.pdf");
+        fs::copy(pdf_fixture("fyrtio-Å界.pdf"), &path).unwrap();
+        let db = data.0.join("index.db");
+        let indexer = Indexer::open(IndexStore::open(&db).unwrap(), &[tree.0.clone()]).unwrap();
+        indexer.enqueue_initial_scan().unwrap();
+        while indexer.scan_available(64) > 0 {}
+        let registry = process_registry(&cache);
+        let step = indexer
+            .extract_once_typed(
+                &registry,
+                |_| Err(EmbedError::ModelNotAvailable("no model".into())),
+                |_| Ok(None),
+            )
+            .unwrap();
+        assert_eq!(step.fts_chunks_indexed, 30);
+        let entry = indexer
+            .store_lock()
+            .find_by_path(&path.to_string_lossy())
+            .unwrap()
+            .unwrap();
+        let first = indexer.store_lock().list_content_chunks(entry.id).unwrap();
+        assert_eq!(first.len(), 30);
+        assert_eq!(
+            entry.thumbnail_path, first[0].location.thumbnail_path,
+            "primary page thumbnail must be first page"
+        );
+        assert!(indexer
+            .search(&SearchRequest {
+                text: "PDF_MARKER_PAGE_35".into(),
+                limit: 5,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty());
+        drop(indexer);
+        let indexer = Indexer::open(IndexStore::open(&db).unwrap(), &[tree.0.clone()]).unwrap();
+        let step = indexer
+            .extract_once_typed(
+                &registry,
+                |_| Err(EmbedError::ModelNotAvailable("no model".into())),
+                |_| Ok(None),
+            )
+            .unwrap();
+        assert_eq!(step.fts_chunks_indexed, 10);
+        let chunks = indexer.store_lock().list_content_chunks(entry.id).unwrap();
+        assert_eq!(chunks.len(), 40);
+        assert_eq!(
+            chunks[..30].iter().map(|c| c.id).collect::<Vec<_>>(),
+            first.iter().map(|c| c.id).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            chunks
+                .iter()
+                .map(|c| c.chunk_index)
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            40
+        );
+        let hits = indexer
+            .search(&SearchRequest {
+                text: "PDF_MARKER_PAGE_35".into(),
+                limit: 5,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].matches[0].page, Some(35));
+        assert!(hits[0].matches[0].excerpt.contains("PDF_MARKER_PAGE_35"));
+        let matches = indexer
+            .store_lock()
+            .content_matches_page(entry.id, &["sharedpdfneedle".into()], 32, 32)
+            .unwrap();
+        assert_eq!(matches.len(), 8);
+        assert_eq!(matches[0].page, Some(33));
+        assert!(chunks.iter().all(|c| c
+            .location
+            .thumbnail_path
+            .as_ref()
+            .is_some_and(|p| Path::new(p).is_file())));
+        let mut config = indexer.get_indexing_config().unwrap();
+        config.roots.clear();
+        indexer.set_indexing_config(&config).unwrap();
+        assert!(indexer
+            .search(&SearchRequest {
+                text: "PDF_MARKER_PAGE_35".into(),
+                limit: 5,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn pdf_native_later_failure_and_missing_dependency_preserve_committed_pages() {
+        let tree = TempTree::new();
+        let cache = TempTree::new();
+        let binaries = TempTree::new();
+        let path = tree.0.join("partial.pdf");
+        fs::copy(pdf_fixture("later-page-error.pdf"), &path).unwrap();
+        let indexer = seeded_indexer(&tree);
+        let registry = process_registry(&cache);
+        let no_model = |_: &[String]| Err(EmbedError::ModelNotAvailable("no model".into()));
+        assert_eq!(
+            indexer
+                .extract_once_typed(&registry, no_model, |_| Ok(None))
+                .unwrap()
+                .fts_chunks_indexed,
+            30
+        );
+        let entry = indexer
+            .store_lock()
+            .find_by_path(&path.to_string_lossy())
+            .unwrap()
+            .unwrap();
+        assert!(
+            indexer
+                .extract_once_typed(&registry, no_model, |_| Ok(None))
+                .unwrap()
+                .failed
+        );
+        assert_eq!(
+            indexer
+                .store_lock()
+                .list_content_chunks(entry.id)
+                .unwrap()
+                .len(),
+            30
+        );
+        assert!(
+            !indexer
+                .store_lock()
+                .content_progress(entry.id, "pdf")
+                .unwrap()
+                .unwrap()
+                .complete
+        );
+        let worker = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/debug/winsearch-extract.exe");
+        let no_dll = binaries.0.join("winsearch-extract.exe");
+        fs::copy(worker, &no_dll).unwrap();
+        let mut missing = ExtractorRegistry::production();
+        missing.worker = Some(ExtractClient::new(no_dll, cache.0.clone()));
+        assert!(
+            indexer
+                .extract_once_typed(&missing, no_model, |_| Ok(None))
+                .unwrap()
+                .failed
+        );
+        let hits = indexer
+            .search(&SearchRequest {
+                text: "retainedpagetoken1".into(),
+                limit: 5,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].matches[0].page, Some(1));
+        let mut revoked = indexer.get_indexing_config().unwrap();
+        revoked.roots.clear();
+        indexer.set_indexing_config(&revoked).unwrap();
+        assert!(
+            !indexer
+                .extract_once_typed(
+                    &missing,
+                    |_| panic!("revoked vectors"),
+                    |_| panic!("revoked visual")
+                )
+                .unwrap()
+                .claimed
+        );
+        assert!(indexer
+            .search(&SearchRequest {
+                text: "retainedpagetoken1".into(),
+                limit: 5,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn pdf_native_ocr_exact_and_visual_embedding_consumes_rendered_png() {
+        let tree = TempTree::new();
+        let cache = TempTree::new();
+        let path = tree.0.join("scan.pdf");
+        fs::copy(pdf_fixture("scanned-two.pdf"), &path).unwrap();
+        let indexer = seeded_indexer(&tree);
+        let registry = process_registry(&cache);
+        indexer
+            .extract_once_typed(
+                &registry,
+                |_| Err(EmbedError::ModelNotAvailable("no model".into())),
+                |_| Ok(None),
+            )
+            .unwrap();
+        let hits = indexer
+            .search(&SearchRequest {
+                text: "INVOICE".into(),
+                limit: 1,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].matches[0].page, Some(1));
+        assert_eq!(hits[0].matches[1].page, Some(2));
+        assert!(hits[0].matches[0].excerpt.contains("INVOICE"));
+        indexer
+            .extract_once_typed(
+                &registry,
+                |t| Ok(t.iter().map(|_| vec![1.0, 0.0]).collect()),
+                |_| panic!("text stage"),
+            )
+            .unwrap();
+        let called = std::cell::Cell::new(0);
+        let step = indexer
+            .extract_once_typed(
+                &registry,
+                |_| panic!("visual stage"),
+                |artifact| {
+                    called.set(called.get() + 1);
+                    assert_eq!(artifact.extension().unwrap(), "png");
+                    assert_ne!(artifact, &path);
+                    let raster = ws_platform::wic::decode_image_wic(artifact, 2048).unwrap();
+                    assert!(raster.bgra8.chunks_exact(4).any(|p| p[0] < 100));
+                    Ok(Some(vec![0.0, 1.0]))
+                },
+            )
+            .unwrap();
+        assert_eq!(called.get(), 2);
+        assert_eq!(step.segments_stored, 2);
+        let visual = indexer.search_vectors(&[0.0, 1.0], 5, None).unwrap();
+        assert!(visual.iter().any(|s| s.segment.page == Some(1)));
+    }
+
+    #[test]
+    fn pdf_native_modified_while_parsing_cannot_commit_and_new_primary_replaces_old() {
+        let tree = TempTree::new();
+        let cache = TempTree::new();
+        let path = tree.0.join("changing.pdf");
+        fs::copy(pdf_fixture("fyrtio-Å界.pdf"), &path).unwrap();
+        let indexer = seeded_indexer(&tree);
+        let registry = process_registry(&cache);
+        let changed = path.clone();
+        let scratch = cache.0.join("extract");
+        let blank = pdf_fixture("empty.pdf");
+        let mutation = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while !scratch.is_dir() || fs::read_dir(&scratch).unwrap().next().is_none() {
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            std::thread::sleep(Duration::from_millis(50));
+            fs::copy(blank, changed).unwrap();
+        });
+        let step = indexer
+            .extract_once_typed(
+                &registry,
+                |_| panic!("stale batch cannot embed"),
+                |_| panic!("stale visual"),
+            )
+            .unwrap();
+        mutation.join().unwrap();
+        assert!(step.requeued);
+        let entry = indexer
+            .store_lock()
+            .find_by_path(&path.to_string_lossy())
+            .unwrap()
+            .unwrap();
+        assert!(indexer
+            .store_lock()
+            .list_content_chunks(entry.id)
+            .unwrap()
+            .is_empty());
+        let step = indexer
+            .extract_once_typed(
+                &registry,
+                |_| panic!("blank text"),
+                |_| panic!("blank visual"),
+            )
+            .unwrap();
+        assert_eq!(step.fts_chunks_indexed, 0);
+        let blank_primary = indexer
+            .store_lock()
+            .get_entry(entry.id)
+            .unwrap()
+            .unwrap()
+            .thumbnail_path
+            .unwrap();
+        fs::copy(pdf_fixture("scanned.pdf"), &path).unwrap();
+        indexer.handle_event(
+            entry.root_id,
+            crate::watcher::WatchEvent::Modified(path.clone()),
+        );
+        indexer
+            .extract_once_typed(
+                &registry,
+                |_| Err(EmbedError::ModelNotAvailable("no model".into())),
+                |_| Ok(None),
+            )
+            .unwrap();
+        let primary = indexer
+            .store_lock()
+            .get_entry(entry.id)
+            .unwrap()
+            .unwrap()
+            .thumbnail_path
+            .unwrap();
+        assert_ne!(primary, blank_primary);
+        let raster = ws_platform::wic::decode_image_wic(Path::new(&primary), 2048).unwrap();
+        assert!(raster.bgra8.chunks_exact(4).any(|p| p[0] < 100));
+    }
+
+    #[test]
+    fn pdf_native_huge_page_restart_has_stable_chunk_ordinals() {
+        let tree = TempTree::new();
+        let cache = TempTree::new();
+        let data = TempTree::new();
+        let path = tree.0.join("large.pdf");
+        fs::copy(pdf_fixture("huge-text.pdf"), &path).unwrap();
+        let db = data.0.join("index.db");
+        let indexer = Indexer::open(IndexStore::open(&db).unwrap(), &[tree.0.clone()]).unwrap();
+        indexer.enqueue_initial_scan().unwrap();
+        while indexer.scan_available(64) > 0 {}
+        let registry = process_registry(&cache);
+        let no_model = |_: &[String]| Err(EmbedError::ModelNotAvailable("no model".into()));
+        assert_eq!(
+            indexer
+                .extract_once_typed(&registry, no_model, |_| Ok(None))
+                .unwrap()
+                .fts_chunks_indexed,
+            256
+        );
+        let entry = indexer
+            .store_lock()
+            .find_by_path(&path.to_string_lossy())
+            .unwrap()
+            .unwrap();
+        let first = indexer.store_lock().list_content_chunks(entry.id).unwrap();
+        assert_eq!(
+            indexer
+                .store_lock()
+                .content_progress(entry.id, "pdf")
+                .unwrap()
+                .unwrap()
+                .cursor,
+            256
+        );
+        drop(indexer);
+        let indexer = Indexer::open(IndexStore::open(&db).unwrap(), &[tree.0.clone()]).unwrap();
+        indexer
+            .extract_once_typed(&registry, no_model, |_| Ok(None))
+            .unwrap();
+        let chunks = indexer.store_lock().list_content_chunks(entry.id).unwrap();
+        assert!(chunks.len() > 256);
+        assert_eq!(
+            chunks.iter().map(|c| c.chunk_index).collect::<Vec<_>>(),
+            (0..chunks.len() as i64).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            chunks[..256].iter().map(|c| c.id).collect::<Vec<_>>(),
+            first.iter().map(|c| c.id).collect::<Vec<_>>()
+        );
+        assert!(
+            indexer
+                .store_lock()
+                .content_progress(entry.id, "pdf")
+                .unwrap()
+                .unwrap()
+                .complete
+        );
+        let hits = indexer
+            .search(&SearchRequest {
+                text: "finalhugepageneedle".into(),
+                limit: 1,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].matches[0].page, Some(1));
     }
 
     #[test]

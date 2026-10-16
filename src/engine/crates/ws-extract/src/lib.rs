@@ -6,6 +6,7 @@ pub mod chunk;
 pub mod docs;
 pub mod image;
 pub mod ocr;
+pub mod pdf;
 pub mod worker;
 
 use std::path::{Path, PathBuf};
@@ -159,6 +160,7 @@ pub trait Extractor: Send + Sync {
             output,
             next_cursor: (successful && (end as u64) < total).then_some(end as u64),
             total_units: successful.then_some(total),
+            diagnostics: Vec::new(),
         })
     }
 }

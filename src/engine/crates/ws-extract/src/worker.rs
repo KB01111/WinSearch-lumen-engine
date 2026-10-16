@@ -23,6 +23,9 @@ pub struct ExtractResponse {
     pub output: ExtractOutput,
     pub next_cursor: Option<u64>,
     pub total_units: Option<u64>,
+    /// Bounded source-limit diagnostics; exact content may still be usable.
+    #[serde(default)]
+    pub diagnostics: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -65,8 +68,13 @@ pub fn validate_response(
     request: &ExtractRequest,
     response: &ExtractResponse,
 ) -> Result<(), String> {
+    if response.diagnostics.len() > 8 || response.diagnostics.iter().any(|s| s.len() > 1024) {
+        return Err("worker diagnostics exceed bounds".into());
+    }
     let segments = &response.output.segments;
-    if segments.len() > MAX_DRAFTS || segments.len() > request.max_units as usize {
+    if segments.len() > MAX_DRAFTS
+        || (request.kind != "pdf" && segments.len() > request.max_units as usize)
+    {
         return Err("too many drafts".into());
     }
     if matches!(
@@ -81,7 +89,9 @@ pub fn validate_response(
             return Err("failure message too long".into());
         }
     }
-    if response.next_cursor.is_some_and(|next| {
+    if request.kind == "pdf" {
+        validate_pdf_progress(request, response)?;
+    } else if response.next_cursor.is_some_and(|next| {
         next <= request.cursor || response.total_units.is_some_and(|total| next > total)
     }) || response
         .total_units
@@ -112,14 +122,18 @@ pub fn validate_response(
     }
     let (mut page, mut time, mut line) = (0, 0, 0);
     for draft in segments {
-        let valid_kind =
-            draft.kind == request.kind || (request.kind == "image" && draft.kind == "ocr");
+        let valid_kind = draft.kind == request.kind
+            || (matches!(request.kind.as_str(), "image" | "pdf") && draft.kind == "ocr")
+            || (request.kind == "pdf" && draft.kind == crate::pdf::VISUAL_KIND);
         if !valid_kind || draft.kind.len() > 32 || draft.text.len() > MAX_SEGMENT_BYTES {
             return Err("invalid draft kind or text length".into());
         }
         if let Some(p) = draft.page {
             if p == 0 || p < page {
                 return Err("unordered pages".into());
+            }
+            if p != page && request.kind == "pdf" {
+                line = 0;
             }
             page = p;
         }
@@ -142,6 +156,88 @@ pub fn validate_response(
             .is_some_and(|p| p.as_os_str().len() > 32_768)
         {
             return Err("thumbnail path too long".into());
+        }
+    }
+    Ok(())
+}
+
+fn validate_pdf_progress(
+    request: &ExtractRequest,
+    response: &ExtractResponse,
+) -> Result<(), String> {
+    let (page, chunk) = crate::pdf::decode_cursor(request.cursor)?;
+    if !matches!(
+        response.output.status,
+        ExtractionStatus::Extracted | ExtractionStatus::ExactOnly
+    ) {
+        if response.next_cursor.is_some() {
+            return Err("failed PDF cursor".into());
+        }
+        return Ok(());
+    }
+    let total = response.total_units.ok_or("PDF page count missing")?;
+    if total > crate::pdf::MAX_PAGES as u64
+        || page as u64 > total
+        || (page as u64 == total && chunk != 0)
+    {
+        return Err("invalid PDF total pages".into());
+    }
+    let end_page = (page + request.max_units.min(30)).min(total as u32);
+    for draft in &response.output.segments {
+        let p = draft.page.ok_or("PDF draft missing page")?;
+        if p <= page || p > end_page || draft.start_ms.is_some() || draft.end_ms.is_some() {
+            return Err("PDF draft outside page batch".into());
+        }
+        if draft.kind == crate::pdf::VISUAL_KIND
+            && (!draft.text.is_empty() || draft.thumbnail_hint.is_none() || draft.line.is_some())
+        {
+            return Err("invalid PDF visual draft".into());
+        }
+    }
+    if let Some(next) = response.next_cursor {
+        let (p, c) = crate::pdf::decode_cursor(next)?;
+        if next <= request.cursor || p < page || p > end_page || p as u64 >= total {
+            return Err("invalid PDF cursor progress".into());
+        }
+        let n = response
+            .output
+            .segments
+            .iter()
+            .filter(|s| s.page == Some(p + 1))
+            .count() as u32;
+        if (p == page && (n == 0 || c != chunk + n))
+            || (p > page && c != n)
+            || response
+                .output
+                .segments
+                .iter()
+                .any(|s| s.page.unwrap() > p + u32::from(c > 0))
+        {
+            return Err("PDF cursor does not cover page drafts".into());
+        }
+        for completed in page..p {
+            if !response
+                .output
+                .segments
+                .iter()
+                .any(|s| s.page == Some(completed + 1))
+            {
+                return Err("PDF completed page has no representation".into());
+            }
+        }
+    } else {
+        if end_page as u64 != total {
+            return Err("PDF falsely completed before total pages".into());
+        }
+        for completed in page..total as u32 {
+            if !response
+                .output
+                .segments
+                .iter()
+                .any(|s| s.page == Some(completed + 1))
+            {
+                return Err("PDF completed page has no representation".into());
+            }
         }
     }
     Ok(())
@@ -171,6 +267,7 @@ mod tests {
             output: ExtractOutput::extracted(vec![segment]),
             next_cursor: None,
             total_units: Some(1),
+            diagnostics: Vec::new(),
         };
         let mut wire = Vec::new();
         ws_protocol::write_message(&mut wire, &response).unwrap();
@@ -182,11 +279,74 @@ mod tests {
     }
 
     #[test]
+    fn pdf_transport_multiple_drafts_and_packed_page_chunk_progress() {
+        let mut req = request();
+        req.kind = "pdf".into();
+        req.max_units = 1;
+        let mut text = SegmentDraft::text("pdf", "first");
+        text.page = Some(1);
+        text.line = Some(5);
+        let mut ocr = text.clone();
+        ocr.kind = "ocr".into();
+        ocr.line = Some(6);
+        let mut response = ExtractResponse {
+            output: ExtractOutput::extracted(vec![text.clone(), ocr]),
+            next_cursor: Some(1 << 32),
+            total_units: Some(2),
+            diagnostics: vec![],
+        };
+        validate_response(&req, &response).unwrap();
+        response.output.segments = vec![text; 256];
+        response.next_cursor = Some(256);
+        validate_response(&req, &response).unwrap();
+        req.cursor = 256;
+        response.output.segments.truncate(2);
+        response.next_cursor = Some(1 << 32);
+        validate_response(&req, &response).unwrap();
+        response.output.segments[0].kind = "image".into();
+        assert!(validate_response(&req, &response).is_err());
+        response.output.segments[0].kind = "pdf".into();
+        response.next_cursor = Some((1 << 32) | 9000);
+        assert!(validate_response(&req, &response).is_err());
+        response.next_cursor = Some(1 << 32);
+        response.output.segments[0].page = Some(2);
+        assert!(validate_response(&req, &response).is_err());
+    }
+
+    #[test]
+    fn pdf_transport_rejects_missing_completed_page_and_limits_diagnostics() {
+        let mut req = request();
+        req.kind = "pdf".into();
+        let mut a = SegmentDraft::text("pdf", "first");
+        a.page = Some(1);
+        a.line = Some(20);
+        let mut b = a.clone();
+        b.page = Some(2);
+        b.line = Some(1);
+        let mut response = ExtractResponse {
+            output: ExtractOutput::extracted(vec![a.clone(), b]),
+            next_cursor: None,
+            total_units: Some(2),
+            diagnostics: vec![],
+        };
+        validate_response(&req, &response).unwrap();
+        response.output.segments.pop();
+        assert!(validate_response(&req, &response).is_err());
+        response.output.segments[0].page = None;
+        assert!(validate_response(&req, &response).is_err());
+        response.output.segments[0].page = Some(1);
+        response.next_cursor = Some(1 << 32);
+        response.diagnostics = vec!["x".repeat(1025)];
+        assert!(validate_response(&req, &response).is_err());
+    }
+
+    #[test]
     fn text_batches_reject_empty_progress_and_false_completion() {
         let mut response = ExtractResponse {
             output: ExtractOutput::extracted(vec![SegmentDraft::text("doc", "one")]),
             next_cursor: None,
             total_units: Some(75),
+            diagnostics: Vec::new(),
         };
         assert!(validate_response(&request(), &response).is_err());
         response.next_cursor = Some(30);
@@ -208,6 +368,7 @@ mod tests {
             output: ExtractOutput::extracted(vec![SegmentDraft::text("doc", "x"); 257]),
             next_cursor: None,
             total_units: None,
+            diagnostics: Vec::new(),
         };
         assert!(validate_response(&request(), &response).is_err());
         response.output.segments.truncate(1);
@@ -230,6 +391,7 @@ mod tests {
             ]),
             next_cursor: None,
             total_units: None,
+            diagnostics: Vec::new(),
         };
         response.output.segments[0].page = Some(2);
         response.output.segments[1].page = Some(1);

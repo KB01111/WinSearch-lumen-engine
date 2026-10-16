@@ -61,8 +61,12 @@ implemented **and** verified. Legend: `[x]` done+verified · `[~]` partial ·
       decoder/worker plumbing exists; mixed-encoder correctness fix pending
 - [~] Screenshot search: visual + OCR text, exact error codes (Phase 4) —
       OCR exists; genuine visual discrimination/reference checks pending
-- [ ] PDF page-level search, scanned-page OCR, page numbers/thumbnails,
-      first-30-pages fast path, 5,000-page cap, resumable (Phase 4)
+- [~] PDF page-level search, scanned-page OCR, page numbers/thumbnails,
+      first-30-pages fast path, 5,000-page cap, resumable (Phase 4) — native
+      PDFium text/raster and installed WinRT OCR verified with generated PDFs;
+      exact pages survive restart without a model. Rendered-page visual artifacts
+      reach the deferred embedding path; real visual-model quality and packaged
+      distribution acceptance remain separate gates.
 - [~] Document search (txt/md/rtf/doc/docx/odt/html) with chunking, excerpts,
       numeric-content exact-only routing (Phase 4) — no-model exact persistence
       and durable long-document continuation pending

@@ -94,3 +94,13 @@ WinSearch incorporates or references the following third-party software.
     Usage:    Native inference runtime for text and multimodal embeddings in
               ws-embed (fetched at build time at a pinned commit and linked via
               a flat C ABI shim).
+
+16. PDFium 157.0.8086.0 (chromium/8086), public Windows x64 build
+    Project:  https://pdfium.googlesource.com/pdfium/
+    Binaries: https://github.com/bblanchon/pdfium-binaries
+    License:  BSD-style; additional bundled dependencies have their own licenses.
+    Copyright 2014 The PDFium Authors; original code copyright 2014 Foxit Software Inc.
+    Usage:    Isolated extraction-worker PDF text, page rasterization and OCR input.
+    Pin/hash: src/engine/third_party/pdfium.json; tools/fetch-pdfium.ps1 verifies
+              the archive before extraction. Retain its LICENSE and licenses/*
+              alongside the packaged extraction worker and pdfium.dll.

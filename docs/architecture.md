@@ -218,7 +218,8 @@ The worker returns a truthful total and `next_cursor`; only a null cursor
 finishes extraction. Continuations receive lower priority than new/short jobs.
 Document parsing currently repeats within the existing 32 MiB input / 16 MiB
 archive XML bounds to reconstruct the requested window; it does not hydrate
-cloud placeholders. Page/media-specific cursors remain dedicated future work.
+cloud placeholders. PDF page cursors are described below; media cursors remain
+dedicated work.
 
 Additive tables `content_revisions`, `content_progress`, and `content_chunks`
 extend schema version 2. The migration marker is `meta.content_batches_v1`.
@@ -259,5 +260,64 @@ multiple matching chunks for a grouped file result. These interfaces carry
 up to 32 moments on the primary result path; `content_matches_page` exposes
 subsequent matching chunks with an offset and a per-page cap of 32. Exact text
 and all locations remain durable regardless of that retrieval cap. They carry
-locations for later PDF/media work; they do not establish native PDF page,
-audio, video, or frontend explorer support.
+locations for PDF/media work; audio, video, and frontend explorer support have
+their own acceptance gates.
+
+### PDF worker pages
+
+`ws_extract::pdf::extract_pdf_batch(&ExtractRequest, &ExtractBudget)` uses the
+same owned extraction child, deadlines, job memory limit, admission permits,
+scratch validation and artifact leases as document/image batches. PDFium is
+loaded only in that child from an absolute sibling DLL path with Windows
+`LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32`. Debug builds
+alone accept an explicit absolute `WINSEARCH_TEST_PDFIUM_DIR` for fixtures.
+The archive version/hash and upstream URL are pinned in
+`src/engine/third_party/pdfium.json`; `tools/fetch-pdfium.ps1` verifies before
+extracting, rejects unsafe archive paths/links, preserves all licenses and
+never changes PATH. Package assembly must copy the verified DLL and notices.
+
+The cursor is opaque: `(zero_based_page << 32) | draft_within_page`. Decode
+validation accepts page ordinals through 5000 and draft ordinals below 8192;
+page 5000 is terminal and cannot have a draft offset. Requests also validate
+against the real capped page count and the actual reconstructed page drafts.
+`total_units` is the actual page count capped at 5000, never a chunk count.
+Each batch covers at most 30 pages and 256 drafts. A continued large page
+finishes its remaining text/OCR/visual drafts before advancing. Blank pages
+have an empty, non-embeddable page draft with their real thumbnail, allowing
+durable progress without fabricating text. Terminal completion is represented
+by `next_cursor = null`; the persisted completion flag is authoritative.
+
+All PDF drafts carry one-based `page`. Allowed kinds are `pdf` selectable
+text, `ocr` raster-recognized text, and `pdf_visual` with empty text and a
+rendered PNG. Text uses the shared chunker and numeric exact-only routing.
+Draft ordinals are stable packed page/chunk identities, so replay/restart
+cannot duplicate them. Line ordering resets per page. Per-page locations
+retain their own artifacts; the first page thumbnail remains the file's
+primary thumbnail until source invalidation. Deferred visual embeddings open
+the promoted page PNG rather than the source PDF. Real visual-model quality
+is a separate media-runtime gate.
+
+PDFium handles are RAII-managed under a serial lock. Unicode paths use native
+File reads and bounded `FPDF_LoadCustomDocument` callbacks (Windows unsigned
+long is 32 bits), without buffering the whole source. Text extraction allocates
+`count + 1` UTF-16 values and rejects more than 500000 page characters. Finite,
+positive page sizes and checked raster dimensions/stride/area precede render;
+the raster has at most 2048 pixels per edge. Grossly pathological aspect ratios
+fail explicitly. No JavaScript/forms handlers are initialized or invoked.
+
+Protected, corrupt, unreadable, missing-dependency and OCR-unavailable inputs
+return explicit failures; genuinely blank pages complete normally. A later
+failure leaves previously committed batches searchable and progress incomplete.
+The worker's additive `diagnostics: Vec<String>` is capped at eight entries of
+1024 bytes each. Sources above the page limit emit
+`PDF page limit: source_pages=N indexed_pages=5000; remaining pages excluded by product limit`.
+The daemon records this warning; completion means all pages within the product
+limit, not uncapped full-file coverage. A future source-status UI must surface
+that distinction. Search visibility, native cancellation, exact and vector
+commits continue to use current source/policy/model generations.
+
+Native fixture setup: run `tools/generate-pdf-fixtures.py` with Python containing
+Pillow/reportlab, then the fetcher with an isolated output (or use the independently
+verified archive cache). Worker acceptance tests use the debug dependency override;
+daemon native tests use the verified `pdfium.dll` beside the rebuilt debug worker.
+`tools/test-fetch-pdfium.ps1` checks the fetcher against the pinned cached archive.

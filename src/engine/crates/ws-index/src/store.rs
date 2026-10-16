@@ -201,7 +201,7 @@ impl IndexStore {
             }
             if let Some(thumb) = &chunk.location.thumbnail_path {
                 tx.execute(
-                    "UPDATE entries SET thumbnail_path=?2 WHERE id=?1",
+                    "UPDATE entries SET thumbnail_path=COALESCE(thumbnail_path,?2) WHERE id=?1",
                     params![job.entry_id, thumb],
                 )?;
             }

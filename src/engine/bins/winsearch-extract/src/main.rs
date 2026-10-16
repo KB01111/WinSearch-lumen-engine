@@ -27,6 +27,7 @@ fn run() -> Result<(), String> {
             output: ExtractOutput::unsupported(),
             next_cursor: None,
             total_units: None,
+            diagnostics: Vec::new(),
         }
     } else if !request.scratch_dir.is_absolute()
         || !ws_platform::content::local_content_allowed(&request.path)
@@ -39,17 +40,21 @@ fn run() -> Result<(), String> {
             },
             next_cursor: None,
             total_units: None,
+            diagnostics: Vec::new(),
         }
     } else {
         let budget = ExtractBudget::new(
             ws_extract::DEFAULT_MAX_FILE_BYTES,
             ws_extract::DEFAULT_EXTRACT_TIMEOUT,
-            request.max_units as usize,
+            if request.kind == "pdf" {
+                ws_extract::worker::MAX_DRAFTS
+            } else {
+                request.max_units as usize
+            },
         );
         let result = match request.kind.as_str() {
-            "doc" | "pdf" => {
-                DocumentExtractor.extract_batch(&request.path, &budget, request.cursor)
-            }
+            "doc" => DocumentExtractor.extract_batch(&request.path, &budget, request.cursor),
+            "pdf" => ws_extract::pdf::extract_pdf_batch(&request, &budget),
             "image" => ImageExtractor::default()
                 .with_thumb_dir(request.scratch_dir.clone())
                 .extract_batch(&request.path, &budget, request.cursor),
@@ -62,6 +67,7 @@ fn run() -> Result<(), String> {
             },
             next_cursor: None,
             total_units: None,
+            diagnostics: Vec::new(),
         })
     };
     ws_protocol::write_message(&mut stdout, &response).map_err(|e| e.to_string())
