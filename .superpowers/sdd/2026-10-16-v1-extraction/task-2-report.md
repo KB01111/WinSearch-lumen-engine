@@ -90,7 +90,7 @@ Current document continuation reconstructs and rechunks bounded source text for 
 
 Addressed Important I1 from `task-2-review.md` against fix base `c142d96cfb3360f54edebe54cb156713f7e202bd`. The review correctly identified that FTS `unicode61 remove_diacritics 2` can match `cafe` against late source `café`, while the literal query-based excerpt selector falls back to the opening text. FTS normalization, ranking, thresholds, and policy filtering are unchanged.
 
-- Added optional, default-compatible index-local `ContentMatch.match_byte`, computed from the first FTS-highlighted token in original UTF-8 text. The same original-text prefix determines the actual match line. If source text contains the normal highlight marker, the query uses an absent marker before deriving that offset, so literal marker data cannot become a false anchor. This is query metadata rather than persisted schema or new public IPC content.
+- Added optional, default-compatible index-local `ContentMatch.match_byte`, computed from the first FTS-highlighted token in original UTF-8 text. The same original-text prefix determines the actual match line. If source text contains the normal highlight marker, the query uses an absent marker before deriving that offset; review round 2 below corrects that marker's boundary construction. This is query metadata rather than persisted schema or new public IPC content.
 - Added `ws_extract::select_excerpt_at` and reused the existing excerpt renderer for bounded 240-character excerpts and whitespace collapse. The authoritative original byte offset maps through that collapse without searching the query again. Both the primary excerpt and every `matching_moments` excerpt use this common mapping. Existing literal query-based selection remains available for callers without an authoritative anchor.
 - The public engine regression uses a generated file with the match near character 1000, unrelated `decafélate` substrings in earlier padding, multibyte leading text, literal highlight-marker data, composed `café` and decomposed `cafe\u{301}` variants, and matching moments on actual lines 2 and 4. It asserts actual matching source text in the primary excerpt and all moments, the relevant line, shared primary/first-moment metadata, and the 240-character bound. A focused selector regression verifies original byte anchoring through collapsed Unicode/ASCII whitespace, plus a zero-length excerpt budget.
 
@@ -103,3 +103,22 @@ Focused covering verification on the amended source:
 - `rtk git diff --check`: passed.
 
 No unchanged broad/native worker/model suite or .NET/WinUI checks were repeated for this index-local excerpt correction; the earlier checks remain identified by their implementation revision above. No C# or wire schema changed. The seven baseline warning groups remain ledgered for final whole-v1 review as requested. Native PDF/media/model-quality and complete-v1 acceptance stay with their downstream tasks. No new scratch report or planning files were added to Git.
+
+## Review fix round 2
+
+Addressed Important N1 from `task-2-rereview-1.md` against fix base `6217d8e56330b5d9cab35b9243764ff45b7db294`. The original I1 normalization fix remains in place. An absent delimiter made only from repeated U+0001 could still overlap a literal source suffix and the newly inserted delimiter, so its first occurrence did not necessarily identify the actual highlight boundary.
+
+The delimiter now starts with a single U+0001 and grows using only U+0002 until absent from the source. Its start character occurs nowhere else inside the delimiter: an earlier literal source suffix cannot complete a false delimiter across the inserted-start boundary, because that boundary presents U+0001 where a continuation requires U+0002. The ordinary no-literal-marker fast path and FTS matching/normalization, ranking, limits, typed locations, and shared primary/all-moment excerpt mapping are unchanged.
+
+Added a generated public engine regression for the reported adjacent U+0001 run of length 600, a line-2 variant, repeated literal U+0001/U+0002 pairs, and a long literal U+0002 suffix following U+0001. It asserts the actual `café invoice` excerpt, actual line, primary/first-moment agreement and the 240-character bound. Existing composed/decomposed accent, multibyte padding, literal-marker, multiple-moment and whitespace-collapse assertions remain intact.
+
+Runtime RED before the correction: `rtk cargo test -p winsearchd task2_adjacent_literal_marker_runs_do_not_shift_public_match_anchor --bin winsearchd -- --test-threads=1` produced **0 passed, 1 failed, 134 filtered out**, with `adjacent literal marker run displaced the excerpt` (0.04 seconds). Runtime GREEN after the correction: the same command passed **1 test**, 134 filtered out, in 0.15 seconds.
+
+Focused covering verification on the amended source:
+
+- `rtk cargo test -p ws-index --lib -- --test-threads=1`: **74 passed, 0 failed, 0 ignored**, 1.13 seconds.
+- `rtk cargo test -p winsearchd engine::tests --bin winsearchd -- --test-threads=1`: **28 passed, 0 failed, 0 ignored**, 107 filtered out, 0.46 seconds, including both public normalization and adjacent-marker regressions.
+- `rtk cargo test -p ws-extract anchored_excerpt_preserves_original_byte_position_through_whitespace_collapse --lib`: **1 passed, 0 failed, 0 ignored**, 28 filtered out, 0.00 seconds.
+- `rtk git diff --check`: passed.
+
+No unchanged broad/native/.NET/WinUI suites were rerun. No schema, public wire fields, dependency, threshold, or test gate changed. Baseline warnings and downstream v1/native modality/model acceptance retain their previously assigned scope. Only the existing tracked report was amended; no new scratch planning/report files were added to Git.

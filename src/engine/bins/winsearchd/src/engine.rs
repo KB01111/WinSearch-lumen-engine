@@ -1220,6 +1220,31 @@ mod tests {
     }
 
     #[test]
+    fn task2_adjacent_literal_marker_runs_do_not_shift_public_match_anchor() {
+        for (prefix, line) in [
+            ("\u{1}".repeat(600), 1),
+            (format!("Heading\n{}", "\u{1}".repeat(600)), 2),
+            ("\u{1}\u{2}".repeat(300), 1),
+            (format!("\u{1}{}", "\u{2}".repeat(600)), 1),
+        ] {
+            let tree = TempTree::new();
+            fs::write(tree.0.join("adjacent.txt"), format!("{prefix}café invoice")).unwrap();
+            let engine = service_with(&tree, &[]);
+            engine.indexer.extract_once_with(&crate::extract::ExtractorRegistry::default(), |_| {
+                Err("model unavailable".into())
+            }).unwrap();
+            let results = engine.plan_results(&query("cafe"));
+            let result = results.iter().find(|r| r.title == "adjacent.txt").unwrap();
+            assert!(result.excerpt.as_ref().unwrap().contains("café invoice"), "adjacent literal marker run displaced the excerpt");
+            assert_eq!(result.location, Some(MatchLocation::Line { line }));
+            assert_eq!(result.matching_moments.len(), 1);
+            assert_eq!(result.matching_moments[0].location, result.location);
+            assert_eq!(Some(&result.matching_moments[0].excerpt), result.excerpt.as_ref());
+            assert!(result.matching_moments[0].excerpt.chars().count() <= 240);
+        }
+    }
+
+    #[test]
     fn code_mode_returns_no_file_results() {
         let tree = TempTree::new();
         let engine = service_with(&tree, &["main.rs"]);

@@ -147,9 +147,10 @@ impl IndexStore {
                 let text: String = r.get(0)?;
                 let mut marker = "\u{1}".to_string();
                 while text.contains(&marker) {
-                    marker = marker.repeat(2);
+                    marker.push_str(&"\u{2}".repeat(marker.len()));
                 }
-                // Literal control characters in source text must not masquerade as highlights.
+                // U+0001 occurs only at the marker's start: a literal source suffix
+                // cannot complete a false marker across the inserted marker boundary.
                 let highlighted: String = if marker.len() == 1 {
                     r.get(6)?
                 } else {
