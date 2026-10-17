@@ -132,6 +132,7 @@ pub fn build_ocr_segments(
             break;
         }
         segments.push(SegmentDraft {
+            embedding_input: crate::DraftEmbeddingInput::Text,
             kind: SEGMENT_KIND_OCR.to_string(),
             text: chunk.text,
             page,

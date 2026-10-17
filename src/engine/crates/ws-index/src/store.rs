@@ -169,7 +169,8 @@ impl IndexStore {
         if self.content_progress(job.entry_id, &job.kind)?.as_ref() != Some(progress) {
             return Ok(false);
         }
-        if next.is_some_and(|n| n <= progress.cursor) || (chunks.is_empty() && next.is_some()) {
+        if next.is_some_and(|n| n <= progress.cursor || n > i64::MAX as u64)
+            || (chunks.is_empty() && next.is_some() && !matches!(job.kind.as_str(), "audio" | "video")) {
             return Err(StoreError::InvalidConfig(
                 "cursor advanced without content".into(),
             ));
@@ -191,7 +192,9 @@ impl IndexStore {
             )?;
         }
         for chunk in chunks {
-            tx.execute("INSERT INTO content_chunks(entry_id,job_kind,kind,chunk_index,text,page,start_ms,end_ms,line,thumbnail_path,embed,visual) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",params![job.entry_id,job.kind,chunk.kind,chunk.chunk_index,chunk.text,chunk.location.page,chunk.location.start_ms.map(|n| n as i64),chunk.location.end_ms.map(|n| n as i64),chunk.location.line,chunk.location.thumbnail_path,chunk.embed,chunk.visual])?;
+            let input = serde_json::to_string(&chunk.embedding_input)
+                .map_err(|e| StoreError::InvalidConfig(e.to_string()))?;
+            tx.execute("INSERT INTO content_chunks(entry_id,job_kind,kind,chunk_index,text,page,start_ms,end_ms,line,thumbnail_path,embed,visual,embedding_input) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",params![job.entry_id,job.kind,chunk.kind,chunk.chunk_index,chunk.text,chunk.location.page,chunk.location.start_ms.map(|n| n as i64),chunk.location.end_ms.map(|n| n as i64),chunk.location.line,chunk.location.thumbnail_path,chunk.embed,chunk.visual,input])?;
             let id = tx.last_insert_rowid();
             if !chunk.visual && !chunk.text.trim().is_empty() {
                 tx.execute(
@@ -236,7 +239,7 @@ impl IndexStore {
         suffix: &str,
         entry: i64,
     ) -> Result<Vec<crate::model::ContentChunk>, StoreError> {
-        let mut stmt = self.conn.prepare(&format!("SELECT id,entry_id,job_kind,kind,chunk_index,text,page,start_ms,end_ms,line,thumbnail_path,embed,attempts,visual FROM content_chunks {suffix}"))?;
+        let mut stmt = self.conn.prepare(&format!("SELECT id,entry_id,job_kind,kind,chunk_index,text,page,start_ms,end_ms,line,thumbnail_path,embed,attempts,visual,embedding_input FROM content_chunks {suffix}"))?;
         let rows = stmt.query_map([entry], |r| {
             Ok(crate::model::ContentChunk {
                 id: r.get(0)?,
@@ -257,6 +260,8 @@ impl IndexStore {
                 embed: r.get(11)?,
                 attempts: r.get(12)?,
                 visual: r.get(13)?,
+                embedding_input: serde_json::from_str(&r.get::<_, String>(14)?)
+                    .map_err(|e| rusqlite::Error::FromSqlConversionFailure(14, rusqlite::types::Type::Text, Box::new(e)))?,
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -271,7 +276,11 @@ impl IndexStore {
         let Some(entry) = entry else {
             return Ok(Vec::new());
         };
-        let chunks = self.content_chunks_by("WHERE entry_id=?1 AND embed=1 AND embed_state='pending' AND attempts<3 AND visual=(SELECT visual FROM content_chunks WHERE entry_id=?1 AND embed=1 AND embed_state='pending' AND attempts<3 ORDER BY visual,id LIMIT 1) ORDER BY id LIMIT 30",entry)?;
+        let mut chunks = self.content_chunks_by("WHERE entry_id=?1 AND embed=1 AND embed_state='pending' AND attempts<3 AND visual=(SELECT visual FROM content_chunks WHERE entry_id=?1 AND embed=1 AND embed_state='pending' AND attempts<3 ORDER BY visual,id LIMIT 1) ORDER BY id LIMIT 30",entry)?;
+        if let Some(first) = chunks.first() {
+            let class = std::mem::discriminant(&first.embedding_input);
+            chunks.retain(|c| std::mem::discriminant(&c.embedding_input) == class);
+        }
         let tx = self.conn.transaction()?;
         for chunk in &chunks {
             tx.execute(
@@ -281,6 +290,23 @@ impl IndexStore {
         }
         tx.commit()?;
         Ok(chunks)
+    }
+
+    /// Replace a regenerated derived input without replacing the exact row or claim.
+    pub fn replace_content_artifact(
+        &mut self, chunk: &crate::model::ContentChunk,
+        input: &crate::model::DraftEmbeddingInput, revision: i64, generation: i64,
+    ) -> Result<bool, StoreError> {
+        if self.content_revision(chunk.entry_id)? != revision || self.model_generation()? != generation {
+            return Ok(false);
+        }
+        if std::mem::discriminant(input) != std::mem::discriminant(&chunk.embedding_input)
+            || matches!(input, crate::model::DraftEmbeddingInput::Text) {
+            return Err(StoreError::InvalidConfig("regenerated artifact type changed".into()));
+        }
+        let encode = |input| serde_json::to_string(input).map_err(|e| StoreError::InvalidConfig(e.to_string()));
+        Ok(self.conn.execute("UPDATE content_chunks SET embedding_input=?3 WHERE id=?1 AND entry_id=?2 AND embed_state='claimed' AND embedding_input=?4",
+            params![chunk.id, chunk.entry_id, encode(input)?, encode(&chunk.embedding_input)?])? == 1)
     }
 
     pub fn release_content_vectors(
@@ -613,6 +639,12 @@ END;
 UPDATE content_chunks SET embed_state='pending' WHERE embed_state='claimed';
 "#,
         )?;
+        let chunk_columns = conn.prepare("PRAGMA table_info(content_chunks)")?
+            .query_map([], |r| r.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?;
+        if !chunk_columns.iter().any(|c| c == "embedding_input") {
+            conn.execute("ALTER TABLE content_chunks ADD COLUMN embedding_input TEXT NOT NULL DEFAULT '\"Text\"'", [])?;
+        }
         // Preserve legacy FTS rows, including numeric exact-only text without segments.
         if conn.query_row(
             "SELECT COUNT(*) FROM meta WHERE key='content_batches_v1'",
@@ -2327,8 +2359,57 @@ mod tests {
             location: Default::default(),
             embed: true,
             visual: false,
+            embedding_input: Default::default(),
             attempts: 0,
         }
+    }
+
+    #[test]
+    fn media_typed_artifact_persists_independently_of_text_and_vector_reset() {
+        use crate::model::DraftEmbeddingInput;
+        let (mut store, job, progress) = batch_fixture();
+        let mut chunk = content_chunk(&job, 0, "");
+        chunk.kind = "audio".into();
+        chunk.location.start_ms = Some(50000);
+        chunk.location.end_ms = Some(65000);
+        chunk.embedding_input = DraftEmbeddingInput::Audio { path: std::path::PathBuf::from("C:/private/cache/時刻 window.wav") };
+        assert!(store.commit_content_batch(&job, &progress, &[chunk.clone()], None).unwrap());
+        assert_eq!(store.list_content_chunks(job.entry_id).unwrap()[0].embedding_input, chunk.embedding_input);
+        store.reset_content_vectors().unwrap();
+        let claimed = store.claim_content_vectors(Some(job.entry_id)).unwrap();
+        assert_eq!(claimed.len(), 1);
+        assert_eq!(claimed[0].embedding_input, chunk.embedding_input);
+        assert!(claimed[0].text.is_empty());
+        assert_eq!(claimed[0].location.start_ms, Some(50000));
+        let generation = store.model_generation().unwrap();
+        let restored = DraftEmbeddingInput::Audio { path: std::path::PathBuf::from("C:/private/cache/restored.wav") };
+        assert!(!store.replace_content_artifact(&claimed[0], &restored, progress.revision + 1, generation).unwrap());
+        assert!(!store.replace_content_artifact(&claimed[0], &restored, progress.revision, generation + 1).unwrap());
+        assert!(store.replace_content_artifact(&claimed[0], &restored, progress.revision, generation).unwrap());
+        assert!(!store.replace_content_artifact(&claimed[0], &restored, progress.revision, generation).unwrap());
+        let after = store.list_content_chunks(job.entry_id).unwrap();
+        assert_eq!(after[0].id, claimed[0].id);
+        assert_eq!(after[0].embedding_input, restored);
+        assert_eq!(after[0].location.start_ms, Some(50000));
+    }
+
+    #[test]
+    fn media_silent_progress_is_durable_without_content_and_rejects_replay() {
+        let (mut store, old_job, _) = batch_fixture();
+        store.complete_extract_job(old_job.id).unwrap();
+        store.enqueue_extract_job(old_job.entry_id, "audio").unwrap();
+        let job = store.claim_content_extract_job().unwrap().unwrap();
+        let progress = store.begin_content_batch(job.entry_id, "audio", "silent-source").unwrap();
+        assert!(store.commit_content_batch(&job, &progress, &[], Some(30)).unwrap());
+        assert!(store.list_content_chunks(job.entry_id).unwrap().is_empty());
+        let saved = store.content_progress(job.entry_id, "audio").unwrap().unwrap();
+        assert_eq!(saved.cursor, 30);
+        assert!(!saved.complete);
+        assert!(!store.commit_content_batch(&job, &progress, &[], Some(30)).unwrap());
+        let resumed = store.claim_content_extract_job().unwrap().unwrap();
+        assert!(store.commit_content_batch(&resumed, &saved, &[], None).unwrap());
+        assert!(store.content_progress(job.entry_id, "audio").unwrap().unwrap().complete);
+        assert!(store.claim_content_vectors(Some(job.entry_id)).unwrap().is_empty());
     }
 
     #[test]

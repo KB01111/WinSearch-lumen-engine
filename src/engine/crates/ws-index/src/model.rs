@@ -165,6 +165,14 @@ pub struct ContentMatch {
     pub thumbnail_path: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum DraftEmbeddingInput {
+    #[default]
+    Text,
+    Image { path: std::path::PathBuf, token_budget: u32 },
+    Audio { path: std::path::PathBuf },
+}
+
 /// Exact content persists independently of optional vectors. Chunk ordinals are
 /// stable within one source revision and shared by cursor and vector writes.
 #[derive(Debug, Clone)]
@@ -178,6 +186,7 @@ pub struct ContentChunk {
     pub location: ContentMatch,
     pub embed: bool,
     pub visual: bool,
+    pub embedding_input: DraftEmbeddingInput,
     pub attempts: i64,
 }
 

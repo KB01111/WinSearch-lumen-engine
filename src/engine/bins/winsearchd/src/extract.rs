@@ -87,7 +87,7 @@ impl ExtractorRegistry {
     pub fn production() -> Self {
         Self {
             extractors: HashMap::new(),
-            budget_factory: Box::new(|_| ExtractBudget::default()),
+            budget_factory: Box::new(ExtractBudget::for_modality),
             worker: Some(ExtractClient::production()),
         }
     }
@@ -162,6 +162,26 @@ impl Indexer {
         F: Fn(&[String]) -> Result<Vec<Vec<f32>>, EmbedError>,
         FI: Fn(&Path) -> Result<Option<Vec<f32>>, EmbedError>,
     {
+        self.extract_once_inputs(registry, embed, |input| match input {
+            ws_extract::DraftEmbeddingInput::Image { path, .. } => embed_image(path)?
+                .ok_or_else(|| EmbedError::Unsupported("visual embedding unavailable".into())),
+            ws_extract::DraftEmbeddingInput::Audio { .. } =>
+                Err(EmbedError::ModelNotAvailable("audio callback unavailable".into())),
+            ws_extract::DraftEmbeddingInput::Text =>
+                Err(EmbedError::Protocol("text passed to media callback".into())),
+        })
+    }
+
+    fn extract_once_inputs<F, FI>(
+        &self,
+        registry: &ExtractorRegistry,
+        embed: F,
+        embed_image: FI,
+    ) -> Result<ExtractStepOutcome, StoreError>
+    where
+        F: Fn(&[String]) -> Result<Vec<Vec<f32>>, EmbedError>,
+        FI: Fn(&ws_extract::DraftEmbeddingInput) -> Result<Vec<f32>, EmbedError>,
+    {
         if self.indexing_pause_reason().is_some() {
             return Ok(ExtractStepOutcome::default());
         }
@@ -177,7 +197,7 @@ impl Indexer {
             }
             let Some(job) = store.claim_content_extract_job()? else {
                 drop(store);
-                return self.embed_content_pending(&embed, &embed_image, None);
+                return self.embed_content_pending(registry, &embed, &embed_image, None);
             };
             match store.get_entry(job.entry_id)? {
                 Some(entry)
@@ -230,21 +250,20 @@ impl Indexer {
         // 3. Run extraction outside the store lock, enforcing the budget.
         let path = Path::new(&entry.path);
         let snapshot = source_snapshot(path);
-        let (progress, pdf_source_replaced) = {
+        let (progress, source_replaced) = {
             let mut store = self.store_lock();
-            let pdf_source_replaced = job.kind == SEGMENT_KIND_PDF
-                && store
+            let source_replaced = store
                     .content_progress(job.entry_id, &job.kind)?
                     .is_some_and(|previous| previous.source != snapshot);
-            if pdf_source_replaced {
+            if source_replaced {
                 store.invalidate_content_source(job.entry_id)?;
             }
             (
                 store.begin_content_batch(job.entry_id, &job.kind, &snapshot)?,
-                pdf_source_replaced,
+                source_replaced,
             )
         };
-        if pdf_source_replaced {
+        if source_replaced {
             self.invalidate_vector_cache();
         }
         let source = std::fs::metadata(path)
@@ -289,6 +308,7 @@ impl Indexer {
                         next_cursor: None,
                         total_units: None,
                         diagnostics: Vec::new(),
+                        media: None,
                     })
                 }
                 Err(ExtractClientError::Timeout) => Err(ExtractError::DeadlineExceeded),
@@ -434,7 +454,9 @@ impl Indexer {
                 entry_id: job.entry_id,
                 job_kind: job.kind.clone(),
                 kind: d.kind.clone(),
-                chunk_index: if job.kind == SEGMENT_KIND_PDF {
+                chunk_index: if d.kind == "audio" {
+                    (d.start_ms.expect("validated audio start") / ws_extract::audio::HOP_MS) as i64
+                } else if job.kind == SEGMENT_KIND_PDF {
                     let page = d.page.expect("validated PDF page") - 1;
                     if pdf_page != page || i == 0 {
                         pdf_page = page;
@@ -462,9 +484,12 @@ impl Indexer {
                         .map(|p| p.to_string_lossy().into_owned()),
                 },
                 embed: d.embed
-                    && (!d.text.trim().is_empty() || d.kind == ws_extract::pdf::VISUAL_KIND)
+                    && (!d.text.trim().is_empty() || d.kind == ws_extract::pdf::VISUAL_KIND
+                        || !matches!(d.embedding_input, ws_extract::DraftEmbeddingInput::Text))
                     && output.status == ExtractionStatus::Extracted,
-                visual: d.kind == ws_extract::pdf::VISUAL_KIND,
+                visual: d.kind == ws_extract::pdf::VISUAL_KIND
+                    || matches!(d.embedding_input, ws_extract::DraftEmbeddingInput::Image { .. }),
+                embedding_input: d.embedding_input.clone(),
                 attempts: 0,
             })
             .collect();
@@ -482,6 +507,7 @@ impl Indexer {
                 location: ContentMatch::default(),
                 embed: true,
                 visual: true,
+                embedding_input: Default::default(),
                 attempts: 0,
             });
         }
@@ -495,9 +521,9 @@ impl Indexer {
         }
         drop(store);
         self.invalidate_vector_cache();
-        let mut embedded = self.embed_content_pending(&embed, &embed_image, Some(entry.id))?;
+        let mut embedded = self.embed_content_pending(registry, &embed, &embed_image, Some(entry.id))?;
         if job.kind == SEGMENT_KIND_IMAGE && !embedded.requeued && !embedded.failed {
-            let visual = self.embed_content_pending(&embed, &embed_image, Some(entry.id))?;
+            let visual = self.embed_content_pending(registry, &embed, &embed_image, Some(entry.id))?;
             embedded.segments_stored += visual.segments_stored;
             embedded.requeued |= visual.requeued;
             embedded.failed |= visual.failed;
@@ -532,15 +558,16 @@ impl Indexer {
 
     fn embed_content_pending<F, FI>(
         &self,
+        registry: &ExtractorRegistry,
         embed: &F,
         image: &FI,
         preferred: Option<i64>,
     ) -> Result<ExtractStepOutcome, StoreError>
     where
         F: Fn(&[String]) -> Result<Vec<Vec<f32>>, EmbedError>,
-        FI: Fn(&Path) -> Result<Option<Vec<f32>>, EmbedError>,
+        FI: Fn(&ws_extract::DraftEmbeddingInput) -> Result<Vec<f32>, EmbedError>,
     {
-        let (chunks, entry, revision, generation, progress) = {
+        let (mut chunks, entry, revision, generation, progress) = {
             let mut store = self.store_lock();
             let chunks = store.claim_content_vectors(preferred)?;
             let Some(first) = chunks.first() else {
@@ -573,18 +600,26 @@ impl Indexer {
             return Ok(ExtractStepOutcome::default());
         }
         let result = (|| {
-            let vectors = if chunks[0].visual {
+            for chunk in &mut chunks {
+                if let ws_extract::DraftEmbeddingInput::Audio { path: artifact } = &chunk.embedding_input {
+                    if !artifact.is_file() || !ws_platform::content::local_content_allowed(artifact) {
+                        self.restore_audio_artifact(registry, chunk, path, progress.as_ref().unwrap(), generation)?;
+                    }
+                }
+            }
+            let vectors = if chunks[0].visual || !matches!(chunks[0].embedding_input, ws_extract::DraftEmbeddingInput::Text) {
                 chunks.iter().map(|chunk| {
-                    let artifact = if chunk.kind == ws_extract::pdf::VISUAL_KIND {
-                        Path::new(chunk.location.thumbnail_path.as_deref().ok_or_else(|| {
-                            EmbedError::Protocol("PDF visual artifact missing".into())
-                        })?)
+                    let input = if matches!(chunk.embedding_input, ws_extract::DraftEmbeddingInput::Text) {
+                        let artifact = if chunk.kind == ws_extract::pdf::VISUAL_KIND {
+                            Path::new(chunk.location.thumbnail_path.as_deref().ok_or_else(|| {
+                                EmbedError::Protocol("PDF visual artifact missing".into())
+                            })?)
+                        } else { path };
+                        ws_extract::DraftEmbeddingInput::Image { path: artifact.to_path_buf(), token_budget: 280 }
                     } else {
-                        path
+                        chunk.embedding_input.clone()
                     };
-                    image(artifact)?.ok_or_else(|| {
-                        EmbedError::Unsupported("visual embedding unavailable".into())
-                    })
+                    image(&input)
                 }).collect::<Result<Vec<_>, _>>()?
             } else {
                 embed(&chunks.iter().map(|c| c.text.clone()).collect::<Vec<_>>())?
@@ -660,7 +695,7 @@ impl Indexer {
                 }
                 let unavailable = matches!(
                     error,
-                    EmbedError::ModelNotAvailable(_) | EmbedError::Unsupported(_)
+                    EmbedError::ModelNotAvailable(_) | EmbedError::InputUnavailable(_) | EmbedError::Unsupported(_)
                 );
                 store.release_content_vectors(&chunks, !unavailable)?;
                 Ok(ExtractStepOutcome {
@@ -672,19 +707,53 @@ impl Indexer {
         }
     }
 
+    fn restore_audio_artifact(
+        &self, registry: &ExtractorRegistry, chunk: &mut ContentChunk,
+        source: &Path, progress: &ws_index::model::ContentProgress, generation: i64,
+    ) -> Result<(), EmbedError> {
+        let client = registry.worker.as_ref()
+            .ok_or_else(|| EmbedError::InputUnavailable("derived media requires the extraction worker".into()))?;
+        let mut request = client.request(source.to_path_buf(), &chunk.job_kind, 1);
+        request.cursor = chunk.location.start_ms
+            .ok_or_else(|| EmbedError::Protocol("audio artifact has no source time".into()))? / ws_extract::audio::HOP_MS;
+        let response = client.extract_while(&request, ws_extract::DEFAULT_EXTRACT_TIMEOUT, || {
+            self.indexing_pause_reason().is_none() && self.content_path_allowed(source)
+                && source_snapshot(source) == progress.source
+                && self.store_lock().content_revision(chunk.entry_id).ok() == Some(progress.revision)
+        }).map_err(|e| EmbedError::InputUnavailable(e.to_string()))?;
+        let mut lease = ArtifactLease::for_output(&response.output);
+        let draft = response.output.segments.iter().find(|s| {
+            s.kind == chunk.kind && s.start_ms == chunk.location.start_ms && s.end_ms == chunk.location.end_ms
+                && matches!(s.embedding_input, ws_extract::DraftEmbeddingInput::Audio { .. })
+        }).ok_or_else(|| EmbedError::Protocol("regenerated audio does not match durable window".into()))?;
+        if response.output.segments.len() != 1 || self.indexing_pause_reason().is_some()
+            || !self.content_path_allowed(source) || source_snapshot(source) != progress.source {
+            return Err(EmbedError::InputUnavailable("source/policy changed during artifact restoration".into()));
+        }
+        let replaced = self.store_lock().replace_content_artifact(chunk, &draft.embedding_input, progress.revision, generation)
+            .map_err(|e| EmbedError::Protocol(e.to_string()))?;
+        if !replaced { return Err(EmbedError::InputUnavailable("artifact claim became stale".into())); }
+        chunk.embedding_input = draft.embedding_input.clone();
+        lease.keep();
+        Ok(())
+    }
+
     /// Production entry for one content extraction step using the supervisor.
     pub fn extract_once_with_supervisor(
         &self,
         registry: &ExtractorRegistry,
         sup: &Arc<EmbedSupervisor>,
     ) -> Result<ExtractStepOutcome, StoreError> {
-        self.extract_once_typed(
+        self.extract_once_inputs(
             registry,
             |texts| sup.embed_texts_bounded(texts, EMBED_JOB_TIMEOUT),
-            |path| match sup.embed_image_bounded(path, EMBED_JOB_TIMEOUT) {
-                Ok(vec) => Ok(Some(vec)),
-                Err(crate::embed_client::EmbedError::Unsupported(_)) => Ok(None),
-                Err(e) => Err(e),
+            |input| match input {
+                ws_extract::DraftEmbeddingInput::Image { path, token_budget } =>
+                    sup.embed_image_with_budget_bounded(path, *token_budget, EMBED_JOB_TIMEOUT),
+                ws_extract::DraftEmbeddingInput::Audio { path } =>
+                    sup.embed_audio_bounded(path, None, EMBED_JOB_TIMEOUT),
+                ws_extract::DraftEmbeddingInput::Text =>
+                    Err(EmbedError::Protocol("text passed to media callback".into())),
             },
         )
     }
@@ -822,7 +891,10 @@ mod tests {
     }
 
     fn seeded_indexer(tree: &TempTree) -> Arc<Indexer> {
-        let store = IndexStore::open_in_memory().unwrap();
+        let mut store = IndexStore::open_in_memory().unwrap();
+        let mut config = store.get_or_migrate_indexing_config().unwrap();
+        config.respect_battery_saver = false;
+        store.set_indexing_config(&config).unwrap();
         let indexer = Indexer::open(store, &[tree.0.clone()]).unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
@@ -843,6 +915,67 @@ mod tests {
             .join("../../../..")
             .join("artifacts/pdf-fixtures")
             .join(name)
+    }
+
+    #[test]
+    fn media_audio_native_drafts_defer_without_model_or_fake_transcript() {
+        let tree = TempTree::new();
+        let cache = TempTree::new();
+        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+        let source = tree.0.join("時刻 recording.wav");
+        fs::copy(repo.join("artifacts/spoken-fixtures/two-passages-65s.wav"), &source).unwrap();
+        let indexer = seeded_indexer(&tree);
+        let mut registry = process_registry(&cache);
+        registry.worker.as_mut().unwrap().worker_env.push(("WINSEARCH_TEST_DECODER_DIR".into(),
+            repo.join("artifacts/dependencies/ffmpeg-2026-09-30/ffmpeg-n9.0.2-17-g2a571b6068-win64-lgpl-shared-9.0/bin")));
+        let result = indexer.extract_once_typed(&registry,
+            |_| Err(EmbedError::ModelNotAvailable("fixture no model".into())), |_| Ok(None)).unwrap();
+        assert_eq!(result.status, Some(ExtractionStatus::Extracted));
+        assert_eq!(result.fts_chunks_indexed, 0);
+        let mut store = indexer.store_lock();
+        let entry = store.find_by_path(&source.to_string_lossy()).unwrap().unwrap();
+        let chunks = store.list_content_chunks(entry.id).unwrap();
+        assert_eq!(chunks.len(), 3);
+        assert!(chunks.iter().all(|c| c.text.is_empty() && c.embed),
+            "genuine audio remains pending even without an invented transcript");
+        assert_eq!(chunks.iter().map(|c| c.chunk_index).collect::<Vec<_>>(), vec![0,1,2]);
+        for chunk in &chunks {
+            let ws_extract::DraftEmbeddingInput::Audio { path } = &chunk.embedding_input else { panic!("audio type lost"); };
+            assert!(path.is_file());
+            ws_extract::audio::validate_window_wav(path).unwrap();
+        }
+        let claimed = store.claim_content_vectors(Some(entry.id)).unwrap();
+        assert_eq!(claimed.len(), 3);
+        store.release_content_vectors(&claimed, false).unwrap();
+        assert!(store.list_segments_for_entry(entry.id).unwrap().is_empty());
+        let ids: Vec<_> = chunks.iter().map(|c| c.id).collect();
+        drop(store);
+        // A pruned derived window must be recreated without replacing exact rows.
+        let ws_extract::DraftEmbeddingInput::Audio { path: missing } = &chunks[1].embedding_input else { panic!("audio"); };
+        fs::remove_file(missing).unwrap();
+        let calls = std::cell::Cell::new(0);
+        let mut missing_parser = ExtractorRegistry::production();
+        missing_parser.worker = Some(ExtractClient::new(cache.0.join("not-a-worker.exe"), cache.0.clone()));
+        let embedded = indexer.extract_once_inputs(&registry, |_| panic!("audio cannot be embedded as text"),
+            |input| {
+                let ws_extract::DraftEmbeddingInput::Audio { path } = input else { panic!("wrong media input"); };
+                ws_extract::audio::validate_window_wav(path).expect("missing derived audio should be regenerated first");
+                calls.set(calls.get() + 1);
+                Ok(vec![1.0,0.0])
+            }).unwrap();
+        assert_eq!(calls.get(), 3);
+        assert_eq!(embedded.segments_stored, 3);
+        assert_eq!(indexer.store_lock().list_content_chunks(entry.id).unwrap().iter().map(|c| c.id).collect::<Vec<_>>(), ids);
+        assert_eq!(indexer.store_lock().list_segments_for_entry(entry.id).unwrap().iter().map(|s| s.start_ms).collect::<Vec<_>>(), vec![Some(0),Some(25000),Some(50000)]);
+        indexer.store_lock().reset_content_vectors().unwrap();
+        let without_parser = indexer.extract_once_inputs(&missing_parser, |_| panic!("not text"),
+            |_| Ok(vec![0.0,1.0])).unwrap();
+        assert_eq!(without_parser.segments_stored, 3, "intact deferred artifacts must not reparse");
+        fs::write(&source, b"changed corrupt media source").unwrap();
+        indexer.store_lock().enqueue_extract_job(entry.id, "audio").unwrap();
+        indexer.extract_once_inputs(&missing_parser, |_| panic!("no stale text"), |_| panic!("no stale audio")).unwrap();
+        assert!(indexer.store_lock().list_segments_for_entry(entry.id).unwrap().is_empty(),
+            "proven source replacement must invalidate old media before a decoder failure");
     }
 
     fn pdf_native_replacement_clears_derived_vectors(replacement: Option<&str>) {

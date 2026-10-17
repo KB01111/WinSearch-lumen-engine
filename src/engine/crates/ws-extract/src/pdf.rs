@@ -71,6 +71,7 @@ pub fn extract_pdf_batch(
         {
             let embed = !crate::is_numeric_dominated(&text.text, "pdf");
             drafts.push(SegmentDraft {
+                embedding_input: crate::DraftEmbeddingInput::Text,
                 kind: "pdf".into(),
                 text: text.text,
                 page: Some(page + 1),
@@ -107,6 +108,7 @@ pub fn extract_pdf_batch(
             {
                 let embed = !crate::is_numeric_dominated(&text.text, "pdf");
                 drafts.push(SegmentDraft {
+                    embedding_input: crate::DraftEmbeddingInput::Text,
                     kind: "ocr".into(),
                     text: text.text,
                     page: Some(page + 1),
@@ -118,6 +120,7 @@ pub fn extract_pdf_batch(
                 });
             }
             drafts.push(SegmentDraft {
+                embedding_input: crate::DraftEmbeddingInput::Text,
                 kind: VISUAL_KIND.into(),
                 text: String::new(),
                 page: Some(page + 1),
@@ -140,6 +143,7 @@ pub fn extract_pdf_batch(
         }
         if drafts.is_empty() {
             drafts.push(SegmentDraft {
+                embedding_input: crate::DraftEmbeddingInput::Text,
                 kind: "pdf".into(),
                 text: String::new(),
                 page: Some(page + 1),
@@ -176,5 +180,6 @@ pub fn extract_pdf_batch(
         next_cursor: (page < total).then_some(encode_cursor(page, chunk)),
         total_units: Some(u64::from(total)),
         diagnostics,
+        media: None,
     })
 }

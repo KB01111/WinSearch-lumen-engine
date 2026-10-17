@@ -13,6 +13,8 @@ use crate::ExtractError;
 
 /// Default maximum bytes an extractor may read from one file (32 MiB).
 pub const DEFAULT_MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
+/// Streaming media is bounded by decoded windows, not an in-memory source read.
+pub const DEFAULT_MAX_MEDIA_FILE_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 /// Default wall-clock budget per extraction batch (also enforced by the parent).
 pub const DEFAULT_EXTRACT_TIMEOUT: Duration = Duration::from_secs(120);
 /// Default cap on segments emitted by one file extraction.
@@ -40,6 +42,11 @@ impl Default for ExtractBudget {
 }
 
 impl ExtractBudget {
+    pub fn for_modality(kind: &str) -> Self {
+        Self { max_bytes: if matches!(kind, "audio" | "video") {
+            DEFAULT_MAX_MEDIA_FILE_BYTES
+        } else { DEFAULT_MAX_FILE_BYTES }, ..Self::default() }
+    }
     /// Creates a budget starting now with `timeout` duration.
     pub fn new(max_bytes: u64, timeout: Duration, max_segments: usize) -> Self {
         Self {

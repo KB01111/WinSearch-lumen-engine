@@ -2,6 +2,8 @@
 //! and baseline plain-text extraction for WinSearch (Phase 4, P4.1).
 
 pub mod budget;
+pub mod audio;
+pub mod decoder;
 pub mod chunk;
 pub mod docs;
 pub mod image;
@@ -23,6 +25,7 @@ pub use chunk::{
     DEFAULT_CHUNK_CHARS, DEFAULT_EXCERPT_CHARS, DEFAULT_OVERLAP_CHARS, DEFAULT_OVERLAP_RATIO,
 };
 pub use docs::{build_document_output, is_numeric_dominated, strip_rtf, DocumentExtractor};
+pub use ws_index::model::DraftEmbeddingInput;
 pub use image::{
     is_screenshot_path, parse_exif_from_bytes, stat_thumbnail_key, thumbnail_cache_path,
     ExifMetadata, ImageExtractor, DEFAULT_MAX_IMAGE_EDGE, DEFAULT_THUMBNAIL_MAX_EDGE,
@@ -60,6 +63,8 @@ pub struct SegmentDraft {
     /// FTS content indexing when `text` is non-empty). False for `ExactOnly`
     /// segments that only feed FTS.
     pub embed: bool,
+    #[serde(default)]
+    pub embedding_input: DraftEmbeddingInput,
 }
 
 impl SegmentDraft {
@@ -74,6 +79,7 @@ impl SegmentDraft {
             line: None,
             thumbnail_hint: None,
             embed: true,
+            embedding_input: DraftEmbeddingInput::Text,
         }
     }
 }
@@ -161,6 +167,7 @@ pub trait Extractor: Send + Sync {
             next_cursor: (successful && (end as u64) < total).then_some(end as u64),
             total_units: successful.then_some(total),
             diagnostics: Vec::new(),
+            media: None,
         })
     }
 }
@@ -242,6 +249,7 @@ impl Extractor for PlainTextExtractor {
                 line: Some(chunk.line),
                 thumbnail_hint: None,
                 embed: true,
+                embedding_input: DraftEmbeddingInput::Text,
             });
         }
         Ok(ExtractOutput::extracted(segments))

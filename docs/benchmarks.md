@@ -149,5 +149,13 @@ in the final performance acceptance scope.
 
 ## Targets (Phase 7 power/performance items)
 
+The 2026-10-17 CPU worker follow-up reproduced all four independent media
+reference cosines (>=.999) but hit the unchanged watchdog at 180 seconds during
+repeated audio requests, before retrieval. This is an incomplete acceptance run,
+not a passing benchmark. Retained results: artifacts/media-review-followup/.
+The host's native power policy independently reported Battery Saver during
+extraction tests; that association does not establish the slowdown's cause.
+CPU calibration and a fresh complete model/retrieval run remain required.
+
 - Idle CPU/GPU ≈ 0: resource-behavior measurements remain on the Phase 7 checklist.
 - Power-aware indexing policies (AC / battery saver / quiet hours): Phase 7.

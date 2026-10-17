@@ -28,6 +28,7 @@ fn run() -> Result<(), String> {
             next_cursor: None,
             total_units: None,
             diagnostics: Vec::new(),
+            media: None,
         }
     } else if !request.scratch_dir.is_absolute()
         || !ws_platform::content::local_content_allowed(&request.path)
@@ -41,20 +42,20 @@ fn run() -> Result<(), String> {
             next_cursor: None,
             total_units: None,
             diagnostics: Vec::new(),
+            media: None,
         }
     } else {
-        let budget = ExtractBudget::new(
-            ws_extract::DEFAULT_MAX_FILE_BYTES,
-            ws_extract::DEFAULT_EXTRACT_TIMEOUT,
-            if request.kind == "pdf" {
+        let mut budget = ExtractBudget::for_modality(&request.kind);
+        budget.max_segments = if matches!(request.kind.as_str(), "pdf" | "video") {
                 ws_extract::worker::MAX_DRAFTS
             } else {
                 request.max_units as usize
-            },
-        );
+            };
         let result = match request.kind.as_str() {
             "doc" => DocumentExtractor.extract_batch(&request.path, &budget, request.cursor),
             "pdf" => ws_extract::pdf::extract_pdf_batch(&request, &budget),
+            "audio" => ws_extract::audio::extract_audio_batch(&request, &budget),
+            "video" => ws_extract::audio::extract_audio_batch(&request, &budget),
             "image" => ImageExtractor::default()
                 .with_thumb_dir(request.scratch_dir.clone())
                 .extract_batch(&request.path, &budget, request.cursor),
@@ -68,6 +69,7 @@ fn run() -> Result<(), String> {
             next_cursor: None,
             total_units: None,
             diagnostics: Vec::new(),
+            media: None,
         })
     };
     ws_protocol::write_message(&mut stdout, &response).map_err(|e| e.to_string())

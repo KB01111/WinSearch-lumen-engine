@@ -21,7 +21,7 @@ fn main() {
         }
     }
     std::fs::write(&args[2], std::process::id().to_string()).unwrap();
-    frame(r#"{"supported_kinds":["doc","image"]}"#);
+    frame(r#"{"supported_kinds":["doc","image","audio"]}"#);
     if mode == "never-read" {
         loop {
             std::thread::sleep(Duration::from_secs(60));
@@ -32,6 +32,20 @@ fn main() {
     let mut input = vec![0; u32::from_le_bytes(length) as usize];
     std::io::stdin().read_exact(&mut input).unwrap();
     match mode {
+        "audio-cache" | "audio-outside" => {
+            let artifact = std::path::Path::new(&args[3]);
+            let mut wav = Vec::new();
+            wav.extend_from_slice(b"RIFF"); wav.extend_from_slice(&32036u32.to_le_bytes());
+            wav.extend_from_slice(b"WAVEfmt "); wav.extend_from_slice(&16u32.to_le_bytes());
+            wav.extend_from_slice(&1u16.to_le_bytes()); wav.extend_from_slice(&1u16.to_le_bytes());
+            wav.extend_from_slice(&16000u32.to_le_bytes()); wav.extend_from_slice(&32000u32.to_le_bytes());
+            wav.extend_from_slice(&2u16.to_le_bytes()); wav.extend_from_slice(&16u16.to_le_bytes());
+            wav.extend_from_slice(b"data"); wav.extend_from_slice(&32000u32.to_le_bytes());
+            wav.resize(32044, 12);
+            std::fs::write(artifact, wav).unwrap();
+            let path = args[3].replace('\\', "\\\\").replace('"', "\\\"");
+            frame(&format!(r#"{{"output":{{"status":"Extracted","segments":[{{"kind":"audio","text":"","page":null,"line":null,"start_ms":0,"end_ms":1000,"thumbnail_hint":null,"embed":true,"embedding_input":{{"Audio":{{"path":"{path}"}}}}}}]}},"next_cursor":null,"total_units":1,"media":{{"duration_ms":1000,"visual_frames":0,"has_audio":true}}}}"#));
+        }
         "oversized" => {
             std::io::stdout()
                 .write_all(&u32::MAX.to_le_bytes())

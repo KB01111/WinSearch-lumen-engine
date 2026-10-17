@@ -112,3 +112,15 @@ WinSearch incorporates or references the following third-party software.
     Usage:    Pillow-compatible bicubic sizing port in ws-embed/src/image.rs;
               independent native image/audio tests. Full license/provenance:
               src/engine/crates/ws-embed/tests/fixtures/media/.
+
+18. FFmpeg n9.0.2-17-g2a571b6068, Windows x64 LGPL shared 9.0 build
+    Project:  https://ffmpeg.org/
+    Binaries: https://github.com/BtbN/FFmpeg-Builds
+    License:  LGPL-3.0-or-later; bundled libraries retain their own licenses.
+    Copyright: The FFmpeg developers and individual bundled-library authors.
+    Usage:    Bounded local audio/video probing and decoding in the extraction child.
+    Pin/hash: src/engine/third_party/ffmpeg.json; tools/fetch-ffmpeg.ps1 verifies
+              before safe extraction. Retain LICENSE.txt, COPYING.GPLv3 and
+              SOURCE-INSTRUCTIONS.md with all required sibling DLLs.
+    Source:   src/engine/third_party/ffmpeg-source.md records exact upstream/build
+              revisions and the corresponding-source release assembly gate.

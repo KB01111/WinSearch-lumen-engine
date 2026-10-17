@@ -380,3 +380,43 @@ profile; the current WinUI app remains another consumer. Lumen's React
 SearchService, Zod validation, consent, cancellation and native process/model
 ownership remain boundaries. Actual client/host integration and engine-only
 package verification are required work, not established by the media tests.
+
+### Bounded audio extraction
+
+The extraction child now decodes compressed/local recordings through private
+sibling ffmpeg/ffprobe executables, never PATH. Debug fixtures alone can set
+WINSEARCH_TEST_DECODER_DIR. Both tools use a local-file protocol and explicit
+container whitelist that excludes playlists, concat and image sequences; MOV
+external references remain disabled. Probe JSON is capped at 64 KiB, stderr at 32 KiB,
+stream count at 32, source duration at 366 days, and decoded PCM at 960000 bytes.
+Each decoder runs in an owned nested job under the existing worker's outer job,
+deadline and 1 GiB tree limit. Timeout, crash and capture-overflow tests exercise
+the real process owner. Streaming media has a 64 GiB metadata size cap; ordinary
+document/image/PDF input keeps its 32 MiB bound.
+
+Audio cursors are window ordinals, with windows of 30 seconds and a hop of 25 seconds.
+Each batch processes at most 30 windows and the final partial window ends at
+the source duration. RMS below .003 advances progress without a draft, transcript
+or vector. Duration decimal parsing avoids floating-point millisecond rounding.
+The internal MediaBatch duration/count metadata lets the parent validate actual
+processed units independently of emitted drafts. Video phase/frame extraction
+is still required; the current container route only covers an audio stream.
+
+DraftEmbeddingInput distinguishes text, image budgets and derived audio paths;
+it is persisted on each content chunk independently of searchable text.
+The parent confines, caps and promotes artifacts before removing scratch.
+Audio additionally requires a canonical bounded PCM16/mono 16k WAV whose sample
+duration agrees with its location. Artifact leases cover typed inputs as well
+as thumbnails. Silent-only progress commits atomically and stale/replayed claims
+cannot advance it. A missing deferred WAV is regenerated from its permitted
+source in a bounded child, then attached to the existing claimed chunk without
+changing exact row IDs or source locations. Generation/revision/policy checks
+precede replacement and vector commits; changed sources invalidate old vectors
+before a decoder failure can preserve stale media results.
+
+Native fixtures cover Unicode/spaced/dash filenames, three windows in a 65 second recording,
+compressed audio, network-playlist rejection without a loopback connection,
+and a 20 minute silent recording continued across workers. These are decoder and
+persistence checks. Actual indexed media retrieval, video phases/shot selection,
+resource measurements, cache maintenance, installed payload and UI acceptance
+remain open.

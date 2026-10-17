@@ -80,6 +80,8 @@ pub enum EmbedError {
     VersionMismatch(String),
     #[error("embedding model not available: {0}")]
     ModelNotAvailable(String),
+    #[error("embedding input unavailable: {0}")]
+    InputUnavailable(String),
     #[error("embedding failed: {0}")]
     EmbedFailed(String),
     #[error("unsupported by embed worker: {0}")]

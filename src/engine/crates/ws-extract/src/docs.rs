@@ -109,6 +109,7 @@ pub fn build_document_output(
             break;
         }
         segments.push(SegmentDraft {
+            embedding_input: crate::DraftEmbeddingInput::Text,
             kind: seg_kind.to_string(),
             text: chunk.text,
             page: None,

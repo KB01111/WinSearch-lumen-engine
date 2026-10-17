@@ -7,7 +7,7 @@ use std::path::PathBuf;
 pub const MAX_REQUEST_BYTES: usize = 256 * 1024;
 pub const MAX_DRAFTS: usize = 256;
 pub const MAX_SEGMENT_BYTES: usize = 64 * 1024;
-pub const SUPPORTED_KINDS: &[&str] = &["doc", "pdf", "image"];
+pub const SUPPORTED_KINDS: &[&str] = &["doc", "pdf", "image", "audio", "video"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtractRequest {
@@ -26,6 +26,15 @@ pub struct ExtractResponse {
     /// Bounded source-limit diagnostics; exact content may still be usable.
     #[serde(default)]
     pub diagnostics: Vec<String>,
+    #[serde(default)]
+    pub media: Option<MediaBatch>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MediaBatch {
+    pub duration_ms: u64,
+    pub visual_frames: u32,
+    pub has_audio: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -73,7 +82,7 @@ pub fn validate_response(
     }
     let segments = &response.output.segments;
     if segments.len() > MAX_DRAFTS
-        || (request.kind != "pdf" && segments.len() > request.max_units as usize)
+        || (!matches!(request.kind.as_str(), "pdf" | "video") && segments.len() > request.max_units as usize)
     {
         return Err("too many drafts".into());
     }
@@ -91,6 +100,8 @@ pub fn validate_response(
     }
     if request.kind == "pdf" {
         validate_pdf_progress(request, response)?;
+    } else if matches!(request.kind.as_str(), "audio" | "video") {
+        validate_media_progress(request, response)?;
     } else if response.next_cursor.is_some_and(|next| {
         next <= request.cursor || response.total_units.is_some_and(|total| next > total)
     }) || response
@@ -124,7 +135,8 @@ pub fn validate_response(
     for draft in segments {
         let valid_kind = draft.kind == request.kind
             || (matches!(request.kind.as_str(), "image" | "pdf") && draft.kind == "ocr")
-            || (request.kind == "pdf" && draft.kind == crate::pdf::VISUAL_KIND);
+            || (request.kind == "pdf" && draft.kind == crate::pdf::VISUAL_KIND)
+            || (request.kind == "video" && draft.kind == "audio");
         if !valid_kind || draft.kind.len() > 32 || draft.text.len() > MAX_SEGMENT_BYTES {
             return Err("invalid draft kind or text length".into());
         }
@@ -157,6 +169,43 @@ pub fn validate_response(
         {
             return Err("thumbnail path too long".into());
         }
+        match &draft.embedding_input {
+            crate::DraftEmbeddingInput::Text if draft.kind != "audio" => (),
+            crate::DraftEmbeddingInput::Audio { path } if draft.kind == "audio"
+                && draft.embed && draft.text.is_empty() && path.is_absolute()
+                && path.as_os_str().len() <= 32768 && draft.thumbnail_hint.is_none() => (),
+            _ => return Err("invalid typed embedding input".into()),
+        }
+    }
+    Ok(())
+}
+
+fn validate_media_progress(request: &ExtractRequest, response: &ExtractResponse) -> Result<(), String> {
+    if !matches!(response.output.status, ExtractionStatus::Extracted | ExtractionStatus::ExactOnly) {
+        if response.next_cursor.is_some() || response.media.is_some() { return Err("failed media has progress".into()); }
+        return Ok(());
+    }
+    let media = response.media.as_ref().ok_or("media progress missing")?;
+    if media.duration_ms == 0 || media.duration_ms > crate::decoder::MAX_DURATION_MS
+        || media.visual_frames != 0 || !media.has_audio {
+        return Err("invalid audio progress metadata".into());
+    }
+    let total = crate::audio::window_count(media.duration_ms);
+    if response.total_units != Some(total) || request.cursor > total { return Err("invalid audio total/cursor".into()); }
+    let end = total.min(request.cursor + u64::from(request.max_units.min(30)));
+    if response.next_cursor != (end < total).then_some(end) { return Err("invalid audio continuation".into()); }
+    let mut previous = None;
+    for draft in &response.output.segments {
+        let start = draft.start_ms.ok_or("audio draft missing time")?;
+        let finish = draft.end_ms.ok_or("audio draft missing end")?;
+        let window = start / crate::audio::HOP_MS;
+        if draft.kind != "audio" || draft.page.is_some() || draft.line.is_some()
+            || start % crate::audio::HOP_MS != 0 || window < request.cursor || window >= end
+            || previous.is_some_and(|p| window <= p) || finish <= start
+            || finish > media.duration_ms.min(start + crate::audio::WINDOW_MS) {
+            return Err("audio draft outside processed windows".into());
+        }
+        previous = Some(window);
     }
     Ok(())
 }
@@ -267,6 +316,42 @@ mod tests {
     }
 
     #[test]
+    fn media_audio_progress_allows_silence_and_rejects_forged_times_or_inputs() {
+        let mut req = request();
+        req.kind = "audio".into();
+        req.max_units = 30;
+        let mut response = ExtractResponse {
+            output: ExtractOutput::extracted(vec![]),
+            next_cursor: Some(30), total_units: Some(48), diagnostics: vec![],
+            media: Some(MediaBatch { duration_ms: 1_200_000, visual_frames: 0, has_audio: true }),
+        };
+        validate_response(&req, &response).unwrap();
+        response.next_cursor = Some(31);
+        assert!(validate_response(&req, &response).is_err());
+        response.next_cursor = Some(30);
+        let mut draft = SegmentDraft::text("audio", "");
+        draft.start_ms = Some(25000);
+        draft.end_ms = Some(55000);
+        draft.embedding_input = crate::DraftEmbeddingInput::Audio { path: PathBuf::from("C:/private/window.wav") };
+        response.output.segments.push(draft);
+        validate_response(&req, &response).unwrap();
+        response.output.segments[0].start_ms = Some(25001);
+        assert!(validate_response(&req, &response).is_err());
+        response.output.segments[0].start_ms = Some(25000);
+        response.output.segments[0].end_ms = Some(55001);
+        assert!(validate_response(&req, &response).is_err());
+        response.output.segments[0].end_ms = Some(55000);
+        response.output.segments[0].embedding_input = crate::DraftEmbeddingInput::Text;
+        assert!(validate_response(&req, &response).is_err());
+        response.output.segments.clear();
+        req.cursor = 30;
+        response.next_cursor = None;
+        validate_response(&req, &response).unwrap();
+        response.total_units = Some(47);
+        assert!(validate_response(&req, &response).is_err());
+    }
+
+    #[test]
     fn protocol_roundtrip_preserves_text_and_line_metadata() {
         let mut segment = SegmentDraft::text("doc", "actual text\nsecond line");
         segment.line = Some(1);
@@ -275,6 +360,7 @@ mod tests {
             next_cursor: None,
             total_units: Some(1),
             diagnostics: Vec::new(),
+            media: None,
         };
         let mut wire = Vec::new();
         ws_protocol::write_message(&mut wire, &response).unwrap();
@@ -301,6 +387,7 @@ mod tests {
             next_cursor: Some(1 << 32),
             total_units: Some(2),
             diagnostics: vec![],
+            media: None,
         };
         validate_response(&req, &response).unwrap();
         response.output.segments = vec![text; 256];
@@ -335,6 +422,7 @@ mod tests {
             next_cursor: None,
             total_units: Some(2),
             diagnostics: vec![],
+            media: None,
         };
         validate_response(&req, &response).unwrap();
         response.output.segments.pop();
@@ -359,6 +447,7 @@ mod tests {
             next_cursor: None,
             total_units: Some(1),
             diagnostics: vec![],
+            media: None,
         };
         validate_response(&req, &response).unwrap();
         response.output.segments.push(draft);
@@ -383,6 +472,7 @@ mod tests {
             next_cursor: None,
             total_units: Some(75),
             diagnostics: Vec::new(),
+            media: None,
         };
         assert!(validate_response(&request(), &response).is_err());
         response.next_cursor = Some(30);
@@ -405,6 +495,7 @@ mod tests {
             next_cursor: None,
             total_units: None,
             diagnostics: Vec::new(),
+            media: None,
         };
         assert!(validate_response(&request(), &response).is_err());
         response.output.segments.truncate(1);
@@ -428,6 +519,7 @@ mod tests {
             next_cursor: None,
             total_units: None,
             diagnostics: Vec::new(),
+            media: None,
         };
         response.output.segments[0].page = Some(2);
         response.output.segments[1].page = Some(1);

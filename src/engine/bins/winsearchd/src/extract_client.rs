@@ -50,6 +50,8 @@ pub struct ExtractClient {
     cleanup_pending: Arc<AtomicUsize>,
     #[cfg(test)]
     worker_args: Vec<String>,
+    #[cfg(test)]
+    pub(crate) worker_env: Vec<(String, PathBuf)>,
 }
 
 impl ExtractClient {
@@ -64,6 +66,8 @@ impl ExtractClient {
             cleanup_pending: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
             worker_args: Vec::new(),
+            #[cfg(test)]
+            worker_env: Vec::new(),
         }
     }
 
@@ -144,6 +148,8 @@ impl ExtractClient {
                 .stderr(Stdio::null());
             #[cfg(test)]
             command.args(&self.worker_args);
+            #[cfg(test)]
+            command.envs(self.worker_env.iter().map(|(name, value)| (name, value)));
             let mut job = ChildJob::spawn(&mut command).map_err(ExtractClientError::worker)?;
             let mut stdin = job.child_mut().stdin.take().expect("piped stdin");
             let mut stdout = job.child_mut().stdout.take().expect("piped stdout");
@@ -291,10 +297,7 @@ impl ExtractClient {
         }
         let mut moved: std::collections::HashMap<PathBuf, PathBuf> =
             std::collections::HashMap::new();
-        for (index, segment) in response.output.segments.iter_mut().enumerate() {
-            let Some(source) = segment.thumbnail_hint.as_ref() else {
-                continue;
-            };
+        let mut promote_one = |source: &Path, extension: &str, cap: u64| -> Result<PathBuf, ExtractClientError> {
             if !ws_platform::content::local_content_allowed(source) {
                 return Err(ExtractClientError::Malformed(
                     "unsafe thumbnail source".into(),
@@ -309,16 +312,16 @@ impl ExtractClient {
                 ));
             }
             if let Some(path) = moved.get(&canonical) {
-                segment.thumbnail_hint = Some(path.clone());
-                continue;
+                return Ok(path.clone());
             }
             let name = format!(
-                "extract-{}-{index}.png",
+                "extract-{}-{}.{extension}",
                 request
                     .scratch_dir
                     .file_name()
                     .expect("private scratch name")
-                    .to_string_lossy()
+                    .to_string_lossy(),
+                moved.len()
             );
             let path = destination.join(name);
             let mut target = std::fs::OpenOptions::new()
@@ -329,13 +332,33 @@ impl ExtractClient {
             promoted.paths.push(path.clone());
             let source_file =
                 std::fs::File::open(&canonical).map_err(ExtractClientError::worker)?;
-            let bytes = std::io::copy(&mut source_file.take(16 * 1024 * 1024 + 1), &mut target)
+            let bytes = std::io::copy(&mut source_file.take(cap + 1), &mut target)
                 .map_err(ExtractClientError::worker)?;
-            if bytes > 16 * 1024 * 1024 {
-                return Err(ExtractClientError::Malformed("thumbnail too large".into()));
+            if bytes > cap {
+                return Err(ExtractClientError::Malformed("derived artifact too large".into()));
             }
             moved.insert(canonical, path.clone());
-            segment.thumbnail_hint = Some(path);
+            Ok(path)
+        };
+        for segment in &mut response.output.segments {
+            if let Some(source) = segment.thumbnail_hint.as_ref() {
+                segment.thumbnail_hint = Some(promote_one(source, "png", 16 * 1024 * 1024)?);
+            }
+            match &mut segment.embedding_input {
+                ws_extract::DraftEmbeddingInput::Text => (),
+                ws_extract::DraftEmbeddingInput::Image { path, .. } => {
+                    *path = promote_one(path, "png", 16 * 1024 * 1024)?;
+                }
+                ws_extract::DraftEmbeddingInput::Audio { path } => {
+                    *path = promote_one(path, "wav", ws_extract::decoder::MAX_PCM_BYTES as u64 + 44)?;
+                    let samples = ws_extract::audio::validate_window_wav(path)
+                        .map_err(|e| ExtractClientError::Malformed(e.to_string()))?;
+                    let span = segment.end_ms.unwrap() - segment.start_ms.unwrap();
+                    if (samples * 1000).div_ceil(16000).abs_diff(span) > 1 {
+                        return Err(ExtractClientError::Malformed("audio timestamp/WAV duration mismatch".into()));
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -353,7 +376,14 @@ impl ArtifactLease {
             paths: output
                 .segments
                 .iter()
-                .filter_map(|s| s.thumbnail_hint.clone())
+                .flat_map(|s| {
+                    let input = match &s.embedding_input {
+                        ws_extract::DraftEmbeddingInput::Text => None,
+                        ws_extract::DraftEmbeddingInput::Image { path, .. }
+                        | ws_extract::DraftEmbeddingInput::Audio { path } => Some(path.clone()),
+                    };
+                    s.thumbnail_hint.clone().into_iter().chain(input)
+                })
                 .collect(),
         }
     }
@@ -672,6 +702,33 @@ pub(crate) mod tests {
         release: Option<mpsc::Sender<()>>,
         pending: Arc<AtomicUsize>,
     }
+
+    #[test]
+    fn media_artifact_is_promoted_and_owned_until_durable_commit() {
+        let tree = Tree::new();
+        let mut client = ExtractClient::new(fixture(), tree.0.join("cache"));
+        let request = client.request(tree.0.join("source.wav"), "audio", 30);
+        let original = request.scratch_dir.join("window.wav");
+        client.worker_args = vec!["audio-cache".into(), tree.0.join("worker.pid").to_string_lossy().into(), original.to_string_lossy().into()];
+        let response = client.extract(&request, Duration::from_secs(5)).unwrap();
+        let ws_extract::DraftEmbeddingInput::Audio { path } = &response.output.segments[0].embedding_input else { panic!("typed audio missing"); };
+        assert!(path.is_file(), "audio artifact was lost when private scratch was cleaned");
+        assert!(!path.starts_with(&request.scratch_dir));
+        assert!(path.starts_with(&client.cache_dir));
+        assert_eq!(&std::fs::read(path).unwrap()[..4], b"RIFF");
+        drop(ArtifactLease::for_output(&response.output));
+        assert!(!path.exists(), "uncommitted derived audio lease must clean up");
+    }
+
+    #[test]
+    fn media_artifact_outside_private_scratch_is_rejected() {
+        let tree = Tree::new();
+        let mut client = ExtractClient::new(fixture(), tree.0.join("cache"));
+        client.worker_args = vec!["audio-outside".into(), tree.0.join("worker.pid").to_string_lossy().into(), tree.0.join("outside.wav").to_string_lossy().into()];
+        let request = client.request(tree.0.join("source.wav"), "audio", 30);
+        assert!(matches!(client.extract(&request, Duration::from_secs(5)), Err(ExtractClientError::Malformed(_))));
+        assert!(tree.0.join("outside.wav").is_file(), "external data must be preserved");
+    }
     impl Drop for CleanupFixture {
         fn drop(&mut self) {
             self.release.take();
@@ -929,7 +986,7 @@ pub(crate) mod tests {
         );
         assert_eq!(response.output.segments[0].line, Some(1));
         assert!(!request.scratch_dir.exists());
-        let request = client.request(path, "audio", 256);
+        let request = client.request(path, "archive", 256);
         assert!(matches!(
             client.extract(&request, Duration::from_secs(5)),
             Err(ExtractClientError::Unsupported(_))

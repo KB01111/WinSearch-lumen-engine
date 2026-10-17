@@ -862,11 +862,17 @@ mod tests {
         let root = dir.join("source");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("keep.txt"), b"durableexact").unwrap();
+        let mut store = ws_index::IndexStore::open_in_memory().unwrap();
+        let mut config = store.get_or_migrate_indexing_config().unwrap();
+        // This fixture tests migration; host Battery Saver must not skip its scan.
+        config.respect_battery_saver = false;
+        store.set_indexing_config(&config).unwrap();
         let indexer = crate::indexer::Indexer::open(
-            ws_index::IndexStore::open_in_memory().unwrap(),
+            store,
             &[root.clone()],
         )
         .unwrap();
+        assert!(indexer.indexing_pause_reason().is_none(), "fixture scan paused: {:?}", indexer.indexing_pause_reason());
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
         let (entry, before, generation) = {
@@ -894,6 +900,7 @@ mod tests {
                 location: Default::default(),
                 embed: true,
                 visual: false,
+                embedding_input: Default::default(),
                 attempts: 0,
             };
             chunk.location.line = Some(4);

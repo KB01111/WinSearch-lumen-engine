@@ -72,9 +72,11 @@ implemented **and** verified. Legend: `[x]` done+verified · `[~]` partial ·
 - [~] Document search (txt/md/rtf/doc/docx/odt/html) with chunking, excerpts,
       numeric-content exact-only routing (Phase 4) — no-model exact persistence
       and durable long-document continuation verified; final UI/package gates pending
-- [ ] Audio: 30 s overlapping windows, timestamp matches, player with
+- [~] Audio: 30 s overlapping windows, timestamp matches, player with
       seek-to-match (Phase 4) — real bounded PCM runtime/reference/spoken retrieval
-      verified; decoder windows, durable extraction and player remain required
+      verified. Native bounded decoding, silence-only continuation and durable
+      typed/deferred WAV inputs now pass; indexed real-model retrieval, player,
+      dependency packaging and final acceptance remain required
 - [ ] Video: periodic + shot-change frames, audio-track indexing, timestamp
       navigation, timeline markers (Phase 4)
 
@@ -127,6 +129,8 @@ implemented **and** verified. Legend: `[x]` done+verified · `[~]` partial ·
       the workspace, incl. real ReadDirectoryChangesW events, shell-created
       .lnk round-trips, crash/resume, and subst-based drive disconnects
 - [~] Retrieval evals (exact, OCR, PDF page, audio/video timestamps, code) (Phases 3–5) —
-      Phase 3 `winsearch-cli eval names` suite (Recall@5 + MRR + negative controls) implemented and passing; OCR/PDF/media/code suites land in Phases 4–5
+      `winsearch-cli eval names` runs Recall@5, MRR and negative controls.
+      Deterministic fixtures pass; the actual-model name baseline fails negative
+      controls. Full indexed OCR/PDF/media/code quality remains required.
 - [ ] Resource-behavior tests (Phase 7)
 - [ ] UI verification matrix (Phase 7)
