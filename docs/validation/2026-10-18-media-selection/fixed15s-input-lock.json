@@ -1,0 +1,36 @@
+{
+  "scope": "Post-run hashes, captured before any subsequent native build; no measurement result modified",
+  "utc": "2026-10-17T23:02:48.010701+00:00",
+  "inputs": {
+    "extractor": {
+      "path": "<checkout>\\src\\engine\\target\\debug\\winsearch-extract.exe",
+      "bytes": 34528256,
+      "sha256": "d63b502a38db167d4228a7336719c5d3cd7f17821b79e540e99682419e33f257"
+    },
+    "ffmpeg": {
+      "path": "<checkout>\\artifacts\\dependencies\\ffmpeg-2026-09-30\\ffmpeg-n9.0.2-17-g2a571b6068-win64-lgpl-shared-9.0\\bin\\ffmpeg.exe",
+      "bytes": 540160,
+      "sha256": "24fdada9908f7a231e9dfcc9f462273d3ddb698f5071f04c61496819ce3cfef0"
+    },
+    "ffprobe": {
+      "path": "<checkout>\\artifacts\\dependencies\\ffmpeg-2026-09-30\\ffmpeg-n9.0.2-17-g2a571b6068-win64-lgpl-shared-9.0\\bin\\ffprobe.exe",
+      "bytes": 229888,
+      "sha256": "a77003c4628c7a414718623156280be47c1aaa2fa85c177d3d1d325d3d06358f"
+    },
+    "harness": {
+      "path": "<checkout>\\tools\\test-media-resources.py",
+      "bytes": 10206,
+      "sha256": "9eff579cb6122fb647bc6777e1afa81621dfaac6671ed6b16cccb2fd8de3959e"
+    },
+    "sparse_source": {
+      "path": "<checkout>\\artifacts\\media-selection-resources-v1\\two hour late soundtrack.mp4",
+      "bytes": 355439,
+      "sha256": "f428d7e23df93d96711247afd1117acbc675b07af6d03dcb752242956542858f"
+    },
+    "hd_source": {
+      "path": "<checkout>\\artifacts\\media-selection-resources-v1\\high-resolution long-gop.mp4",
+      "bytes": 49588735,
+      "sha256": "ea070dd77de0367e982e8f71e9cbc3b9b1aa824ae01dab37f84eaa5c03fda61d"
+    }
+  }
+}
