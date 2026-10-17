@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Work only in C:\Users\kevin\.codex\worktrees\winsearch-v1\WinSearch on codex/winsearch-v1. Approved full v1 design remains binding.
-- Run after reviewed PDF/media/code retrieval wiring so all result kinds can be evaluated. Preserve prior checkouts, exact-first response/cancellation, code opt-in and policy visibility before limits.
+- Begin after reviewed PDF/media runtime wiring. The genuine media daemon exposed three unrelated-query false positives, so fail-closed evaluation/provenance and shared recipe/admission now precede code parsing. Keep this task open until real code wiring and the complete held-out suite pass; code and all original modality gates remain required. Preserve prior checkouts, exact-first response/cancellation, code opt-in and policy visibility before limits.
 - Prefix shell commands with rtk. No weakened Recall@5/MRR/negative-FP gates, changed expected answers to hide failures, regenerated native references or relaxed cosine tolerance1e-3.
 - Never branch on evaluation queries/corpus/expected labels in production. No production stub vectors or silent fallback to a deterministic embedder when a real model was requested.
 - Use isolated generated/public fixtures and explicit CPU/native settings. Benchmark device/backend separately; do not call fixture smoke tests model-quality evidence.

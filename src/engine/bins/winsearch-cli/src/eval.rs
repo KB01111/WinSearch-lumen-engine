@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex,OnceLock};
 
 use serde::Deserialize;
 use ws_embed_protocol::STUB_DIM;
@@ -194,17 +194,14 @@ static WORKER_PIPE_SEQ: AtomicU64 = AtomicU64::new(0);
 pub struct WorkerModelEmbedder {
     model_path: PathBuf,
     pipe_name: String,
-    label: String,
+    verified_label: OnceLock<String>,
+    verified_backend: OnceLock<String>,
     child: Mutex<Option<Child>>,
     next_id: AtomicU64,
 }
 
 impl WorkerModelEmbedder {
     pub fn new(model_path: PathBuf) -> Self {
-        let label = format!(
-            "WorkerModelEmbedder (live model; winsearch-embed: {})",
-            model_path.display()
-        );
         let pipe_name = format!(
             r"\\.\pipe\winsearch-cli-eval-{}-{}-{}",
             std::process::id(),
@@ -217,7 +214,8 @@ impl WorkerModelEmbedder {
         Self {
             model_path,
             pipe_name,
-            label,
+            verified_label: OnceLock::new(),
+            verified_backend: OnceLock::new(),
             child: Mutex::new(None),
             next_id: AtomicU64::new(1),
         }
@@ -279,7 +277,8 @@ impl Drop for WorkerModelEmbedder {
 
 impl EvalEmbedder for WorkerModelEmbedder {
     fn label(&self) -> &str {
-        &self.label
+        self.verified_label.get().map(String::as_str)
+            .unwrap_or("WorkerModelEmbedder (awaiting verified real-worker response)")
     }
 
     fn embed_texts(&self, texts: &[String]) -> anyhow::Result<Vec<Vec<f32>>> {
@@ -307,7 +306,12 @@ impl EvalEmbedder for WorkerModelEmbedder {
         let ack: Option<ws_embed_protocol::EmbedResponse> =
             ws_protocol::read_message(&mut stream)?;
         match ack {
-            Some(ws_embed_protocol::EmbedResponse::HelloAck { .. }) => {}
+            Some(ws_embed_protocol::EmbedResponse::HelloAck { protocol_version,stub,features,.. }) => {
+                anyhow::ensure!(!stub,"real-model evaluation refuses a stub worker");
+                anyhow::ensure!(protocol_version==ws_embed_protocol::EMBED_PROTOCOL_VERSION,
+                    "real-model worker protocol version mismatch");
+                anyhow::ensure!(features.iter().any(|f|f=="embed_texts"),"real-model worker cannot embed text");
+            }
             Some(ws_embed_protocol::EmbedResponse::Error { code, message, .. }) => {
                 anyhow::bail!("worker handshake error {code:?}: {message}");
             }
@@ -326,22 +330,44 @@ impl EvalEmbedder for WorkerModelEmbedder {
         )?;
         let reply: Option<ws_embed_protocol::EmbedResponse> =
             ws_protocol::read_message(&mut stream)?;
+        let (vectors,backend)=real_worker_vectors(reply,id,texts.len())?;
+        let observed=self.verified_backend.get_or_init(||backend.clone());
+        anyhow::ensure!(observed==&backend,"real-model worker backend changed during evaluation");
+        self.verified_label.get_or_init(||format!(
+            "WorkerModelEmbedder (real {backend}; stub:false; dim:768; model:{})",self.model_path.display()));
+        Ok(vectors)
+    }
+}
+
+fn real_worker_vectors(reply:Option<ws_embed_protocol::EmbedResponse>,expected_id:u64,expected_count:usize)
+    -> anyhow::Result<(Vec<Vec<f32>>,String)> {
         match reply {
-            Some(ws_embed_protocol::EmbedResponse::Embeddings { vecs, .. }) => Ok(vecs),
+            Some(ws_embed_protocol::EmbedResponse::Embeddings { id,vecs,dim,backend,stub }) => {
+                anyhow::ensure!(!stub && backend!="stub","real-model evaluation refuses stub vectors");
+                anyhow::ensure!(matches!(backend.as_str(),"cpu"|"cuda"|"vulkan"),"unknown real-model backend: {backend}");
+                anyhow::ensure!(id==expected_id,"real-model response ID mismatch");
+                anyhow::ensure!(dim==ws_modelmgr::EMBEDDING_DIM as usize,"real-model embedding dimension mismatch");
+                anyhow::ensure!(vecs.len()==expected_count,"real-model embedding count mismatch");
+                for vector in &vecs {
+                    anyhow::ensure!(vector.len()==dim && vector.iter().all(|v|v.is_finite()),
+                        "invalid real-model vector shape or values");
+                    let norm=vector.iter().map(|v|f64::from(*v).powi(2)).sum::<f64>().sqrt();
+                    anyhow::ensure!((norm-1.0).abs()<=1e-3,"non-unit real-model embedding");
+                }
+                Ok((vecs,backend))
+            },
             Some(ws_embed_protocol::EmbedResponse::Error { code, message, .. }) => {
                 anyhow::bail!("worker error {code:?}: {message}")
             }
             other => anyhow::bail!("unexpected worker reply: {other:?}"),
         }
-    }
 }
 
 fn select_embedder() -> anyhow::Result<Box<dyn EvalEmbedder>> {
     if let Some(os_path) = std::env::var_os("WS_EMBED_TEST_MODEL") {
         let p = PathBuf::from(os_path);
-        if p.is_file() {
-            return Ok(Box::new(WorkerModelEmbedder::new(p)));
-        }
+        anyhow::ensure!(p.is_file(),"WS_EMBED_TEST_MODEL explicitly requested a missing/non-file model: {}",p.display());
+        return Ok(Box::new(WorkerModelEmbedder::new(p.canonicalize()?)));
     }
     Ok(Box::new(ConceptStubEmbedder))
 }
@@ -864,6 +890,30 @@ fn fnv1a64(s: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn real_reply_rejects_wrong_identity_count_backend_shape_and_nonunit_vectors() {
+        use ws_embed_protocol::EmbedResponse;
+        let valid=EmbedResponse::Embeddings { id:7,vecs:vec![ws_embed_protocol::stub_vector("shape-only",768)],
+            dim:768,backend:"cpu".into(),stub:false };
+        assert!(real_worker_vectors(Some(valid.clone()),7,1).is_ok());
+        for case in 0..8 {
+            let mut reply=valid.clone();
+            let EmbedResponse::Embeddings { id,vecs,dim,backend,stub }=&mut reply else { unreachable!() };
+            match case {
+                0=>*id=8,
+                1=>vecs.clear(),
+                2=>*stub=true,
+                3=>*backend="stub".into(),
+                4=>*dim=512,
+                5=>vecs[0].pop().map(|_|()).unwrap(),
+                6=>vecs[0][0]=f32::NAN,
+                7=>vecs[0].fill(0.0),
+                _=>unreachable!(),
+            }
+            assert!(real_worker_vectors(Some(reply),7,1).is_err(),"invalid real reply case{case} accepted");
+        }
+    }
 
     #[test]
     fn concept_stub_groups_paraphrases_and_separates_negatives() {
