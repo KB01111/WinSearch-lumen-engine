@@ -11,6 +11,16 @@ import time
 import uuid
 
 
+def validate_vectors(reply, expected_count):
+    assert reply['type'] == 'embeddings' and reply['stub'] is False and reply['backend'] == 'cpu', reply
+    assert reply['dim'] == 768
+    assert len(reply['vecs']) == expected_count, (expected_count, len(reply['vecs']))
+    for vector in reply['vecs']:
+        assert len(vector) == 768 and all(math.isfinite(v) for v in vector)
+        assert abs(sum(v*v for v in vector) - 1) < 1e-3
+    return reply['vecs']
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ['worker', 'model', 'fixtures', 'spoken', 'output']:
@@ -78,12 +88,7 @@ def main():
 
                 def embed(kind, **fields):
                     reply = request(kind, **fields)
-                    assert reply['type'] == 'embeddings' and reply['stub'] is False and reply['backend'] == 'cpu', reply
-                    assert reply['dim'] == 768
-                    for vector in reply['vecs']:
-                        assert len(vector) == 768 and all(math.isfinite(v) for v in vector)
-                        assert abs(sum(v*v for v in vector) - 1) < 1e-3
-                    return reply['vecs']
+                    return validate_vectors(reply, len(fields['texts']) if kind == 'embed_texts' else 1)
 
                 def cosine(a, b):
                     return sum(x*y for x,y in zip(a,b)) / math.sqrt(sum(x*x for x in a)*sum(y*y for y in b))
@@ -93,7 +98,6 @@ def main():
                 images = {}
                 for name, file, budget in [('screen-280','screen.png',280), ('photo-140','photo.jpg',140), ('frame-70','photo.jpg',70)]:
                     vectors = embed('embed_image', path=str((args.fixtures / file).resolve()), token_budget=budget)
-                    assert len(vectors) == 1
                     vector = vectors[0]
                     agreement = cosine(vector, reference[name])
                     summary['references'][name] = agreement
@@ -119,7 +123,6 @@ def main():
                     'baking a chocolate cake in the kitchen with flour butter eggs and sugar',
                 ]
                 text_vectors = embed('embed_texts', texts=['task: search result | query: ' + q for q in queries])
-                assert len(text_vectors) == 4
                 for index, (query, vector) in enumerate(zip(queries, text_vectors)):
                     candidates = [images['screen-280'],images['photo-140']] if index < 2 else spoken
                     scores = [cosine(vector, candidate) for candidate in candidates]
