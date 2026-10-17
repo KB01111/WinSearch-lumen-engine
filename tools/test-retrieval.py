@@ -26,6 +26,7 @@ owner = harness.OwnedJob()
 model = root/'artifacts/test-models/embeddinggemma-2-Q8_0.gguf'
 projector = root/'artifacts/test-models/mmproj-embeddinggemma-2-Q8_0.gguf'
 binary = root/'src/engine/target/debug/winsearch-cli.exe'
+worker = root/'src/engine/target/debug/winsearch-embed.exe'
 suite = root/'evals'/f'{args.suite}.json'
 frozen = {
     'names': '4640467f2867f24e61c2c5d6184ee1bb8200b1938807f36798fded8c55050037',
@@ -36,10 +37,18 @@ def digest(path):
     with path.open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 assert digest(suite) == frozen[args.suite], 'Frozen fixture changed'
+assets = sorted({segment['asset'] for entry in json.loads(suite.read_text(encoding='utf-8'))['entries']
+    for segment in entry.get('segments', []) if segment.get('asset')})
+asset_hashes = {}
+for asset in assets:
+    resolved = (root/asset).resolve()
+    assert resolved.is_relative_to(root/'artifacts/retrieval-fixtures'), 'Unexpected generated asset path'
+    asset_hashes[asset] = digest(resolved)
 lock = {
     'suite': args.suite, 'suite_sha256': digest(suite),
     'cli_sha256': digest(binary), 'model_sha256': digest(model),
     'projector_sha256': digest(projector), 'backend_requested': 'cpu',
+    'worker_sha256': digest(worker), 'generated_asset_sha256': asset_hashes,
     'recipe_frozen_commit': '4173543b8e434d9bef912623935cdc8b53aeeee6',
     'expected_pipeline_version': 2, 'expected_minimum_semantic_cosine': .65,
     'input_scope': 'declared fixture chunks and actual generated media, not native extraction proof',

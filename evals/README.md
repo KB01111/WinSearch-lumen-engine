@@ -17,6 +17,12 @@ runs the built debug CLI and actual CPU worker under an owned Windows job.
 Choose `names` or `retrieval-held-out` for the other frozen suites and a new
 output directory for each run. The harness verifies fixture hashes, printed
 recipe version/admission floor, and non-stub worker provenance; it records
-binary/model hashes, misses, metrics and descendant cleanup under `artifacts/`.
+CLI/worker/model/projector/generated-asset hashes, misses, metrics and descendant
+cleanup under `artifacts/`.
 It uses the existing pinned GGUF/projector in `artifacts/test-models`; this is
-separate from the requested Windows NPU model acceptance.
+separate from the Windows NPU model availability check.
+
+Fixture locations must apply to their kind: doc/code use lines, PDF uses pages,
+audio/video use paired source times, images have no location, and OCR may use
+one page, line or time range. Video/OCR frame point timestamps are valid.
+Declared line spans are bounded by the fixture's 2 MiB source-line envelope.

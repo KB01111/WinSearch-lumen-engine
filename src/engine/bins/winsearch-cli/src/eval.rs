@@ -575,17 +575,28 @@ fn validate_fixture_segment(segment: &FixtureSegment) -> anyhow::Result<()> {
         segment.page != Some(0) && segment.line != Some(0),
         "invalid fixture page/line"
     );
+    let timed=segment.start_ms.is_some() || segment.end_ms.is_some();
+    let locations=u8::from(segment.page.is_some())+u8::from(segment.line.is_some())+u8::from(timed);
+    let location_allowed=match segment.kind.as_str() {
+        "doc"|"code"=>segment.page.is_none() && !timed,
+        "pdf"=>segment.line.is_none() && !timed,
+        "image"=>locations==0,
+        "audio"|"video"=>segment.page.is_none() && segment.line.is_none(),
+        "ocr"=>locations<=1,
+        _=>false,
+    };
+    anyhow::ensure!(location_allowed,"location fields do not apply to fixture kind {}",segment.kind);
+    if let Some(start)=segment.line {
+        let end=u64::from(start)+segment.text.lines().count().saturating_sub(1) as u64;
+        anyhow::ensure!(end<=ws_code::MAX_CODE_FILE_BYTES+1,"fixture exceeds bounded source lines");
+    }
     if segment.kind == "pdf" {
         anyhow::ensure!(segment.page.is_some(), "PDF fixture needs its actual page");
     }
     if segment.kind == "code" {
-        let start = segment
-            .line
-            .ok_or_else(|| anyhow::anyhow!("code fixture needs its actual line"))?;
-        let end = u64::from(start) + segment.text.lines().count().saturating_sub(1) as u64;
         anyhow::ensure!(
-            end <= ws_code::MAX_CODE_FILE_BYTES + 1,
-            "code fixture exceeds source line bound"
+            segment.line.is_some(),
+            "code fixture needs its actual line"
         );
     }
     anyhow::ensure!(
@@ -1471,6 +1482,36 @@ mod tests {
         assert_eq!(report.modalities["pdf-exact"].fp_rate(), None);
         assert_eq!(report.modalities["code-isolation"].recall(), None);
         assert_eq!(report.modalities["code-isolation"].fp_rate(), Some(0.0));
+    }
+
+    #[test]
+    fn fixture_locations_reject_conflicting_and_wrong_kind_fields() {
+        for value in [
+            serde_json::json!({"kind":"code","line":1,"page":7,"text":"fn f() {}"}),
+            serde_json::json!({"kind":"code","line":1,"start_ms":0,"end_ms":1,"text":"fn f() {}"}),
+            serde_json::json!({"kind":"image","asset":"image.png","line":1}),
+            serde_json::json!({"kind":"image","asset":"image.png","page":1}),
+            serde_json::json!({"kind":"doc","text":"text","start_ms":0,"end_ms":1}),
+            serde_json::json!({"kind":"doc","text":"text","page":1}),
+            serde_json::json!({"kind":"pdf","text":"text","page":1,"line":1}),
+            serde_json::json!({"kind":"audio","asset":"audio.wav","start_ms":0,"end_ms":1,"page":1}),
+            serde_json::json!({"kind":"video","asset":"frame.png","start_ms":1,"end_ms":1,"line":1}),
+            serde_json::json!({"kind":"ocr","text":"text","page":1,"start_ms":1,"end_ms":1}),
+            serde_json::json!({"kind":"doc","text":"text","line":u32::MAX}),
+            serde_json::json!({"kind":"ocr","text":"text","line":u32::MAX}),
+        ] {
+            let segment:FixtureSegment=serde_json::from_value(value.clone()).unwrap();
+            assert!(validate_fixture_segment(&segment).is_err(),"incoherent fixture accepted: {value}");
+        }
+        for value in [
+            serde_json::json!({"kind":"ocr","text":"page OCR","page":7}),
+            serde_json::json!({"kind":"ocr","text":"frame OCR","start_ms":12,"end_ms":12}),
+            serde_json::json!({"kind":"ocr","text":"image OCR","line":2}),
+            serde_json::json!({"kind":"video","asset":"frame.png","start_ms":12,"end_ms":12}),
+        ] {
+            let segment:FixtureSegment=serde_json::from_value(value.clone()).unwrap();
+            assert!(validate_fixture_segment(&segment).is_ok(),"valid fixture rejected: {value}");
+        }
     }
 
     #[test]
