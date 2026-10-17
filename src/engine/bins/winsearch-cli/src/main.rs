@@ -288,6 +288,8 @@ fn cmd_eval(suite_name: &str) -> anyhow::Result<()> {
     println!("=== WinSearch Retrieval Eval: {} ===", report.suite_name);
     println!("suite file:        {}", path.display());
     println!("embedder:          {}", report.embedder_label);
+    println!("vector pipeline:   {}", ws_modelmgr::manifest::VECTOR_PIPELINE_VERSION);
+    println!("semantic floor:    {:.4}", ws_index::retrieval::MIN_SEMANTIC_COSINE);
     println!("fixture entries:   {}", suite.entries.len());
     println!(
         "queries:           {} total ({} positive, {} negative control)",
@@ -327,8 +329,25 @@ fn cmd_eval(suite_name: &str) -> anyhow::Result<()> {
                 outcome.category, outcome.query, outcome.reciprocal_rank
             );
         }
+        for hit in &outcome.ranked_hits {
+            for location in &hit.matches {
+                println!("      {}: page={:?} time_ms={:?}..{:?} line={:?}",
+                    hit.name, location.page, location.start_ms, location.end_ms, location.line);
+            }
+            if let Some(code) = &hit.code {
+                println!("      {}: symbol={} kind={} definition={} virtual_lines={}..{} cell={:?}",
+                    hit.path,code.symbol,code.kind,code.is_definition,code.start_line,code.end_line,code.notebook);
+            }
+        }
     }
 
+    println!();
+    println!("Per modality/category (n/a means no queries of that type):");
+    for (modality, metrics) in &report.modalities {
+        let metric = |value: Option<f64>| value.map(|n|format!("{n:.3}")).unwrap_or_else(||"n/a".into());
+        println!("  {modality}: positive={} negative={} Recall@5={} MRR={} FP={}",
+            metrics.positive, metrics.negative, metric(metrics.recall()), metric(metrics.mrr()), metric(metrics.fp_rate()));
+    }
     println!();
     println!(
         "Recall@5:          {:.3}  (threshold >= {:.3})",
