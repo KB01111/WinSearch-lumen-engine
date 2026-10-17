@@ -7,7 +7,7 @@ use std::path::PathBuf;
 pub const MAX_REQUEST_BYTES: usize = 256 * 1024;
 pub const MAX_DRAFTS: usize = 256;
 pub const MAX_SEGMENT_BYTES: usize = 64 * 1024;
-pub const SUPPORTED_KINDS: &[&str] = &["doc", "pdf", "image", "audio", "video"];
+pub const SUPPORTED_KINDS: &[&str] = &["doc", "pdf", "image", "audio", "video", "code"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtractRequest {
@@ -30,6 +30,8 @@ pub struct ExtractResponse {
     pub diagnostics: Vec<String>,
     #[serde(default)]
     pub media: Option<MediaBatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<crate::code::CodeBatch>,
 }
 
 pub use ws_index::model::MediaPlan as MediaBatch;
@@ -85,6 +87,12 @@ pub fn validate_response(
 ) -> Result<(), String> {
     if response.diagnostics.len() > 8 || response.diagnostics.iter().any(|s| s.len() > 1024) {
         return Err("worker diagnostics exceed bounds".into());
+    }
+    if request.kind == "code" {
+        return crate::code::validate_batch(request, response);
+    }
+    if response.code.is_some() {
+        return Err("code payload belongs to another modality".into());
     }
     let segments = &response.output.segments;
     if segments.len() > MAX_DRAFTS
@@ -417,7 +425,7 @@ mod tests {
         image.embedding_input=crate::DraftEmbeddingInput::Image { path:"C:/scratch/frame.png".into(),token_budget:140 };
         let mut ocr=SegmentDraft::text("ocr","real screen text");
         ocr.start_ms=Some(0); ocr.end_ms=Some(0); ocr.thumbnail_hint=image.thumbnail_hint.clone();
-        let mut response=ExtractResponse { output:ExtractOutput::extracted(vec![image.clone(),ocr.clone()]),
+        let mut response=ExtractResponse { code: None, output:ExtractOutput::extracted(vec![image.clone(),ocr.clone()]),
             next_cursor:Some(crate::video::frame_cursor(1,0)),total_units:Some(4),diagnostics:vec![],media:Some(plan.clone()) };
         validate_response(&req,&response).unwrap();
         response.next_cursor=Some(crate::video::audio_cursor(0));
@@ -448,7 +456,7 @@ mod tests {
         let mut image=SegmentDraft::text("video","");
         image.start_ms=Some(0); image.end_ms=Some(0); image.thumbnail_hint=Some("C:/scratch/frame.png".into());
         image.embedding_input=crate::DraftEmbeddingInput::Image { path:"C:/scratch/frame.png".into(),token_budget:70 };
-        let mut response=ExtractResponse { output:ExtractOutput::extracted(vec![image]),
+        let mut response=ExtractResponse { code: None, output:ExtractOutput::extracted(vec![image]),
             next_cursor:Some(crate::video::frame_cursor(1,0)),total_units:Some(2),diagnostics:vec![],media:Some(plan.clone()) };
         validate_response(&req,&response).unwrap();
         response.output.segments[0].start_ms=Some(4999); response.output.segments[0].end_ms=Some(4999);
@@ -467,7 +475,7 @@ mod tests {
         let mut req = request();
         req.kind = "audio".into();
         req.max_units = 30;
-        let mut response = ExtractResponse {
+        let mut response = ExtractResponse { code: None,
             output: ExtractOutput::extracted(vec![]),
             next_cursor: Some(30), total_units: Some(48), diagnostics: vec![],
             media: Some(MediaBatch { duration_ms: 1_200_000, frames_ms: vec![], has_audio: true }),
@@ -502,7 +510,7 @@ mod tests {
     fn protocol_roundtrip_preserves_text_and_line_metadata() {
         let mut segment = SegmentDraft::text("doc", "actual text\nsecond line");
         segment.line = Some(1);
-        let response = ExtractResponse {
+        let response = ExtractResponse { code: None,
             output: ExtractOutput::extracted(vec![segment]),
             next_cursor: None,
             total_units: Some(1),
@@ -519,6 +527,15 @@ mod tests {
     }
 
     #[test]
+    fn code_response_requires_typed_forward_units() {
+        let mut req=request();
+        req.kind="code".into();
+        let response=ExtractResponse { code: None, output:ExtractOutput::extracted(vec![]),next_cursor:Some(1),
+            total_units:Some(2),diagnostics:vec![],media:None };
+        assert!(validate_response(&req,&response).is_err(),"code cursor advanced without any typed source units");
+    }
+
+    #[test]
     fn pdf_transport_multiple_drafts_and_packed_page_chunk_progress() {
         let mut req = request();
         req.kind = "pdf".into();
@@ -529,7 +546,7 @@ mod tests {
         let mut ocr = text.clone();
         ocr.kind = "ocr".into();
         ocr.line = Some(6);
-        let mut response = ExtractResponse {
+        let mut response = ExtractResponse { code: None,
             output: ExtractOutput::extracted(vec![text.clone(), ocr]),
             next_cursor: Some(1 << 32),
             total_units: Some(2),
@@ -564,7 +581,7 @@ mod tests {
         let mut b = a.clone();
         b.page = Some(2);
         b.line = Some(1);
-        let mut response = ExtractResponse {
+        let mut response = ExtractResponse { code: None,
             output: ExtractOutput::extracted(vec![a.clone(), b]),
             next_cursor: None,
             total_units: Some(2),
@@ -589,7 +606,7 @@ mod tests {
         req.cursor = 8191;
         let mut draft = SegmentDraft::text("pdf", "last valid draft");
         draft.page = Some(1);
-        let mut response = ExtractResponse {
+        let mut response = ExtractResponse { code: None,
             output: ExtractOutput::extracted(vec![draft.clone()]),
             next_cursor: None,
             total_units: Some(1),
@@ -614,7 +631,7 @@ mod tests {
 
     #[test]
     fn text_batches_reject_empty_progress_and_false_completion() {
-        let mut response = ExtractResponse {
+        let mut response = ExtractResponse { code: None,
             output: ExtractOutput::extracted(vec![SegmentDraft::text("doc", "one")]),
             next_cursor: None,
             total_units: Some(75),
@@ -637,7 +654,7 @@ mod tests {
         let mut req = request();
         req.path = PathBuf::from("界".repeat(100_000));
         assert!(encode_request(&req).is_err());
-        let mut response = ExtractResponse {
+        let mut response = ExtractResponse { code: None,
             output: ExtractOutput::extracted(vec![SegmentDraft::text("doc", "x"); 257]),
             next_cursor: None,
             total_units: None,
@@ -658,7 +675,7 @@ mod tests {
 
     #[test]
     fn response_rejects_reversed_metadata_and_foreign_kinds() {
-        let mut response = ExtractResponse {
+        let mut response = ExtractResponse { code: None,
             output: ExtractOutput::extracted(vec![
                 SegmentDraft::text("doc", "one"),
                 SegmentDraft::text("doc", "two"),

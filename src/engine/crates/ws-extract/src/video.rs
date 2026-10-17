@@ -124,7 +124,7 @@ pub fn extract_video_batch(
     } else {
         None
     };
-    Ok(ExtractResponse {
+    Ok(ExtractResponse { code: None,
         output: ExtractOutput::extracted(segments),
         next_cursor,
         total_units: Some(total_units(&plan)),

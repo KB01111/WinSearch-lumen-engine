@@ -306,7 +306,7 @@ impl Indexer {
                     return Ok(ExtractStepOutcome { claimed: true, requeued: true, ..Default::default() });
                 }
                 Err(ExtractClientError::Unsupported(_)) => {
-                    Ok(ws_extract::worker::ExtractResponse {
+                    Ok(ws_extract::worker::ExtractResponse { code: None,
                         output: ExtractOutput::unsupported(),
                         next_cursor: None,
                         total_units: None,

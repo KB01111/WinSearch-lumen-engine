@@ -362,6 +362,37 @@ tags require a loaded supporting projector (or explicit test-only stub mode).
 field deserializes as legacy0, pipeline1 is incompatible, and malformed/partial identities fail closed.
 Vector replacement preserves durable exact text, locations and parser progress.
 
+Code syntax now uses pinned native Tree-sitter grammars for all twenty listed
+languages plus the TSX variant. SQL uses SQLite syntax. Iterative node walking
+finds definitions and identifier occurrences while skipping comments/strings;
+references do not imply cross-file type resolution. Unsupported languages retain
+bounded text chunks; malformed syntax retains useful text with explicit recovery
+diagnostics. Code reads are limited to2MiB after residency/sensitive/ancestor
+checks. Chunks are bounded to16KiB and60lines without nested-body multiplication.
+The code crawler uses an iterative64-level walk with guarded reads of local
+`.gitignore`, `.ignore` and selected-root `.git/info/exclude`. It reuses the
+ignore crate's pattern matcher, preserving nested negation and `.ignore`
+priority. Control files are capped at2MiB/8192lines and unavailable controls
+fail closed. No automatic parent/global/worktree-external ignore-file reads
+occur. Selected-root containment and credential-config/sensitive-ancestor
+checks also apply to direct code reads, before binary sniffing.
+
+`winsearch-extract` accepts internal kind `code` under the existing owned-child
+deadline/memory/two-slot admission path. The optional typed `CodeBatch` is
+separate from ordinary content drafts. Its cursor covers chunks followed by
+symbols, at most256units and2MiB encoded payload per response. Parent validation
+rejects missing/skipped units and invalid ranges/cell metadata. Native tests
+reconstruct300definitions plus300references over multiple batches without losing
+source text. This transport is available for the pending opt-in code scheduler;
+normal queries have no code results and there is no active in-process fallback.
+
+`code.db` schema2 stores zero-based notebook cell ordinal and one-based local
+lines alongside virtual source lines for chunks/symbols. Notebook source cells,
+including language magics, are retained; outputs/attachments/raw JSON are excluded.
+Migration preserves repo/file identity and exact text, clears stale heuristic
+symbols/vectors and marks files for native reparse. Successful persistence records
+the native parse revision and diagnostics; metadata changes reset that revision.
+
 Application formatting lives in `ws-modelmgr::recipe`: normal queries use
 `task: search result | query: ...`, code queries use the code-retrieval task,
 and text/code documents use `title: ... | text: ...`. Filename inputs retain

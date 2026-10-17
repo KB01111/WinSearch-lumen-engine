@@ -12,6 +12,7 @@ pub mod notebook;
 pub mod parse;
 pub mod store;
 pub mod symbols;
+mod syntax;
 
 use std::path::Path;
 
@@ -43,7 +44,7 @@ pub fn index_code_file(
     scan_generation: i64,
     record: &CodeFileRecord,
 ) -> anyhow::Result<(i64, Vec<i64>, ParsedCodeFile)> {
-    let raw = std::fs::read_to_string(Path::new(&record.path))?;
+    let raw = parse::read_source(Path::new(&record.path))?;
     let parsed = if record.language.eq_ignore_ascii_case("notebook")
         || record.language.eq_ignore_ascii_case("jupyter")
         || record.ext.eq_ignore_ascii_case("ipynb")

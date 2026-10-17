@@ -12,6 +12,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 ws-index.workspace = true
+ws-code.workspace = true
 ws-platform.workspace = true
 ws-protocol.workspace = true
 zip.workspace = true

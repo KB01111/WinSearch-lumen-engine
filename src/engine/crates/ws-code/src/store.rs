@@ -68,7 +68,9 @@ CREATE TABLE IF NOT EXISTS code_files (
     mtime           INTEGER NOT NULL DEFAULT 0,
     volume_serial   INTEGER NOT NULL DEFAULT 0,
     file_id         INTEGER NOT NULL DEFAULT 0,
-    scan_generation INTEGER NOT NULL DEFAULT 0
+    scan_generation INTEGER NOT NULL DEFAULT 0,
+    parse_version INTEGER NOT NULL DEFAULT 0,
+    parse_diagnostics TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS idx_code_files_repo     ON code_files(repo_id, scan_generation);
 CREATE INDEX IF NOT EXISTS idx_code_files_identity ON code_files(volume_serial, file_id);
@@ -86,6 +88,9 @@ CREATE TABLE IF NOT EXISTS code_chunks (
     text        TEXT NOT NULL DEFAULT '',
     vector      BLOB NOT NULL,
     norm        REAL NOT NULL DEFAULT 0,
+    notebook_cell INTEGER,
+    cell_start_line INTEGER,
+    cell_end_line INTEGER,
     UNIQUE(file_id, chunk_index)
 );
 CREATE INDEX IF NOT EXISTS idx_code_chunks_file ON code_chunks(file_id);
@@ -105,7 +110,10 @@ CREATE TABLE IF NOT EXISTS code_symbols (
     is_definition INTEGER NOT NULL DEFAULT 1,
     line          INTEGER NOT NULL DEFAULT 1,
     end_line      INTEGER NOT NULL DEFAULT 1,
-    signature     TEXT NOT NULL DEFAULT ''
+    signature     TEXT NOT NULL DEFAULT '',
+    notebook_cell INTEGER,
+    cell_start_line INTEGER,
+    cell_end_line INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_code_symbols_file ON code_symbols(file_id);
 CREATE INDEX IF NOT EXISTS idx_code_symbols_name ON code_symbols(name_lower, is_definition DESC);
@@ -157,6 +165,23 @@ impl CodeStore {
                 )?;
             }
             Some(CODE_SCHEMA_VERSION) => {}
+            Some("1") => {
+                conn.execute_batch("BEGIN IMMEDIATE;
+                    ALTER TABLE code_files ADD COLUMN parse_version INTEGER NOT NULL DEFAULT 0;
+                    ALTER TABLE code_files ADD COLUMN parse_diagnostics TEXT NOT NULL DEFAULT '[]';
+                    ALTER TABLE code_chunks ADD COLUMN notebook_cell INTEGER;
+                    ALTER TABLE code_chunks ADD COLUMN cell_start_line INTEGER;
+                    ALTER TABLE code_chunks ADD COLUMN cell_end_line INTEGER;
+                    ALTER TABLE code_symbols ADD COLUMN notebook_cell INTEGER;
+                    ALTER TABLE code_symbols ADD COLUMN cell_start_line INTEGER;
+                    ALTER TABLE code_symbols ADD COLUMN cell_end_line INTEGER;
+                    DELETE FROM code_symbols_fts; DELETE FROM code_symbols_tri; DELETE FROM code_symbols;
+                    UPDATE code_chunks SET symbol_name='', symbol_kind='stale', vector=x'', norm=0;
+                    DELETE FROM code_chunks_fts;
+                    INSERT INTO code_chunks_fts(rowid,symbol_name,text) SELECT id,'',text FROM code_chunks;
+                    UPDATE meta SET value='2' WHERE key='schema_version';
+                    COMMIT;")?;
+            }
             Some(other) => {
                 return Err(CodeStoreError::UnsupportedSchemaVersion(other.to_string()));
             }
@@ -171,6 +196,28 @@ impl CodeStore {
             |r| r.get(0),
         )?;
         Ok(v)
+    }
+
+    pub fn mark_parse_pending(&mut self, file: i64) -> Result<(), CodeStoreError> {
+        self.conn
+            .execute("UPDATE code_files SET parse_version=0 WHERE id=?1", [file])?;
+        Ok(())
+    }
+
+    /// A current parse may still carry recovery diagnostics; callers must retain them.
+    pub fn mark_parsed(&mut self, file: i64, diagnostics: &[String]) -> Result<(), CodeStoreError> {
+        if diagnostics.len() > 8 || diagnostics.iter().any(|d| d.len() > 1024) {
+            return Err(CodeStoreError::InvalidChunk(
+                "parse diagnostics exceed bounds".into(),
+            ));
+        }
+        let encoded = serde_json::to_string(diagnostics)
+            .map_err(|e| CodeStoreError::InvalidChunk(e.to_string()))?;
+        self.conn.execute(
+            "UPDATE code_files SET parse_version=?2,parse_diagnostics=?3 WHERE id=?1",
+            params![file, crate::model::CODE_PARSE_VERSION, encoded],
+        )?;
+        Ok(())
     }
 
     // ---- meta ----
@@ -318,15 +365,22 @@ impl CodeStore {
                 "UPDATE code_files SET
                      repo_id = ?2, path = ?3, rel_path = ?4, name = ?5, name_lower = ?6,
                      ext = ?7, language = ?8, size = ?9, mtime = ?10,
-                     volume_serial = ?11, file_id = ?12, scan_generation = ?13
+                     volume_serial = ?11, file_id = ?12, scan_generation = ?13,
+                     parse_version=0, parse_diagnostics='[]'
                  WHERE id = ?1",
             )?;
 
             // Move identities to newly seen paths before processing replacements
             // at their old paths, regardless of crawl/batch order.
-            let mut ordered = records.iter().enumerate().map(|(index, rec)| {
-                by_path.exists(params![rec.path]).map(|exists| (exists, index, rec))
-            }).collect::<Result<Vec<_>, _>>()?;
+            let mut ordered = records
+                .iter()
+                .enumerate()
+                .map(|(index, rec)| {
+                    by_path
+                        .exists(params![rec.path])
+                        .map(|exists| (exists, index, rec))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             ordered.sort_by_key(|(exists, _, _)| *exists);
             for (_, index, rec) in ordered {
                 let name_lower = rec.name.to_lowercase();
@@ -379,13 +433,15 @@ impl CodeStore {
                         )
                         .optional()?;
                     cand.and_then(|(id, old_path, old_gen)| {
-                        let in_batch = records.iter().any(|r| r.path == old_path
-                            && r.volume_serial == rec.volume_serial && r.file_id == rec.file_id);
-                        let case_only_rename =
-                            old_path.to_lowercase() == rec.path.to_lowercase();
+                        let in_batch = records.iter().any(|r| {
+                            r.path == old_path
+                                && r.volume_serial == rec.volume_serial
+                                && r.file_id == rec.file_id
+                        });
+                        let case_only_rename = old_path.to_lowercase() == rec.path.to_lowercase();
                         let old_path = std::path::Path::new(&old_path);
-                        let still_exists = !case_only_rename &&
-                            ws_platform::identity::file_identity(old_path)
+                        let still_exists = !case_only_rename
+                            && ws_platform::identity::file_identity(old_path)
                                 .map(|identity| identity == (rec.volume_serial, rec.file_id))
                                 .unwrap_or_else(|| old_path.try_exists().unwrap_or(true));
                         if old_gen != scan_generation && !in_batch && !still_exists {
@@ -567,8 +623,8 @@ impl CodeStore {
         let id: i64 = tx.query_row(
             "INSERT INTO code_chunks(
                  file_id, chunk_index, start_line, end_line, symbol_name, symbol_kind,
-                 text, vector, norm
-             ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 text, vector, norm, notebook_cell, cell_start_line, cell_end_line
+             ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
              ON CONFLICT(file_id, chunk_index) DO UPDATE SET
                  start_line = excluded.start_line,
                  end_line = excluded.end_line,
@@ -576,7 +632,8 @@ impl CodeStore {
                  symbol_kind = excluded.symbol_kind,
                  text = excluded.text,
                  vector = excluded.vector,
-                 norm = excluded.norm
+                 norm = excluded.norm,
+                 notebook_cell=excluded.notebook_cell, cell_start_line=excluded.cell_start_line, cell_end_line=excluded.cell_end_line
              RETURNING id",
             params![
                 chunk.file_id,
@@ -588,6 +645,9 @@ impl CodeStore {
                 chunk.text,
                 bytes,
                 norm as f64,
+                chunk.notebook.map(|n| n.cell_ordinal),
+                chunk.notebook.map(|n| n.start_line),
+                chunk.notebook.map(|n| n.end_line),
             ],
             |r| r.get(0),
         )?;
@@ -644,7 +704,7 @@ impl CodeStore {
     pub fn list_chunks_for_file(&self, file_id: i64) -> Result<Vec<CodeChunk>, CodeStoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT id, file_id, chunk_index, start_line, end_line, symbol_name, symbol_kind,
-                    text, vector, norm
+                    text, vector, norm, notebook_cell, cell_start_line, cell_end_line
              FROM code_chunks WHERE file_id = ?1 ORDER BY chunk_index",
         )?;
         let rows = stmt.query_map(params![file_id], map_code_chunk_row)?;
@@ -666,13 +726,14 @@ impl CodeStore {
         }
         let mut stmt = self.conn.prepare(
             "SELECT id, file_id, chunk_index, start_line, end_line, symbol_name, symbol_kind,
-                    text, vector, norm
+                    text, vector, norm, notebook_cell, cell_start_line, cell_end_line
              FROM code_chunks WHERE norm > 0",
         )?;
         let rows = stmt.query_map([], |row| {
             let bytes: Vec<u8> = row.get(8)?;
             let norm: f64 = row.get(9)?;
             let chunk = CodeChunk {
+                notebook: map_notebook(row, 10)?,
                 id: row.get(0)?,
                 file_id: row.get(1)?,
                 chunk_index: row.get(2)?,
@@ -736,8 +797,8 @@ impl CodeStore {
         {
             let mut insert = tx.prepare_cached(
                 "INSERT INTO code_symbols(
-                     file_id, name, name_lower, kind, is_definition, line, end_line, signature
-                 ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                     file_id, name, name_lower, kind, is_definition, line, end_line, signature, notebook_cell, cell_start_line, cell_end_line
+                 ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             )?;
             let mut fts_insert = tx.prepare_cached(
                 "INSERT INTO code_symbols_fts(rowid, name, signature) VALUES(?1, ?2, ?3)",
@@ -756,6 +817,9 @@ impl CodeStore {
                     sym.line as i64,
                     sym.end_line as i64,
                     sym.signature,
+                    sym.notebook.map(|n| n.cell_ordinal),
+                    sym.notebook.map(|n| n.start_line),
+                    sym.notebook.map(|n| n.end_line),
                 ])?;
                 let id = tx.last_insert_rowid();
                 fts_insert.execute(params![id, sym.name, sym.signature])?;
@@ -769,7 +833,7 @@ impl CodeStore {
 
     pub fn list_symbols_for_file(&self, file_id: i64) -> Result<Vec<CodeSymbol>, CodeStoreError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, file_id, name, name_lower, kind, is_definition, line, end_line, signature
+            "SELECT id, file_id, name, name_lower, kind, is_definition, line, end_line, signature, notebook_cell, cell_start_line, cell_end_line
              FROM code_symbols WHERE file_id = ?1 ORDER BY line, id",
         )?;
         let rows = stmt.query_map(params![file_id], map_code_symbol_row)?;
@@ -805,7 +869,7 @@ impl CodeStore {
         // 1. Exact or prefix match on name_lower (definitions first)
         if let Some(upper) = prefix_upper_bound(&q) {
             let mut stmt = self.conn.prepare_cached(
-                "SELECT id, file_id, name, name_lower, kind, is_definition, line, end_line, signature
+                "SELECT id, file_id, name, name_lower, kind, is_definition, line, end_line, signature, notebook_cell, cell_start_line, cell_end_line
                  FROM code_symbols
                  WHERE name_lower >= ?1 AND name_lower < ?2
                  ORDER BY (name_lower = ?1) DESC, is_definition DESC, length(name) ASC, line ASC
@@ -821,7 +885,7 @@ impl CodeStore {
         if q.chars().count() >= 3 && results.len() < limit {
             let escaped = q.replace('"', "\"\"");
             let mut stmt = self.conn.prepare_cached(
-                "SELECT id, file_id, name, name_lower, kind, is_definition, line, end_line, signature
+                "SELECT id, file_id, name, name_lower, kind, is_definition, line, end_line, signature, notebook_cell, cell_start_line, cell_end_line
                  FROM code_symbols
                  WHERE id IN (
                      SELECT rowid FROM code_symbols_tri WHERE code_symbols_tri MATCH ?1 LIMIT 200
@@ -830,7 +894,10 @@ impl CodeStore {
                  LIMIT ?2",
             )?;
             let rows = stmt
-                .query_map(params![format!("\"{escaped}\""), limit as i64], map_code_symbol_row)?
+                .query_map(
+                    params![format!("\"{escaped}\""), limit as i64],
+                    map_code_symbol_row,
+                )?
                 .collect::<Result<Vec<_>, _>>()?;
             push_unique_symbols(&mut seen, &mut results, rows);
         }
@@ -844,7 +911,7 @@ impl CodeStore {
         if !tokens.is_empty() && results.len() < limit {
             let expr = tokens.join(" ");
             let mut stmt = self.conn.prepare_cached(
-                "SELECT id, file_id, name, name_lower, kind, is_definition, line, end_line, signature
+                "SELECT id, file_id, name, name_lower, kind, is_definition, line, end_line, signature, notebook_cell, cell_start_line, cell_end_line
                  FROM code_symbols
                  WHERE id IN (
                      SELECT rowid FROM code_symbols_fts WHERE code_symbols_fts MATCH ?1 LIMIT 200
@@ -869,23 +936,19 @@ impl CodeStore {
         let files_total: i64 = self
             .conn
             .query_row("SELECT COUNT(*) FROM code_files", [], |r| r.get(0))?;
-        let chunks_total: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM code_chunks", [], |r| r.get(0))?;
-        let embedded_chunks_total: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM code_chunks WHERE norm > 0",
-            [],
-            |r| r.get(0),
-        )?;
-        let symbols_total: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM code_symbols", [], |r| r.get(0))?;
-        let page_count: i64 = self
-            .conn
-            .query_row("PRAGMA page_count", [], |r| r.get(0))?;
-        let page_size: i64 = self
-            .conn
-            .query_row("PRAGMA page_size", [], |r| r.get(0))?;
+        let chunks_total: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM code_chunks", [], |r| r.get(0))?;
+        let embedded_chunks_total: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM code_chunks WHERE norm > 0", [], |r| {
+                    r.get(0)
+                })?;
+        let symbols_total: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM code_symbols", [], |r| r.get(0))?;
+        let page_count: i64 = self.conn.query_row("PRAGMA page_count", [], |r| r.get(0))?;
+        let page_size: i64 = self.conn.query_row("PRAGMA page_size", [], |r| r.get(0))?;
         Ok(CodeIndexStats {
             repos_total: repos_total as u64,
             files_total: files_total as u64,
@@ -897,7 +960,10 @@ impl CodeStore {
     }
 }
 
-fn delete_fts_for_file(tx: &rusqlite::Transaction<'_>, file_id: i64) -> Result<(), rusqlite::Error> {
+fn delete_fts_for_file(
+    tx: &rusqlite::Transaction<'_>,
+    file_id: i64,
+) -> Result<(), rusqlite::Error> {
     tx.execute(
         "DELETE FROM code_chunks_fts WHERE rowid IN (
              SELECT id FROM code_chunks WHERE file_id = ?1
@@ -941,6 +1007,7 @@ fn map_code_chunk_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CodeChunk> {
     let bytes: Vec<u8> = row.get(8)?;
     let norm: f64 = row.get(9)?;
     Ok(CodeChunk {
+        notebook: map_notebook(row, 10)?,
         id: row.get(0)?,
         file_id: row.get(1)?,
         chunk_index: row.get(2)?,
@@ -956,6 +1023,7 @@ fn map_code_chunk_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CodeChunk> {
 
 fn map_code_symbol_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CodeSymbol> {
     Ok(CodeSymbol {
+        notebook: map_notebook(row, 9)?,
         id: row.get(0)?,
         file_id: row.get(1)?,
         name: row.get(2)?,
@@ -1048,6 +1116,134 @@ mod tests {
     }
 
     #[test]
+    fn native_parse_revision_and_notebook_locations_survive_reopen_and_invalidate_on_change() {
+        let dir = TempDir::new("native-parse-state");
+        let source = dir.0.join("source.ipynb");
+        fs::write(
+            &source,
+            serde_json::to_vec(&serde_json::json!({"cells":[
+                {"cell_type":"markdown","source":"Intro\n"},
+                {"cell_type":"code","source":"def greet():\n    return 1\n"}
+            ]}))
+            .unwrap(),
+        )
+        .unwrap();
+        let db = dir.0.join("code.db");
+        let mut store = CodeStore::open(&db).unwrap();
+        let repo = store
+            .ensure_repo(&crate::DetectedRepo {
+                root_path: dir.0.to_string_lossy().into(),
+                name: "test".into(),
+                has_git: false,
+            })
+            .unwrap();
+        let generation = store.begin_generation(repo).unwrap();
+        let mut record = crate::record_for_code_path(&dir.0, &source)
+            .unwrap()
+            .unwrap();
+        let file = store
+            .apply_file_batch(repo, generation, &[record.clone()])
+            .unwrap()[0]
+            .file_id();
+        let parsed = crate::parse_file(&source).unwrap();
+        crate::persist_parsed_file(&mut store, file, &parsed).unwrap();
+        let revision: i64 = store
+            .conn
+            .query_row(
+                "SELECT parse_version FROM code_files WHERE id=?1",
+                [file],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            revision, 1,
+            "successfully persisted native parse still appears stale"
+        );
+        drop(store);
+        let mut store = CodeStore::open(&db).unwrap();
+        let chunks = store.list_chunks_for_file(file).unwrap();
+        let code = chunks
+            .iter()
+            .find(|c| c.text.contains("def greet"))
+            .unwrap();
+        assert_eq!(
+            code.notebook,
+            Some(crate::model::NotebookLocation {
+                cell_ordinal: 1,
+                start_line: 1,
+                end_line: 2
+            })
+        );
+        let symbols = store.list_symbols_for_file(file).unwrap();
+        let symbol = symbols
+            .iter()
+            .find(|s| s.name == "greet" && s.is_definition)
+            .unwrap();
+        assert_eq!(symbol.notebook, code.notebook);
+        record.size += 1;
+        store.apply_file_batch(repo, generation, &[record]).unwrap();
+        let revision: i64 = store
+            .conn
+            .query_row(
+                "SELECT parse_version FROM code_files WHERE id=?1",
+                [file],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(revision, 0, "changed source was not scheduled for reparse");
+    }
+
+    #[test]
+    fn legacy_schema_migration_preserves_identity_and_exact_text_but_requeues_native_parse() {
+        let dir = TempDir::new("schema-v1-migration");
+        let db = dir.0.join("code.db");
+        let connection = Connection::open(&db).unwrap();
+        connection
+            .execute_batch(include_str!("../tests/fixtures/schema-v1.sql"))
+            .unwrap();
+        connection.execute_batch("INSERT INTO meta VALUES('schema_version','1');
+            INSERT INTO repos(id,root_path,name) VALUES(1,'C:/Legacy','legacy');
+            INSERT INTO code_files(id,repo_id,path,rel_path,name,name_lower,language,volume_serial,file_id)
+                VALUES(7,1,'C:/Legacy/a.py','a.py','a.py','a.py','python',42,12345);
+            INSERT INTO code_chunks(id,file_id,text,symbol_name,symbol_kind,vector,norm)
+                VALUES(11,7,'legacy_exact_identifier','fake','function',x'003c0000',1);
+            INSERT INTO code_chunks_fts(rowid,symbol_name,text) VALUES(11,'fake','legacy_exact_identifier');
+            INSERT INTO code_symbols(id,file_id,name,name_lower,kind,line,end_line)
+                VALUES(13,7,'fake','fake','function',1,1);
+            INSERT INTO code_symbols_fts(rowid,name,signature) VALUES(13,'fake','old heuristic');
+            INSERT INTO code_symbols_tri(rowid,name) VALUES(13,'fake');").unwrap();
+        drop(connection);
+        let store = CodeStore::open(&db).unwrap();
+        assert_eq!(store.schema_version().unwrap(), "2");
+        let file = store.get_file(7).unwrap().unwrap();
+        assert_eq!((file.id, file.volume_serial, file.file_id), (7, 42, 12345));
+        let chunks = store.list_chunks_for_file(7).unwrap();
+        assert_eq!(chunks[0].id, 11);
+        assert_eq!(chunks[0].text, "legacy_exact_identifier");
+        assert!(chunks[0].vector.is_empty() && chunks[0].norm == 0.0);
+        assert!(store.list_symbols_for_file(7).unwrap().is_empty());
+        let found:i64=store.conn.query_row("SELECT rowid FROM code_chunks_fts WHERE code_chunks_fts MATCH 'legacy_exact_identifier'",[],|r|r.get(0)).unwrap();
+        assert_eq!(found, 11);
+        let revision: i64 = store
+            .conn
+            .query_row("SELECT parse_version FROM code_files WHERE id=7", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(revision, 0);
+        drop(store);
+        assert_eq!(
+            CodeStore::open(&db)
+                .unwrap()
+                .get_file(7)
+                .unwrap()
+                .unwrap()
+                .id,
+            7
+        );
+    }
+
+    #[test]
     fn standalone_schema_and_end_to_end_crawl_with_rename_identity_preservation() {
         let dir = TempDir::new("e2e");
         let repo_dir = dir.0.join("sample-repo");
@@ -1089,6 +1285,7 @@ mod tests {
             .replace_symbols_for_file(
                 engine_row_before.id,
                 &[NewCodeSymbol {
+                    notebook: None,
                     file_id: engine_row_before.id,
                     name: "SearchEngine",
                     kind: "struct",
@@ -1101,6 +1298,7 @@ mod tests {
             .unwrap();
         let chunk_id = store
             .upsert_chunk(NewCodeChunk {
+                notebook: None,
                 file_id: engine_row_before.id,
                 chunk_index: 0,
                 start_line: 1,
@@ -1125,9 +1323,10 @@ mod tests {
 
         // Verify the rename outcome preserved the exact `code_files.id`.
         assert!(
-            outcomes2
-                .iter()
-                .any(|o| *o == FileUpsertOutcome::Renamed { id: engine_row_before.id }),
+            outcomes2.iter().any(|o| *o
+                == FileUpsertOutcome::Renamed {
+                    id: engine_row_before.id
+                }),
             "expected Renamed outcome with preserved id {}, got {outcomes2:?}",
             engine_row_before.id
         );
@@ -1201,6 +1400,7 @@ mod tests {
             .replace_symbols_for_file(
                 caller_file_id,
                 &[NewCodeSymbol {
+                    notebook: None,
                     file_id: caller_file_id,
                     name: "dispatch_query",
                     kind: "call",
@@ -1215,6 +1415,7 @@ mod tests {
             .replace_symbols_for_file(
                 def_file_id,
                 &[NewCodeSymbol {
+                    notebook: None,
                     file_id: def_file_id,
                     name: "dispatch_query",
                     kind: "function",
@@ -1228,7 +1429,10 @@ mod tests {
 
         let hits = store.search_symbols("dispatch_query", 10).unwrap();
         assert_eq!(hits.len(), 2);
-        assert!(hits[0].is_definition, "definition must rank before reference");
+        assert!(
+            hits[0].is_definition,
+            "definition must rank before reference"
+        );
         assert_eq!(hits[0].file_id, def_file_id);
         assert_eq!(hits[0].line, 10);
         assert!(!hits[1].is_definition);
@@ -1236,6 +1440,7 @@ mod tests {
         // Vector search over code chunks
         store
             .upsert_chunk(NewCodeChunk {
+                notebook: None,
                 file_id: caller_file_id,
                 chunk_index: 0,
                 start_line: 40,
@@ -1248,6 +1453,7 @@ mod tests {
             .unwrap();
         store
             .upsert_chunk(NewCodeChunk {
+                notebook: None,
                 file_id: def_file_id,
                 chunk_index: 0,
                 start_line: 10,
@@ -1259,7 +1465,9 @@ mod tests {
             })
             .unwrap();
 
-        let vhits = store.search_chunk_vectors(&[1.0, 0.1, 0.0, 0.0], 5).unwrap();
+        let vhits = store
+            .search_chunk_vectors(&[1.0, 0.1, 0.0, 0.0], 5)
+            .unwrap();
         assert_eq!(vhits.len(), 2);
         assert_eq!(vhits[0].chunk.symbol_name, "dispatch_query");
         assert!(vhits[0].score > vhits[1].score);
@@ -1275,31 +1483,63 @@ mod tests {
     #[test]
     fn reused_old_path_preserves_moved_identity_in_either_batch_order() {
         for replacement_first in [false, true] {
-            let dir = std::env::temp_dir().join(format!("ws-code-reuse-{}-{}-{}",
-                std::process::id(), replacement_first,
-                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+            let dir = std::env::temp_dir().join(format!(
+                "ws-code-reuse-{}-{}-{}",
+                std::process::id(),
+                replacement_first,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
             fs::create_dir_all(&dir).unwrap();
             let old = dir.join("old.rs");
             let moved = dir.join("moved.rs");
             fs::write(&old, "fn original() {}").unwrap();
             let mut store = CodeStore::open_in_memory().unwrap();
-            let repo = store.ensure_repo(&DetectedRepo {
-                root_path: dir.to_string_lossy().into_owned(), name: "reuse".into(), has_git: false,
-            }).unwrap();
-            let record = crate::crawl::record_for_code_path(&dir, &old).unwrap().unwrap();
+            let repo = store
+                .ensure_repo(&DetectedRepo {
+                    root_path: dir.to_string_lossy().into_owned(),
+                    name: "reuse".into(),
+                    has_git: false,
+                })
+                .unwrap();
+            let record = crate::crawl::record_for_code_path(&dir, &old)
+                .unwrap()
+                .unwrap();
             let g1 = store.begin_generation(repo).unwrap();
             let id = store.apply_file_batch(repo, g1, &[record]).unwrap()[0].file_id();
             fs::rename(&old, &moved).unwrap();
             fs::write(&old, "fn replacement() {}").unwrap();
             let mut records = vec![
-                crate::crawl::record_for_code_path(&dir, &moved).unwrap().unwrap(),
-                crate::crawl::record_for_code_path(&dir, &old).unwrap().unwrap(),
+                crate::crawl::record_for_code_path(&dir, &moved)
+                    .unwrap()
+                    .unwrap(),
+                crate::crawl::record_for_code_path(&dir, &old)
+                    .unwrap()
+                    .unwrap(),
             ];
-            if replacement_first { records.reverse(); }
+            if replacement_first {
+                records.reverse();
+            }
             let g2 = store.begin_generation(repo).unwrap();
             store.apply_file_batch(repo, g2, &records).unwrap();
-            assert_eq!(store.find_file_by_path(&moved.to_string_lossy()).unwrap().unwrap().id, id);
-            assert_ne!(store.find_file_by_path(&old.to_string_lossy()).unwrap().unwrap().id, id);
+            assert_eq!(
+                store
+                    .find_file_by_path(&moved.to_string_lossy())
+                    .unwrap()
+                    .unwrap()
+                    .id,
+                id
+            );
+            assert_ne!(
+                store
+                    .find_file_by_path(&old.to_string_lossy())
+                    .unwrap()
+                    .unwrap()
+                    .id,
+                id
+            );
             fs::remove_dir_all(&dir).unwrap();
         }
     }
@@ -1343,6 +1583,7 @@ mod tests {
             .replace_symbols_for_file(
                 initial_id,
                 &[NewCodeSymbol {
+                    notebook: None,
                     file_id: initial_id,
                     name: "SearchEngine",
                     kind: "struct",
@@ -1372,4 +1613,20 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+fn map_notebook(
+    row: &rusqlite::Row<'_>,
+    first: usize,
+) -> rusqlite::Result<Option<crate::model::NotebookLocation>> {
+    let ordinal: Option<u32> = row.get(first)?;
+    ordinal
+        .map(|cell_ordinal| {
+            Ok(crate::model::NotebookLocation {
+                cell_ordinal,
+                start_line: row.get(first + 1)?,
+                end_line: row.get(first + 2)?,
+            })
+        })
+        .transpose()
 }

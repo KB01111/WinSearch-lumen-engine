@@ -727,6 +727,111 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn code_native_child_parses_source_under_shared_owned_transport() {
+        let tree=Tree::new();
+        let source=tree.0.join("example.rs");
+        std::fs::write(&source,"pub fn first() { helper(); }\n").unwrap();
+        let worker=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/winsearch-extract.exe");
+        let client=ExtractClient::new(worker,tree.0.join("cache"));
+        let request=client.request(source,"code",64);
+        let response=client.extract(&request,Duration::from_secs(10)).unwrap();
+        assert!(matches!(response.output.status,ws_extract::ExtractionStatus::Extracted),
+            "real child did not parse code: {:?}",response.output.status);
+        let batch=response.code.expect("typed code batch");
+        assert!(batch.units.iter().any(|unit|matches!(unit,ws_extract::code::CodeUnit::Symbol { symbol,.. }
+            if symbol.name=="first" && symbol.role.is_definition() && symbol.line==1)));
+        assert!(batch.units.iter().any(|unit|matches!(unit,ws_extract::code::CodeUnit::Chunk { chunk,.. }
+            if chunk.text=="pub fn first() { helper(); }\n")));
+    }
+
+    #[test]
+    fn code_native_child_continuations_preserve_the_complete_source_and_symbol_tail() {
+        use ws_extract::code::CodeUnit;
+        let tree=Tree::new();
+        let source=tree.0.join("many.rs");
+        let text=(0..300).map(|n|format!("pub fn f{n}() {{ helper(); }}\n")).collect::<String>();
+        std::fs::write(&source,&text).unwrap();
+        let worker=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/winsearch-extract.exe");
+        let client=ExtractClient::new(worker,tree.0.join("cache"));
+        let mut request=client.request(source,"code",64);
+        let mut reconstructed=String::new();
+        let (mut definitions,mut references,mut batches,mut consumed)=(0,0,0,0);
+        let mut expected_total=None;
+        loop {
+            let response=client.extract(&request,Duration::from_secs(10)).unwrap();
+            assert!(response.diagnostics.is_empty());
+            if let Some(total)=expected_total { assert_eq!(response.total_units,Some(total)); }
+            else { expected_total=response.total_units; }
+            let batch=response.code.unwrap();
+            assert!(!batch.units.is_empty() && batch.units.len()<=64);
+            for unit in batch.units {
+                assert_eq!(unit.ordinal(),consumed);
+                consumed+=1;
+                match unit {
+                    CodeUnit::Chunk { chunk,.. }=>reconstructed.push_str(&chunk.text),
+                    CodeUnit::Symbol { symbol,.. } if symbol.role.is_definition()=>definitions+=1,
+                    CodeUnit::Symbol { symbol,.. } if symbol.name=="helper"=>references+=1,
+                    _=>(),
+                }
+            }
+            batches+=1;
+            match response.next_cursor {
+                Some(next)=> { assert_eq!(next,consumed); request.cursor=next; }
+                None=>break,
+            }
+            assert!(batches<30,"continuation failed to make bounded progress");
+        }
+        assert!(batches>1);
+        assert_eq!(Some(consumed),expected_total);
+        assert_eq!(reconstructed,text);
+        assert_eq!((definitions,references),(300,300));
+    }
+
+    #[test]
+    fn code_native_child_keeps_notebook_coordinates_and_excludes_outputs() {
+        use ws_extract::code::CodeUnit;
+        let tree=Tree::new();
+        let source=tree.0.join("example.ipynb");
+        let notebook=serde_json::json!({"cells":[
+            {"cell_type":"markdown","source":"Introduction\n"},
+            {"cell_type":"code","source":"%%python\ndef greet():\n    helper()\n",
+             "outputs":[{"text":"OUTPUT_MUST_NOT_BE_INDEXED"}],"attachments":{"fake":"ATTACHMENT_MUST_NOT_BE_INDEXED"}}
+        ]});
+        std::fs::write(&source,serde_json::to_vec(&notebook).unwrap()).unwrap();
+        let worker=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/winsearch-extract.exe");
+        let client=ExtractClient::new(worker,tree.0.join("cache"));
+        let response=client.extract(&client.request(source,"code",64),Duration::from_secs(10)).unwrap();
+        assert!(response.diagnostics.is_empty());
+        let batch=response.code.unwrap();
+        let serialized=serde_json::to_string(&batch).unwrap();
+        assert!(!serialized.contains("MUST_NOT_BE_INDEXED"));
+        let symbol=batch.units.iter().find_map(|unit|match unit {
+            CodeUnit::Symbol { symbol,.. } if symbol.name=="greet" && symbol.role.is_definition()=>Some(symbol),
+            _=>None,
+        }).unwrap();
+        assert_eq!((symbol.line,symbol.end_line),(3,4));
+        let cell=symbol.notebook.unwrap();
+        assert_eq!((cell.cell_ordinal,cell.start_line,cell.end_line),(1,2,3));
+    }
+
+    #[test]
+    fn code_native_child_denies_sensitive_and_oversized_sources() {
+        let tree=Tree::new();
+        let sensitive=tree.0.join(".env");
+        std::fs::write(&sensitive,"SYNTHETIC_PRIVATE_FIXTURE=not-to-be-read").unwrap();
+        let oversized=tree.0.join("oversized.rs");
+        std::fs::File::create(&oversized).unwrap().set_len(ws_code::MAX_CODE_FILE_BYTES+1).unwrap();
+        let worker=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/winsearch-extract.exe");
+        let client=ExtractClient::new(worker,tree.0.join("cache"));
+        for (path,expected) in [(sensitive,"code source policy denied"),(oversized,"source exceeds 2 MiB")] {
+            match client.extract(&client.request(path,"code",64),Duration::from_secs(10)) {
+                Err(ExtractClientError::Worker(message))=>assert!(message.contains(expected),"{message}"),
+                other=>panic!("unsafe code source was not explicitly rejected: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn media_artifact_outside_private_scratch_is_rejected() {
         let tree = Tree::new();
         let mut client = ExtractClient::new(fixture(), tree.0.join("cache"));

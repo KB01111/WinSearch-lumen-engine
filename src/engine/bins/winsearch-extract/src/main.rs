@@ -23,7 +23,7 @@ fn run() -> Result<(), String> {
     .map_err(|e| e.to_string())?;
     let request = read_request(&mut std::io::stdin().lock())?;
     let response = if !SUPPORTED_KINDS.contains(&request.kind.as_str()) {
-        ws_extract::worker::ExtractResponse {
+        ws_extract::worker::ExtractResponse { code: None,
             output: ExtractOutput::unsupported(),
             next_cursor: None,
             total_units: None,
@@ -34,7 +34,7 @@ fn run() -> Result<(), String> {
         || !ws_platform::content::local_content_allowed(&request.path)
         || !ws_platform::content::local_content_allowed(&request.scratch_dir)
     {
-        ws_extract::worker::ExtractResponse {
+        ws_extract::worker::ExtractResponse { code: None,
             output: ExtractOutput {
                 status: ExtractionStatus::Failed("content policy changed".into()),
                 segments: Vec::new(),
@@ -56,12 +56,13 @@ fn run() -> Result<(), String> {
             "pdf" => ws_extract::pdf::extract_pdf_batch(&request, &budget),
             "audio" => ws_extract::audio::extract_audio_batch(&request, &budget),
             "video" => ws_extract::video::extract_video_batch(&request, &budget),
+            "code" => ws_extract::code::extract_code_batch(&request, &budget),
             "image" => ImageExtractor::default()
                 .with_thumb_dir(request.scratch_dir.clone())
                 .extract_batch(&request.path, &budget, request.cursor),
             _ => unreachable!(),
         };
-        result.unwrap_or_else(|error| ws_extract::worker::ExtractResponse {
+        result.unwrap_or_else(|error| ws_extract::worker::ExtractResponse { code: None,
             output: ExtractOutput {
                 status: ExtractionStatus::Failed(error.to_string()),
                 segments: Vec::new(),

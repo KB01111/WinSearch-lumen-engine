@@ -77,21 +77,23 @@ implemented **and** verified. Legend: `[x]` done+verified · `[~]` partial ·
       seek-to-match (Phase 4) — real bounded PCM runtime/reference/spoken retrieval
       verified. Native bounded decoding, silence-only continuation and durable
       typed/deferred WAV inputs now pass. The genuine daemon retrieves the later
-      passage at 50..65s; unrelated-query rejection, player, packaging and final
-      acceptance remain required
+      passage at 50..65s and the shared pipeline2 recipe rejects all3current
+      daemon negative controls; held-out quality, player and packaging remain required
 - [~] Video: periodic + shot-change frames, audio-track indexing, timestamp
       navigation, timeline markers (Phase 4) — native selection/PTS/OCR/phases and
       source-policy/cache recovery verified; genuine frame and later soundtrack
-      locations recorded. Negative controls still fail; timeline/player, complete
+      locations and all3current daemon negative controls pass; timeline/player, complete
       cache maintenance, expensive long-source scanning and packaging remain open
 
 ## Code search (opt-in)
 
 - [x] Separate code index (never mixes with normal results) (Phase 5)
 - [x] Repository detection, .gitignore, language detection (Phase 5)
-- [ ] Tree-sitter chunking + symbols, definitions over references (Phase 5) —
-      existing parser uses line heuristics; no Tree-sitter dependency yet
-- [x] Notebook cells (without outputs), line-number preservation (Phase 5)
+- [~] Tree-sitter chunking + symbols, definitions over references (Phase 5) —
+      twenty actual grammars plus TSX, bounded owned-child batches, syntax
+      diagnostics and schema2 migration verified; scheduling/query integration remains
+- [~] Notebook cells without outputs, virtual/cell-local line preservation (Phase 5) —
+      native child and store/reopen verified; editor routing remains
 - [ ] `code:` queries (semantic + exact identifier) (Phase 5)
 - [ ] Editor detection + open-at-line (VS Code, Cursor, VS, JetBrains,
       Sublime, Zed, configurable) (Phase 5)

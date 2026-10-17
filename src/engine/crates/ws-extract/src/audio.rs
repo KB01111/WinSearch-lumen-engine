@@ -60,7 +60,7 @@ pub(crate) fn extract_windows(
         draft.embedding_input = DraftEmbeddingInput::Audio { path: artifact };
         segments.push(draft);
     }
-    Ok(ExtractResponse {
+    Ok(ExtractResponse { code: None,
         output: ExtractOutput::extracted(segments),
         next_cursor: (end < total).then_some(end),
         total_units: Some(total),

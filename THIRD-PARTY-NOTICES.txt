@@ -124,3 +124,23 @@ WinSearch incorporates or references the following third-party software.
               SOURCE-INSTRUCTIONS.md with all required sibling DLLs.
     Source:   src/engine/third_party/ffmpeg-source.md records exact upstream/build
               revisions and the corresponding-source release assembly gate.
+
+19. Tree-sitter 0.27.1 and twenty native language grammar packages
+    Project:  https://github.com/tree-sitter/tree-sitter
+    License:  MIT (runtime, language interface and all selected grammars except
+              tree-sitter-sqlite3, which is CC0-1.0).
+    Grammars: Rust0.24.2, C0.24.2, C++0.23.4, C#0.23.5, Python0.25.0,
+              JavaScript0.25.0, TypeScript/TSX0.23.2, Go0.25.0, Java0.23.5,
+              Kotlin-ng1.1.0, Swift0.7.4, PHP0.25.1, Ruby0.23.1,
+              SQLite3/SQL0.1.0, PowerShell0.26.4, Bash0.25.1, HTML0.23.2,
+              CSS0.25.0, YAML0.7.2 and TOML-ng0.7.0.
+    Usage:    Bounded native syntax parsing in the owned extraction child.
+              SQL syntax uses the SQLite dialect; references are syntactic
+              occurrences, without cross-file type resolution.
+    Notices:  src/engine/third_party/code-grammars-LICENSES.txt contains the
+              complete license/copyright text, exact package versions and
+              upstream repositories, including runtime/interface dependencies,
+              regex and streaming-iterator (MIT OR Apache-2.0). Upstream license
+              files missing from published crate archives were fetched at those
+              crates' recorded VCS commits; their URLs/hashes are retained.
+              Redistribute this file with the extraction-worker payload.

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Schema version recorded in `code.db`'s `meta` table.
-pub const CODE_SCHEMA_VERSION: &str = "1";
+pub const CODE_SCHEMA_VERSION: &str = "2";
 
 /// Expected production embedding width (EmbeddingGemma 2 unified space).
 pub const EMBEDDING_DIM: usize = 768;
@@ -98,6 +98,7 @@ pub struct CodeFileRow {
 /// Input for inserting or replacing a code chunk in `code.db`.
 #[derive(Debug, Clone)]
 pub struct NewCodeChunk<'a> {
+    pub notebook: Option<NotebookLocation>,
     pub file_id: i64,
     pub chunk_index: i64,
     pub start_line: u32,
@@ -113,6 +114,7 @@ pub struct NewCodeChunk<'a> {
 /// Stored code chunk row in `code.db`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CodeChunk {
+    pub notebook: Option<NotebookLocation>,
     pub id: i64,
     pub file_id: i64,
     pub chunk_index: i64,
@@ -158,6 +160,7 @@ impl SymbolRole {
 /// Input for inserting a symbol occurrence into `code.db`.
 #[derive(Debug, Clone)]
 pub struct NewCodeSymbol<'a> {
+    pub notebook: Option<NotebookLocation>,
     pub file_id: i64,
     pub name: &'a str,
     pub kind: &'a str,
@@ -170,6 +173,7 @@ pub struct NewCodeSymbol<'a> {
 /// Stored symbol row in `code.db`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeSymbol {
+    pub notebook: Option<NotebookLocation>,
     pub id: i64,
     pub file_id: i64,
     pub name: String,
@@ -218,3 +222,15 @@ pub fn language_for_file(name: &str, ext: &str) -> &'static str {
         _ => "text",
     }
 }
+
+/// Virtual notebook coordinates, never a physical JSON line. Ordinal is zero-based;
+/// local line numbers are one-based and include the cell magic line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NotebookLocation {
+    pub cell_ordinal: u32,
+    pub start_line: u32,
+    pub end_line: u32,
+}
+
+/// Revision of persisted native syntax content; zero denotes stale heuristics.
+pub const CODE_PARSE_VERSION: i64 = 1;

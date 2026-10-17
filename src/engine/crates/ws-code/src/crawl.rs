@@ -13,13 +13,32 @@ use std::os::windows::fs::MetadataExt;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
-use ignore::WalkBuilder;
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use std::sync::Arc;
 
 use crate::model::{language_for_file, CodeFileRecord, DetectedRepo};
 
 /// Maximum file size indexed as source code (2 MiB). Larger files are almost
 /// always generated dumps, bundled assets, or data fixtures.
 pub const MAX_CODE_FILE_BYTES: u64 = 2 * 1024 * 1024;
+
+const SENSITIVE_CODE_DIRS: &[&str] = &[
+    ".ssh",
+    ".aws",
+    ".azure",
+    ".gnupg",
+    ".kube",
+    ".docker",
+    ".password-store",
+];
+
+pub(crate) fn sensitive_code_ancestor(path: &Path) -> bool {
+    path.ancestors().filter_map(Path::file_name).any(|name| {
+        SENSITIVE_CODE_DIRS
+            .iter()
+            .any(|s| name.to_string_lossy().eq_ignore_ascii_case(s))
+    })
+}
 
 /// Directory names excluded from code indexing even when not listed in `.gitignore`.
 pub const EXCLUDED_CODE_DIRS: &[&str] = &[
@@ -56,6 +75,15 @@ pub const EXCLUDED_CODE_DIRS: &[&str] = &[
 /// Exact file names (case-insensitive) never indexed in `code.db`: secrets,
 /// credentials, and lockfiles.
 pub const EXCLUDED_CODE_FILES: &[&str] = &[
+    ".git",
+    ".git-credentials",
+    ".gitconfig",
+    ".npmrc",
+    ".yarnrc",
+    ".yarnrc.yml",
+    ".pypirc",
+    ".netrc",
+    "_netrc",
     ".env",
     "id_rsa",
     "id_dsa",
@@ -81,18 +109,16 @@ pub const EXCLUDED_CODE_FILES: &[&str] = &[
 /// private keys/certificates, compiled artifacts, archives, media, and fonts.
 pub const EXCLUDED_CODE_EXTS: &[&str] = &[
     // Keys & certificates
-    "pem", "key", "pfx", "p12", "ppk", "kdbx", "asc", "jks", "keystore", "der", "p8", "crt",
-    "cer",
+    "pem", "key", "pfx", "p12", "ppk", "kdbx", "asc", "jks", "keystore", "der", "p8", "crt", "cer",
     // Compiled / binary / native artifacts
     "exe", "dll", "so", "dylib", "lib", "a", "o", "obj", "pdb", "ilk", "exp", "wasm", "class",
-    "pyc", "pyo", "pyd", "rlib", "rmeta",
-    // Archives & packages
+    "pyc", "pyo", "pyd", "rlib", "rmeta", // Archives & packages
     "zip", "tar", "gz", "tgz", "bz2", "xz", "7z", "rar", "nupkg", "jar", "war", "whl",
     // Images, audio, video, fonts, documents, DBs
-    "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "tiff", "tif", "heic", "avif", "mp3",
-    "wav", "flac", "ogg", "m4a", "mp4", "mkv", "mov", "avi", "webm", "ttf", "otf", "woff",
-    "woff2", "eot", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "sqlite", "sqlite3",
-    "db", "db-wal", "db-shm", "lock", "map",
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "tiff", "tif", "heic", "avif", "mp3", "wav",
+    "flac", "ogg", "m4a", "mp4", "mkv", "mov", "avi", "webm", "ttf", "otf", "woff", "woff2", "eot",
+    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "sqlite", "sqlite3", "db", "db-wal",
+    "db-shm", "lock", "map",
 ];
 
 /// Generated or minified filename suffixes (matched case-insensitively).
@@ -132,7 +158,10 @@ pub fn detect_repos(root: &Path) -> io::Result<Vec<DetectedRepo>> {
 
 /// Detects repositories under `root` searching up to `max_depth` directory levels.
 pub fn detect_repos_with_depth(root: &Path, max_depth: usize) -> io::Result<Vec<DetectedRepo>> {
-    if !root.exists() {
+    if sensitive_code_ancestor(root)
+        || !ws_platform::content::metadata_path_allowed(root, false)
+        || !root.exists()
+    {
         return Ok(Vec::new());
     }
     if has_git_marker(root)? {
@@ -168,7 +197,10 @@ fn find_git_repos_recursive(
     }
     let rd = match fs::read_dir(dir) {
         Ok(rd) => rd,
-        Err(e) if e.kind() == io::ErrorKind::NotFound || e.kind() == io::ErrorKind::PermissionDenied => {
+        Err(e)
+            if e.kind() == io::ErrorKind::NotFound
+                || e.kind() == io::ErrorKind::PermissionDenied =>
+        {
             return Ok(())
         }
         Err(e) => return Err(e),
@@ -213,7 +245,12 @@ fn find_git_repos_recursive(
 pub fn has_git_marker(dir: &Path) -> io::Result<bool> {
     match fs::symlink_metadata(dir.join(".git")) {
         Ok(_) => Ok(true),
-        Err(e) if matches!(e.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) => {
+        Err(e)
+            if matches!(
+                e.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+            ) =>
+        {
             Ok(false)
         }
         Err(e) => Err(e),
@@ -225,74 +262,187 @@ pub fn has_git_marker(dir: &Path) -> io::Result<bool> {
 /// code exclusions (vendor, generated, minified, `node_modules`, `target`,
 /// `.git`, binary files, and secret keys).
 pub fn crawl_repo(repo_root: &Path) -> io::Result<Vec<CodeFileRecord>> {
-    if !repo_root.exists() {
+    if !repo_root.is_absolute() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "code root must be absolute",
+        ));
+    }
+    if sensitive_code_ancestor(repo_root)
+        || !ws_platform::content::metadata_path_allowed(repo_root, false)
+        || !repo_root.exists()
+    {
         return Ok(Vec::new());
     }
-
-    let mut builder = WalkBuilder::new(repo_root);
-    builder
-        // Do not filter all dotfiles automatically so `.github/workflows/*.yml`
-        // or `.eslintrc.json` can be indexed while `.git`, `.env*`, etc. are
-        // explicitly excluded by our filter.
-        .hidden(false)
-        .parents(true)
-        .ignore(true)
-        .git_ignore(true)
-        .git_global(false)
-        .git_exclude(true)
-        // `require_git(false)` ensures `.gitignore` rules (including nested and
-        // `!negation` rules) work both in `.git` repos, git worktrees, and
-        // fixture/standalone trees.
-        .require_git(false)
-        .follow_links(false)
-        .max_depth(Some(64));
-
-    builder.filter_entry(|entry| {
-        if entry.depth() == 0 {
-            return true;
-        }
-        let name = entry.file_name().to_string_lossy();
-        let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
-        if is_dir {
-            !is_excluded_code_dir(&name)
-        } else {
-            !is_excluded_code_file(&name)
-        }
-    });
-
+    let mut inherited = Vec::new();
+    if let Some(rule) = guarded_ignore(repo_root, &repo_root.join(".git/info/exclude"))? {
+        inherited.push(rule);
+    }
+    let mut stack = vec![CrawlFrame::open(repo_root, 0, inherited, Vec::new())?];
     let mut records = Vec::new();
-    for result in builder.build() {
-        let entry = match result {
-            Ok(e) => e,
+    while let Some(frame) = stack.last_mut() {
+        let Some(entry) = frame.entries.next() else {
+            stack.pop();
+            continue;
+        };
+        let entry = match entry {
+            Ok(entry) => entry,
             Err(_) => continue,
         };
-        if entry.depth() == 0 {
-            continue;
-        }
-        let ft = match entry.file_type() {
-            Some(ft) => ft,
-            None => continue,
-        };
-        if !ft.is_file() {
-            continue;
-        }
         let path = entry.path();
-        if let Some(rec) = record_for_code_path(repo_root, path)? {
-            records.push(rec);
+        if !ws_platform::content::metadata_path_allowed(&path, false) {
+            continue;
+        }
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(_) => continue,
+        };
+        let is_dir = metadata.is_dir();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if (is_dir && is_excluded_code_dir(&name)) || (!is_dir && is_excluded_code_file(&name)) {
+            continue;
+        }
+        // .ignore has priority over .gitignore; nearest matching scope wins.
+        let excluded = rule_match(&frame.ignore_rules, &path, is_dir)
+            .or_else(|| rule_match(&frame.git_rules, &path, is_dir))
+            .unwrap_or(false);
+        if excluded {
+            continue;
+        }
+        if is_dir && frame.depth < 63 {
+            let child = CrawlFrame::open(
+                &path,
+                frame.depth + 1,
+                frame.git_rules.clone(),
+                frame.ignore_rules.clone(),
+            )?;
+            stack.push(child);
+        } else if metadata.is_file() {
+            if let Some(record) = record_for_code_path(repo_root, &path)? {
+                records.push(record);
+            }
         }
     }
-
     records.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
     Ok(records)
+}
+
+struct CrawlFrame {
+    depth: usize,
+    entries: fs::ReadDir,
+    git_rules: Vec<Arc<Gitignore>>,
+    ignore_rules: Vec<Arc<Gitignore>>,
+}
+
+impl CrawlFrame {
+    fn open(
+        path: &Path,
+        depth: usize,
+        mut git_rules: Vec<Arc<Gitignore>>,
+        mut ignore_rules: Vec<Arc<Gitignore>>,
+    ) -> io::Result<Self> {
+        if let Some(rule) = guarded_ignore(path, &path.join(".gitignore"))? {
+            git_rules.push(rule);
+        }
+        if let Some(rule) = guarded_ignore(path, &path.join(".ignore"))? {
+            ignore_rules.push(rule);
+        }
+        Ok(Self {
+            depth,
+            entries: fs::read_dir(path)?,
+            git_rules,
+            ignore_rules,
+        })
+    }
+}
+
+fn rule_match(rules: &[Arc<Gitignore>], path: &Path, is_dir: bool) -> Option<bool> {
+    for rule in rules.iter().rev() {
+        match rule.matched_path_or_any_parents(path, is_dir) {
+            ignore::Match::Ignore(_) => return Some(true),
+            ignore::Match::Whitelist(_) => return Some(false),
+            ignore::Match::None => (),
+        }
+    }
+    None
+}
+
+/// Fixed control filenames only; no library-triggered parent/global/worktree reads.
+fn guarded_ignore(scope: &Path, path: &Path) -> io::Result<Option<Arc<Gitignore>>> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+            ) =>
+        {
+            return Ok(None)
+        }
+        Err(error) => return Err(error),
+    };
+    if !metadata.is_file()
+        || metadata.len() > MAX_CODE_FILE_BYTES
+        || !ws_platform::content::local_content_allowed(path)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "ignore configuration is unavailable or exceeds 2 MiB",
+        ));
+    }
+    let mut file = File::open(path)?;
+    let mut bytes = Vec::new();
+    (&mut file)
+        .take(MAX_CODE_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    let after = file.metadata()?;
+    if bytes.len() as u64 > MAX_CODE_FILE_BYTES
+        || metadata.len() != after.len()
+        || metadata.modified()? != after.modified()?
+        || !ws_platform::content::local_content_allowed(path)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "ignore configuration changed during read",
+        ));
+    }
+    let source = String::from_utf8(bytes)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let mut builder = GitignoreBuilder::new(scope);
+    for (ordinal, line) in source.lines().enumerate() {
+        if ordinal >= 8192 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "too many ignore patterns",
+            ));
+        }
+        builder
+            .add_line(Some(path.to_path_buf()), line)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    }
+    builder
+        .build()
+        .map(Arc::new)
+        .map(Some)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
 /// Builds a [`CodeFileRecord`] for a single file inside `repo_root`, returning
 /// `Ok(None)` if the file vanished, is excluded by policy, exceeds
 /// [`MAX_CODE_FILE_BYTES`], or appears to be binary.
-pub fn record_for_code_path(
-    repo_root: &Path,
-    path: &Path,
-) -> io::Result<Option<CodeFileRecord>> {
+pub fn record_for_code_path(repo_root: &Path, path: &Path) -> io::Result<Option<CodeFileRecord>> {
+    let Ok(relative) = path.strip_prefix(repo_root) else {
+        return Ok(None);
+    };
+    if !path.is_absolute()
+        || sensitive_code_ancestor(path)
+        || relative
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        || !ws_platform::content::local_content_allowed(path)
+    {
+        return Ok(None);
+    }
     let metadata = match fs::symlink_metadata(path) {
         Ok(m) => m,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -352,6 +502,12 @@ pub fn record_for_code_path(
 /// True for directory names excluded from code indexing (`node_modules`,
 /// `target`, `vendor`, `generated`, `.git`, etc.).
 pub fn is_excluded_code_dir(name: &str) -> bool {
+    if SENSITIVE_CODE_DIRS
+        .iter()
+        .any(|s| name.eq_ignore_ascii_case(s))
+    {
+        return true;
+    }
     if EXCLUDED_CODE_DIRS
         .iter()
         .any(|d| name.eq_ignore_ascii_case(d))
@@ -398,9 +554,13 @@ pub fn is_excluded_code_file(name: &str) -> bool {
 /// Inspects the first 8 KiB of `path` and returns `true` if it contains a NUL
 /// byte (standard Git/ripgrep binary heuristic).
 pub fn is_probably_binary(path: &Path) -> io::Result<bool> {
+    crate::parse::guard_source_path(path)?;
     let mut file = match File::open(path) {
         Ok(f) => f,
-        Err(e) if e.kind() == io::ErrorKind::NotFound || e.kind() == io::ErrorKind::PermissionDenied => {
+        Err(e)
+            if e.kind() == io::ErrorKind::NotFound
+                || e.kind() == io::ErrorKind::PermissionDenied =>
+        {
             return Ok(true)
         }
         Err(e) => return Err(e),
@@ -498,6 +658,109 @@ fn relative_slash_path(repo_root: &Path, path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn code_record_never_reads_a_source_outside_the_selected_root() {
+        let tree = TempDir::new("outside-root");
+        let selected = tree.0.join("selected");
+        fs::create_dir(&selected).unwrap();
+        let outside = tree.0.join("outside.rs");
+        fs::write(&outside, "fn outside() {}\n").unwrap();
+        assert!(
+            record_for_code_path(&selected, &outside).unwrap().is_none(),
+            "outside-root code source was accepted"
+        );
+        assert!(
+            record_for_code_path(&selected, &selected.join("../outside.rs"))
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn oversized_ignore_file_fails_closed_instead_of_unfiltered_crawl() {
+        let tree = TempDir::new("ignore-limit");
+        fs::write(tree.0.join("source.rs"), "fn visible() {}\n").unwrap();
+        fs::write(
+            tree.0.join(".gitignore"),
+            vec![b'#'; MAX_CODE_FILE_BYTES as usize + 1],
+        )
+        .unwrap();
+        assert!(
+            crawl_repo(&tree.0).is_err(),
+            "oversized ignore configuration was read or ignored without a bound"
+        );
+    }
+
+    #[test]
+    fn secret_configurations_and_sensitive_ancestors_are_never_read_as_code() {
+        let tree = TempDir::new("secret-configs");
+        for relative in [
+            ".npmrc",
+            ".pypirc",
+            ".netrc",
+            ".git-credentials",
+            ".yarnrc.yml",
+            ".aws/config",
+            ".ssh/config",
+            ".docker/config.json",
+        ] {
+            let path = tree.0.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, "SYNTHETIC_PRIVATE_FIXTURE=not-source").unwrap();
+            assert!(
+                record_for_code_path(&tree.0, &path).unwrap().is_none(),
+                "credential configuration accepted: {relative}"
+            );
+            assert!(
+                crate::parse_file(&path).is_err(),
+                "direct source parse bypassed credential rule: {relative}"
+            );
+        }
+    }
+
+    #[test]
+    fn guarded_ignore_rules_keep_nested_negations_and_priority_inside_selected_root() {
+        let tree = TempDir::new("ignore-priority");
+        let selected = tree.0.join("selected");
+        fs::create_dir_all(selected.join(".git/info")).unwrap();
+        fs::create_dir_all(selected.join("sub")).unwrap();
+        fs::write(tree.0.join(".gitignore"), "*.rs\n").unwrap();
+        fs::write(selected.join(".git/info/exclude"), "from-exclude.rs\n").unwrap();
+        fs::write(selected.join(".gitignore"), "only-gitignore.rs\n").unwrap();
+        fs::write(selected.join(".ignore"), "!only-gitignore.rs\n*.tmp.rs\n").unwrap();
+        fs::write(
+            selected.join("sub/.gitignore"),
+            "!from-exclude.rs\n!blocked.tmp.rs\n",
+        )
+        .unwrap();
+        fs::write(selected.join("sub/.ignore"), "!wins.tmp.rs\n").unwrap();
+        for relative in [
+            "root.rs",
+            "only-gitignore.rs",
+            "from-exclude.rs",
+            "sub/from-exclude.rs",
+            "sub/blocked.tmp.rs",
+            "sub/wins.tmp.rs",
+        ] {
+            fs::write(selected.join(relative), "fn source() {}\n").unwrap();
+        }
+        let files = crawl_repo(&selected)
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.ext == "rs")
+            .map(|r| r.rel_path)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            files,
+            [
+                "only-gitignore.rs",
+                "root.rs",
+                "sub/from-exclude.rs",
+                "sub/wins.tmp.rs"
+            ]
+        );
+    }
 
     struct TempDir(std::path::PathBuf);
 
