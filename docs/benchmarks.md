@@ -221,3 +221,39 @@ behavior or the final installed resource gates. Raw results:
 
 - Idle CPU/GPU ≈ 0: resource-behavior measurements remain on the Phase 7 checklist.
 - Power-aware indexing policies (AC / battery saver / quiet hours): Phase 7.
+
+## Retrieval-quality checkpoint, 2026-10-17
+
+The shared application recipe now uses search/code task queries, title/text
+documents, raw filenames/media, and finite cosine admission at0.65. Pipeline2
+invalidates incompatible vectors while retaining durable exact text. The
+previous native media false-positive run above is retained as historical RED;
+the corrected production-daemon check passed three media positives and three
+unrelated negatives in39.765s (`artifacts/indexed-media-recipe-final/`).
+
+Expanded CLI fixture-index runs use actual CPU image/audio/text worker inputs,
+strict non-stub768-dimensional provenance and unchanged overall gates
+Recall@5>=.90,MRR>=.85,negativeFP0:
+
+| Frozen suite | Recall@5 | MRR | Negative FP |
+| --- | ---: | ---: | ---: |
+| Original names | .933 | .933 | 0/3 |
+| Development | .938 | .938 | 0/7 |
+| Held-out | .938 | .906 | 0/7 |
+
+The cooking query in names and one application paraphrase in each added suite
+remain explicit misses. Held-out soundtrack ranks second; other added positive
+categories rank first. Category results are printed separately. The recipe was
+frozen before held-out outcomes; no expected answer or gate was changed.
+
+`tools/test-retrieval.py` records executable/model/projector and generated input
+hashes, actual backend/recipe, failed cases and owned-job cleanup. Refreshed runs
+are `artifacts/retrieval-expanded-{names-v2,development-v3,held-out-v2}/`;
+CLI SHA2d3ba4b... was identical across those three. Their wall times include the
+wrapper and concurrent development activity, not an installed-app latency claim.
+Fixture-index results do not establish native extraction, ordered daemon/CLI
+parity, final reviewed-source or complete v1 acceptance.
+
+The measured CPU cap8 remains the conservative HX370 default above. Native
+Windows XRT detects the laptop's Strix NPU, but neither checked EmbeddingGemma2
+bundle provides verified Windows model execution. See [availability check](hx370-npu.md).
