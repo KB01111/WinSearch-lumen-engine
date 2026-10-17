@@ -108,6 +108,7 @@ struct RootInfo {
 }
 
 pub struct Indexer {
+    code_service:Mutex<Option<std::sync::Weak<crate::code::CodeService>>>,
     store: Mutex<IndexStore>,
     vector_index: std::sync::RwLock<Option<ws_index::VectorIndex>>,
     cache_epoch: std::sync::atomic::AtomicU64,
@@ -143,6 +144,7 @@ impl Indexer {
         let config = crate::policy::validate(config)?;
         let mut store = self.store_lock();
         store.set_indexing_config(&config)?;
+        if let Some(code)=self.code_service.lock().unwrap_or_else(|p|p.into_inner()).as_ref().and_then(|w|w.upgrade()) {code.policy_changed();}
         *self.policy.write().unwrap_or_else(|p| p.into_inner()) = config.clone();
         let mut roots = Vec::new();
         for row in store
@@ -232,6 +234,7 @@ impl Indexer {
             }));
         }
         Ok(Arc::new(Self {
+            code_service:Mutex::new(None),
             store: Mutex::new(store),
             vector_index: std::sync::RwLock::new(None),
             cache_epoch: std::sync::atomic::AtomicU64::new(1),
@@ -539,7 +542,10 @@ impl Indexer {
 
     // ---- crawl workers ----
 
-    fn notify_work(&self) {
+    pub(crate) fn set_code_service(&self,code:std::sync::Weak<crate::code::CodeService>) { *self.code_service.lock().unwrap_or_else(|p|p.into_inner())=Some(code); }
+
+    pub(crate) fn notify_work(&self) {
+        if let Some(code)=self.code_service.lock().unwrap_or_else(|p|p.into_inner()).as_ref().and_then(|w|w.upgrade()) {code.signal();}
         let mut guard = self.wake.0.lock().unwrap_or_else(|p| p.into_inner());
         *guard = true;
         self.wake.1.notify_all();

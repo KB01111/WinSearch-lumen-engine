@@ -11,30 +11,54 @@ internal static class ResultActions
     /// page, media timestamp, editor line) lands with the respective modality
     /// phases; until then the file itself opens.
     /// </summary>
-    public static void Open(SearchResult result)
+    public static string? Open(SearchResult result)
     {
         switch (result.Kind)
         {
             case ResultKind.Calculator:
                 CopyText(result.Subtitle);
-                return;
+                return null;
             case ResultKind.Settings:
                 ShellOpen(result.Subtitle);
-                return;
+                return null;
             case ResultKind.Action:
                 // Action results carry their command in the path slot.
                 if (!string.IsNullOrEmpty(result.Path))
                 {
                     ShellOpen(result.Path);
                 }
-                return;
+                return null;
+            case ResultKind.Code:
+                var file = result.Path ?? result.Subtitle;
+                var editor = WinSearch.Core.Settings.AppSettings.Load().PreferredCodeEditor;
+                if (editor == WinSearch.Core.Settings.CodeEditor.Associated)
+                {
+                    ShellOpen(file);
+                    return null;
+                }
+                try
+                {
+                    var executable = WinSearch.Core.CodeEditorLauncher.Detect(editor);
+                    if (executable is not null)
+                    {
+                        System.Diagnostics.Process.Start(WinSearch.Core.CodeEditorLauncher.StartInfo(editor, executable, file, result.Location));
+                        return null;
+                    }
+                }
+                catch (Exception error) when (error is System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException or System.Security.SecurityException)
+                {
+                    ShellOpen(file);
+                    return $"{editor} could not open this result. Opened the associated viewer.";
+                }
+                ShellOpen(file);
+                return $"{editor} is unavailable. Opened the associated viewer.";
             default:
                 var target = result.Path ?? result.Subtitle;
                 if (!string.IsNullOrEmpty(target))
                 {
                     ShellOpen(target);
                 }
-                return;
+                return null;
         }
     }
 

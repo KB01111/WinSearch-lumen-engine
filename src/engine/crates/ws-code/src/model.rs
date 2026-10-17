@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Schema version recorded in `code.db`'s `meta` table.
-pub const CODE_SCHEMA_VERSION: &str = "2";
+pub const CODE_SCHEMA_VERSION: &str = "3";
 
 /// Expected production embedding width (EmbeddingGemma 2 unified space).
 pub const EMBEDDING_DIM: usize = 768;
@@ -134,6 +134,29 @@ pub struct CodeChunk {
 pub struct ScoredCodeChunk {
     pub chunk: CodeChunk,
     pub score: f32,
+}
+
+/// A code-only result. Exact scores are lexical tiers; semantic scores are cosine.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CodeSearchHit {
+    pub file: CodeFileRow,
+    pub excerpt: String,
+    pub symbol_name: String,
+    pub symbol_kind: String,
+    pub is_definition: bool,
+    pub start_line: u32,
+    pub end_line: u32,
+    pub notebook: Option<NotebookLocation>,
+    pub score: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeJob {
+    pub path: String,
+    pub root: String,
+    pub scan: bool,
+    pub revision: i64,
+    pub attempts: u32,
 }
 
 /// Role of a symbol occurrence (definitions rank above references in Code search).

@@ -91,12 +91,16 @@ implemented **and** verified. Legend: `[x]` done+verified · `[~]` partial ·
 - [x] Repository detection, .gitignore, language detection (Phase 5)
 - [~] Tree-sitter chunking + symbols, definitions over references (Phase 5) —
       twenty actual grammars plus TSX, bounded owned-child batches, syntax
-      diagnostics and schema2 migration verified; scheduling/query integration remains
+      diagnostics, schema3 migration, native scheduler and exact definition ranking verified
 - [~] Notebook cells without outputs, virtual/cell-local line preservation (Phase 5) —
-      native child and store/reopen verified; editor routing remains
-- [ ] `code:` queries (semantic + exact identifier) (Phase 5)
-- [ ] Editor detection + open-at-line (VS Code, Cursor, VS, JetBrains,
-      Sublime, Zed, configurable) (Phase 5)
+      native child/store/reopen and actual named-pipe cell-local location verified;
+      native preview/editor interaction remains
+- [~] `code:` queries (semantic + exact identifier) (Phase 5) — native no-model
+      daemon, persistent60s quiet/restart/pause/root revocation verified; deterministic
+      semantic fixtures and request revision checks pass; final review/quality remains
+- [~] Editor detection + open-at-line (VS Code, Cursor, VS, JetBrains,
+      Sublime, Zed, Notepad++, configurable) (Phase 5) — argument matrix and notebook
+      fallback verified in .NET; installed editor interaction remains
 
 ## Windows experience
 

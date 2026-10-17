@@ -21,7 +21,7 @@ fn main() {
         }
     }
     std::fs::write(&args[2], std::process::id().to_string()).unwrap();
-    frame(r#"{"supported_kinds":["doc","image","audio"]}"#);
+    frame(r#"{"supported_kinds":["doc","image","audio","code"]}"#);
     if mode == "never-read" {
         loop {
             std::thread::sleep(Duration::from_secs(60));
@@ -32,6 +32,10 @@ fn main() {
     let mut input = vec![0; u32::from_le_bytes(length) as usize];
     std::io::stdin().read_exact(&mut input).unwrap();
     match mode {
+        "code-wait" => {
+            while !std::path::Path::new(&args[3]).exists() {std::thread::sleep(Duration::from_millis(5));}
+            frame(r#"{"output":{"status":"Extracted","segments":[]},"next_cursor":null,"total_units":1,"code":{"language":"rust","units":[{"type":"chunk","ordinal":0,"chunk":{"start_line":1,"end_line":1,"symbol_name":"","symbol_kind":"text","text":"fixture","notebook":null}}]}}"#);
+        }
         "audio-cache" | "audio-outside" => {
             let artifact = std::path::Path::new(&args[3]);
             let mut wav = Vec::new();

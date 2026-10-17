@@ -13,9 +13,7 @@ use crate::engine::SharedEngine;
 pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn features() -> Vec<String> {
-    // Capability tags advertised at handshake. Grows with the phases:
-    // "search.semantic" appears in Phase 3, "code" in Phase 5.
-    vec!["search.exact".to_string(), "search.semantic".to_string()]
+    vec!["search.exact".to_string(), "search.semantic".to_string(), "code".to_string()]
 }
 
 pub fn handle_connection(stream: PipeStream, engine: SharedEngine) {

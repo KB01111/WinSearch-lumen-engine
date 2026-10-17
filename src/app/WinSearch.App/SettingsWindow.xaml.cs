@@ -44,6 +44,8 @@ internal sealed partial class SettingsWindow : Window
         ThemeCombo.ItemsSource = SettingsViewModel.ThemeOptions;
         ThemeCombo.SelectedItem = _viewModel.SelectedTheme;
         RememberQueryToggle.IsOn = _viewModel.RememberLastQuery;
+        CodeEditorCombo.ItemsSource = Enum.GetValues<CodeEditor>();
+        CodeEditorCombo.SelectedItem = _settings.PreferredCodeEditor;
 
         BackendCombo.ItemsSource = SettingsViewModel.BackendOptions;
         SyncAiControlsFromViewModel();
@@ -58,6 +60,15 @@ internal sealed partial class SettingsWindow : Window
     {
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         _viewModel.Dispose();
+    }
+
+    private void OnCodeEditorChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (CodeEditorCombo.SelectedItem is CodeEditor editor)
+        {
+            _settings.PreferredCodeEditor = editor;
+            _settings.Save();
+        }
     }
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)

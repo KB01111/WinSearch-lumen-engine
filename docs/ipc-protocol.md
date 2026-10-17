@@ -65,7 +65,7 @@ All messages carry a `type` discriminator (snake_case). Requests carry `id`
 
 | type | fields | description |
 |---|---|---|
-| `hello_ack` | `protocol_version`, `engine_version`, `features[]` | Handshake reply; `features` lists capability tags (currently `["search.exact", "search.semantic"]`; `"code"` added in Phase 5). |
+| `hello_ack` | `protocol_version`, `engine_version`, `features[]` | Handshake reply; `features` lists `["search.exact", "search.semantic", "code"]`. Code availability still follows the opt-in policy. |
 | `pong` | `id` | Heartbeat reply. |
 | `results` | `id`, `batch[]`, `done` | Streamed result batches; terminal frame has `done: true` (also sent when cancelled). |
 | `status` | `id?`, `status` | `id: null` is a pushed update (indexing progress); `id` set answers `get_status`. |
@@ -81,7 +81,9 @@ All messages carry a `type` discriminator (snake_case). Requests carry `id`
 - `SearchResult`: `id`, `kind`, `title`, `subtitle`, `match_explanation`,
   `score`, `path?`, `location?`, `thumbnail_path?`.
 - `MatchLocation` (discriminator `kind`):
-  `page {page}` | `timestamp {seconds, end_seconds}` | `line {line}`.
+  `page {page}` | `timestamp {seconds, end_seconds}` | `line {line}` |
+  `notebook {cell_ordinal, line, end_line}`. Notebook cells are zero-based;
+  cell-local line ranges are one-based and inclusive.
 - `EngineStatus`: `state` (`idle|indexing|paused|error`), `current_activity`,
   `files_discovered`, `files_indexed`, `segments_indexed`, `queue_depth`,
   `model_loaded`, `index_size_bytes`.
@@ -140,13 +142,20 @@ exercises two generated-data daemon instances and independent shutdown.
 
 - **Progressive search**: exact matches stream first; semantic results append
   in later batches under the same `id` when `include_semantic` is set,
-  `semantic_enabled` is true, and the embedding model is ready (excluding
-  `mode: code`). Semantic hits are deduplicated against already-streamed
+  `semantic_enabled` is true, and the embedding model is ready. Code mode also
+  requires code opt-in and a category filter that admits code. Semantic hits
+  are deduplicated against already-streamed
   exact entry IDs, scored in the hybrid band (`0.45 + 0.45·cosine` with
-  cosine ≥ `0.35`, `+0.10` exact-token-in-name boost, `+0.02` recency), and
+  cosine ≥ `0.65`, `+0.10` exact-token-in-name boost, `+0.02` recency), and
   carry `match_explanation` (`"semantic name match · similarity 0.XX"`). The
   client discards batches from superseded requests (sequence guard) so older
   searches never overwrite newer ones.
+- **Code search**: `mode: code` uses only the separate code index. Exact
+  definitions precede references and chunk FTS. Semantic chunks append after
+  exact results, suppressing chunks containing an exact hit at the same file
+  and line. Results carry the actual excerpt, line/cell location and stable
+  code result ID. Disabled/removed roots are hidden before candidate limits;
+  policy and parse revisions fence in-flight queries through delivery.
 - **Cancellation**: cancelling the client-side token sends `cancel`; the engine
   cooperatively stops and closes the stream with `done: true`.
 - **Liveness**: clients ping periodically; a dropped pipe triggers automatic

@@ -383,15 +383,37 @@ separate from ordinary content drafts. Its cursor covers chunks followed by
 symbols, at most256units and2MiB encoded payload per response. Parent validation
 rejects missing/skipped units and invalid ranges/cell metadata. Native tests
 reconstruct300definitions plus300references over multiple batches without losing
-source text. This transport is available for the pending opt-in code scheduler;
-normal queries have no code results and there is no active in-process fallback.
+source text. The opt-in code scheduler uses this transport; normal queries have
+no code results and there is no active in-process fallback.
 
-`code.db` schema2 stores zero-based notebook cell ordinal and one-based local
+`code.db` schema3 stores zero-based notebook cell ordinal and one-based local
 lines alongside virtual source lines for chunks/symbols. Notebook source cells,
 including language magics, are retained; outputs/attachments/raw JSON are excluded.
 Migration preserves repo/file identity and exact text, clears stale heuristic
 symbols/vectors and marks files for native reparse. Successful persistence records
 the native parse revision and diagnostics; metadata changes reset that revision.
+
+The code coordinator persists source snapshots, revisioned claims and scan
+staging in `code.db`. Initial selected roots reconcile immediately; watcher
+changes hide stale source and persist a 60-second quiet deadline across pause,
+resume and restart. One signalled coordinator walks at most512 entries or applies
+at most256 files per turn. Parser children return at most256 units per batch;
+a whole-file transaction publishes exact chunks/symbols before deferred vectors.
+Failed parse jobs have three poison attempts; missing models do not consume them.
+Precise metadata/native identity, current policy, claim revision and model recipe
+are checked around work and commits. Power notifications wake the coordinator;
+scheduled openings use the next daily boundary rather than a polling loop.
+
+Code queries filter current roots/exclusions/residency before candidate limits.
+Exact identifier definitions precede references, then chunk FTS, followed by
+optional semantic chunks using the shared supervisor/recipe/admission floor.
+Policy changes and new parse publication advance a request revision so an old
+stream cannot resume after revoke/regrant or return an excerpt from a prior parse.
+Notebook results retain zero-based cell ordinal and one-based cell-local lines.
+The Windows editor preference detects known editor installations, launches with
+individual arguments, and falls back to the associated viewer with an explanation.
+Notebook opening never treats virtual source lines as JSON file lines. Native
+editor interaction and full preview acceptance remain part of the shell gate.
 
 Application formatting lives in `ws-modelmgr::recipe`: normal queries use
 `task: search result | query: ...`, code queries use the code-retrieval task,

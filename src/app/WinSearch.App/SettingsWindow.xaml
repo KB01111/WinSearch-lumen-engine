@@ -53,6 +53,11 @@
             </StackPanel>
 
             <!-- AI model -->
+            <StackPanel Spacing="8">
+                <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Code editor" />
+                <ComboBox x:Name="CodeEditorCombo" MinWidth="220" SelectionChanged="OnCodeEditorChanged" />
+                <TextBlock Text="Unavailable editors open in the associated viewer. Notebook results show the actual cell and local line." TextWrapping="Wrap" MaxWidth="640" />
+            </StackPanel>
             <StackPanel Spacing="10">
                 <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="AI model" />
 

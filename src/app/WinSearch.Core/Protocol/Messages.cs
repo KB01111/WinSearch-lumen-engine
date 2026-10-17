@@ -238,6 +238,7 @@ public sealed class SearchQuery
 [JsonDerivedType(typeof(PageLocation), "page")]
 [JsonDerivedType(typeof(TimestampLocation), "timestamp")]
 [JsonDerivedType(typeof(LineLocation), "line")]
+[JsonDerivedType(typeof(NotebookLocation), "notebook")]
 public abstract class MatchLocation;
 
 public sealed class PageLocation : MatchLocation
@@ -254,6 +255,13 @@ public sealed class TimestampLocation : MatchLocation
 public sealed class LineLocation : MatchLocation
 {
     public uint Line { get; set; }
+}
+
+public sealed class NotebookLocation : MatchLocation
+{
+    public uint CellOrdinal { get; set; }
+    public uint Line { get; set; }
+    public uint EndLine { get; set; }
 }
 
 public sealed class SearchResult

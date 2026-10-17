@@ -272,6 +272,14 @@ pub fn persist_parsed_file(
     file_id: i64,
     parsed: &ParsedCodeFile,
 ) -> Result<Vec<i64>, CodeStoreError> {
+    store.commit_parsed_file(file_id, parsed)
+}
+
+pub(crate) fn persist_parsed_rows(
+    store: &mut CodeStore,
+    file_id: i64,
+    parsed: &ParsedCodeFile,
+) -> Result<Vec<i64>, CodeStoreError> {
     store.mark_parse_pending(file_id)?;
     let sym_inputs: Vec<NewCodeSymbol<'_>> = parsed
         .symbols

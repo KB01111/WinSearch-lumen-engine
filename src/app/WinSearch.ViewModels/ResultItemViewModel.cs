@@ -35,6 +35,7 @@ public sealed class ResultItemViewModel
         PageLocation page => $"page {page.Page}",
         TimestampLocation ts => $"{FormatTimestamp(ts.Seconds)} – {FormatTimestamp(ts.EndSeconds)}",
         LineLocation line => $"line {line.Line}",
+        NotebookLocation notebook => $"cell {notebook.CellOrdinal + 1}, line {notebook.Line}",
         _ => "",
     };
 

@@ -71,6 +71,8 @@ impl ClientHandle {
 }
 
 pub struct EngineService {
+    code: Mutex<Option<Arc<crate::code::CodeService>>>,
+    power:Mutex<Option<crate::policy::PowerNotifications>>,
     status: Mutex<EngineStatus>,
     clients: Mutex<Vec<ClientHandle>>,
     /// Cancellation flags for in-flight search requests, keyed by `(client_id, request_id)`.
@@ -130,6 +132,8 @@ impl EngineService {
             embed.set_preferred_backend(cfg.preferred_backend.as_str());
         }
         Arc::new(Self {
+            code:Mutex::new(None),
+            power:Mutex::new(None),
             status: Mutex::new(EngineStatus {
                 state: EngineRunState::Idle,
                 current_activity: String::new(),
@@ -164,6 +168,16 @@ impl EngineService {
     pub fn embed_supervisor(&self) -> Arc<EmbedSupervisor> {
         Arc::clone(&self.embed)
     }
+
+    pub fn start_code_scheduler(&self)->anyhow::Result<()> {
+        *self.power.lock().unwrap_or_else(|p|p.into_inner())=Some(crate::policy::PowerNotifications::register(&self.indexer)?);
+        let code=crate::code::CodeService::new(ws_code::CodeStore::open(&paths::code_db_path())?,Arc::clone(&self.indexer),Arc::clone(&self.embed),Arc::clone(&self.models),crate::extract_client::ExtractClient::production());
+        self.indexer.set_code_service(Arc::downgrade(&code));
+        code.start()?;
+        *self.code.lock().unwrap_or_else(|p|p.into_inner())=Some(code);Ok(())
+    }
+
+    fn code_service(&self)->Option<Arc<crate::code::CodeService>> {self.code.lock().unwrap_or_else(|p|p.into_inner()).clone()}
 
     pub fn status(&self) -> EngineStatus {
         let mut status = self
@@ -467,12 +481,13 @@ impl EngineService {
     }
 
     /// The full semantic gate: requested by the client, allowed by policy,
-    /// servable by the model — and never for `code:` (code search is
-    /// unaffected by this stage).
+    /// servable by the model, with code opt-in and category filters applied.
     fn semantic_allowed(&self, query: &SearchQuery) -> bool {
         query.include_semantic
             && !query.text.trim().is_empty()
-            && query.mode != SearchMode::Code
+            && (query.mode != SearchMode::Code ||
+                ((query.categories.is_empty() || query.categories.contains(&ResultKind::Code))
+                    && self.indexer.get_indexing_config().is_ok_and(|c|c.code_enabled)))
             && self.semantic_enabled()
             && self.model_ready()
     }
@@ -482,6 +497,10 @@ impl EngineService {
     /// semantic stage yield no hits — exact results already streamed.
     fn embed_query(&self, text: &str) -> Result<Vec<f32>, String> {
         let input = ws_modelmgr::recipe::search_query(text);
+        self.embed_query_input(input)
+    }
+
+    fn embed_query_input(&self,input:String)->Result<Vec<f32>,String> {
         let generation = self.indexer.store_lock().model_generation().map_err(|e| e.to_string())?;
         let key = format!("{generation}:{input}");
         if let Some(hit) = self
@@ -527,6 +546,18 @@ impl EngineService {
     fn plan_semantic(&self, query: &SearchQuery, exact_entry_ids: &HashSet<i64>) -> Vec<SearchResult> {
         if !self.semantic_allowed(query) {
             return Vec::new();
+        }
+        if query.mode==SearchMode::Code {
+            let Some(code)=self.code_service() else {return Vec::new();};
+            let epoch=code.query_epoch();
+            let Ok(vector)=self.embed_query_input(ws_modelmgr::recipe::code_query(&query.text)) else {return Vec::new();};
+            if code.query_epoch()!=epoch {return Vec::new();}
+            let exact=code.exact(&query.text,query.limit.max(1) as usize);
+            let candidates=(query.limit as usize).max(SEMANTIC_TOP_K).saturating_mul(8);
+            let mut hits=code.semantic(&vector,candidates).into_iter().filter(|h|semantic_admitted("code",h.score) && !exact.iter().any(|e|e.file.id==h.file.id && e.start_line>=h.start_line && e.start_line<=h.end_line)).map(|h|{let score=hybrid_score(h.score,&query.text,&h.file.name_lower,h.file.mtime,crate::code::now()/1000);let mut r=code_result(h);r.score=score;r}).collect::<Vec<_>>();
+            hits.sort_by(|a,b|b.score.total_cmp(&a.score));hits.truncate(query.limit.max(1) as usize);
+            if code.query_epoch()!=epoch {return Vec::new();}
+            return hits;
         }
         let Ok(generation) = self.indexer.store_lock().model_generation() else { return Vec::new(); };
         let kinds = hit_kinds(&query.categories);
@@ -695,7 +726,9 @@ impl EngineService {
         query: SearchQuery,
         cancel: Arc<AtomicBool>,
     ) -> Result<(), FrameError> {
+        let code_epoch=self.code_service().filter(|_|query.mode==SearchMode::Code).map(|c|c.query_epoch());
         let results = self.plan_results(&query);
+        let results=results.into_iter().filter(|r|r.kind!=ResultKind::Code || r.path.as_deref().is_some_and(|p|self.code_service().is_some_and(|c|code_epoch.is_some_and(|e|c.result_allowed(p,e))))).collect::<Vec<_>>();
 
         if cancel.load(Ordering::Relaxed) {
             self.end_request_for_client(client.id(), id);
@@ -708,7 +741,7 @@ impl EngineService {
 
         // Whether a semantic stage will follow: when it will, the exact
         // terminal frame says `done: false` so the client keeps listening.
-        let semantic = self.semantic_allowed(&query);
+        let semantic = self.semantic_allowed(&query) && self.code_query_current(&query,code_epoch);
 
         // Progressive response: the first batch is what the overlay shows;
         // overflow streams after so typing stays responsive.
@@ -716,7 +749,7 @@ impl EngineService {
         let (first, rest) = results.split_at(limit);
         client.send(&ServerMessage::Results {
             id,
-            batch: first.to_vec(),
+            batch: if self.code_query_current(&query,code_epoch) {first.to_vec()} else {Vec::new()},
             done: rest.is_empty() && !semantic,
         })?;
         if !rest.is_empty() {
@@ -730,7 +763,7 @@ impl EngineService {
             }
             client.send(&ServerMessage::Results {
                 id,
-                batch: rest.to_vec(),
+                batch: if self.code_query_current(&query,code_epoch) {rest.to_vec()} else {Vec::new()},
                 done: !semantic,
             })?;
         }
@@ -749,7 +782,7 @@ impl EngineService {
             .name("winsearch-semantic".into())
             .spawn(move || {
                 let outcome =
-                    this.run_semantic_stage(&thread_client, id, &query, &exact_ids, &cancel);
+                    this.run_semantic_stage(&thread_client, id, &query, &exact_ids, &cancel,code_epoch);
                 this.end_request_for_client(thread_client.id(), id);
                 if let Err(err) = outcome {
                     let _ = thread_client.send(&ServerMessage::Error {
@@ -776,6 +809,10 @@ impl EngineService {
         Ok(())
     }
 
+    fn code_query_current(&self,query:&SearchQuery,epoch:Option<u64>)->bool {
+        query.mode!=SearchMode::Code || self.code_service().is_some_and(|code|Some(code.query_epoch())==epoch)
+    }
+
     fn run_semantic_stage(
         &self,
         client: &ClientHandle,
@@ -783,6 +820,7 @@ impl EngineService {
         query: &SearchQuery,
         exact_ids: &HashSet<i64>,
         cancel: &AtomicBool,
+        code_epoch:Option<u64>,
     ) -> Result<(), FrameError> {
         if cancel.load(Ordering::Relaxed) {
             return client.send(&ServerMessage::Results {
@@ -793,8 +831,9 @@ impl EngineService {
         }
         let generation = self.indexer.store_lock().model_generation().ok();
         let mut hits = self.plan_semantic(query, exact_ids);
+        hits.retain(|r|r.kind!=ResultKind::Code || r.path.as_deref().is_some_and(|p|self.code_service().is_some_and(|c|code_epoch.is_some_and(|e|c.result_allowed(p,e)))));
         if generation.is_none() || self.indexer.store_lock().model_generation().ok() != generation
-            || !self.semantic_allowed(query) {
+            || !self.semantic_allowed(query) || !self.code_query_current(query,code_epoch) {
             hits.clear();
         }
         if cancel.load(Ordering::Relaxed) {
@@ -817,6 +856,10 @@ impl EngineService {
         let text = query.text.trim();
         if text.is_empty() {
             return Vec::new();
+        }
+        if query.mode==SearchMode::Code {
+            if !query.categories.is_empty() && !query.categories.contains(&ResultKind::Code) {return Vec::new();}
+            return self.code_service().map(|code|code.exact(text,query.limit.max(1) as usize).into_iter().map(code_result).collect()).unwrap_or_default();
         }
 
         let mut results = Vec::new();
@@ -979,6 +1022,12 @@ fn entry_hit_kind(row: &EntryRow) -> HitKind {
 /// Entry ids already streamed in the exact batch (`SearchResult.id` is
 /// `"e{entry_id}"` for index hits; calculator/settings ids never parse and
 /// are ignored). Drives duplicate suppression in the semantic stage.
+fn code_result(hit:ws_code::model::CodeSearchHit)->SearchResult {
+    let location=hit.notebook.map(|n|MatchLocation::Notebook {cell_ordinal:n.cell_ordinal,line:n.start_line,end_line:n.end_line}).unwrap_or(MatchLocation::Line {line:hit.start_line});
+    let explanation=if let Some(n)=hit.notebook {format!("{} · cell {}, line {}",hit.symbol_kind,n.cell_ordinal+1,n.start_line)} else {format!("{} · line {}",hit.symbol_kind,hit.start_line)};
+    SearchResult { id:format!("code:{}:{}:{}:{}",hit.file.id,hit.start_line,hit.is_definition,hit.symbol_name),kind:ResultKind::Code,title:if hit.symbol_name.is_empty(){hit.file.name.clone()}else{hit.symbol_name},subtitle:hit.file.path.clone(),match_explanation:explanation,score:hit.score as f64,path:Some(hit.file.path),location:Some(location),excerpt:Some(hit.excerpt),..Default::default() }
+}
+
 fn exact_entry_ids(results: &[SearchResult]) -> HashSet<i64> {
     results
         .iter()
@@ -1794,6 +1843,88 @@ mod tests {
     }
 
     // ---- streaming integration (fake vectors, real pipe frames) ----
+
+    fn code_search_service()->(SharedEngine,Arc<crate::code::CodeService>,PathBuf) {
+        let (code,indexer,root)=crate::code::tests::indexed_fixture();
+        indexer.set_code_service(Arc::downgrade(&code));
+        let engine=EngineService::new_with_model_dir(indexer,root.parent().unwrap().join("models"));
+        *engine.code.lock().unwrap()=Some(Arc::clone(&code));
+        engine.set_model_ready_override(Some(true));
+        engine.set_query_embed_hook(Arc::new(|_|Ok(vec![1.0,0.0,0.0])));
+        (engine,code,root)
+    }
+
+    #[test]
+    fn code_zero_limit_uses_same_effective_limit_for_duplicate_suppression() {
+        let (engine,code,root)=code_search_service();
+        {
+            let mut store=code.store.lock().unwrap();
+            for file in store.all_files().unwrap() {
+                for chunk in store.list_chunks_for_file(file.id).unwrap() {
+                    store.set_chunk_vector(chunk.id,if file.name=="lib.rs" {&[1.0,0.0,0.0]} else {&[0.0,1.0,0.0]}).unwrap();
+                }
+            }
+        }
+        let mut q=semantic_query("needle");q.mode=SearchMode::Code;q.limit=0;
+        assert_eq!(engine.plan_results(&q).len(),1);
+        assert!(engine.plan_semantic(&q,&HashSet::new()).is_empty(),"the effective minimum limit cannot append the same code chunk again");
+        drop(engine);drop(code);fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn code_search_honors_categories_before_exact_and_semantic_planning() {
+        let (engine,code,root)=code_search_service();
+        let mut q=semantic_query("needle");q.mode=SearchMode::Code;
+        assert!(!engine.plan_results(&q).is_empty());
+        assert!(!engine.plan_semantic(&q,&HashSet::new()).is_empty());
+        q.categories=vec![ResultKind::Video];
+        assert!(engine.plan_results(&q).is_empty(),"video-only filters exclude code exact hits");
+        assert!(!engine.semantic_allowed(&q),"excluded code must not start inference");
+        assert!(engine.plan_semantic(&q,&HashSet::new()).is_empty());
+        drop(engine);drop(code);fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn code_semantic_rejects_revoke_then_regrant_during_embedding() {
+        let (engine,code,root)=code_search_service();
+        let indexer=Arc::clone(&engine.indexer);
+        engine.set_query_embed_hook(Arc::new(move |_| {
+            let policy=indexer.get_indexing_config().unwrap();
+            let mut revoked=policy.clone();revoked.code_roots.clear();
+            indexer.set_indexing_config(&revoked).unwrap();
+            indexer.set_indexing_config(&policy).unwrap();
+            Ok(vec![1.0,0.0,0.0])
+        }));
+        let mut q=semantic_query("indirect description");q.mode=SearchMode::Code;
+        assert!(engine.plan_semantic(&q,&HashSet::new()).is_empty(),"regrant cannot revive an old request");
+        drop(engine);drop(code);fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn code_stream_rejects_revoke_then_regrant_between_stages() {
+        let (engine,code,root)=code_search_service();
+        let (entered_tx,entered_rx)=std::sync::mpsc::channel();
+        let (proceed_tx,proceed_rx)=std::sync::mpsc::channel();
+        let proceed_rx=Mutex::new(proceed_rx);
+        engine.set_query_embed_hook(Arc::new(move |_| {
+            entered_tx.send(()).unwrap();proceed_rx.lock().unwrap().recv().unwrap();
+            Ok(vec![1.0,0.0,0.0])
+        }));
+        let mut q=semantic_query("needle");q.mode=SearchMode::Code;
+        let pipe=unique_pipe();serve_search(Arc::clone(&engine),&pipe,17,q);
+        let mut stream=connect_retry(&pipe);
+        let (first,done)=read_one(&mut stream);assert!(!first.is_empty());assert!(!done);
+        entered_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+        let policy=engine.indexer.get_indexing_config().unwrap();
+        let mut revoked=policy.clone();revoked.code_roots.clear();
+        engine.indexer.set_indexing_config(&revoked).unwrap();
+        engine.indexer.set_indexing_config(&policy).unwrap();
+        proceed_tx.send(()).unwrap();
+        let (terminal,done)=read_one(&mut stream);assert!(done);
+        assert!(terminal.is_empty(),"the streamed append belongs to the revoked request");
+        engine.code.lock().unwrap().take();drop(code);
+        fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
 
     static PIPE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 

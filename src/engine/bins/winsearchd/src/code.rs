@@ -1,0 +1,970 @@
+//! Opt-in code index. One signalled coordinator owns durable jobs; parsing uses
+//! the process-wide owned extraction child and vectors use the shared supervisor.
+use crate::{
+    embed_client::EmbedSupervisor,
+    extract_client::ExtractClient,
+    indexer::Indexer,
+    model::ModelService,
+    watcher::{self, WatchEvent, Watcher},
+};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex, Weak};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use ws_code::model::{CodeJob, CodeSearchHit};
+use ws_code::{CodeFileRow, CodeStore, ParsedCodeFile};
+
+pub const QUIET_PERIOD: Duration = Duration::from_secs(60);
+const MAX_UNITS: u64 = 131_072;
+const MAX_PARSE_BYTES: usize = 32 * 1024 * 1024;
+
+struct ScanState {
+    job: CodeJob,
+    epoch: u64,
+    policy: ws_protocol::IndexingConfig,
+    repos: std::collections::VecDeque<ws_code::DetectedRepo>,
+    active: Option<RepoScan>,
+}
+struct RepoScan {
+    root: String,
+    id: i64,
+    generation: i64,
+    crawler: ws_code::crawl::CodeCrawler,
+    walk_done: bool,
+}
+
+pub struct CodeService {
+    pub(crate) store: Mutex<CodeStore>,
+    indexer: Arc<Indexer>,
+    embed: Arc<EmbedSupervisor>,
+    models: Arc<ModelService>,
+    extract: ExtractClient,
+    epoch: AtomicU64,
+    wake: (Mutex<bool>, Condvar),
+    watchers: Mutex<Vec<Watcher>>,
+    config: Mutex<Option<ws_protocol::IndexingConfig>>,
+    quiet: Duration,
+    scan: Mutex<Option<ScanState>>,
+}
+
+pub fn now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(i64::MAX as u128) as i64
+}
+
+/// Precise metadata and native identity, never a content read or cloud hydration.
+fn snapshot(path: &Path) -> Option<String> {
+    if !ws_platform::content::local_content_allowed(path) {
+        return None;
+    }
+    let m = std::fs::symlink_metadata(path).ok()?;
+    let identity = ws_platform::identity::file_identity(path)?;
+    Some(format!(
+        "{}:{}:{:?}:{:?}:{identity:?}",
+        ws_code::model::CODE_PARSE_VERSION,
+        m.len(),
+        m.modified().ok()?,
+        m.created().ok()?
+    ))
+}
+
+impl CodeService {
+    pub fn new(
+        store: CodeStore,
+        indexer: Arc<Indexer>,
+        embed: Arc<EmbedSupervisor>,
+        models: Arc<ModelService>,
+        extract: ExtractClient,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            store: Mutex::new(store),
+            indexer,
+            embed,
+            models,
+            extract,
+            epoch: AtomicU64::new(1),
+            wake: (Mutex::new(true), Condvar::new()),
+            watchers: Mutex::new(Vec::new()),
+            config: Mutex::new(None),
+            quiet: QUIET_PERIOD,
+            scan: Mutex::new(None),
+        })
+    }
+    pub fn signal(&self) {
+        *self.wake.0.lock().unwrap_or_else(|p| p.into_inner()) = true;
+        self.wake.1.notify_one();
+    }
+    pub fn policy_changed(&self) {
+        self.epoch.fetch_add(1, Ordering::AcqRel);
+        self.signal();
+    }
+    pub fn query_epoch(&self) -> u64 {
+        self.epoch.load(Ordering::Acquire)
+    }
+    fn policy(&self) -> ws_protocol::IndexingConfig {
+        self.indexer.get_indexing_config().unwrap_or_default()
+    }
+    pub fn allowed(&self, path: &Path) -> bool {
+        crate::policy::code_path_allowed(&self.policy(), &path.to_string_lossy())
+            && ws_platform::content::metadata_path_allowed(path, false)
+    }
+    fn visible(&self, file: &CodeFileRow, stored: Option<&str>) -> bool {
+        self.allowed(Path::new(&file.path))
+            && stored.is_some()
+            && snapshot(Path::new(&file.path)).as_deref() == stored
+    }
+    pub fn exact(&self, text: &str, limit: usize) -> Vec<CodeSearchHit> {
+        let store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+        store
+            .search_exact(text, limit, |file| {
+                self.visible(
+                    file,
+                    store.source_snapshot(file.id).ok().flatten().as_deref(),
+                )
+            })
+            .unwrap_or_default()
+    }
+    pub fn semantic(&self, vector: &[f32], limit: usize) -> Vec<CodeSearchHit> {
+        let store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+        if store
+            .meta_get("vector_fingerprint")
+            .ok()
+            .flatten()
+            .as_deref()
+            != self.fingerprint().as_deref()
+        {
+            return Vec::new();
+        }
+        store
+            .search_semantic(vector, limit, |file| {
+                self.visible(
+                    file,
+                    store.source_snapshot(file.id).ok().flatten().as_deref(),
+                )
+            })
+            .unwrap_or_default()
+    }
+    pub fn result_allowed(&self, path: &str, epoch: u64) -> bool {
+        let store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+        self.query_epoch() == epoch
+            && store
+                .find_file_by_path(path)
+                .ok()
+                .flatten()
+                .is_some_and(|f| {
+                    self.visible(&f, store.source_snapshot(f.id).ok().flatten().as_deref())
+                })
+            && self.query_epoch() == epoch
+    }
+    fn fingerprint(&self) -> Option<String> {
+        let generation = self.indexer.store_lock().model_generation().ok()?;
+        let compat = self
+            .indexer
+            .meta_get(ws_modelmgr::EMBEDDING_MODEL_META_KEY)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        Some(format!("{generation}:{compat}:code-v1"))
+    }
+    pub fn changed(&self, root: &str, event: WatchEvent) -> anyhow::Result<()> {
+        self.epoch.fetch_add(1, Ordering::AcqRel);
+        let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+        match event {
+            WatchEvent::Created(p) | WatchEvent::Modified(p) | WatchEvent::Deleted(p) => {
+                store.invalidate_sources_under(&p.to_string_lossy())?
+            }
+            WatchEvent::Renamed { from, to } => {
+                store.invalidate_sources_under(&from.to_string_lossy())?;
+                store.invalidate_sources_under(&to.to_string_lossy())?;
+            }
+            WatchEvent::Overflow => store.invalidate_sources_under(root)?,
+        }
+        let due = now() + self.quiet.as_millis() as i64;
+        store.defer_jobs_under(root, due)?;
+        store.enqueue_job(root, root, true, due)?;
+        drop(store);
+        self.signal();
+        Ok(())
+    }
+    pub(crate) fn configure(self: &Arc<Self>) -> anyhow::Result<()> {
+        let policy = self.policy();
+        let mut previous = self.config.lock().unwrap_or_else(|p| p.into_inner());
+        if previous.as_ref() == Some(&policy) {
+            return Ok(());
+        }
+        let rebuild = previous.as_ref().is_none_or(|old| {
+            old.code_enabled != policy.code_enabled || old.code_roots != policy.code_roots
+        });
+        let rescan = previous.as_ref().is_none_or(|old| {
+            old.excluded_paths != policy.excluded_paths
+                || old.excluded_extensions != policy.excluded_extensions
+        });
+        if !rebuild && !rescan {
+            *previous = Some(policy);
+            return Ok(());
+        }
+        if policy.code_enabled {
+            for root in &policy.code_roots {
+                self.store
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .ensure_scan_job(root, now())?;
+            }
+        }
+        if !rebuild {
+            *previous = Some(policy);
+            return Ok(());
+        }
+        let old = std::mem::take(&mut *self.watchers.lock().unwrap_or_else(|p| p.into_inner()));
+        drop(old);
+        let mut watchers = Vec::new();
+        if policy.code_enabled {
+            for root in &policy.code_roots {
+                let weak = Arc::downgrade(self);
+                let watched = root.clone();
+                if let Ok(watcher) = watcher::spawn(Path::new(root), move |event| {
+                    if let Some(service) = weak.upgrade() {
+                        if let Err(e) = service.changed(&watched, event) {
+                            tracing::warn!(error=%e,"code watcher queue failed");
+                        }
+                    }
+                }) {
+                    watchers.push(watcher);
+                }
+            }
+        }
+        *self.watchers.lock().unwrap_or_else(|p| p.into_inner()) = watchers;
+        *previous = Some(policy);
+        Ok(())
+    }
+    pub fn start(self: &Arc<Self>) -> anyhow::Result<()> {
+        self.store
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .recover_jobs()?;
+        self.configure()?;
+        let weak = Arc::downgrade(self);
+        std::thread::Builder::new()
+            .name("winsearch-code".into())
+            .spawn(move || Self::coordinate(weak))?;
+        Ok(())
+    }
+    fn coordinate(weak: Weak<Self>) {
+        while let Some(service) = weak.upgrade() {
+            if service.indexer.is_shutdown() {
+                break;
+            }
+            if let Err(e) = service.configure() {
+                tracing::warn!(error=%e,"code configuration failed");
+            }
+            match service.turn() {
+                Ok(true) => continue,
+                Err(e) => tracing::warn!(error=%e,"code coordinator failed"),
+                _ => (),
+            }
+            let due = service
+                .store
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .next_job_due()
+                .ok()
+                .flatten();
+            let due = if service.indexer.indexing_pause_reason().is_some() {
+                crate::policy::schedule_wait(&service.policy())
+                    .map(|d| now() + d.as_millis() as i64)
+            } else {
+                due
+            };
+            let mut wake = service.wake.0.lock().unwrap_or_else(|p| p.into_inner());
+            if *wake {
+                *wake = false;
+                continue;
+            }
+            if let Some(due) = due.filter(|d| *d > now()) {
+                let _guard = service
+                    .wake
+                    .1
+                    .wait_timeout(wake, Duration::from_millis((due - now()).max(1) as u64))
+                    .unwrap_or_else(|p| p.into_inner());
+            } else {
+                let _guard = service.wake.1.wait(wake).unwrap_or_else(|p| p.into_inner());
+            }
+        }
+    }
+    pub fn turn(&self) -> anyhow::Result<bool> {
+        if self.indexer.indexing_pause_reason().is_some() {
+            return Ok(false);
+        }
+        let scan = self.scan.lock().unwrap_or_else(|p| p.into_inner()).take();
+        if let Some(mut scan) = scan {
+            match self.scan_step(&mut scan) {
+                Ok(true) => {
+                    self.store
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .finish_job(&scan.job)?;
+                }
+                Ok(false) => {
+                    *self.scan.lock().unwrap_or_else(|p| p.into_inner()) = Some(scan);
+                }
+                Err(e) => {
+                    self.store
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .retry_job(
+                            &scan.job,
+                            now() + 60_000,
+                            !e.to_string().contains("changed"),
+                        )?;
+                    tracing::warn!(error=%e,"code scan deferred");
+                }
+            }
+            return Ok(true);
+        }
+        let job = self
+            .store
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .claim_job(now())?;
+        let Some(job) = job else {
+            return self.embed_turn();
+        };
+        if !self.allowed(Path::new(&job.path)) {
+            self.store
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .finish_job(&job)?;
+            return Ok(true);
+        }
+        if job.scan {
+            let epoch = self.epoch.load(Ordering::Acquire);
+            let policy = self.policy();
+            let repos = match ws_code::detect_repos(Path::new(&job.path)) {
+                Ok(repos) => repos,
+                Err(e) => {
+                    self.store
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .retry_job(&job, now() + 60_000, true)?;
+                    tracing::warn!(error=%e,"code repository detection deferred");
+                    return Ok(true);
+                }
+            };
+            *self.scan.lock().unwrap_or_else(|p| p.into_inner()) = Some(ScanState {
+                job,
+                epoch,
+                policy,
+                repos: repos.into(),
+                active: None,
+            });
+            return Ok(true);
+        }
+        let outcome = self.parse(&job);
+        let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+        match outcome {
+            Ok(()) => {
+                store.finish_job(&job)?;
+            }
+            Err(e) => {
+                let poison = !e.to_string().contains("changed");
+                store.retry_job(&job, now() + 60_000, poison)?;
+                tracing::warn!(path=%job.path,error=%e,"code job deferred");
+            }
+        }
+        Ok(true)
+    }
+    fn fence(&self, job: &CodeJob, epoch: u64, policy: &ws_protocol::IndexingConfig) -> bool {
+        self.epoch.load(Ordering::Acquire) == epoch
+            && self.policy() == *policy
+            && self.allowed(Path::new(&job.path))
+            && self.indexer.indexing_pause_reason().is_none()
+            && self
+                .store
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .job_current(job)
+                .unwrap_or(false)
+    }
+    fn scan_step(&self, state: &mut ScanState) -> anyhow::Result<bool> {
+        let valid =
+            |p: &Path| self.fence(&state.job, state.epoch, &state.policy) && self.allowed(p);
+        anyhow::ensure!(valid(Path::new(&state.job.path)), "code policy changed");
+        if state.active.is_none() {
+            let Some(repo) = state.repos.pop_front() else {
+                return Ok(true);
+            };
+            let crawler = ws_code::crawl::CodeCrawler::open(Path::new(&repo.root_path), &valid)?;
+            let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+            let id = store.ensure_repo(&repo)?;
+            let generation = store.begin_generation(id)?;
+            store.clear_scan(id)?;
+            state.active = Some(RepoScan {
+                root: repo.root_path,
+                id,
+                generation,
+                crawler,
+                walk_done: false,
+            });
+        }
+        let active = state.active.as_mut().unwrap();
+        if !active.walk_done {
+            let (records, done) = active.crawler.next_batch(512, &valid)?;
+            anyhow::ensure!(valid(Path::new(&state.job.path)), "code policy changed");
+            self.store
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .stage_scan(active.id, &records)?;
+            active.walk_done = done;
+            return Ok(false);
+        }
+        let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+        let records = store.scan_batch(active.id, 256)?;
+        if records.is_empty() {
+            store.sweep_generation(active.id, active.generation)?;
+            state.active = None;
+            return Ok(false);
+        }
+        let outcomes = store.apply_file_batch(active.id, active.generation, &records)?;
+        for (record, outcome) in records.iter().zip(outcomes) {
+            let stored = store.source_snapshot(outcome.file_id())?;
+            if stored.is_none() || stored.as_deref() != snapshot(Path::new(&record.path)).as_deref()
+            {
+                store.enqueue_file_job(&record.path, &active.root, record.mtime, now())?;
+            }
+        }
+        store.complete_scan_batch(active.id, &records)?;
+        Ok(false)
+    }
+    fn parse(&self, job: &CodeJob) -> anyhow::Result<()> {
+        let path = PathBuf::from(&job.path);
+        let epoch = self.epoch.load(Ordering::Acquire);
+        let policy = self.policy();
+        let before =
+            snapshot(&path).ok_or_else(|| anyhow::anyhow!("source changed or unavailable"))?;
+        let valid =
+            || self.fence(job, epoch, &policy) && snapshot(&path).as_deref() == Some(&before);
+        let mut parsed = ParsedCodeFile {
+            language: String::new(),
+            chunks: Vec::new(),
+            symbols: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+        let mut request = self.extract.request(path.clone(), "code", 256);
+        let mut expected_total = None;
+        let mut bytes = 0usize;
+        let mut symbols_started = false;
+        let mut cell_offsets = std::collections::HashMap::new();
+        loop {
+            anyhow::ensure!(valid(), "source or code policy changed");
+            let response = self
+                .extract
+                .extract_while(&request, Duration::from_secs(30), valid)?;
+            let total = response
+                .total_units
+                .ok_or_else(|| anyhow::anyhow!("missing code total"))?;
+            anyhow::ensure!(
+                total <= MAX_UNITS && expected_total.is_none_or(|old| old == total),
+                "code unit total changed or exceeds bound"
+            );
+            expected_total = Some(total);
+            let batch = response
+                .code
+                .ok_or_else(|| anyhow::anyhow!("missing typed code batch"))?;
+            anyhow::ensure!(
+                parsed.language.is_empty() || parsed.language == batch.language,
+                "code language changed"
+            );
+            parsed.language = batch.language;
+            for unit in batch.units {
+                use ws_extract::code::CodeUnit;
+                let (line, notebook) = match &unit {
+                    CodeUnit::Chunk { chunk, .. } => (chunk.start_line, chunk.notebook),
+                    CodeUnit::Symbol { symbol, .. } => (symbol.line, symbol.notebook),
+                };
+                if let Some(cell) = notebook {
+                    let offset = line
+                        .checked_sub(cell.start_line)
+                        .ok_or_else(|| anyhow::anyhow!("notebook offset changed"))?;
+                    let previous = cell_offsets.entry(cell.cell_ordinal).or_insert(offset);
+                    anyhow::ensure!(
+                        *previous == offset,
+                        "notebook offset changed between code batches"
+                    );
+                }
+                match unit {
+                    CodeUnit::Chunk { chunk, .. } => {
+                        anyhow::ensure!(!symbols_started, "code order changed");
+                        bytes += chunk.text.len();
+                        parsed.chunks.push(chunk);
+                    }
+                    CodeUnit::Symbol { symbol, .. } => {
+                        symbols_started = true;
+                        bytes += symbol.name.len() + symbol.signature.len() + 64;
+                        parsed.symbols.push(symbol);
+                    }
+                }
+                anyhow::ensure!(bytes <= MAX_PARSE_BYTES, "code parse exceeds memory bound");
+            }
+            parsed.diagnostics = response.diagnostics;
+            match response.next_cursor {
+                Some(next) => {
+                    anyhow::ensure!(next > request.cursor, "code cursor changed");
+                    request = self.extract.request(path.clone(), "code", 256);
+                    request.cursor = next;
+                }
+                None => break,
+            }
+        }
+        anyhow::ensure!(valid(), "source or code policy changed");
+        let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+        anyhow::ensure!(
+            store.job_current(job)?
+                && self.epoch.load(Ordering::Acquire) == epoch
+                && self.policy() == policy
+                && snapshot(&path).as_deref() == Some(&before),
+            "source or code policy changed"
+        );
+        let file = store
+            .find_file_by_path(&job.path)?
+            .ok_or_else(|| anyhow::anyhow!("code file disappeared"))?;
+        store.commit_parsed_file(file.id, &parsed)?;
+        store.set_source_snapshot(file.id, &before)?;
+        self.epoch.fetch_add(1, Ordering::AcqRel);
+        Ok(())
+    }
+    fn embed_turn(&self) -> anyhow::Result<bool> {
+        if !self.policy().code_enabled
+            || self.models.status().state != ws_modelmgr::ModelState::Ready
+        {
+            return Ok(false);
+        }
+        let fingerprint = self
+            .fingerprint()
+            .ok_or_else(|| anyhow::anyhow!("model fingerprint unavailable"))?;
+        let epoch = self.epoch.load(Ordering::Acquire);
+        let policy = self.policy();
+        let work = {
+            let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+            store.invalidate_vectors(&fingerprint)?;
+            let mut work = Vec::new();
+            'files: for file in store.all_files()? {
+                if !self.visible(&file, store.source_snapshot(file.id)?.as_deref()) {
+                    continue;
+                }
+                for chunk in store.list_chunks_for_file(file.id)? {
+                    if chunk.vector.is_empty() {
+                        let input = ws_modelmgr::recipe::code_document(&file.name, &chunk.text);
+                        work.push((
+                            file.clone(),
+                            chunk.id,
+                            input,
+                            store.source_snapshot(file.id)?,
+                        ));
+                        if work.len() == 16 {
+                            break 'files;
+                        }
+                    }
+                }
+            }
+            work
+        };
+        if work.is_empty() {
+            return Ok(false);
+        }
+        let inputs = work.iter().map(|w| w.2.clone()).collect::<Vec<_>>();
+        let vectors = match self
+            .embed
+            .embed_texts_bounded(&inputs, Duration::from_secs(120))
+        {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(error=%e,"code vectors deferred");
+                return Ok(false);
+            }
+        };
+        anyhow::ensure!(vectors.len() == work.len(), "code embedding count mismatch");
+        if self.epoch.load(Ordering::Acquire) != epoch
+            || self.policy() != policy
+            || self.fingerprint().as_deref() != Some(&fingerprint)
+            || self.indexer.indexing_pause_reason().is_some()
+        {
+            return Ok(false);
+        }
+        let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+        for ((file, id, _, before), vector) in work.into_iter().zip(vectors) {
+            if self.epoch.load(Ordering::Acquire) != epoch
+                || self.policy() != policy
+                || self.fingerprint().as_deref() != Some(&fingerprint)
+                || self.indexer.indexing_pause_reason().is_some()
+            {
+                return Ok(false);
+            }
+            if self.visible(&file, before.as_deref()) && store.source_snapshot(file.id)? == before {
+                store.set_chunk_vector(id, &vector)?;
+            }
+        }
+        Ok(true)
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    fn fixture() -> (Arc<CodeService>, PathBuf) {
+        let root = std::env::temp_dir().join(format!(
+            "winsearch-code-service-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(root.join("repo")).unwrap();
+        let mut store = ws_index::IndexStore::open_in_memory().unwrap();
+        let mut policy = store.get_or_migrate_indexing_config().unwrap();
+        policy.code_enabled = true;
+        policy.code_roots = vec![root.join("repo").to_string_lossy().into()];
+        policy.respect_battery_saver = false;
+        policy.index_on_battery = true;
+        store.set_indexing_config(&policy).unwrap();
+        let indexer = Indexer::open(store, &[]).unwrap();
+        let models = ModelService::new(root.join("models"), Arc::clone(&indexer));
+        let worker = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/debug/winsearch-extract.exe");
+        let code = CodeService::new(
+            CodeStore::open(&root.join("code.db")).unwrap(),
+            indexer,
+            Arc::new(EmbedSupervisor::new()),
+            models,
+            ExtractClient::new(worker, root.join("cache")),
+        );
+        (code, root.join("repo"))
+    }
+
+    pub(crate) fn indexed_fixture() -> (Arc<CodeService>, Arc<Indexer>, PathBuf) {
+        let (code, root) = fixture();
+        std::fs::write(root.join("lib.rs"), "fn needle() {}\n").unwrap();
+        std::fs::write(root.join("candidate.rs"), "fn resolve_record() {}\n").unwrap();
+        code.configure().unwrap();
+        for _ in 0..16 {
+            if !code.turn().unwrap() {
+                break;
+            }
+        }
+        {
+            let mut store = code.store.lock().unwrap();
+            assert_eq!(store.all_files().unwrap().len(), 2);
+            store
+                .invalidate_vectors(&code.fingerprint().unwrap())
+                .unwrap();
+            for file in store.all_files().unwrap() {
+                for chunk in store.list_chunks_for_file(file.id).unwrap() {
+                    store.set_chunk_vector(chunk.id, &[1.0, 0.0, 0.0]).unwrap();
+                }
+            }
+        }
+        let indexer = Arc::clone(&code.indexer);
+        (code, indexer, root)
+    }
+
+    #[test]
+    fn committing_native_parse_invalidates_inflight_query_revision() {
+        let (code, root) = fixture();
+        std::fs::write(root.join("lib.rs"), "fn needle() {}\n").unwrap();
+        code.configure().unwrap();
+        let before = code.epoch.load(Ordering::Acquire);
+        for _ in 0..12 {
+            if !code.turn().unwrap() {
+                break;
+            }
+        }
+        assert!(!code.exact("needle", 1).is_empty());
+        assert_ne!(
+            code.epoch.load(Ordering::Acquire),
+            before,
+            "published code text must invalidate excerpts planned against the previous revision"
+        );
+        drop(code);
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+    #[test]
+    fn native_coordinator_exact_without_model_and_live_revocation() {
+        let (code, root) = fixture();
+        std::fs::write(root.join("lib.rs"), "fn needle() { needle(); }\n").unwrap();
+        code.configure().unwrap();
+        for _ in 0..8 {
+            if !code.turn().unwrap() {
+                break;
+            }
+        }
+        let hits = code.exact("needle", 2);
+        assert_eq!(hits.len(), 2);
+        assert!(hits[0].is_definition);
+        assert!(!hits[1].is_definition);
+        assert!(
+            code.store
+                .lock()
+                .unwrap()
+                .stats()
+                .unwrap()
+                .embedded_chunks_total
+                == 0
+        );
+        let mut policy = code.policy();
+        policy.paused = true;
+        code.indexer.set_indexing_config(&policy).unwrap();
+        assert_eq!(
+            code.exact("needle", 2).len(),
+            2,
+            "pause preserves exact queries"
+        );
+        assert!(!code.turn().unwrap());
+        policy.code_roots.clear();
+        code.indexer.set_indexing_config(&policy).unwrap();
+        assert!(
+            code.exact("needle", 2).is_empty(),
+            "root revocation hides existing content immediately"
+        );
+        drop(code);
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+    #[test]
+    fn watcher_same_second_edit_hides_then_coalesces() {
+        let (mut code, root) = fixture();
+        Arc::get_mut(&mut code).unwrap().quiet = Duration::from_millis(30);
+        let path = root.join("lib.rs");
+        std::fs::write(&path, "fn alpha() {}\n").unwrap();
+        code.configure().unwrap();
+        for _ in 0..8 {
+            if !code.turn().unwrap() {
+                break;
+            }
+        }
+        assert!(!code.exact("alpha", 1).is_empty());
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::fs::write(&path, "fn omega() {}\n").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        code.changed(&root.to_string_lossy(), WatchEvent::Modified(path.clone()))
+            .unwrap();
+        assert!(code.exact("alpha", 1).is_empty());
+        assert!(!code.turn().unwrap(), "quiet period must defer parsing");
+        std::thread::sleep(Duration::from_millis(50));
+        for _ in 0..8 {
+            if !code.turn().unwrap() {
+                break;
+            }
+        }
+        assert!(!code.exact("omega", 1).is_empty());
+        drop(code);
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn deterministic_supervisor_vectors_defer_resume_and_reject_model_swap_inflight() {
+        let (mut code, root) = fixture();
+        let model_dir = root.parent().unwrap().join("fixture-model");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        let manager = ws_modelmgr::ModelManager::with_files(
+            model_dir.clone(),
+            Default::default(),
+            vec![ws_modelmgr::ExpectedFile {
+                name: "fixture.bin",
+                size: 1,
+                sha256: None,
+            }],
+        );
+        let pipe = format!(
+            r"\\.\pipe\winsearch-code-stub-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        );
+        let service = Arc::get_mut(&mut code).unwrap();
+        service.models = ModelService::with_manager(manager, Arc::clone(&service.indexer));
+        service.embed = Arc::new(EmbedSupervisor::with_config(
+            crate::embed_client::EmbedConfig {
+                worker_bin: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../target/debug/winsearch-embed.exe"),
+                pipe_name: pipe.clone(),
+                worker_args: vec![
+                    "--pipe".into(),
+                    pipe,
+                    "--stub".into(),
+                    "--stub-delay-ms".into(),
+                    "250".into(),
+                    "--idle-secs".into(),
+                    "1".into(),
+                ],
+                backoff_base: Duration::from_millis(10),
+                sleeper: None,
+            },
+        ));
+        std::fs::write(root.join("lib.rs"), "fn needle() {}\n").unwrap();
+        code.configure().unwrap();
+        for _ in 0..12 {
+            if !code.turn().unwrap() {
+                break;
+            }
+        }
+        assert_eq!(
+            code.store
+                .lock()
+                .unwrap()
+                .stats()
+                .unwrap()
+                .embedded_chunks_total,
+            0
+        );
+        std::fs::write(model_dir.join("fixture.bin"), [1]).unwrap();
+        assert!(code.embed_turn().unwrap());
+        assert!(code.embed.model_loaded());
+        assert_eq!(
+            code.store
+                .lock()
+                .unwrap()
+                .stats()
+                .unwrap()
+                .embedded_chunks_total,
+            1
+        );
+        code.indexer.store_lock().reset_content_vectors().unwrap();
+        assert!(
+            code.semantic(&[1.0; ws_embed_protocol::STUB_DIM], 1)
+                .is_empty(),
+            "stale recipe vectors must be hidden before invalidation"
+        );
+        let pending = Arc::clone(&code);
+        let thread = std::thread::spawn(move || pending.embed_turn().unwrap());
+        std::thread::sleep(Duration::from_millis(80));
+        code.indexer.store_lock().reset_content_vectors().unwrap();
+        assert!(
+            !thread.join().unwrap(),
+            "in-flight vectors cannot commit across the model generation"
+        );
+        assert_eq!(
+            code.store
+                .lock()
+                .unwrap()
+                .stats()
+                .unwrap()
+                .embedded_chunks_total,
+            0
+        );
+        assert!(code.embed_turn().unwrap());
+        let deadline = std::time::Instant::now() + Duration::from_secs(8);
+        while code.embed.is_worker_running() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        assert!(
+            !code.embed.is_worker_running(),
+            "shared supervisor idle lifecycle must release fixture worker"
+        );
+        drop(code);
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn owned_child_inflight_is_cancelled_by_source_pause_and_root_revocation() {
+        static FIXTURE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+        let binary = FIXTURE.get_or_init(|| {
+            let binary = std::env::temp_dir().join(format!(
+                "winsearch-code-cancel-fixture-{}.exe",
+                std::process::id()
+            ));
+            let status = std::process::Command::new("rustc")
+                .arg(
+                    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                        .join("tests/fixtures/extract_transport.rs"),
+                )
+                .args(["--edition=2021", "-O", "-o"])
+                .arg(&binary)
+                .status()
+                .unwrap();
+            assert!(status.success());
+            binary
+        });
+        for reason in ["source", "pause", "root"] {
+            let (mut code, root) = fixture();
+            let pid = root.parent().unwrap().join("child.pid");
+            let release = root.parent().unwrap().join("release");
+            let service = Arc::get_mut(&mut code).unwrap();
+            service.extract =
+                ExtractClient::new(binary.clone(), root.parent().unwrap().join("cache"));
+            service.extract.worker_args = vec![
+                "code-wait".into(),
+                pid.to_string_lossy().into(),
+                release.to_string_lossy().into(),
+            ];
+            std::fs::write(root.join("lib.rs"), "fn needle() {}\n").unwrap();
+            code.configure().unwrap();
+            while code.store.lock().unwrap().all_files().unwrap().is_empty()
+                || code.scan.lock().unwrap().is_some()
+            {
+                assert!(code.turn().unwrap());
+            }
+            let job = code
+                .store
+                .lock()
+                .unwrap()
+                .claim_job(now())
+                .unwrap()
+                .unwrap();
+            assert!(!job.scan);
+            let pending = Arc::clone(&code);
+            let thread = std::thread::spawn(move || pending.parse(&job));
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while !pid.exists() && std::time::Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            assert!(
+                pid.exists(),
+                "owned fixture child must start before revocation"
+            );
+            match reason {
+                "source" => {
+                    std::fs::write(root.join("lib.rs"), "fn changed() {}\n").unwrap();
+                    code.changed(
+                        &root.to_string_lossy(),
+                        WatchEvent::Modified(root.join("lib.rs")),
+                    )
+                    .unwrap();
+                }
+                "pause" => {
+                    let mut policy = code.policy();
+                    policy.paused = true;
+                    code.indexer.set_indexing_config(&policy).unwrap();
+                }
+                _ => {
+                    let mut policy = code.policy();
+                    policy.code_roots.clear();
+                    code.indexer.set_indexing_config(&policy).unwrap();
+                }
+            }
+            assert!(
+                thread.join().unwrap().is_err(),
+                "{reason} must prevent parse commit"
+            );
+            assert_eq!(code.store.lock().unwrap().stats().unwrap().chunks_total, 0);
+            let child = std::fs::read_to_string(pid)
+                .unwrap()
+                .parse::<u32>()
+                .unwrap();
+            unsafe {
+                use windows::Win32::{
+                    Foundation::{CloseHandle, WAIT_OBJECT_0},
+                    System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE},
+                };
+                if let Ok(handle) = OpenProcess(PROCESS_SYNCHRONIZE, false, child) {
+                    assert_eq!(WaitForSingleObject(handle, 1000), WAIT_OBJECT_0);
+                    CloseHandle(handle).unwrap();
+                }
+            }
+            drop(code);
+            std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+        }
+    }
+}

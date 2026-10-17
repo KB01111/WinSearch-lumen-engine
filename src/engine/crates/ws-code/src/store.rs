@@ -41,6 +41,21 @@ pub struct CodeStore {
 }
 
 const CODE_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS code_scan_files (
+    repo_id INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    path TEXT NOT NULL, record TEXT NOT NULL, existing INTEGER NOT NULL,
+    PRIMARY KEY(repo_id,path)
+);
+CREATE TABLE IF NOT EXISTS code_jobs (
+    path TEXT PRIMARY KEY, root TEXT NOT NULL, scan INTEGER NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1, due INTEGER NOT NULL,
+    claimed INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0,
+    priority INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS code_source_state (
+    file_id INTEGER PRIMARY KEY REFERENCES code_files(id) ON DELETE CASCADE,
+    snapshot TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -130,6 +145,155 @@ CREATE VIRTUAL TABLE IF NOT EXISTS code_symbols_tri USING fts5(
 "#;
 
 impl CodeStore {
+    pub fn clear_scan(&mut self,repo:i64)->Result<(),CodeStoreError> {self.conn.execute("DELETE FROM code_scan_files WHERE repo_id=?1",[repo])?;Ok(())}
+    pub fn stage_scan(&mut self,repo:i64,records:&[CodeFileRecord])->Result<(),CodeStoreError> {
+        let tx=self.conn.savepoint()?;
+        for record in records {
+            let encoded=serde_json::to_string(record).map_err(|e|CodeStoreError::InvalidChunk(e.to_string()))?;
+            tx.execute("INSERT OR REPLACE INTO code_scan_files(repo_id,path,record,existing) VALUES(?1,?2,?3,EXISTS(SELECT 1 FROM code_files WHERE path=?2))",params![repo,record.path,encoded])?;
+        }
+        tx.commit()?;Ok(())
+    }
+    pub fn scan_batch(&self,repo:i64,limit:usize)->Result<Vec<CodeFileRecord>,CodeStoreError> {
+        let mut stmt=self.conn.prepare("SELECT record FROM code_scan_files WHERE repo_id=?1 ORDER BY existing,path LIMIT ?2")?;
+        let records=stmt.query_map(params![repo,limit as i64],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+        records.into_iter().map(|r|serde_json::from_str(&r).map_err(|e|CodeStoreError::InvalidChunk(e.to_string()))).collect()
+    }
+    pub fn complete_scan_batch(&mut self,repo:i64,records:&[CodeFileRecord])->Result<(),CodeStoreError> {
+        let tx=self.conn.savepoint()?;
+        for record in records {tx.execute("DELETE FROM code_scan_files WHERE repo_id=?1 AND path=?2",params![repo,record.path])?;}
+        tx.commit()?;Ok(())
+    }
+    pub fn invalidate_sources_under(&mut self,path:&str)->Result<(),CodeStoreError> {
+        let ids=self.all_files()?.into_iter().filter(|f| {
+            let p=f.path.replace('/',"\\").to_lowercase();
+            let root=path.replace('/',"\\").trim_end_matches('\\').to_lowercase();
+            p==root || p.strip_prefix(&root).is_some_and(|s|s.starts_with('\\'))
+        }).map(|f|f.id).collect::<Vec<_>>();
+        for id in ids { self.conn.execute("DELETE FROM code_source_state WHERE file_id=?1",[id])?; }
+        Ok(())
+    }
+    pub fn all_files(&self)->Result<Vec<CodeFileRow>,CodeStoreError> {
+        let mut stmt=self.conn.prepare("SELECT id,repo_id,path,rel_path,name,name_lower,ext,language,size,mtime,volume_serial,file_id,scan_generation FROM code_files ORDER BY mtime DESC,id")?;
+        let rows=stmt.query_map([],map_code_file_row)?.collect::<Result<Vec<_>,_>>()?;
+        Ok(rows)
+    }
+    pub fn enqueue_job(&mut self,path:&str,root:&str,scan:bool,due:i64)->Result<(),CodeStoreError> {
+        self.conn.execute("INSERT INTO code_jobs(path,root,scan,due) VALUES(?1,?2,?3,?4)
+            ON CONFLICT(path) DO UPDATE SET root=excluded.root,scan=excluded.scan,due=excluded.due,
+            revision=code_jobs.revision+1,claimed=0,attempts=0",params![path,root,scan,due])?;
+        Ok(())
+    }
+    pub fn ensure_scan_job(&mut self,root:&str,due:i64)->Result<(),CodeStoreError> {
+        self.conn.execute("INSERT INTO code_jobs(path,root,scan,due) VALUES(?1,?1,1,?2) ON CONFLICT(path) DO NOTHING",params![root,due])?;Ok(())
+    }
+    pub fn recover_jobs(&mut self)->Result<(),CodeStoreError> {
+        self.conn.execute("UPDATE code_jobs SET claimed=0",[])?; Ok(())
+    }
+    pub fn defer_jobs_under(&mut self,root:&str,due:i64)->Result<(),CodeStoreError> {
+        let root=root.replace('/',"\\").trim_end_matches('\\').to_lowercase();
+        let mut stmt=self.conn.prepare("SELECT path FROM code_jobs")?;
+        let paths=stmt.query_map([],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+        drop(stmt);
+        for path in paths {
+            let normalized=path.replace('/',"\\").to_lowercase();
+            if normalized==root || normalized.strip_prefix(&root).is_some_and(|p|p.starts_with('\\')) {
+                self.conn.execute("UPDATE code_jobs SET due=?2,claimed=0,revision=revision+1,attempts=0 WHERE path=?1",params![path,due])?;
+            }
+        }
+        Ok(())
+    }
+    pub fn enqueue_file_job(&mut self,path:&str,root:&str,priority:i64,due:i64)->Result<(),CodeStoreError> {
+        self.enqueue_job(path,root,false,due)?;
+        self.conn.execute("UPDATE code_jobs SET priority=?2 WHERE path=?1",params![path,priority])?;Ok(())
+    }
+    pub fn claim_job(&mut self,now:i64)->Result<Option<crate::model::CodeJob>,CodeStoreError> {
+        Ok(self.conn.query_row("UPDATE code_jobs SET claimed=1 WHERE path=(SELECT path FROM code_jobs
+            WHERE claimed=0 AND due<=?1 AND attempts<3 ORDER BY scan DESC,priority DESC,due DESC,path LIMIT 1)
+            RETURNING path,root,scan,revision,attempts",[now],|r|Ok(crate::model::CodeJob {
+                path:r.get(0)?,root:r.get(1)?,scan:r.get(2)?,revision:r.get(3)?,attempts:r.get(4)?
+            })).optional()?)
+    }
+    pub fn job_current(&self,job:&crate::model::CodeJob)->Result<bool,CodeStoreError> {
+        Ok(self.conn.query_row("SELECT EXISTS(SELECT 1 FROM code_jobs WHERE path=?1 AND revision=?2 AND claimed=1)",params![job.path,job.revision],|r|r.get(0))?)
+    }
+    pub fn finish_job(&mut self,job:&crate::model::CodeJob)->Result<bool,CodeStoreError> {
+        Ok(self.conn.execute("DELETE FROM code_jobs WHERE path=?1 AND revision=?2",params![job.path,job.revision])?>0)
+    }
+    pub fn retry_job(&mut self,job:&crate::model::CodeJob,due:i64,poison:bool)->Result<(),CodeStoreError> {
+        self.conn.execute("UPDATE code_jobs SET claimed=0,due=?3,attempts=attempts+?4 WHERE path=?1 AND revision=?2",params![job.path,job.revision,due,poison as i64])?; Ok(())
+    }
+    pub fn next_job_due(&self)->Result<Option<i64>,CodeStoreError> {
+        Ok(self.conn.query_row("SELECT MIN(due) FROM code_jobs WHERE claimed=0 AND attempts<3",[],|r|r.get(0))?)
+    }
+    pub fn source_snapshot(&self,file:i64)->Result<Option<String>,CodeStoreError> {
+        Ok(self.conn.query_row("SELECT snapshot FROM code_source_state WHERE file_id=?1",[file],|r|r.get(0)).optional()?)
+    }
+    pub fn set_source_snapshot(&mut self,file:i64,snapshot:&str)->Result<(),CodeStoreError> {
+        self.conn.execute("INSERT INTO code_source_state(file_id,snapshot) VALUES(?1,?2) ON CONFLICT(file_id) DO UPDATE SET snapshot=excluded.snapshot",params![file,snapshot])?; Ok(())
+    }
+    pub fn invalidate_vectors(&mut self,fingerprint:&str)->Result<(),CodeStoreError> {
+        if self.meta_get("vector_fingerprint")?.as_deref()!=Some(fingerprint) {
+            let tx=self.conn.savepoint()?;
+            tx.execute("UPDATE code_chunks SET vector=x'',norm=0",[])?;
+            tx.execute("INSERT INTO meta(key,value) VALUES('vector_fingerprint',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[fingerprint])?;
+            tx.commit()?;
+        }
+        Ok(())
+    }
+
+    /// Filtering precedes every candidate limit. No ordinary-index rows are consulted.
+    pub fn search_exact(&self,query:&str,limit:usize,allowed:impl Fn(&CodeFileRow)->bool)->Result<Vec<crate::model::CodeSearchHit>,CodeStoreError> {
+        use crate::model::CodeSearchHit;
+        let q=query.trim().to_lowercase();
+        if q.is_empty() || limit==0 { return Ok(Vec::new()); }
+        let mut hits=Vec::new();
+        let mut symbols=self.conn.prepare("SELECT id,file_id,name,name_lower,kind,is_definition,line,end_line,signature,notebook_cell,cell_start_line,cell_end_line FROM code_symbols WHERE instr(name_lower,?1)>0 ORDER BY (name_lower=?1) DESC,is_definition DESC,length(name),line,id")?;
+        for symbol in symbols.query_map([&q],map_code_symbol_row)? {
+            let s=symbol?;
+            let Some(file)=self.get_file(s.file_id)?.filter(&allowed) else { continue };
+            hits.push(CodeSearchHit { file,excerpt:s.signature,symbol_name:s.name,symbol_kind:s.kind,is_definition:s.is_definition,start_line:s.line,end_line:s.end_line,notebook:s.notebook,score:if s.is_definition {1.0} else {0.95} });
+            if hits.len()==limit { return Ok(hits); }
+        }
+        let expr=q.split(|c:char|!c.is_alphanumeric() && c!='_').filter(|t|!t.is_empty()).take(32).map(|t|format!("\"{t}\"*")).collect::<Vec<_>>().join(" ");
+        if expr.is_empty() { return Ok(hits); }
+        let mut stmt=self.conn.prepare("SELECT c.id,c.file_id,c.chunk_index,c.start_line,c.end_line,c.symbol_name,c.symbol_kind,c.text,c.vector,c.norm,c.notebook_cell,c.cell_start_line,c.cell_end_line FROM code_chunks_fts JOIN code_chunks c ON c.id=code_chunks_fts.rowid WHERE code_chunks_fts MATCH ?1 ORDER BY rank,c.id")?;
+        for chunk in stmt.query_map([expr],map_code_chunk_row)? {
+            let c=chunk?;
+            let Some(file)=self.get_file(c.file_id)?.filter(&allowed) else { continue };
+            if hits.iter().any(|h|h.file.id==c.file_id && h.start_line>=c.start_line && h.start_line<=c.end_line) {continue;}
+            hits.push(CodeSearchHit { file,excerpt:c.text,symbol_name:c.symbol_name,symbol_kind:c.symbol_kind,is_definition:false,start_line:c.start_line,end_line:c.end_line,notebook:c.notebook,score:0.9 });
+            if hits.len()==limit {break;}
+        }
+        Ok(hits)
+    }
+
+    /// Returns raw cosine scores; callers apply the common frozen admission floor once.
+    pub fn search_semantic(&self,query:&[f32],limit:usize,allowed:impl Fn(&CodeFileRow)->bool)->Result<Vec<crate::model::CodeSearchHit>,CodeStoreError> {
+        use crate::model::CodeSearchHit;
+        let (q,norm)=normalize_vector(query);
+        if norm==0.0 || limit==0 {return Ok(Vec::new());}
+        let mut hits=Vec::new();
+        let mut stmt=self.conn.prepare("SELECT id,file_id,chunk_index,start_line,end_line,symbol_name,symbol_kind,text,vector,norm,notebook_cell,cell_start_line,cell_end_line FROM code_chunks WHERE norm>0")?;
+        for chunk in stmt.query_map([],map_code_chunk_row)? {
+            let c=chunk?;
+            let Some(file)=self.get_file(c.file_id)?.filter(&allowed) else {continue};
+            if c.vector.len()!=q.len() {continue;}
+            let score=c.vector.iter().zip(&q).map(|(a,b)|a*b).sum();
+            hits.push(CodeSearchHit { file,excerpt:c.text,symbol_name:c.symbol_name,symbol_kind:c.symbol_kind,is_definition:false,start_line:c.start_line,end_line:c.end_line,notebook:c.notebook,score });
+        }
+        hits.sort_by(|a,b|b.score.total_cmp(&a.score).then_with(||a.file.id.cmp(&b.file.id)).then_with(||a.start_line.cmp(&b.start_line)));
+        hits.truncate(limit); Ok(hits)
+    }
+    /// Whole-file replacement, including all FTS rows and parse state.
+    pub fn commit_parsed_file(&mut self, file: i64, parsed: &crate::ParsedCodeFile) -> Result<Vec<i64>, CodeStoreError> {
+        self.conn.execute_batch("SAVEPOINT parsed_file")?;
+        let result = crate::parse::persist_parsed_rows(self, file, parsed);
+        match result {
+            Ok(ids) => { self.conn.execute_batch("RELEASE parsed_file")?; Ok(ids) }
+            Err(error) => { self.conn.execute_batch("ROLLBACK TO parsed_file; RELEASE parsed_file")?; Err(error) }
+        }
+    }
     /// Opens (or creates) `code.db` at `path`.
     pub fn open(path: &Path) -> Result<Self, CodeStoreError> {
         if let Some(dir) = path.parent() {
@@ -165,6 +329,7 @@ impl CodeStore {
                 )?;
             }
             Some(CODE_SCHEMA_VERSION) => {}
+            Some("2")=>{conn.execute("UPDATE meta SET value='3' WHERE key='schema_version'",[])?;}
             Some("1") => {
                 conn.execute_batch("BEGIN IMMEDIATE;
                     ALTER TABLE code_files ADD COLUMN parse_version INTEGER NOT NULL DEFAULT 0;
@@ -179,7 +344,7 @@ impl CodeStore {
                     UPDATE code_chunks SET symbol_name='', symbol_kind='stale', vector=x'', norm=0;
                     DELETE FROM code_chunks_fts;
                     INSERT INTO code_chunks_fts(rowid,symbol_name,text) SELECT id,'',text FROM code_chunks;
-                    UPDATE meta SET value='2' WHERE key='schema_version';
+                    UPDATE meta SET value='3' WHERE key='schema_version';
                     COMMIT;")?;
             }
             Some(other) => {
@@ -291,7 +456,7 @@ impl CodeStore {
     /// Removes files (and their cascading chunks/symbols + FTS rows) in `repo_id`
     /// that were not seen in `scan_generation >= gen`.
     pub fn sweep_generation(&mut self, repo_id: i64, gen: i64) -> Result<u64, CodeStoreError> {
-        let tx = self.conn.transaction()?;
+        let tx = self.conn.savepoint()?;
         let stale_files = "SELECT id FROM code_files WHERE repo_id = ?1 AND scan_generation < ?2";
         tx.execute(
             &format!(
@@ -344,11 +509,11 @@ impl CodeStore {
         scan_generation: i64,
         records: &[CodeFileRecord],
     ) -> Result<Vec<FileUpsertOutcome>, CodeStoreError> {
-        let tx = self.conn.transaction()?;
+        let tx = self.conn.savepoint()?;
         let mut outcomes = vec![None; records.len()];
         {
             let mut by_path = tx.prepare_cached(
-                "SELECT id, size, mtime, name_lower, rel_path FROM code_files WHERE path = ?1",
+                "SELECT id, size, mtime, name_lower, rel_path,volume_serial,file_id FROM code_files WHERE path = ?1",
             )?;
             let mut by_identity = tx.prepare_cached(
                 "SELECT id, path, scan_generation FROM code_files
@@ -384,13 +549,22 @@ impl CodeStore {
             ordered.sort_by_key(|(exists, _, _)| *exists);
             for (_, index, rec) in ordered {
                 let name_lower = rec.name.to_lowercase();
-                let existing_path: Option<(i64, i64, i64, String, String)> = by_path
+                let existing_path: Option<(i64, i64, i64, String, String,i64,i64)> = by_path
                     .query_row(params![rec.path], |r| {
-                        Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+                        Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?,r.get(5)?,r.get(6)?))
                     })
                     .optional()?;
 
-                if let Some((id, size, mtime, old_name_lower, old_rel_path)) = existing_path {
+                if let Some((id, size, mtime, old_name_lower, old_rel_path,volume,file)) = existing_path {
+                    if rec.volume_serial!=0 && rec.file_id!=0 && (volume!=rec.volume_serial as i64 || file!=rec.file_id as i64) {
+                        tx.execute("UPDATE code_files SET path='replaced:'||id||':'||path WHERE id=?1",[id])?;
+                        insert.execute(params![repo_id,rec.path,rec.rel_path,rec.name,name_lower,rec.ext,rec.language,rec.size as i64,rec.mtime,rec.volume_serial as i64,rec.file_id as i64,scan_generation])?;
+                        let replacement=tx.last_insert_rowid();
+                        delete_fts_for_file(&tx,id)?;
+                        tx.execute("DELETE FROM code_files WHERE id=?1",[id])?;
+                        outcomes[index]=Some(FileUpsertOutcome::Inserted {id:replacement});
+                        continue;
+                    }
                     if size == rec.size as i64
                         && mtime == rec.mtime
                         && old_name_lower == name_lower
@@ -579,7 +753,7 @@ impl CodeStore {
     }
 
     pub fn remove_file_by_path(&mut self, path: &str) -> Result<bool, CodeStoreError> {
-        let tx = self.conn.transaction()?;
+        let tx = self.conn.savepoint()?;
         let id: Option<i64> = tx
             .query_row(
                 "SELECT id FROM code_files WHERE path = ?1",
@@ -619,7 +793,7 @@ impl CodeStore {
             (b, n)
         };
 
-        let tx = self.conn.transaction()?;
+        let tx = self.conn.savepoint()?;
         let id: i64 = tx.query_row(
             "INSERT INTO code_chunks(
                  file_id, chunk_index, start_line, end_line, symbol_name, symbol_kind,
@@ -667,7 +841,7 @@ impl CodeStore {
         file_id: i64,
         keep: i64,
     ) -> Result<(), CodeStoreError> {
-        let tx = self.conn.transaction()?;
+        let tx = self.conn.savepoint()?;
         tx.execute(
             "DELETE FROM code_chunks_fts WHERE rowid IN (
                  SELECT id FROM code_chunks WHERE file_id = ?1 AND chunk_index >= ?2
@@ -775,7 +949,7 @@ impl CodeStore {
         file_id: i64,
         symbols: &[NewCodeSymbol<'_>],
     ) -> Result<Vec<i64>, CodeStoreError> {
-        let tx = self.conn.transaction()?;
+        let tx = self.conn.savepoint()?;
         tx.execute(
             "DELETE FROM code_symbols_fts WHERE rowid IN (
                  SELECT id FROM code_symbols WHERE file_id = ?1
@@ -961,7 +1135,7 @@ impl CodeStore {
 }
 
 fn delete_fts_for_file(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     file_id: i64,
 ) -> Result<(), rusqlite::Error> {
     tx.execute(
@@ -1090,6 +1264,69 @@ pub fn dot_fp16_row_vs_normalized(stored_fp16: &[u8], normed_query: &[f32]) -> f
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn same_metadata_replacement_cannot_reuse_old_identity_or_content() {
+        let mut s=CodeStore::open_in_memory().unwrap();
+        let repo=s.ensure_repo(&DetectedRepo {root_path:"C:/r".into(),name:"r".into(),has_git:false}).unwrap();
+        let mut rec=CodeFileRecord {path:"C:/r/a.rs".into(),rel_path:"a.rs".into(),name:"a.rs".into(),ext:"rs".into(),language:"rust".into(),size:10,mtime:100,volume_serial:1,file_id:100};
+        let id=s.apply_file_batch(repo,1,&[rec.clone()]).unwrap()[0].file_id();
+        crate::persist_parsed_file(&mut s,id,&crate::parse_source("fn old() {}","rust")).unwrap();
+        rec.file_id=101;
+        let outcome=s.apply_file_batch(repo,2,&[rec]).unwrap()[0];
+        assert!(matches!(outcome,FileUpsertOutcome::Inserted {..}));
+        assert_ne!(outcome.file_id(),id);
+        assert!(s.search_symbols("old",10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn durable_jobs_coalesce_recover_and_fence_claims() {
+        let mut s=CodeStore::open_in_memory().unwrap();
+        s.enqueue_job("C:/r","C:/r",true,100).unwrap();
+        assert!(s.claim_job(99).unwrap().is_none());
+        let first=s.claim_job(100).unwrap().unwrap();
+        s.enqueue_job("C:/r","C:/r",true,160).unwrap();
+        assert!(!s.finish_job(&first).unwrap());
+        assert!(s.claim_job(159).unwrap().is_none());
+        s.recover_jobs().unwrap();
+        let second=s.claim_job(160).unwrap().unwrap();
+        assert!(second.revision>first.revision);
+        assert!(s.finish_job(&second).unwrap());
+    }
+
+    #[test]
+    fn code_exact_and_semantic_filter_before_limit() {
+        let mut s=CodeStore::open_in_memory().unwrap();
+        let r=s.ensure_repo(&DetectedRepo { root_path:"C:/r".into(),name:"r".into(),has_git:false }).unwrap();
+        for (n,text) in [("hidden.rs","fn needle() {}"),("visible.rs","fn needle() { needle(); }")] {
+            let record=CodeFileRecord { path:format!("C:/r/{n}"),rel_path:n.into(),name:n.into(),ext:"rs".into(),language:"rust".into(),size:text.len() as u64,mtime:1,volume_serial:0,file_id:0 };
+            let f=s.apply_file_batch(r,1,&[record]).unwrap()[0].file_id();
+            crate::persist_parsed_file(&mut s,f,&crate::parse_source(text,"rust")).unwrap();
+            for c in s.list_chunks_for_file(f).unwrap() { s.set_chunk_vector(c.id,&[1.0,0.0]).unwrap(); }
+        }
+        let exact=s.search_exact("needle",2,|f|f.name=="visible.rs").unwrap();
+        assert_eq!(exact.len(),2);
+        assert!(exact[0].is_definition);
+        assert!(!exact[1].is_definition);
+        let semantic=s.search_semantic(&[1.0,0.0],1,|f|f.name=="visible.rs").unwrap();
+        assert_eq!(semantic.len(),1);
+        assert_eq!(semantic[0].file.name,"visible.rs");
+    }
+
+    #[test]
+    fn parsed_file_commit_is_atomic_on_invalid_tail() {
+        let mut store = CodeStore::open_in_memory().unwrap();
+        let repo = store.ensure_repo(&DetectedRepo { root_path: "C:/repo".into(), name:"repo".into(), has_git:false }).unwrap();
+        let record = CodeFileRecord { path:"C:/repo/lib.rs".into(), rel_path:"lib.rs".into(), name:"lib.rs".into(), ext:"rs".into(), language:"rust".into(), size:24, mtime:1, volume_serial:1, file_id:2 };
+        let id = store.apply_file_batch(repo,1,&[record]).unwrap()[0].file_id();
+        let original = crate::parse_source("fn original() {}", "rust");
+        crate::persist_parsed_file(&mut store,id,&original).unwrap();
+        let mut invalid = crate::parse_source("fn replacement() {}", "rust");
+        invalid.chunks.push(crate::ParsedCodeUnit { notebook:None,start_line:0,end_line:0,symbol_name:String::new(),symbol_kind:String::new(),text:"invalid".into() });
+        assert!(crate::persist_parsed_file(&mut store,id,&invalid).is_err());
+        assert_eq!(store.list_symbols_for_file(id).unwrap()[0].name,"original");
+        assert_eq!(store.list_chunks_for_file(id).unwrap()[0].text,"fn original() {}");
+    }
     use crate::crawl::{crawl_repo, detect_repos};
     use crate::model::SymbolRole;
     use std::fs;
@@ -1214,7 +1451,7 @@ mod tests {
             INSERT INTO code_symbols_tri(rowid,name) VALUES(13,'fake');").unwrap();
         drop(connection);
         let store = CodeStore::open(&db).unwrap();
-        assert_eq!(store.schema_version().unwrap(), "2");
+        assert_eq!(store.schema_version().unwrap(), "3");
         let file = store.get_file(7).unwrap().unwrap();
         assert_eq!((file.id, file.volume_serial, file.file_id), (7, 42, 12345));
         let chunks = store.list_chunks_for_file(7).unwrap();

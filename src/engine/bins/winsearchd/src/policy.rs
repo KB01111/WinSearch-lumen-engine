@@ -2,6 +2,55 @@ use std::path::Path;
 use ws_index::StoreError;
 use ws_protocol::{IndexingConfig, IndexingMode};
 
+/// Callback contexts are integer registry keys, never dereferenced pointers.
+/// Removal before unregister makes late callbacks harmless even if native
+/// unregistration fails; weak values do not extend the indexer's lifetime.
+pub struct PowerNotifications { handles:Vec<usize>, key:usize, _parameters:Box<windows::Win32::System::Power::DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS> }
+unsafe impl Send for PowerNotifications {}
+unsafe impl Sync for PowerNotifications {}
+fn power_listeners()->&'static std::sync::Mutex<std::collections::HashMap<usize,std::sync::Weak<crate::indexer::Indexer>>> {
+    static LISTENERS:std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<usize,std::sync::Weak<crate::indexer::Indexer>>>>=std::sync::OnceLock::new();
+    LISTENERS.get_or_init(Default::default)
+}
+unsafe extern "system" fn power_changed(context:*const core::ffi::c_void,_kind:u32,_setting:*const core::ffi::c_void)->u32 {
+    let indexer=power_listeners().lock().unwrap_or_else(|p|p.into_inner()).get(&(context as usize)).and_then(|w|w.upgrade());
+    if let Some(indexer)=indexer {indexer.notify_work();}
+    0
+}
+impl PowerNotifications {
+    pub fn register(indexer:&std::sync::Arc<crate::indexer::Indexer>)->std::io::Result<Self> {
+        use windows::{core::GUID,Win32::{Foundation::HANDLE,System::Power::{DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS,PowerSettingRegisterNotification},UI::WindowsAndMessaging::DEVICE_NOTIFY_CALLBACK}};
+        static NEXT:std::sync::atomic::AtomicUsize=std::sync::atomic::AtomicUsize::new(1);
+        let key=NEXT.fetch_add(1,std::sync::atomic::Ordering::Relaxed);
+        power_listeners().lock().unwrap_or_else(|p|p.into_inner()).insert(key,std::sync::Arc::downgrade(indexer));
+        let parameters=Box::new(DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS {Callback:Some(power_changed),Context:key as *mut _});
+        let mut owned=Self {handles:Vec::new(),key,_parameters:parameters};
+        for guid in [GUID::from_u128(0x5d3e9a59_e9d5_4b00_a6bd_ff34ff516548),GUID::from_u128(0xe00958c0_c213_4ace_ac77_fecced2eeea5)] {
+            let mut registration=std::ptr::null_mut();
+            let error=unsafe {PowerSettingRegisterNotification(&guid,DEVICE_NOTIFY_CALLBACK,HANDLE((&*owned._parameters as *const DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS).cast_mut().cast()),&mut registration)};
+            if error.0!=0 {return Err(std::io::Error::from_raw_os_error(error.0 as i32));}
+            owned.handles.push(registration as usize);
+        }
+        Ok(owned)
+    }
+}
+impl Drop for PowerNotifications {
+    fn drop(&mut self) {
+        power_listeners().lock().unwrap_or_else(|p|p.into_inner()).remove(&self.key);
+        for handle in self.handles.drain(..) {let error=unsafe {windows::Win32::System::Power::PowerSettingUnregisterNotification(windows::Win32::System::Power::HPOWERNOTIFY(handle as isize))};if error.0!=0 {tracing::warn!(code=error.0,"power notification unregister failed");}}
+    }
+}
+
+/// Deadline of the next daily scheduled opening, not a periodic poll.
+pub fn schedule_wait(c:&IndexingConfig)->Option<std::time::Duration> {
+    if c.paused || c.mode!=IndexingMode::Scheduled {return None;}
+    let t=unsafe {windows::Win32::System::SystemInformation::GetLocalTime()};
+    let minute=t.wHour*60+t.wMinute;
+    if hours_contains(c.hours_start,c.hours_end,minute) {return None;}
+    let delta=(i32::from(c.hours_start)-i32::from(minute)).rem_euclid(1440) as u64;
+    Some(std::time::Duration::from_millis(delta*60_000-u64::from(t.wSecond)*1000-u64::from(t.wMilliseconds)))
+}
+
 pub fn hours_contains(start: u16, end: u16, minute: u16) -> bool {
     start == end
         || if start < end {
@@ -77,6 +126,13 @@ pub fn path_allowed(c: &IndexingConfig, path: &str) -> bool {
         .to_string_lossy()
         .to_ascii_lowercase();
     !c.excluded_extensions.contains(&ext)
+}
+
+pub fn code_path_allowed(c: &IndexingConfig, path: &str) -> bool {
+    if !c.code_enabled {return false;}
+    let mut code=c.clone();
+    code.roots=c.code_roots.clone();
+    path_allowed(&code,path)
 }
 pub fn pause_reason(
     c: &IndexingConfig,

@@ -4,6 +4,7 @@
 //! the per-user named pipe even when no frontend is connected.
 
 mod catalog;
+mod code;
 mod crawl;
 mod embed_client;
 mod engine;
@@ -91,6 +92,7 @@ fn main() -> anyhow::Result<()> {
         engine.embed_supervisor(),
         Arc::new(extract::ExtractorRegistry::production()),
     );
+    engine.start_code_scheduler()?;
     spawn_status_pusher(Arc::clone(&engine));
     // Model progress/completion pushes fan out to every connected client.
     {

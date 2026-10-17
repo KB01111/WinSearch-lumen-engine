@@ -2,6 +2,8 @@ using System.Text.Json;
 
 namespace WinSearch.Core.Settings;
 
+public enum CodeEditor { Associated, VSCode, Cursor, VisualStudio, JetBrains, Sublime, Zed, NotepadPlusPlus }
+
 public enum AppTheme
 {
     System,
@@ -17,6 +19,7 @@ public enum AppTheme
 /// </summary>
 public sealed class AppSettings
 {
+    public CodeEditor PreferredCodeEditor { get; set; } = CodeEditor.Associated;
     public AppTheme Theme { get; set; } = AppTheme.System;
 
     /// <summary>RegisterHotKey modifier flags (MOD_ALT = 1, MOD_CONTROL = 2, MOD_SHIFT = 4, MOD_WIN = 8).</summary>

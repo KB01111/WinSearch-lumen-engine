@@ -189,6 +189,7 @@ impl ModelService {
             };
             // Callbacks may read state or enqueue more work; no mutex may span delivery.
             drop(notifications);
+            self.indexer.notify_work();
             self.push(&status);
             notifications = self.notifications.lock().unwrap_or_else(|p| p.into_inner());
         }

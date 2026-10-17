@@ -49,7 +49,7 @@ pub struct ExtractClient {
     cache_dir: PathBuf,
     cleanup_pending: Arc<AtomicUsize>,
     #[cfg(test)]
-    worker_args: Vec<String>,
+    pub(crate) worker_args: Vec<String>,
     #[cfg(test)]
     pub(crate) worker_env: Vec<(String, PathBuf)>,
 }

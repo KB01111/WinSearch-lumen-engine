@@ -277,6 +277,7 @@ pub enum MatchLocation {
     Page { page: u32 },
     Timestamp { seconds: f64, end_seconds: f64 },
     Line { line: u32 },
+    Notebook { cell_ordinal:u32, line:u32, end_line:u32 },
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
