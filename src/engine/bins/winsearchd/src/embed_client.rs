@@ -467,11 +467,25 @@ impl EmbedSupervisor {
         texts: &[String],
         timeout: Duration,
     ) -> Result<Vec<Vec<f32>>, EmbedError> {
+        self.embed_texts_while(texts, timeout, || true)
+    }
+
+    /// Caller fence is checked while waiting, including during worker startup.
+    /// Cancellation targets this call's IO only; shared callers keep their worker.
+    pub fn embed_texts_while(
+        self: &std::sync::Arc<Self>,
+        texts: &[String],
+        timeout: Duration,
+        valid: impl Fn() -> bool,
+    ) -> Result<Vec<Vec<f32>>, EmbedError> {
         use std::sync::mpsc;
         if texts.is_empty() {
             return Err(EmbedError::InvalidRequest(
                 "cannot embed an empty batch".into(),
             ));
+        }
+        if !valid() {
+            return Err(EmbedError::Transport("embed caller cancelled".into()));
         }
         let call_id = self.cancel_seq.fetch_add(1, Ordering::Relaxed);
         self.begin_bounded();
@@ -493,7 +507,22 @@ impl EmbedSupervisor {
                 "cannot spawn embed helper: {e}"
             )));
         }
-        let outcome = rx.recv_timeout(timeout);
+        let outcome = loop {
+            if !valid() {
+                cancel.store(true, Ordering::Relaxed);
+                self.cancel_inflight_read_for(call_id);
+                self.finish_bounded(true);
+                return Err(EmbedError::Transport("embed caller cancelled".into()));
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break Err(mpsc::RecvTimeoutError::Timeout);
+            }
+            match rx.recv_timeout(remaining.min(CONNECT_POLL)) {
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                outcome => break outcome,
+            }
+        };
         match outcome {
             Ok(r) => {
                 self.finish_bounded(false);
@@ -1784,6 +1813,47 @@ mod tests {
             "first batch must fail via the watchdog, got {err:?}"
         );
         assert_eq!(fake.jobs_seen.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn caller_cancellation_does_not_cancel_another_shared_call() {
+        let fake = FakeWorker::start(Mode::Hang);
+        let sup = Arc::new(test_supervisor(fake.pipe_name.clone()));
+        let first_valid = Arc::new(AtomicBool::new(true));
+        let second_valid = Arc::new(AtomicBool::new(true));
+        let spawn_call = |valid: Arc<AtomicBool>| {
+            let supervisor = Arc::clone(&sup);
+            std::thread::spawn(move || {
+                supervisor.embed_texts_while(
+                    &["deterministic fixture".into()],
+                    Duration::from_secs(10),
+                    || valid.load(Ordering::Acquire),
+                )
+            })
+        };
+        let first = spawn_call(Arc::clone(&first_valid));
+        let second = spawn_call(Arc::clone(&second_valid));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while fake.jobs_seen.lock().unwrap().len() < 2 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(fake.jobs_seen.lock().unwrap().len(), 2);
+        first_valid.store(false, Ordering::Release);
+        assert!(first
+            .join()
+            .unwrap()
+            .unwrap_err()
+            .to_string()
+            .contains("caller cancelled"));
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(
+            !second.is_finished(),
+            "another caller's pipe IO was cancelled"
+        );
+        assert_eq!(sup.bounded_calls.lock().unwrap().active, 1);
+        assert_eq!(sup.inflight_tids.lock().unwrap().len(), 1);
+        second_valid.store(false, Ordering::Release);
+        assert!(second.join().unwrap().is_err());
     }
 
     #[test]

@@ -40,6 +40,13 @@ pub struct CodeStore {
     conn: Connection,
 }
 
+pub struct PendingVectorPage {
+    /// Text is loaded only for visible pending chunks; vectors are never decoded.
+    pub work: Vec<(CodeFileRow, i64, String, Option<String>)>,
+    pub cursor: i64,
+    pub more: bool,
+}
+
 const CODE_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS code_scan_files (
     repo_id INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
@@ -109,6 +116,7 @@ CREATE TABLE IF NOT EXISTS code_chunks (
     UNIQUE(file_id, chunk_index)
 );
 CREATE INDEX IF NOT EXISTS idx_code_chunks_file ON code_chunks(file_id);
+CREATE INDEX IF NOT EXISTS idx_code_chunks_pending ON code_chunks(id) WHERE length(vector)=0;
 
 CREATE VIRTUAL TABLE IF NOT EXISTS code_chunks_fts USING fts5(
     symbol_name,
@@ -145,6 +153,61 @@ CREATE VIRTUAL TABLE IF NOT EXISTS code_symbols_tri USING fts5(
 "#;
 
 impl CodeStore {
+    pub fn pending_vector_page(
+        &self,
+        after: i64,
+        budget: usize,
+        limit: usize,
+        allowed: impl Fn(&CodeFileRow, Option<&str>) -> bool,
+    ) -> Result<PendingVectorPage, CodeStoreError> {
+        let mut work = Vec::new();
+        let mut cursor = after;
+        if budget == 0 || limit == 0 {
+            return Ok(PendingVectorPage {
+                work,
+                cursor,
+                more: false,
+            });
+        }
+        // The partial index skips embedded rows without visiting/decoding their
+        // payloads. Keyset continuation bounds hidden rows as well as inputs.
+        let mut stmt=self.conn.prepare("SELECT id,file_id FROM code_chunks INDEXED BY idx_code_chunks_pending WHERE length(vector)=0 AND id>?1 ORDER BY id LIMIT ?2")?;
+        let rows = stmt.query_map(params![after, budget.min(i64::MAX as usize) as i64], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+        })?;
+        let mut inspected = 0;
+        for row in rows {
+            let (id, file_id) = row?;
+            inspected += 1;
+            cursor = id;
+            let Some(file) = self.get_file(file_id)? else {
+                continue;
+            };
+            let before = self.source_snapshot(file_id)?;
+            if !allowed(&file, before.as_deref()) {
+                continue;
+            }
+            let text = self
+                .conn
+                .query_row("SELECT text FROM code_chunks WHERE id=?1", [id], |r| {
+                    r.get(0)
+                })?;
+            work.push((file, id, text, before));
+            if work.len() == limit {
+                return Ok(PendingVectorPage {
+                    work,
+                    cursor,
+                    more: true,
+                });
+            }
+        }
+        Ok(PendingVectorPage {
+            work,
+            cursor,
+            more: inspected == budget,
+        })
+    }
+
     pub fn clear_scan(&mut self,repo:i64)->Result<(),CodeStoreError> {self.conn.execute("DELETE FROM code_scan_files WHERE repo_id=?1",[repo])?;Ok(())}
     pub fn stage_scan(&mut self,repo:i64,records:&[CodeFileRecord])->Result<(),CodeStoreError> {
         let tx=self.conn.savepoint()?;
@@ -1264,6 +1327,82 @@ pub fn dot_fp16_row_vs_normalized(stored_fp16: &[u8], normed_query: &[f32]) -> f
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_vector_pages_bound_hidden_prefix_and_skip_completed_index() {
+        let mut s = CodeStore::open_in_memory().unwrap();
+        let repo = s
+            .ensure_repo(&DetectedRepo {
+                root_path: "C:/r".into(),
+                name: "r".into(),
+                has_git: false,
+            })
+            .unwrap();
+        for i in 0..360 {
+            let record = CodeFileRecord {
+                path: format!("C:/r/{i}.rs"),
+                rel_path: format!("{i}.rs"),
+                name: format!("{i}.rs"),
+                ext: "rs".into(),
+                language: "rust".into(),
+                size: 1,
+                mtime: i,
+                volume_serial: 0,
+                file_id: 0,
+            };
+            let id = s.apply_file_batch(repo, 1, &[record]).unwrap()[0].file_id();
+            let chunks = s
+                .commit_parsed_file(id, &crate::parse_source("fn needle() {}", "rust"))
+                .unwrap();
+            s.set_source_snapshot(id, "fixture-source").unwrap();
+            if i < 260 {
+                s.set_chunk_vector(chunks[0], &[1.0, 0.0]).unwrap();
+            }
+        }
+        let calls = std::cell::Cell::new(0);
+        let mut after = 0;
+        let mut names = Vec::new();
+        let mut page_count = 0;
+        loop {
+            calls.set(0);
+            let page = s
+                .pending_vector_page(after, 32, 8, |f, source| {
+                    calls.set(calls.get() + 1);
+                    assert_eq!(source, Some("fixture-source"));
+                    assert!(
+                        f.name.trim_end_matches(".rs").parse::<usize>().unwrap() >= 260,
+                        "completed chunks must not enter the visibility scan"
+                    );
+                    f.name.trim_end_matches(".rs").parse::<usize>().unwrap() >= 340
+                })
+                .unwrap();
+            assert!(
+                calls.get() <= 32,
+                "one page inspected {} file candidates",
+                calls.get()
+            );
+            assert!(page.work.len() <= 8);
+            names.extend(page.work.iter().map(|w| w.0.name.clone()));
+            if !page.more {
+                break;
+            }
+            assert!(
+                page.cursor > after,
+                "continuation must advance through a hidden-only page"
+            );
+            after = page.cursor;
+            page_count += 1;
+            assert!(page_count < 10);
+        }
+        names.sort();
+        names.dedup();
+        assert_eq!(
+            names.len(),
+            20,
+            "hidden rows cannot consume the visible inference limit"
+        );
+        assert!(page_count >= 3);
+    }
 
     #[test]
     fn same_metadata_replacement_cannot_reuse_old_identity_or_content() {
