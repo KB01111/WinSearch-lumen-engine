@@ -35,3 +35,34 @@ laptop; it does not require developing that port. Keep the existing CPU/GPU
 backends and measured CPU configuration while their native acceptance proceeds.
 Do not label CPU results as NPU results or silently enable an unsupported bundle.
 No drivers, firmware, power policy or system runtime were changed for this check.
+
+Official platform checks reach the same limited conclusion:
+
+- [AMD's Ryzen AI 1.8 model list](https://ryzenai.docs.amd.com/en/latest/llm_list.html)
+  lists `embeddinggemma-300m`, not EmbeddingGemma 2. Its generative Gemma models
+  do not establish compatibility with this embedding architecture.
+- [AMD's Windows ML model support](https://ryzenai.docs.amd.com/projects/WinML/en/latest/model_support.html)
+  describes ONNX float/quantized Transformer support and prepared LLMs.
+  [Microsoft's Windows ML overview](https://learn.microsoft.com/en-us/windows/ai/new-windows-ml/overview)
+  describes execution-provider management; neither provides an EG2 package.
+- [ONNX Runtime's Vitis AI provider](https://onnxruntime.ai/docs/execution-providers/Vitis-AI-ExecutionProvider.html)
+  supports Ryzen AI on Windows. [AMD's deployment guide](https://ryzenai.docs.amd.com/en/latest/modelrun.html)
+  requires a compatible ONNX graph and can partition unsupported operations onto
+  CPU. Its operator-assignment report is needed to establish actual NPU placement.
+- [llama.cpp's backend list](https://github.com/ggml-org/llama.cpp#supported-backends)
+  includes CPU and GPU routes; it does not list an AMD XDNA NPU backend.
+  [Google's EG2 card](https://huggingface.co/google/embeddinggemma-2) does not
+  establish a Windows AMD NPU export or validated execution path.
+
+| Evidence stage | Windows/HX370 EG2 result |
+| --- | --- |
+| Model in supported AMD catalogue | Older 300M listed; EG2 not found in the checked list |
+| Compatible downloadable artifact/runtime | Linux bundles found; ready Windows pair not verified |
+| Model/runtime initialization | XRT detects the NPU; no EG2 model loaded on it |
+| Actual NPU operators executed | Not demonstrated |
+| Correct embeddings/reference agreement | Not demonstrated on NPU; CPU evidence is separate |
+| Repeated latency/memory/cancellation acceptance | Not demonstrated on NPU |
+
+This is an availability assessment, not proof that a custom Windows port is
+impossible. NPU acceleration remains unavailable for production selection until
+all execution stages pass. It is optional and does not block v1.0.
