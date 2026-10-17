@@ -9,6 +9,9 @@ Paths below are repository-relative. `engine` means `src/engine`, `app` means
 `src/app`. “Scoped verified” means the named implementation/tests passed for
 that checkpoint; every final-source acceptance gate still requires reconciliation.
 Raw local logs are under `artifacts/`; they are not claimed to be uploaded CI.
+The [draft PR](https://github.com/KB01111/WinSearch/pull/2) is open. Its published
+[media checkpoint evidence](validation/2026-10-18-media-selection/README.md)
+contains selected local logs and resource/input records; final acceptance remains open.
 
 | Requirement | Current implementation | Missing functionality/evidence | Relevant source | Existing acceptance test/evidence | Required change | Verification status |
 | --- | --- | --- | --- | --- | --- | --- |

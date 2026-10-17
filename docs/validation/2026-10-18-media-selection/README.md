@@ -14,7 +14,8 @@ cargo test -p ws-extract -p ws-index -p winsearch-extract -p winsearchd -p winse
 188 daemon, 45 extraction and 82 index tests. Dependencies, sibling workers and
 generated native fixtures were already prepared by the repository's existing
 fetch/generation tools. This is not proof of a fresh self-contained installation.
-The log's seven existing debug daemon dead-code warnings remain visible.
+The separate [coherent debug build log](selected-build.txt) retains seven existing
+daemon dead-code warnings. They do not appear in the selected test log.
 
 Resource results preserve all measured batches, including the baseline's 480
 scan workers. [Fixed-slice results](fixed15s-resources.json) and
