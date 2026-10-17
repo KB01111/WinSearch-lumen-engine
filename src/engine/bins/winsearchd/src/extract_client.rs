@@ -829,6 +829,15 @@ pub(crate) mod tests {
                 other=>panic!("unsafe code source was not explicitly rejected: {other:?}"),
             }
         }
+        for relative in [".git/config", ".hg/hgrc", ".svn/auth/private.py", ".env/private.py", ".environment/private.py"] {
+            let path=tree.0.join("repo").join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path,"SYNTHETIC_PRIVATE_FIXTURE=not-to-be-read").unwrap();
+            match client.extract(&client.request(path,"code",64),Duration::from_secs(10)) {
+                Err(ExtractClientError::Worker(message))=>assert!(message.contains("code source policy denied"),"{message}"),
+                other=>panic!("sensitive ancestor {relative} bypassed child source policy: {other:?}"),
+            }
+        }
     }
 
     #[test]

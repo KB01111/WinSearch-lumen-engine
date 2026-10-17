@@ -249,12 +249,20 @@ pub fn parse_file(path: &Path) -> std::io::Result<ParsedCodeFile> {
         .extension()
         .map(|s| s.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
-    let lang = if ext == "tsx" {
+    let lang = file_parse_language(path, language_for_file(&name, &ext));
+    Ok(parse_source(&raw, lang))
+}
+
+/// TSX has a separate grammar while its stored language remains TypeScript.
+pub(crate) fn file_parse_language<'a>(path: &Path, language: &'a str) -> &'a str {
+    if path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("tsx"))
+    {
         "tsx"
     } else {
-        language_for_file(&name, &ext)
-    };
-    Ok(parse_source(&raw, lang))
+        language
+    }
 }
 
 /// Persists extracted symbols and chunks for `file_id` into `store` (`code.db`).
@@ -305,6 +313,32 @@ pub fn persist_parsed_file(
 mod tests {
     use super::*;
     use crate::model::{CodeFileRecord, DetectedRepo};
+
+    #[test]
+    fn high_level_index_helper_preserves_tsx_grammar_and_stored_expression_symbols() {
+        let path = std::env::temp_dir().join(format!(
+            "winsearch-code-index-tsx-{}.tsx",
+            std::process::id()
+        ));
+        let source = "export function Window() {\n return <div>{renderRow()}</div>;\n}\n";
+        fs::write(&path, source).unwrap();
+        let root = path.parent().unwrap();
+        let record = crate::record_for_code_path(root, &path).unwrap().unwrap();
+        assert_eq!(record.language, "typescript");
+        let mut store = CodeStore::open_in_memory().unwrap();
+        let repo = store
+            .ensure_repo(&DetectedRepo {
+                root_path: root.to_string_lossy().into_owned(),
+                name: "tsx-fixture".into(),
+                has_git: false,
+            })
+            .unwrap();
+        let (_, _, parsed) = crate::index_code_file(&mut store, repo, 1, &record).unwrap();
+        fs::remove_file(&path).unwrap();
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+        let stored = store.search_symbols("renderRow", 10).unwrap();
+        assert!(stored.iter().any(|s| !s.is_definition && s.line == 2));
+    }
 
     #[test]
     fn tsx_unicode_crlf_empty_and_malformed_sources_keep_honest_ranges_and_diagnostics() {

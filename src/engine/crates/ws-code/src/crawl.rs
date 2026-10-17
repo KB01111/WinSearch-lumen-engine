@@ -23,6 +23,9 @@ use crate::model::{language_for_file, CodeFileRecord, DetectedRepo};
 pub const MAX_CODE_FILE_BYTES: u64 = 2 * 1024 * 1024;
 
 const SENSITIVE_CODE_DIRS: &[&str] = &[
+    ".git",
+    ".hg",
+    ".svn",
     ".ssh",
     ".aws",
     ".azure",
@@ -33,11 +36,16 @@ const SENSITIVE_CODE_DIRS: &[&str] = &[
 ];
 
 pub(crate) fn sensitive_code_ancestor(path: &Path) -> bool {
-    path.ancestors().filter_map(Path::file_name).any(|name| {
-        SENSITIVE_CODE_DIRS
-            .iter()
-            .any(|s| name.to_string_lossy().eq_ignore_ascii_case(s))
-    })
+    path.ancestors()
+        .filter_map(Path::file_name)
+        .any(|name| is_sensitive_code_dir(&name.to_string_lossy()))
+}
+
+fn is_sensitive_code_dir(name: &str) -> bool {
+    SENSITIVE_CODE_DIRS
+        .iter()
+        .any(|s| name.eq_ignore_ascii_case(s))
+        || name.to_ascii_lowercase().starts_with(".env")
 }
 
 /// Directory names excluded from code indexing even when not listed in `.gitignore`.
@@ -502,20 +510,13 @@ pub fn record_for_code_path(repo_root: &Path, path: &Path) -> io::Result<Option<
 /// True for directory names excluded from code indexing (`node_modules`,
 /// `target`, `vendor`, `generated`, `.git`, etc.).
 pub fn is_excluded_code_dir(name: &str) -> bool {
-    if SENSITIVE_CODE_DIRS
-        .iter()
-        .any(|s| name.eq_ignore_ascii_case(s))
-    {
+    if is_sensitive_code_dir(name) {
         return true;
     }
     if EXCLUDED_CODE_DIRS
         .iter()
         .any(|d| name.eq_ignore_ascii_case(d))
     {
-        return true;
-    }
-    let lower = name.to_ascii_lowercase();
-    if lower.starts_with(".env") {
         return true;
     }
     false
@@ -565,8 +566,17 @@ pub fn is_probably_binary(path: &Path) -> io::Result<bool> {
         }
         Err(e) => return Err(e),
     };
+    let before = file.metadata()?;
     let mut buf = [0u8; 8192];
     let n = file.read(&mut buf)?;
+    crate::parse::guard_source_path(path)?;
+    let after = file.metadata()?;
+    if before.len() != after.len() || before.modified()? != after.modified()? {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "source changed during binary sniff",
+        ));
+    }
     Ok(buf[..n].contains(&0))
 }
 
@@ -704,6 +714,11 @@ mod tests {
             ".aws/config",
             ".ssh/config",
             ".docker/config.json",
+            ".git/config",
+            ".hg/hgrc",
+            ".svn/auth/private.py",
+            ".env/private.py",
+            ".environment/private.py",
         ] {
             let path = tree.0.join(relative);
             fs::create_dir_all(path.parent().unwrap()).unwrap();

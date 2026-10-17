@@ -103,6 +103,8 @@ fn valid_lines(start: u32, end: u32, notebook: Option<NotebookLocation>) -> bool
         && notebook.is_none_or(|cell| {
             cell.start_line > 0
                 && cell.end_line >= cell.start_line
+                && cell.start_line <= start
+                && cell.end_line <= end
                 && cell.end_line - cell.start_line == end - start
                 && u64::from(cell.cell_ordinal) <= ws_code::MAX_CODE_FILE_BYTES
         })
@@ -216,7 +218,7 @@ mod tests {
             }),
         };
         crate::worker::validate_response(&request, &valid).unwrap();
-        for case in 0..6 {
+        for case in 0..8 {
             let mut invalid = valid.clone();
             match case {
                 0 => invalid.next_cursor = Some(2),
@@ -253,6 +255,19 @@ mod tests {
                     .segments
                     .push(crate::SegmentDraft::text("doc", "wrong channel")),
                 5 => invalid.code = None,
+                6 | 7 => {
+                    let CodeUnit::Chunk { chunk, .. } =
+                        &mut invalid.code.as_mut().unwrap().units[0]
+                    else {
+                        unreachable!()
+                    };
+                    let local = if case == 6 { 2 } else { u32::MAX };
+                    chunk.notebook = Some(NotebookLocation {
+                        cell_ordinal: 0,
+                        start_line: local,
+                        end_line: local,
+                    });
+                }
                 _ => unreachable!(),
             }
             assert!(

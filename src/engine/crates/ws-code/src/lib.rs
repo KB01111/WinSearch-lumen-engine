@@ -53,9 +53,13 @@ pub fn index_code_file(
             .map_err(|e| anyhow::anyhow!("invalid notebook {}: {e}", record.path))?
             .parsed
     } else {
-        parse_source(&raw, &record.language)
+        parse_source(
+            &raw,
+            parse::file_parse_language(Path::new(&record.path), &record.language),
+        )
     };
-    let outcomes = store.apply_file_batch(repo_id, scan_generation, std::slice::from_ref(record))?;
+    let outcomes =
+        store.apply_file_batch(repo_id, scan_generation, std::slice::from_ref(record))?;
     let file_id = outcomes
         .first()
         .map(|o| o.file_id())
