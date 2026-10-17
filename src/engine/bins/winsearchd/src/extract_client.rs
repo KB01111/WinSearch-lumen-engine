@@ -94,6 +94,7 @@ impl ExtractClient {
             )),
             cursor: 0,
             max_units,
+            media_plan: None,
         }
     }
 
@@ -389,6 +390,11 @@ impl ArtifactLease {
     }
     pub fn keep(&mut self) {
         self.paths.clear();
+    }
+    pub fn keep_input(&mut self,input:&ws_extract::DraftEmbeddingInput) {
+        if let ws_extract::DraftEmbeddingInput::Image { path,.. } | ws_extract::DraftEmbeddingInput::Audio { path }=input {
+            self.paths.retain(|p|p!=path);
+        }
     }
 }
 impl Drop for ArtifactLease {

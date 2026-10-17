@@ -155,7 +155,54 @@ repeated audio requests, before retrieval. This is an incomplete acceptance run,
 not a passing benchmark. Retained results: artifacts/media-review-followup/.
 The host's native power policy independently reported Battery Saver during
 extraction tests; that association does not establish the slowdown's cause.
-CPU calibration and a fresh complete model/retrieval run remain required.
+That timeout is retained as intermittent evidence. A fresh unchanged helper run
+passed all four media references and four retrieval pairs in 20.422s
+(`artifacts/media-calibration-baseline/`); it does not prove the earlier cause.
+
+Controlled CPU probes used the same pinned model/native build, public screen and
+speech inputs, then speech padded to 30s. All reference cosines stayed >=.999:
+
+| Threads | Total seconds | Image 280 seconds | Short speech seconds | Audio 30s seconds |
+| --- | ---: | ---: | ---: | ---: |
+| 4 | 15.672 | 6.876 | 0.586 | 4.766 |
+| 8 | 16.235 | 7.127 | 0.485 | 5.497 |
+| 12 | 15.515 | 7.281 | 0.604 | 5.128 |
+| 24 | 21.469 | 10.525 | 1.503 | 5.277 |
+
+`ws-embed/examples/media-throughput.rs` reproduces one thread-count probe; its
+executable needs the same sibling native DLLs as the worker. The shared runtime
+default now caps available logical threads at 8; explicit LoadOptions still allow
+calibration. This is a conservative measured default, not a universal optimum.
+The actual daemon's three-file media corpus plus its installed-app catalog left
+15 frame vectors pending at the unchanged 120s check with 24 threads. Rebuilt with
+8 threads it completed 15 frame/7 audio/565 name vectors in 60.750s. Both later-spoken
+queries returned 50..65s, and the screenshot query returned a genuine 40s cached
+frame. All three unrelated queries returned false positives; this run fails the
+required retrieval gate. Results: `artifacts/indexed-media-threads8/`. Its older
+harness also flagged the valid 40s frame because it expected exactly 33s; the
+corrected harness checks the screenshot's full 32.75..65s interval. This has not
+been represented as a fresh passing full run.
+
+The corrected harness was then rerun with a native stdin startup gate, ensuring
+job assignment precedes any eager daemon helpers. This final source run completed
+indexing in 45.250s and passed all three positive location/thumbnail checks. The
+same three negatives still fail, so the whole quality run exits1. Resources and
+full results are retained in `artifacts/indexed-media-native-gate/`; there were
+no WinSearch processes left in the subsequent independent process inventory.
+
+`tools/test-media-resources.py` generated a two-hour 160x100/1fps video with an
+eight-second soundtrack near 7100s. The first 30-frame batch selected exactly 1,200
+times plus 288 independent audio windows in 2.830s, sampled peak job-tree working
+set 54,505,472 bytes and scratch 10,110 bytes. Early silence emitted no draft; the
+7100..7130s audio artifact was 960,044 bytes (sampled tree working set 36,360,192).
+Cancellation waited until the real ffmpeg child was observed, then terminated
+and independently read back an empty owned job in 6.521ms on this run. Timing uses
+QueryPerformanceCounter (100ns resolution). The older GetTickCount64 clock had
+15.625ms resolution and cannot support its apparent zero-duration result.
+Memory was sampled every 20ms; scratch includes final file counts. These sparse-source
+measurements do not establish long/high-resolution decode throughput, GPU
+behavior or the final installed resource gates. Raw results:
+`artifacts/media-long-resource-qpc/results.json`.
 
 - Idle CPU/GPU ≈ 0: resource-behavior measurements remain on the Phase 7 checklist.
 - Power-aware indexing policies (AC / battery saver / quiet hours): Phase 7.

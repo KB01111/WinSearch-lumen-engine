@@ -623,12 +623,10 @@ fn ensure_runtime<'a>(
         let mmproj = path.with_file_name(MMPROJ_FILE);
         let opts = ws_embed::LoadOptions {
             backend: shared.cfg.backend,
-            n_threads: std::thread::available_parallelism()
-                .map(|n| n.get() as i32)
-                .unwrap_or(4),
             mmproj: mmproj.is_file().then_some(mmproj),
+            ..ws_embed::LoadOptions::default()
         };
-        info!(path = %path.display(), backend = ?opts.backend, "loading embedding model");
+        info!(path = %path.display(), backend = ?opts.backend, threads = opts.n_threads, "loading embedding model");
         match ws_embed::EmbedRuntime::load(&path, &opts) {
             Ok(rt) => {
                 eng.backend = Some(rt.backend().to_string());

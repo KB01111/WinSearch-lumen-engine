@@ -197,6 +197,35 @@ pub struct ContentProgress {
     pub revision: i64,
     pub source: String,
     pub model_generation: i64,
+    pub media_plan: Option<MediaPlan>,
+}
+
+pub const MAX_MEDIA_DURATION_MS: u64 = 366 * 24 * 60 * 60 * 1000;
+pub const MAX_MEDIA_FRAMES: usize = 1200;
+
+/// Pure data, scoped to the source revision; no worker-controlled manifest path.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MediaPlan {
+    pub duration_ms: u64,
+    #[serde(default)]
+    pub frames_ms: Vec<u64>,
+    pub has_audio: bool,
+}
+
+impl MediaPlan {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.duration_ms == 0 || self.duration_ms > MAX_MEDIA_DURATION_MS
+            || self.frames_ms.len() > MAX_MEDIA_FRAMES
+            || (!self.has_audio && self.frames_ms.is_empty()) {
+            return Err("invalid media duration/stream/frame bound");
+        }
+        if !self.frames_ms.is_empty()
+            && (self.frames_ms.iter().any(|t| *t >= self.duration_ms)
+                || self.frames_ms.windows(2).any(|p| p[1] <= p[0] + 500)) {
+            return Err("media selection is outside source or not deduplicated");
+        }
+        Ok(())
+    }
 }
 
 /// Search request against the index (calculator and settings results are

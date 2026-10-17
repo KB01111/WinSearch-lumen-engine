@@ -55,7 +55,7 @@ fn run() -> Result<(), String> {
             "doc" => DocumentExtractor.extract_batch(&request.path, &budget, request.cursor),
             "pdf" => ws_extract::pdf::extract_pdf_batch(&request, &budget),
             "audio" => ws_extract::audio::extract_audio_batch(&request, &budget),
-            "video" => ws_extract::audio::extract_audio_batch(&request, &budget),
+            "video" => ws_extract::video::extract_video_batch(&request, &budget),
             "image" => ImageExtractor::default()
                 .with_thumb_dir(request.scratch_dir.clone())
                 .extract_batch(&request.path, &budget, request.cursor),

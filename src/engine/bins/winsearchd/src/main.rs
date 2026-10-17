@@ -31,6 +31,13 @@ use indexer::Indexer;
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
+    #[cfg(debug_assertions)]
+    if args.iter().any(|a| a == "--test-stdin-gate") {
+        // Native acceptance assigns the daemon before eager catalog children.
+        let mut gate = [0u8];
+        std::io::Read::read_exact(&mut std::io::stdin(), &mut gate)?;
+        anyhow::ensure!(gate == [1], "test startup gate not released");
+    }
     if args.iter().any(|a| a == "--version") {
         println!("winsearchd {}", server::ENGINE_VERSION);
         return Ok(());

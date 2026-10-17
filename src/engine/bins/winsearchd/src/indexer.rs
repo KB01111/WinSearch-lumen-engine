@@ -392,6 +392,10 @@ impl Indexer {
         store.get_entry(id)
     }
 
+    pub(crate) fn segment_thumbnail(&self,segment:&ws_index::model::Segment) -> Result<Option<String>,StoreError> {
+        self.store_lock().segment_thumbnail(segment)
+    }
+
     /// Non-missing entry ids matching the given mode/category filters.
     pub fn matching_entry_ids(
         &self,

@@ -10,6 +10,7 @@ pub mod image;
 pub mod ocr;
 pub mod pdf;
 pub mod worker;
+pub mod video;
 
 use std::path::{Path, PathBuf};
 

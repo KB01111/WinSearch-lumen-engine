@@ -218,8 +218,7 @@ The worker returns a truthful total and `next_cursor`; only a null cursor
 finishes extraction. Continuations receive lower priority than new/short jobs.
 Document parsing currently repeats within the existing 32 MiB input / 16 MiB
 archive XML bounds to reconstruct the requested window; it does not hydrate
-cloud placeholders. PDF page cursors are described below; media cursors remain
-dedicated work.
+cloud placeholders. PDF page and phased media cursors are described below.
 
 Additive tables `content_revisions`, `content_progress`, and `content_chunks`
 extend schema version 2. The migration marker is `meta.content_batches_v1`.
@@ -381,13 +380,13 @@ SearchService, Zod validation, consent, cancellation and native process/model
 ownership remain boundaries. Actual client/host integration and engine-only
 package verification are required work, not established by the media tests.
 
-### Bounded audio extraction
+### Bounded audio and video extraction
 
 The extraction child now decodes compressed/local recordings through private
 sibling ffmpeg/ffprobe executables, never PATH. Debug fixtures alone can set
 WINSEARCH_TEST_DECODER_DIR. Both tools use a local-file protocol and explicit
 container whitelist that excludes playlists, concat and image sequences; MOV
-external references remain disabled. Probe JSON is capped at 64 KiB, stderr at 32 KiB,
+external references remain disabled. Probe JSON is capped at 64 KiB, ordinary stderr at 32 KiB,
 stream count at 32, source duration at 366 days, and decoded PCM at 960000 bytes.
 Each decoder runs in an owned nested job under the existing worker's outer job,
 deadline and 1 GiB tree limit. Timeout, crash and capture-overflow tests exercise
@@ -398,9 +397,32 @@ Audio cursors are window ordinals, with windows of 30 seconds and a hop of 25 se
 Each batch processes at most 30 windows and the final partial window ends at
 the source duration. RMS below .003 advances progress without a draft, transcript
 or vector. Duration decimal parsing avoids floating-point millisecond rounding.
-The internal MediaBatch duration/count metadata lets the parent validate actual
-processed units independently of emitted drafts. Video phase/frame extraction
-is still required; the current container route only covers an audio stream.
+AAC delay, late-starting and short soundtracks retain source time through bounded
+resampling/silence padding; a truncated or corrupt decode fails accurately.
+The internal MediaPlan lets the parent validate processed source units separately
+from emitted drafts, including windows that are genuinely silent.
+
+Video selection combines actual source frames at an adaptive periodic interval
+(normally five seconds), low-resolution shot changes and an actual late frame.
+The shot scan samples at least one second apart, adapting to at most 14,400 samples.
+Mean absolute grayscale change of 38/255 marks a shot candidate. Sorted candidates
+within 500 ms collapse; an evenly spaced subsample of the union caps selection at
+1,200 frames and retains first/last coverage. Integer PTS/time-base conversion
+preserves variable-rate source time; no synthetic fps clock supplies locations.
+Shot raw pixels/logs are bounded separately (about 8 MiB each), frame PNGs at 16 MiB,
+rendered sides at 1280 pixels. Each batch emits at most 30 frame units/256 drafts.
+Visual inputs use 70 tokens, or 140 when useful OCR is present; numeric OCR stays
+exact-only. Videos without sound retain visual search; audio-only containers use
+the soundtrack route.
+
+Frame cursors encode `frame_index << 16 | within_frame_draft`; the independent
+soundtrack phase uses `1 << 62 | window_ordinal`. The revision-scoped selection
+and cursor commit with chunks and the extraction claim in one transaction.
+Changing a continued plan, replaying a claim, or skipping phases is rejected.
+The 1,200-frame cap never truncates the soundtrack's 30 second/25 second-hop windows.
+Initial shot selection still decodes the source sequentially under the 120 second
+budget. The sparse two-hour fixture passes; expensive long/high-resolution scans
+have not established resumable selection and remain a final acceptance concern.
 
 DraftEmbeddingInput distinguishes text, image budgets and derived audio paths;
 it is persisted on each content chunk independently of searchable text.
@@ -408,15 +430,28 @@ The parent confines, caps and promotes artifacts before removing scratch.
 Audio additionally requires a canonical bounded PCM16/mono 16k WAV whose sample
 duration agrees with its location. Artifact leases cover typed inputs as well
 as thumbnails. Silent-only progress commits atomically and stale/replayed claims
-cannot advance it. A missing deferred WAV is regenerated from its permitted
+cannot advance it. A missing deferred WAV or frame is regenerated from its permitted
 source in a bounded child, then attached to the existing claimed chunk without
 changing exact row IDs or source locations. Generation/revision/policy checks
 precede replacement and vector commits; changed sources invalidate old vectors
-before a decoder failure can preserve stale media results.
+before a decoder failure can preserve stale media results. Restoring a video
+frame repairs same-time OCR thumbnail references, including drafts rendered in
+different worker requests. Once vectors are complete, on-demand preview/cache
+regeneration still belongs to the pending preview/maintenance slice.
+
+Semantic results preserve the actual scored segment's page/line/time, up to 32
+deduplicated matching moments and matching cached thumbnails. Sound matches have
+no invented transcript. Existing entry filters also cover a video's soundtrack.
+The current admission threshold still returns unrelated results; the required
+shared retrieval recipe/confidence work and negative-control gate remain open.
 
 Native fixtures cover Unicode/spaced/dash filenames, three windows in a 65 second recording,
 compressed audio, network-playlist rejection without a loopback connection,
-and a 20 minute silent recording continued across workers. These are decoder and
-persistence checks. Actual indexed media retrieval, video phases/shot selection,
-resource measurements, cache maintenance, installed payload and UI acceptance
-remain open.
+and a 20 minute silent recording continued across workers. Native video checks add
+shot selection, variable-rate PTS, OCR, phase restart, cache restoration and
+source/pause/root changes. The genuine daemon run indexes later speech at 50..65s
+and retrieves a matching frame at 40s; unrelated negatives still fail. A two-hour
+160x100/1fps fixture verifies 1,200 frames plus 288 independent audio windows and
+owned decoder cancellation; it is not high-resolution throughput evidence.
+See benchmarks for measured resources. Full retrieval quality, completed-vector
+cache maintenance, installed payload and UI acceptance remain open.

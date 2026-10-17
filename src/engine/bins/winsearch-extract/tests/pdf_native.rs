@@ -25,6 +25,7 @@ fn run(name: &str, cursor: u64, dependency: Option<&Path>) -> ExtractResponse {
         scratch_dir: scratch,
         cursor,
         max_units: 30,
+        media_plan: None,
     };
     assert!(
         req.path.is_file(),

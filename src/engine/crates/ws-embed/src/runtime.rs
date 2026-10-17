@@ -47,7 +47,7 @@ pub enum EmbedError {
 #[derive(Debug, Clone)]
 pub struct LoadOptions {
     pub backend: BackendPreference,
-    /// Host threads for batch processing.
+    /// Host threads for batch processing; an explicit value overrides the bounded default.
     pub n_threads: i32,
     /// Optional mmproj GGUF (multimodal projector). `None` = text only.
     pub mmproj: Option<PathBuf>,
@@ -58,7 +58,9 @@ impl Default for LoadOptions {
         Self {
             backend: BackendPreference::Auto,
             n_threads: std::thread::available_parallelism()
-                .map(|n| n.get() as i32)
+                // More logical threads slowed measured media inference while
+                // competing with the desktop. Calibration can override this.
+                .map(|n| n.get().min(8) as i32)
                 .unwrap_or(4),
             mmproj: None,
         }
@@ -576,6 +578,12 @@ fn plan_sub_batches(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_cpu_threads_preserve_interactive_headroom() {
+        let threads = LoadOptions::default().n_threads;
+        assert!((1..=8).contains(&threads), "unbounded logical CPU use: {threads}");
+    }
 
     #[test]
     fn sub_batches_respect_token_budget_and_max_seqs() {

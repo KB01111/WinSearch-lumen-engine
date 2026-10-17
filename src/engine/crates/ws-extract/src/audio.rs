@@ -67,7 +67,7 @@ pub(crate) fn extract_windows(
         diagnostics: vec![],
         media: Some(crate::worker::MediaBatch {
             duration_ms: duration,
-            visual_frames: 0,
+            frames_ms: vec![],
             has_audio: true,
         }),
     })

@@ -75,10 +75,14 @@ implemented **and** verified. Legend: `[x]` done+verified · `[~]` partial ·
 - [~] Audio: 30 s overlapping windows, timestamp matches, player with
       seek-to-match (Phase 4) — real bounded PCM runtime/reference/spoken retrieval
       verified. Native bounded decoding, silence-only continuation and durable
-      typed/deferred WAV inputs now pass; indexed real-model retrieval, player,
-      dependency packaging and final acceptance remain required
-- [ ] Video: periodic + shot-change frames, audio-track indexing, timestamp
-      navigation, timeline markers (Phase 4)
+      typed/deferred WAV inputs now pass. The genuine daemon retrieves the later
+      passage at 50..65s; unrelated-query rejection, player, packaging and final
+      acceptance remain required
+- [~] Video: periodic + shot-change frames, audio-track indexing, timestamp
+      navigation, timeline markers (Phase 4) — native selection/PTS/OCR/phases and
+      source-policy/cache recovery verified; genuine frame and later soundtrack
+      locations recorded. Negative controls still fail; timeline/player, complete
+      cache maintenance, expensive long-source scanning and packaging remain open
 
 ## Code search (opt-in)
 

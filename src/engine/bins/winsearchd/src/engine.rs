@@ -570,23 +570,17 @@ impl EngineService {
             }
         };
         // Best cosine per entry across all segment kinds (`name`, `doc`, `image`, `ocr`, `pdf`, ...).
-        let mut best: HashMap<i64, (f32, String)> = HashMap::new();
+        let mut best: HashMap<i64, Vec<_>> = HashMap::new();
         for hit in &scored {
-            if hit.cosine < MIN_SEMANTIC_COSINE {
+            if !hit.cosine.is_finite() || hit.cosine < MIN_SEMANTIC_COSINE {
                 continue;
             }
             best.entry(hit.segment.entry_id)
-                .and_modify(|(c, k)| {
-                    if hit.cosine > *c {
-                        *c = hit.cosine;
-                        *k = hit.segment.kind.clone();
-                    }
-                })
-                .or_insert_with(|| (hit.cosine, hit.segment.kind.clone()));
+                .or_default().push(hit);
         }
         let now = now_unix();
         let mut out = Vec::new();
-        for (entry_id, (cosine, seg_kind)) in best {
+        for (entry_id, mut matches) in best {
             if exact_entry_ids.contains(&entry_id) {
                 continue; // duplicate suppression vs the exact batch
             }
@@ -611,17 +605,40 @@ impl EngineService {
             if !kinds.is_empty() && !kinds.contains(&kind) {
                 continue;
             }
+            matches.sort_by(|a,b| b.cosine.total_cmp(&a.cosine).then_with(||a.segment.id.cmp(&b.segment.id)));
+            let cosine=matches[0].cosine;
+            let seg_kind=&matches[0].segment.kind;
+            let terms:Vec<_>=text.split(|c:char|!c.is_alphanumeric()).filter(|s|!s.is_empty()).collect();
+            let mut moments:Vec<ws_protocol::MatchingMoment>=Vec::new();
+            for hit in &matches {
+                let Some(location)=segment_location(&hit.segment) else { continue; };
+                let thumbnail=match self.indexer.segment_thumbnail(&hit.segment) {
+                    Ok(value)=>value,
+                    Err(error)=> { warn!(entry_id,error=%error,"semantic preview metadata unavailable"); None }
+                };
+                let excerpt=ws_extract::select_excerpt(&hit.segment.text,&terms,240);
+                if let Some(existing)=moments.iter_mut().find(|m|m.location==Some(location)) {
+                    if existing.excerpt.is_empty() { existing.excerpt=excerpt; }
+                    if existing.thumbnail_path.is_none() { existing.thumbnail_path=thumbnail; }
+                } else if moments.len()<32 {
+                    moments.push(ws_protocol::MatchingMoment { excerpt,location:Some(location),thumbnail_path:thumbnail });
+                }
+            }
+            let location=moments.first().and_then(|m|m.location);
+            let excerpt=moments.first().map(|m|m.excerpt.clone()).filter(|s|!s.trim().is_empty());
+            let thumbnail_path=if let Some(moment)=moments.first() { moment.thumbnail_path.clone() } else { entry.thumbnail_path };
             out.push(SearchResult {
                 id: format!("s{entry_id}"),
                 kind: to_result_kind(kind),
                 title: entry.name.clone(),
                 subtitle: entry.path.clone(),
-                match_explanation: semantic_explanation_for_kind(&seg_kind, cosine),
+                match_explanation: semantic_explanation_for_kind(seg_kind, cosine),
                 score: hybrid_score(cosine, text, &entry.name_lower, entry.mtime, now),
                 path: Some(entry.path),
-                location: None,
-                thumbnail_path: entry.thumbnail_path,
-                ..Default::default()
+                location,
+                thumbnail_path,
+                excerpt,
+                matching_moments:moments,
             });
         }
         out.sort_by(|a, b| {
@@ -1008,9 +1025,25 @@ fn semantic_explanation_for_kind(seg_kind: &str, cosine: f32) -> String {
         SEGMENT_KIND_NAME => semantic_explanation(cosine),
         "image" => format!("semantic image match · similarity {cosine:.2}"),
         "ocr" => format!("semantic OCR match · similarity {cosine:.2}"),
+        "video" => format!("semantic video frame match · similarity {cosine:.2}"),
+        "audio" => format!("semantic sound match · similarity {cosine:.2}"),
         "doc" | "pdf" => format!("semantic content match · similarity {cosine:.2}"),
         other => format!("semantic {other} match · similarity {cosine:.2}"),
     }
+}
+
+fn segment_location(segment:&ws_index::model::Segment) -> Option<MatchLocation> {
+    if let Some(page)=segment.page {
+        let page=u32::try_from(page).ok()?;
+        return (page>0).then_some(MatchLocation::Page { page });
+    }
+    if let Some(start)=segment.start_ms {
+        let end=segment.end_ms.unwrap_or(start);
+        if start<0 || end<start || end>ws_index::model::MAX_MEDIA_DURATION_MS as i64 { return None; }
+        return Some(MatchLocation::Timestamp { seconds:start as f64/1000.0,end_seconds:end as f64/1000.0 });
+    }
+    let line=u32::try_from(segment.line?).ok()?;
+    (line>0).then_some(MatchLocation::Line { line })
 }
 
 fn now_unix() -> i64 {
@@ -1105,11 +1138,20 @@ mod tests {
         }
     }
 
+    fn fixture_store() -> IndexStore {
+        let mut store = IndexStore::open_in_memory().unwrap();
+        let mut config=store.get_or_migrate_indexing_config().unwrap();
+        // Query fixtures exercise stored data, independently of host power mode.
+        config.respect_battery_saver=false;
+        store.set_indexing_config(&config).unwrap();
+        store
+    }
+
     fn service_with(tree: &TempTree, files: &[&str]) -> SharedEngine {
         for f in files {
             fs::write(tree.0.join(f), b"x").unwrap();
         }
-        let store = IndexStore::open_in_memory().unwrap();
+        let store=fixture_store();
         let indexer = Indexer::open(store, &[tree.0.clone()]).unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
@@ -1338,7 +1380,7 @@ mod tests {
         for f in ["alpha-embed.txt", "beta-embed.txt"] {
             fs::write(tree.0.join(f), b"x").unwrap();
         }
-        let store = IndexStore::open_in_memory().unwrap();
+        let store = fixture_store();
         let indexer = Indexer::open(store, &[tree.0.clone()]).unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
@@ -1484,7 +1526,7 @@ mod tests {
         for f in ["meeting-notes.txt", "banquet-hall.txt", "unrelated-zzz.txt"] {
             fs::write(tree.0.join(f), b"x").unwrap();
         }
-        let store = IndexStore::open_in_memory().unwrap();
+        let store = fixture_store();
         let indexer = Indexer::open(store, &[tree.0.clone()]).unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
@@ -1516,6 +1558,79 @@ mod tests {
             include_semantic: true,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn media_semantic_results_preserve_ranked_moments_thumbnails_and_file_filters() {
+        use ws_index::model::{ContentChunk,ContentMatch,DraftEmbeddingInput,NewSegment};
+        let tree=TempTree::new();
+        let engine=service_with(&tree,&["clip.mp4","song.wav","archive.pdf"]);
+        engine.set_model_ready_override(Some(true));
+        engine.set_query_embed_hook(Arc::new(|_|Ok(vec![1.0,0.0])));
+        let (clip,song,pdf)={
+            let mut store=engine.indexer.store_lock();
+            let clip=store.find_by_path(&tree.0.join("clip.mp4").to_string_lossy()).unwrap().unwrap().id;
+            let song=store.find_by_path(&tree.0.join("song.wav").to_string_lossy()).unwrap().unwrap().id;
+            let pdf=store.find_by_path(&tree.0.join("archive.pdf").to_string_lossy()).unwrap().unwrap().id;
+            let job=store.claim_extract_jobs_batch_for_kind("video",1).unwrap().pop().unwrap();
+            let progress=store.begin_content_batch(clip,"video","metadata fixture").unwrap();
+            let thumbnail=tree.0.join("cached-frame.png").to_string_lossy().into_owned();
+            let chunks=[
+                ContentChunk { id:0,entry_id:clip,job_kind:"video".into(),kind:"video".into(),chunk_index:65536,text:"".into(),
+                    location:ContentMatch { start_ms:Some(33000),end_ms:Some(33000),thumbnail_path:Some(thumbnail.clone()),..Default::default() },
+                    embed:true,visual:true,attempts:0,embedding_input:DraftEmbeddingInput::Image { path:thumbnail.clone().into(),token_budget:140 } },
+                ContentChunk { id:0,entry_id:clip,job_kind:"video".into(),kind:"ocr".into(),chunk_index:65537,text:"DEVICE CONNECTION LOST".into(),
+                    location:ContentMatch { start_ms:Some(33000),end_ms:Some(33000),thumbnail_path:Some(thumbnail.clone()),..Default::default() },
+                    embed:true,visual:false,attempts:0,embedding_input:DraftEmbeddingInput::Text },
+                ContentChunk { id:0,entry_id:clip,job_kind:"video".into(),kind:"audio".into(),chunk_index:1<<62,text:"".into(),
+                    location:ContentMatch { start_ms:Some(50000),end_ms:Some(65000),..Default::default() },
+                    embed:true,visual:false,attempts:0,embedding_input:DraftEmbeddingInput::Audio { path:tree.0.join("window.wav") } },
+            ];
+            store.commit_content_batch(&job,&progress,&chunks,None).unwrap();
+            for (chunk,vector) in chunks.iter().zip([vec![0.8,0.6],vec![0.9,0.4358899],vec![1.0,0.0]]) {
+                store.upsert_segment(NewSegment { entry_id:clip,kind:&chunk.kind,chunk_index:chunk.chunk_index,text:&chunk.text,
+                    page:None,start_ms:chunk.location.start_ms.map(|v|v as i64),end_ms:chunk.location.end_ms.map(|v|v as i64),line:None,vector:&vector }).unwrap();
+            }
+            store.upsert_segment(NewSegment { entry_id:song,kind:"audio",chunk_index:0,text:"",
+                page:None,start_ms:Some(7000),end_ms:Some(8000),line:None,vector:&[1.0,0.0] }).unwrap();
+            store.upsert_segment(NewSegment { entry_id:pdf,kind:"pdf",chunk_index:0,text:"Actual legacy page excerpt",
+                page:Some(35),start_ms:None,end_ms:None,line:None,vector:&[1.0,0.0] }).unwrap();
+            (clip,song,pdf)
+        };
+        let mut q=semantic_query("indirect description");
+        q.categories=vec![ResultKind::Video];
+        let results=engine.plan_semantic(&q,&HashSet::new());
+        assert_eq!(results.len(),1);
+        let hit=&results[0];
+        assert_eq!(hit.id,format!("s{clip}"));
+        assert_eq!(hit.location,Some(MatchLocation::Timestamp { seconds:50.0,end_seconds:65.0 }));
+        assert!(hit.match_explanation.contains("sound"),"{}",hit.match_explanation);
+        assert_eq!(hit.matching_moments.len(),2,"OCR/frame at the same time should share one moment");
+        assert!(hit.matching_moments[0].excerpt.is_empty(),"do not invent a transcript");
+        assert_eq!(hit.matching_moments[1].location,Some(MatchLocation::Timestamp { seconds:33.0,end_seconds:33.0 }));
+        assert!(hit.matching_moments[1].excerpt.contains("DEVICE"));
+        assert!(hit.matching_moments[1].thumbnail_path.as_ref().unwrap().ends_with("cached-frame.png"));
+        assert!(hit.thumbnail_path.is_none(),"sound match must not substitute an unrelated first-frame thumbnail");
+        q.categories=vec![ResultKind::Audio];
+        let audio=engine.plan_semantic(&q,&HashSet::new());
+        assert_eq!(audio.len(),1); assert_eq!(audio[0].id,format!("s{song}"));
+        assert_eq!(audio[0].location,Some(MatchLocation::Timestamp { seconds:7.0,end_seconds:8.0 }));
+        q.categories=vec![ResultKind::Document];
+        let pages=engine.plan_semantic(&q,&HashSet::new());
+        assert_eq!(pages.len(),1); assert_eq!(pages[0].id,format!("s{pdf}"));
+        assert_eq!(pages[0].location,Some(MatchLocation::Page { page:35 }));
+        assert!(pages[0].excerpt.as_ref().unwrap().contains("Actual legacy"));
+        let mut frame=engine.indexer.store_lock().list_segments_for_entry(clip).unwrap().into_iter().find(|s|s.kind=="video").unwrap();
+        assert!(engine.indexer.segment_thumbnail(&frame).unwrap().is_some());
+        frame.start_ms=Some(33001);
+        assert!(engine.indexer.segment_thumbnail(&frame).unwrap().is_none(),"never pair a stale vector with another chunk's pixels");
+        frame.start_ms=Some(-1);
+        assert_eq!(segment_location(&frame),None);
+        let mut config=engine.indexer.get_indexing_config().unwrap();
+        config.roots.clear();
+        engine.indexer.set_indexing_config(&config).unwrap();
+        assert!(engine.plan_semantic(&q,&HashSet::new()).is_empty());
+        assert!(engine.indexer.segment_thumbnail(&frame).unwrap().is_none());
     }
 
     #[test]
@@ -1555,7 +1670,7 @@ mod tests {
     fn cold_start_model_ready_when_model_service_is_ready() {
         let tree = TempTree::new();
         fs::write(tree.0.join("banquet-hall.txt"), b"x").unwrap();
-        let store = IndexStore::open_in_memory().unwrap();
+        let store = fixture_store();
         let indexer = Indexer::open(store, &[tree.0.clone()]).unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}

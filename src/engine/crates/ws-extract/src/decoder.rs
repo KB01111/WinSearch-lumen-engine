@@ -15,8 +15,10 @@ use std::{
 use ws_platform::child_job::ChildJob;
 
 pub const MAX_STREAMS: usize = 32;
-pub const MAX_DURATION_MS: u64 = 366 * 24 * 60 * 60 * 1000;
+pub const MAX_DURATION_MS: u64 = ws_index::model::MAX_MEDIA_DURATION_MS;
 pub const MAX_PCM_BYTES: usize = 30 * 16000 * 2;
+pub const MAX_SHOT_SAMPLES: usize = 14400;
+pub const SHOT_PIXELS: usize = 32 * 18;
 const FORMATS: &str =
     "aac,ac3,aiff,ape,asf,au,avi,flac,flv,matroska,webm,mov,mp3,mpeg,mpegts,ogg,wav,wv";
 
@@ -216,7 +218,7 @@ pub fn audio_window(
         return Err(decode("invalid audio window"));
     }
     let mut command = command("ffmpeg.exe")?;
-    command.args(["-nostdin", "-threads", "2"]);
+    command.args(["-nostdin", "-threads", "2", "-xerror"]);
     input(&mut command, path)?;
     command
         .arg("-ss")
@@ -225,6 +227,8 @@ pub fn audio_window(
         .arg(path)
         .arg("-t")
         .arg(seconds(end_ms - start_ms))
+        .arg("-af")
+        .arg(format!("aresample=16000:async=1:first_pts=0,apad=whole_len={}", (end_ms-start_ms)*16))
         .args([
             "-map",
             "0:a:0",
@@ -244,14 +248,96 @@ pub fn audio_window(
             "pipe:1",
         ]);
     let pcm = capture(&mut command, MAX_PCM_BYTES, budget)?;
-    if pcm.is_empty() || pcm.len() % 2 != 0 {
-        return Err(decode("empty or malformed decoded audio window"));
+    if pcm.len() != ((end_ms-start_ms)*32) as usize {
+        return Err(decode("decoded audio does not cover the bounded source window"));
     }
     Ok(pcm)
 }
 
 pub fn seconds(ms: u64) -> String {
     format!("{}.{:03}", ms / 1000, ms % 1000)
+}
+
+pub struct VideoSample {
+    pub time_ms: u64,
+    pub gray: Vec<u8>,
+}
+
+pub struct VideoFrame {
+    pub time_ms: u64,
+    pub png: Vec<u8>,
+}
+
+/// Select source frames rather than synthesizing an fps grid: timestamps stay
+/// exact even for variable-rate or sparse videos.
+pub fn sample_video(path: &Path, interval_ms: u64, budget: &ExtractBudget) -> Result<Vec<VideoSample>, ExtractError> {
+    if interval_ms == 0 || interval_ms > MAX_DURATION_MS { return Err(decode("invalid shot sampling interval")); }
+    let mut command = video_command(path)?;
+    command.arg("-i").arg(path).args(["-map","0:V:0","-an","-sn","-dn","-vf"])
+        .arg(format!("select='gte(t,0)*(isnan(prev_selected_t)+gte(t-prev_selected_t,{}))',trim=end_frame={},scale=32:18,format=gray,showinfo",
+            seconds(interval_ms), MAX_SHOT_SAMPLES))
+        .args(["-frames:v"]).arg(MAX_SHOT_SAMPLES.to_string())
+        .args(["-fps_mode","passthrough","-c:v","rawvideo","-threads","2","-f","rawvideo","pipe:1"]);
+    let (pixels, log) = capture_outputs(&mut command, MAX_SHOT_SAMPLES * SHOT_PIXELS, 8 * 1024 * 1024, budget)?;
+    let times = frame_times(&log, MAX_SHOT_SAMPLES)?;
+    if pixels.len() % SHOT_PIXELS != 0 || times.len() != pixels.len() / SHOT_PIXELS || times.is_empty() {
+        return Err(decode("shot sample pixels/timestamps do not agree"));
+    }
+    Ok(times.into_iter().zip(pixels.chunks_exact(SHOT_PIXELS))
+        .map(|(time_ms,p)| VideoSample { time_ms, gray:p.to_vec() }).collect())
+}
+
+fn video_command(path: &Path) -> Result<Command, ExtractError> {
+    let mut command = command("ffmpeg.exe")?;
+    command.args(["-nostdin","-threads","2","-xerror","-loglevel","info","-nostats","-copyts","-start_at_zero"]);
+    input(&mut command, path)?;
+    Ok(command)
+}
+
+pub fn video_frame(path: &Path, time_ms: u64, budget: &ExtractBudget) -> Result<Option<VideoFrame>, ExtractError> {
+    if time_ms >= MAX_DURATION_MS { return Err(decode("video frame time outside bound")); }
+    let mut command = video_command(path)?;
+    command.arg("-ss").arg(seconds(time_ms)).arg("-i").arg(path)
+        .args(["-map","0:V:0","-an","-sn","-dn","-frames:v","1","-vf",
+            "trim=end_frame=1,scale=w='min(1280,iw)':h='min(1280,ih)':force_original_aspect_ratio=decrease,showinfo",
+            "-fps_mode","passthrough","-c:v","png","-threads","2","-f","image2pipe","pipe:1"]);
+    let (png, log) = capture_outputs(&mut command, 16 * 1024 * 1024, 65536, budget)?;
+    let times = frame_times(&log, 1)?;
+    if png.is_empty() && times.is_empty() { return Ok(None); }
+    if times.len() != 1 || !png.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err(decode("decoded frame pixels/timestamp missing"));
+    }
+    Ok(Some(VideoFrame { time_ms:times[0], png }))
+}
+
+fn frame_times(log: &[u8], max_frames: usize) -> Result<Vec<u64>, ExtractError> {
+    let mut base = None;
+    let mut times = Vec::new();
+    for line in String::from_utf8_lossy(log).lines() {
+        if !line.starts_with("[Parsed_showinfo_") { continue; }
+        if let Some((_, value)) = line.split_once("config in time_base: ") {
+            let (a,b) = value.split(',').next().unwrap_or("").trim().split_once('/')
+                .ok_or_else(|| decode("frame time base missing"))?;
+            let numerator = a.parse::<u32>().ok().filter(|n| *n > 0).ok_or_else(|| decode("invalid frame time base"))?;
+            let denominator = b.parse::<u32>().ok().filter(|n| *n > 0).ok_or_else(|| decode("invalid frame time base"))?;
+            if base.is_some_and(|v| v != (numerator,denominator)) { return Err(decode("frame time base changed")); }
+            base = Some((numerator,denominator));
+        }
+        let Some((_, body)) = line.split_once("] n:") else { continue; };
+        let ordinal = body.split_whitespace().next().and_then(|v| v.parse::<usize>().ok())
+            .ok_or_else(|| decode("invalid frame ordinal"))?;
+        let pts = body.split_once(" pts:").and_then(|(_,v)| v.split_whitespace().next())
+            .and_then(|v| v.parse::<u64>().ok()).ok_or_else(|| decode("invalid source frame PTS"))?;
+        let (n,d) = base.ok_or_else(|| decode("frame PTS before time base"))?;
+        // Floor before an exact seek so rounding never skips the selected frame.
+        let millis = u128::from(pts) * u128::from(n) * 1000 / u128::from(d);
+        if ordinal != times.len() || times.len() >= max_frames || millis >= u128::from(MAX_DURATION_MS)
+            || times.last().is_some_and(|last| u128::from(*last) > millis) {
+            return Err(decode("frame timestamp/count exceeds source bounds"));
+        }
+        times.push(millis as u64);
+    }
+    Ok(times)
 }
 pub fn decode(message: impl Into<String>) -> ExtractError {
     ExtractError::Decode(message.into())
@@ -284,6 +370,12 @@ fn capture(
     cap: usize,
     budget: &ExtractBudget,
 ) -> Result<Vec<u8>, ExtractError> {
+    capture_outputs(command, cap, 32768, budget).map(|(output,_)| output)
+}
+
+fn capture_outputs(
+    command: &mut Command, cap: usize, error_cap: usize, budget: &ExtractBudget,
+) -> Result<(Vec<u8>,Vec<u8>), ExtractError> {
     budget.check_deadline()?;
     let mut owned = ChildJob::spawn(command)?;
     let stdout = owned
@@ -300,7 +392,7 @@ fn capture(
     let out_flag = Arc::clone(&overflow);
     let err_flag = Arc::clone(&overflow);
     let reader = thread::spawn(move || read_capped(stdout, cap, out_flag));
-    let errors = thread::spawn(move || read_capped(stderr, 32768, err_flag));
+    let errors = thread::spawn(move || read_capped(stderr, error_cap, err_flag));
     let status = (|| loop {
         budget.check_deadline()?;
         if overflow.load(Ordering::Acquire) {
@@ -328,16 +420,29 @@ fn capture(
     if !status.success() {
         return Err(decode(format!(
             "decoder failed: {}",
-            String::from_utf8_lossy(&error)
+            String::from_utf8_lossy(&error[..error.len().min(8192)])
         )));
     }
     budget.check_deadline()?;
-    Ok(output)
+    Ok((output,error))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn source_pts_are_exact_bounded_and_never_rounded_past_frame() {
+        let log=b"[Parsed_showinfo_1 @ 0] config in time_base: 1/30000, frame_rate: 30/1\n[Parsed_showinfo_1 @ 0] n: 0 pts: 1001 pts_time:0.0333667\n[Parsed_showinfo_1 @ 0] n: 1 pts: 47000 pts_time:1.56667\n";
+        assert_eq!(frame_times(log,2).unwrap(),vec![33,1566]);
+        assert!(frame_times(log,1).is_err());
+        for bad in [
+            "[Parsed_showinfo_1 @ 0] n: 0 pts: 1",
+            "[Parsed_showinfo_1 @ 0] config in time_base: 0/0, frame_rate: 1/1",
+            "[Parsed_showinfo_1 @ 0] config in time_base: 1/1, frame_rate: 1/1\n[Parsed_showinfo_1 @ 0] n: 0 pts: -1",
+            "[Parsed_showinfo_1 @ 0] config in time_base: 1/1, frame_rate: 1/1\n[Parsed_showinfo_1 @ 0] n: 1 pts: 1",
+        ] { assert!(frame_times(bad.as_bytes(),2).is_err(),"{bad}"); }
+    }
+
     #[test]
     fn decoder_hang_crash_and_capture_bombs_are_bounded() {
         use std::time::Instant;
