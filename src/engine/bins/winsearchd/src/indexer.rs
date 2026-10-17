@@ -318,6 +318,7 @@ impl Indexer {
         top_k: usize,
         filter: Option<&VectorFilter>,
     ) -> Result<Vec<ScoredSegment>, StoreError> {
+        let epoch=self.search_epoch();
         if top_k == 0 || query.is_empty() {
             return Ok(Vec::new());
         }
@@ -357,6 +358,7 @@ impl Indexer {
             return Ok(Vec::new());
         }
         let store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+        if self.search_epoch()!=epoch {return Ok(Vec::new());}
         let mut out = Vec::with_capacity(hits.len());
         for hit in hits {
             if let Some(segment) = store.get_segment(hit.id)? {
@@ -367,8 +369,11 @@ impl Indexer {
                 });
             }
         }
+        if self.search_epoch()!=epoch {return Ok(Vec::new());}
         Ok(out)
     }
+
+    pub(crate) fn search_epoch(&self)->u64 {self.cache_epoch.load(Ordering::Acquire)}
 
     pub(crate) fn invalidate_vector_cache(&self) {
         self.cache_epoch.fetch_add(1, Ordering::AcqRel);

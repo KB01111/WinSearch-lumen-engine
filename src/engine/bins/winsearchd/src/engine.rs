@@ -99,6 +99,9 @@ pub struct EngineService {
 
 pub type SharedEngine = Arc<EngineService>;
 
+#[derive(Clone,Copy)]
+struct SearchRevision {source:u64,code:Option<u64>}
+
 impl EngineService {
     pub fn new(indexer: Arc<Indexer>) -> SharedEngine {
         Self::new_with_model_dir(indexer, paths::model_dir())
@@ -560,6 +563,7 @@ impl EngineService {
             return hits;
         }
         let Ok(generation) = self.indexer.store_lock().model_generation() else { return Vec::new(); };
+        let source_epoch=self.indexer.search_epoch();
         let kinds = hit_kinds(&query.categories);
         if !query.categories.is_empty() && kinds.is_empty() {
             return Vec::new();
@@ -572,7 +576,7 @@ impl EngineService {
                 return Vec::new();
             }
         };
-        if self.indexer.store_lock().model_generation().ok() != Some(generation) {
+        if self.indexer.store_lock().model_generation().ok() != Some(generation) || self.indexer.search_epoch()!=source_epoch {
             return Vec::new();
         }
         let candidate_limit = (query.limit.max(1) as usize)
@@ -688,7 +692,7 @@ impl EngineService {
                 .then_with(|| a.title.cmp(&b.title))
         });
         out.truncate(query.limit.max(1) as usize);
-        if self.indexer.store_lock().model_generation().ok() != Some(generation) {
+        if self.indexer.store_lock().model_generation().ok() != Some(generation) || self.indexer.search_epoch()!=source_epoch {
             return Vec::new();
         }
         out
@@ -727,6 +731,7 @@ impl EngineService {
         cancel: Arc<AtomicBool>,
     ) -> Result<(), FrameError> {
         let code_epoch=self.code_service().filter(|_|query.mode==SearchMode::Code).map(|c|c.query_epoch());
+        let revision=SearchRevision {source:self.indexer.search_epoch(),code:code_epoch};
         let results = self.plan_results(&query);
         let results=results.into_iter().filter(|r|r.kind!=ResultKind::Code || r.path.as_deref().is_some_and(|p|self.code_service().is_some_and(|c|code_epoch.is_some_and(|e|c.result_allowed(p,e))))).collect::<Vec<_>>();
 
@@ -741,7 +746,7 @@ impl EngineService {
 
         // Whether a semantic stage will follow: when it will, the exact
         // terminal frame says `done: false` so the client keeps listening.
-        let semantic = self.semantic_allowed(&query) && self.code_query_current(&query,code_epoch);
+        let semantic = self.semantic_allowed(&query) && self.query_current(&query,revision);
 
         // Progressive response: the first batch is what the overlay shows;
         // overflow streams after so typing stays responsive.
@@ -749,7 +754,7 @@ impl EngineService {
         let (first, rest) = results.split_at(limit);
         client.send(&ServerMessage::Results {
             id,
-            batch: if self.code_query_current(&query,code_epoch) {first.to_vec()} else {Vec::new()},
+            batch: if self.query_current(&query,revision) {first.to_vec()} else {Vec::new()},
             done: rest.is_empty() && !semantic,
         })?;
         if !rest.is_empty() {
@@ -763,7 +768,7 @@ impl EngineService {
             }
             client.send(&ServerMessage::Results {
                 id,
-                batch: if self.code_query_current(&query,code_epoch) {rest.to_vec()} else {Vec::new()},
+                batch: if self.query_current(&query,revision) {rest.to_vec()} else {Vec::new()},
                 done: !semantic,
             })?;
         }
@@ -782,7 +787,7 @@ impl EngineService {
             .name("winsearch-semantic".into())
             .spawn(move || {
                 let outcome =
-                    this.run_semantic_stage(&thread_client, id, &query, &exact_ids, &cancel,code_epoch);
+                    this.run_semantic_stage(&thread_client, id, &query, &exact_ids, &cancel,revision);
                 this.end_request_for_client(thread_client.id(), id);
                 if let Err(err) = outcome {
                     let _ = thread_client.send(&ServerMessage::Error {
@@ -809,8 +814,10 @@ impl EngineService {
         Ok(())
     }
 
-    fn code_query_current(&self,query:&SearchQuery,epoch:Option<u64>)->bool {
-        query.mode!=SearchMode::Code || self.code_service().is_some_and(|code|Some(code.query_epoch())==epoch)
+    fn query_current(&self,query:&SearchQuery,revision:SearchRevision)->bool {
+        if query.mode==SearchMode::Code {
+            self.code_service().is_some_and(|code|Some(code.query_epoch())==revision.code)
+        } else {self.indexer.search_epoch()==revision.source}
     }
 
     fn run_semantic_stage(
@@ -820,7 +827,7 @@ impl EngineService {
         query: &SearchQuery,
         exact_ids: &HashSet<i64>,
         cancel: &AtomicBool,
-        code_epoch:Option<u64>,
+        revision:SearchRevision,
     ) -> Result<(), FrameError> {
         if cancel.load(Ordering::Relaxed) {
             return client.send(&ServerMessage::Results {
@@ -831,9 +838,9 @@ impl EngineService {
         }
         let generation = self.indexer.store_lock().model_generation().ok();
         let mut hits = self.plan_semantic(query, exact_ids);
-        hits.retain(|r|r.kind!=ResultKind::Code || r.path.as_deref().is_some_and(|p|self.code_service().is_some_and(|c|code_epoch.is_some_and(|e|c.result_allowed(p,e)))));
+        hits.retain(|r|r.kind!=ResultKind::Code || r.path.as_deref().is_some_and(|p|self.code_service().is_some_and(|c|revision.code.is_some_and(|e|c.result_allowed(p,e)))));
         if generation.is_none() || self.indexer.store_lock().model_generation().ok() != generation
-            || !self.semantic_allowed(query) || !self.code_query_current(query,code_epoch) {
+            || !self.semantic_allowed(query) || !self.query_current(query,revision) {
             hits.clear();
         }
         if cancel.load(Ordering::Relaxed) {
@@ -1814,6 +1821,38 @@ mod tests {
     }
 
     #[test]
+    fn application_query_rejects_root_revoke_then_regrant_during_embedding() {
+        let (engine,_tree)=semantic_service();
+        let indexer=Arc::clone(&engine.indexer);
+        engine.set_query_embed_hook(Arc::new(move |_| {
+            let policy=indexer.get_indexing_config().unwrap();
+            let mut revoked=policy.clone();revoked.roots.clear();
+            indexer.set_indexing_config(&revoked).unwrap();
+            indexer.set_indexing_config(&policy).unwrap();
+            Ok(vec![1.0,0.0,0.0])
+        }));
+        assert!(engine.plan_semantic(&semantic_query("changing authorization"),&HashSet::new()).is_empty(),
+            "restored permission cannot revive the previous query revision");
+    }
+
+    #[test]
+    fn application_query_rejects_source_change_during_embedding() {
+        let (engine,tree)=semantic_service();
+        let indexer=Arc::clone(&engine.indexer);
+        let path=tree.0.join("banquet-hall.txt");
+        let stamp=fs::metadata(&path).unwrap().modified().unwrap();
+        let root=indexer.store_lock().roots().unwrap().into_iter().find(|r|r.path==tree.0.to_string_lossy()).unwrap().id;
+        engine.set_query_embed_hook(Arc::new(move |_| {
+            fs::write(&path,b"y").unwrap();
+            fs::File::options().write(true).open(&path).unwrap().set_times(fs::FileTimes::new().set_modified(stamp)).unwrap();
+            indexer.handle_event(root,crate::watcher::WatchEvent::Modified(path.clone()));
+            Ok(vec![1.0,0.0,0.0])
+        }));
+        assert!(engine.plan_semantic(&semantic_query("changing source"),&HashSet::new()).is_empty(),
+            "a source edit invalidates the request even when unchanged name vectors remain searchable");
+    }
+
+    #[test]
     fn application_query_cache_is_fenced_by_model_generation() {
         use std::sync::atomic::AtomicUsize;
         let (engine,_tree)=semantic_service();
@@ -1843,6 +1882,29 @@ mod tests {
     }
 
     // ---- streaming integration (fake vectors, real pipe frames) ----
+
+    #[test]
+    fn application_stream_rejects_revoke_then_regrant_between_stages() {
+        let (engine,_tree)=semantic_service();
+        let (entered_tx,entered_rx)=std::sync::mpsc::channel();
+        let (proceed_tx,proceed_rx)=std::sync::mpsc::channel();
+        let proceed_rx=Mutex::new(proceed_rx);
+        engine.set_query_embed_hook(Arc::new(move |_| {
+            entered_tx.send(()).unwrap();proceed_rx.lock().unwrap().recv().unwrap();
+            Ok(vec![1.0,0.0,0.0])
+        }));
+        let pipe=unique_pipe();serve_search(Arc::clone(&engine),&pipe,19,semantic_query("meeting"));
+        let mut stream=connect_retry(&pipe);
+        let (first,done)=read_one(&mut stream);assert!(!first.is_empty());assert!(!done);
+        entered_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+        let policy=engine.indexer.get_indexing_config().unwrap();
+        let mut revoked=policy.clone();revoked.roots.clear();
+        engine.indexer.set_indexing_config(&revoked).unwrap();
+        engine.indexer.set_indexing_config(&policy).unwrap();
+        proceed_tx.send(()).unwrap();
+        let (terminal,done)=read_one(&mut stream);assert!(done);
+        assert!(terminal.is_empty(),"permission restoration cannot append to an old ordinary search");
+    }
 
     fn code_search_service()->(SharedEngine,Arc<crate::code::CodeService>,PathBuf) {
         let (code,indexer,root)=crate::code::tests::indexed_fixture();

@@ -426,6 +426,13 @@ ranking for daemon and CLI. Query cache keys include the model generation;
 generation changes during embedding, ranking or before semantic delivery
 suppress that stage. In-flight name batches also requeue across a model change.
 
+Ordinary search captures the index cache/source revision before planning and
+checks it through query inference, cached-vector joins, ranking and streamed
+delivery. Watcher invalidation or root/exclusion policy changes invalidate old
+requests even if permission is restored before inference returns. Code queries
+use their own parse/policy revision so unrelated ordinary vector batches do not
+invalidate a code request.
+
 Independent public synthetic reference inputs/vectors are pinned with license
 and hashes in `ws-embed/tests/fixtures/media`. `cargo test -p ws-embed --test media
 -- --ignored --nocapture --test-threads=1` requires verified model files. The
