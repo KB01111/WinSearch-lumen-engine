@@ -18,19 +18,17 @@ use std::sync::{Mutex,OnceLock};
 use serde::Deserialize;
 use ws_embed_protocol::STUB_DIM;
 use ws_index::model::{
-    extension_of, kind_for_ext, EntryRecord, HitKind, NewSegment, SearchRequest, VectorFilter,
+    extension_of, EntryRecord, NewSegment, SearchRequest, VectorFilter,
     SEGMENT_KIND_NAME,
 };
-use ws_index::{EntryRow, IndexStore};
+use ws_index::IndexStore;
 
-/// Minimum cosine similarity for a semantic hit to be shown (matches
-/// `winsearchd::engine::MIN_SEMANTIC_COSINE`).
-pub const MIN_SEMANTIC_COSINE: f32 = 0.35;
-
-/// Retrieval depth before hybrid ranking (matches `winsearchd::engine::SEMANTIC_TOP_K`).
-pub const SEMANTIC_TOP_K: usize = 200;
+use ws_index::retrieval::{hybrid_score, semantic_admitted, SEMANTIC_TOP_K};
+#[cfg(test)]
+use ws_index::retrieval::MIN_SEMANTIC_COSINE;
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EvalSuite {
     pub name: String,
     #[serde(default)]
@@ -41,6 +39,7 @@ pub struct EvalSuite {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EvalThresholds {
     pub min_recall_at_5: f64,
     pub min_mrr: f64,
@@ -49,6 +48,7 @@ pub struct EvalThresholds {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FixtureEntry {
     pub path: String,
     pub name: String,
@@ -67,6 +67,7 @@ fn default_size() -> u64 {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EvalQuery {
     pub query: String,
     #[serde(default)]
@@ -414,7 +415,7 @@ pub fn run_eval_suite_with(
     store.apply_batch(root_id, gen, &records)?;
 
     // Embed all entry names in one batch and populate `segments(kind='name')`.
-    let names: Vec<String> = suite.entries.iter().map(|e| e.name.clone()).collect();
+    let names: Vec<String> = suite.entries.iter().map(|e| ws_modelmgr::recipe::filename(&e.name).to_owned()).collect();
     let vectors = embedder.embed_texts(&names)?;
     if vectors.len() != suite.entries.len() {
         anyhow::bail!(
@@ -575,7 +576,7 @@ pub fn execute_hybrid_query(
         return Ok(results);
     }
 
-    let query_vecs = embedder.embed_texts(&[text.to_string()])?;
+    let query_vecs = embedder.embed_texts(&[ws_modelmgr::recipe::search_query(text)])?;
     let Some(query_vec) = query_vecs.into_iter().next() else {
         return Ok(results);
     };
@@ -585,7 +586,7 @@ pub fn execute_hybrid_query(
 
     let mut best: HashMap<i64, f32> = HashMap::new();
     for s in &scored {
-        if s.cosine < MIN_SEMANTIC_COSINE {
+        if !semantic_admitted(&s.segment.kind, s.cosine) {
             continue;
         }
         best.entry(s.segment.entry_id)
@@ -604,13 +605,12 @@ pub fn execute_hybrid_query(
         if entry.missing {
             continue;
         }
-        let _kind = entry_hit_kind(&entry);
         let score = hybrid_score(cosine, text, &entry.name_lower, entry.mtime, now_unix);
         sem_hits.push(RankedEvalHit {
             entry_id,
             name: entry.name,
             score,
-            explanation: format!("semantic name match · similarity {cosine:.2}"),
+            explanation: format!("semantic name match · similarity {cosine:.4}"),
         });
     }
 
@@ -622,54 +622,6 @@ pub fn execute_hybrid_query(
     sem_hits.truncate(limit);
     results.extend(sem_hits);
     Ok(results)
-}
-
-fn entry_hit_kind(row: &EntryRow) -> HitKind {
-    if row.is_app {
-        HitKind::Application
-    } else if row.is_dir {
-        HitKind::Folder
-    } else {
-        kind_for_ext(&row.ext).hit_kind()
-    }
-}
-
-fn hybrid_base_score(cosine: f32) -> f64 {
-    0.45 + 0.45 * cosine as f64
-}
-
-fn tokenize_lower(text: &str) -> Vec<String> {
-    text.split(|c: char| !c.is_alphanumeric())
-        .filter(|t| !t.is_empty())
-        .map(|t| t.to_lowercase())
-        .collect()
-}
-
-fn exact_token_boost(query_text: &str, name_lower: &str) -> f64 {
-    let name_tokens = tokenize_lower(name_lower);
-    if tokenize_lower(query_text)
-        .iter()
-        .any(|q| name_tokens.iter().any(|n| n == q))
-    {
-        0.10
-    } else {
-        0.0
-    }
-}
-
-fn recency_boost(mtime: i64, now_unix: i64) -> f64 {
-    if mtime > 0 && now_unix.saturating_sub(mtime) <= 30 * 86_400 {
-        0.02
-    } else {
-        0.0
-    }
-}
-
-fn hybrid_score(cosine: f32, query_text: &str, name_lower: &str, mtime: i64, now: i64) -> f64 {
-    (hybrid_base_score(cosine)
-        + exact_token_boost(query_text, name_lower)
-        + recency_boost(mtime, now))
-    .clamp(0.0, 1.0)
 }
 
 /// Concept clusters for the deterministic semantic-concept stub embedder.
@@ -890,6 +842,36 @@ fn fnv1a64(s: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unhandled_eval_fields_are_rejected_instead_of_silently_ignored() {
+        let value:serde_json::Value=serde_json::from_slice(&std::fs::read(resolve_suite_path("names").unwrap()).unwrap()).unwrap();
+        for target in ["suite","entry","query"] {
+            let mut changed=value.clone();
+            match target {
+                "suite"=>changed["unsupported_fixture_kind"]=serde_json::json!(true),
+                "entry"=>changed["entries"][0]["unsupported_segment"]=serde_json::json!(true),
+                "query"=>changed["queries"][0]["unsupported_mode"]=serde_json::json!("code"),
+                _=>unreachable!(),
+            }
+            assert!(serde_json::from_value::<EvalSuite>(changed).is_err(),"{target} fixture semantics were silently dropped");
+        }
+    }
+
+    #[test]
+    fn application_query_uses_search_task_prefix() {
+        struct Recorder(Mutex<Vec<String>>);
+        impl EvalEmbedder for Recorder {
+            fn label(&self) -> &str { "format-only fixture" }
+            fn embed_texts(&self, texts:&[String]) -> anyhow::Result<Vec<Vec<f32>>> {
+                self.0.lock().unwrap().extend_from_slice(texts);
+                Ok(texts.iter().map(|_|vec![1.0,0.0]).collect())
+            }
+        }
+        let embedder=Recorder(Mutex::new(Vec::new()));
+        execute_hybrid_query(&IndexStore::open_in_memory().unwrap(),&embedder,"  find borrowed books  ",true,20,0).unwrap();
+        assert_eq!(*embedder.0.lock().unwrap(),["task: search result | query: find borrowed books"]);
+    }
 
     #[test]
     fn real_reply_rejects_wrong_identity_count_backend_shape_and_nonunit_vectors() {

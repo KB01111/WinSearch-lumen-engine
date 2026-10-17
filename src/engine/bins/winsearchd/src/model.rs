@@ -858,6 +858,7 @@ mod tests {
 
     #[test]
     fn legacy_media_pipeline_requeues_vectors_and_preserves_exact_chunks() {
+        for pipeline in [None, Some(1)] {
         let dir = temp_dir("legacy-media-pipeline");
         let root = dir.join("source");
         std::fs::create_dir_all(&root).unwrap();
@@ -920,10 +921,11 @@ mod tests {
             )
         };
         let mut legacy = serde_json::to_value(ModelCompat::current()).unwrap();
-        legacy
-            .as_object_mut()
-            .unwrap()
-            .remove("vector_pipeline_version");
+        if let Some(version) = pipeline {
+            legacy["vector_pipeline_version"] = serde_json::json!(version);
+        } else {
+            legacy.as_object_mut().unwrap().remove("vector_pipeline_version");
+        }
         indexer
             .meta_set(EMBEDDING_MODEL_META_KEY, &legacy.to_string())
             .unwrap();
@@ -958,6 +960,7 @@ mod tests {
         assert_eq!(pending[0].id, before[0].id);
         drop(store);
         std::fs::remove_dir_all(dir).unwrap();
+        }
     }
 
     #[test]

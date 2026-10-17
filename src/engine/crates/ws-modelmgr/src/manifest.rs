@@ -25,8 +25,8 @@ pub const REPO_COMMIT: &str = "bfcd298762cc34d0357ece5ebdd31791a3a374d8";
 /// Unified EmbeddingGemma 2 embedding width.
 pub const EMBEDDING_DIM: u32 = 768;
 
-/// One-pass mixed-media encoding and reference-compatible image sizing.
-pub const VECTOR_PIPELINE_VERSION: u32 = 1;
+/// One-pass media plus task-aware application query/document inputs.
+pub const VECTOR_PIPELINE_VERSION: u32 = 2;
 
 /// Text-embedding weights (Q8_0, ~310 MB).
 pub const TEXT_FILE: &str = "embeddinggemma-2-Q8_0.gguf";
@@ -129,6 +129,13 @@ impl ModelCompat {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn application_recipe_rejects_raw_text_pipeline_one() {
+        let current=ModelCompat::current();
+        let legacy=ModelCompat { vector_pipeline_version:1,..current.clone() };
+        assert!(!current.is_compatible_with(&legacy),"raw application vectors cannot mix with prompted query/document vectors");
+    }
 
     #[test]
     fn legacy_vector_pipeline_is_incompatible_even_with_matching_weights() {

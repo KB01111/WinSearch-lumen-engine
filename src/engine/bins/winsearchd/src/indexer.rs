@@ -1105,7 +1105,7 @@ impl Indexer {
         F: Fn(&[String]) -> Result<Vec<Vec<f32>>, String>,
     {
         if self.indexing_pause_reason().is_some() { return Ok(EmbedBatchOutcome::default()); }
-        let claimed: Vec<ClaimedNameJob> = {
+        let (claimed, generation): (Vec<ClaimedNameJob>, i64) = {
             let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
             if self.indexing_pause_reason().is_some() { return Ok(EmbedBatchOutcome::default()); }
             let jobs = store.claim_extract_jobs_batch_for_kind(SEGMENT_KIND_NAME, EMBED_BATCH)?;
@@ -1128,12 +1128,12 @@ impl Indexer {
                     }
                 }
             }
-            out
+            (out, store.model_generation()?)
         };
         if claimed.is_empty() {
             return Ok(EmbedBatchOutcome::default());
         }
-        let texts: Vec<String> = claimed.iter().map(|c| c.name.clone()).collect();
+        let texts: Vec<String> = claimed.iter().map(|c| ws_modelmgr::recipe::filename(&c.name).to_owned()).collect();
         let vecs = match embed(&texts) {
             Ok(v) => v,
             Err(e) => {
@@ -1186,6 +1186,11 @@ impl Indexer {
         {
             let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
             for (c, vec) in claimed.iter().zip(vecs.iter()) {
+                if store.model_generation()? != generation {
+                    store.requeue_extract_job(c.job_id)?;
+                    requeued += 1;
+                    continue;
+                }
                 // The entry may have been deleted while embedding: then the
                 // job row is already gone via cascade; completing is a no-op.
                 let fresh_entry = store.get_entry(c.entry_id)?;
@@ -2232,6 +2237,22 @@ mod tests {
             assert!(cos > 0.99, "fresh vector must win, cosine {cos}");
         }
         assert_eq!(indexer.embed_queue_depth().unwrap(), 0);
+    }
+
+    #[test]
+    fn application_name_batch_cannot_commit_across_model_generation() {
+        let tree=TempTree::new();
+        fs::write(tree.0.join("recipe-generation.txt"),b"x").unwrap();
+        let indexer=seeded(&tree);
+        let outcome=indexer.embed_once_with(|texts| {
+            indexer.store_lock().reset_content_vectors().unwrap();
+            fake_embed(texts)
+        }).unwrap();
+        assert!(outcome.claimed>0);
+        assert_eq!(outcome.embedded,0,"old-space name batch committed after model migration");
+        assert_eq!(outcome.requeued,outcome.claimed);
+        assert_eq!(indexer.segments_indexed().unwrap(),0);
+        assert!(indexer.embed_once_with(fake_embed).unwrap().embedded>0);
     }
 
     #[test]

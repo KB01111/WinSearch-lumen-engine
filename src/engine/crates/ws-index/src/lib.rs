@@ -9,6 +9,7 @@
 
 pub mod calc;
 pub mod model;
+pub mod retrieval;
 pub mod search;
 pub mod settings;
 pub mod store;

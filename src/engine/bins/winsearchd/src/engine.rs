@@ -29,12 +29,10 @@ use crate::embed_client::EmbedSupervisor;
 use crate::indexer::Indexer;
 use crate::model::ModelService;
 
-/// How many cosine candidates the semantic stage retrieves before hybrid
-/// ranking (retrieval depth; the appended list is capped at `query.limit`).
-pub const SEMANTIC_TOP_K: usize = 200;
-/// Minimum cosine similarity for a semantic hit to be shown. Tune via evals:
-/// lower recalls more paraphrases, higher keeps the list exact-adjacent.
-pub const MIN_SEMANTIC_COSINE: f32 = 0.35;
+use ws_index::retrieval::{hybrid_score, semantic_admitted};
+#[cfg(test)]
+use ws_index::retrieval::{hybrid_base_score, exact_token_boost, recency_boost, MIN_SEMANTIC_COSINE};
+pub use ws_index::retrieval::SEMANTIC_TOP_K;
 /// Query-embedding LRU capacity: one entry per distinct query text, so
 /// repeated/paused-then-resumed queries never re-embed.
 pub const QUERY_CACHE_CAP: usize = 64;
@@ -483,13 +481,18 @@ impl EngineService {
     /// down, timeout, empty reply) are returned as strings and make the
     /// semantic stage yield no hits — exact results already streamed.
     fn embed_query(&self, text: &str) -> Result<Vec<f32>, String> {
-        let key = text.trim().to_string();
+        let input = ws_modelmgr::recipe::search_query(text);
+        let generation = self.indexer.store_lock().model_generation().map_err(|e| e.to_string())?;
+        let key = format!("{generation}:{input}");
         if let Some(hit) = self
             .query_cache
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .get(&key)
         {
+            if self.indexer.store_lock().model_generation().map_err(|e| e.to_string())? != generation {
+                return Err("model generation changed during query lookup".into());
+            }
             return Ok(hit);
         }
         let vec = if let Some(hook) = self
@@ -498,16 +501,19 @@ impl EngineService {
             .unwrap_or_else(|p| p.into_inner())
             .clone()
         {
-            hook(&key)?
+            hook(&input)?
         } else {
             let vecs = self
                 .embed
-                .embed_texts_bounded(std::slice::from_ref(&key), QUERY_EMBED_TIMEOUT)
+                .embed_texts_bounded(std::slice::from_ref(&input), QUERY_EMBED_TIMEOUT)
                 .map_err(|e| e.to_string())?;
             vecs.into_iter().next().ok_or_else(|| {
                 "embed worker returned no vectors for the query".to_string()
             })?
         };
+        if self.indexer.store_lock().model_generation().map_err(|e| e.to_string())? != generation {
+            return Err("model generation changed during query embedding".into());
+        }
         self.query_cache
             .lock()
             .unwrap_or_else(|p| p.into_inner())
@@ -522,6 +528,7 @@ impl EngineService {
         if !self.semantic_allowed(query) {
             return Vec::new();
         }
+        let Ok(generation) = self.indexer.store_lock().model_generation() else { return Vec::new(); };
         let kinds = hit_kinds(&query.categories);
         if !query.categories.is_empty() && kinds.is_empty() {
             return Vec::new();
@@ -534,6 +541,9 @@ impl EngineService {
                 return Vec::new();
             }
         };
+        if self.indexer.store_lock().model_generation().ok() != Some(generation) {
+            return Vec::new();
+        }
         let candidate_limit = (query.limit.max(1) as usize)
             .max(SEMANTIC_TOP_K)
             .saturating_mul(8);
@@ -572,7 +582,7 @@ impl EngineService {
         // Best cosine per entry across all segment kinds (`name`, `doc`, `image`, `ocr`, `pdf`, ...).
         let mut best: HashMap<i64, Vec<_>> = HashMap::new();
         for hit in &scored {
-            if !hit.cosine.is_finite() || hit.cosine < MIN_SEMANTIC_COSINE {
+            if !semantic_admitted(&hit.segment.kind, hit.cosine) {
                 continue;
             }
             best.entry(hit.segment.entry_id)
@@ -647,6 +657,9 @@ impl EngineService {
                 .then_with(|| a.title.cmp(&b.title))
         });
         out.truncate(query.limit.max(1) as usize);
+        if self.indexer.store_lock().model_generation().ok() != Some(generation) {
+            return Vec::new();
+        }
         out
     }
 
@@ -778,7 +791,12 @@ impl EngineService {
                 done: true,
             });
         }
-        let hits = self.plan_semantic(query, exact_ids);
+        let generation = self.indexer.store_lock().model_generation().ok();
+        let mut hits = self.plan_semantic(query, exact_ids);
+        if generation.is_none() || self.indexer.store_lock().model_generation().ok() != generation
+            || !self.semantic_allowed(query) {
+            hits.clear();
+        }
         if cancel.load(Ordering::Relaxed) {
             return client.send(&ServerMessage::Results {
                 id,
@@ -966,53 +984,6 @@ fn exact_entry_ids(results: &[SearchResult]) -> HashSet<i64> {
         .iter()
         .filter_map(|r| r.id.strip_prefix('e')?.parse::<i64>().ok())
         .collect()
-}
-
-/// Hybrid band mapping: cosine `[0, 1]` → score `[0.45, 0.90]`. The band sits
-/// below exact-prefix matches (0.92) and above FTS token matches (0.5); the
-/// `0.35` cosine threshold lands at `≈0.61`, so every shown semantic hit
-/// already outranks FTS noise.
-fn hybrid_base_score(cosine: f32) -> f64 {
-    0.45 + 0.45 * cosine as f64
-}
-
-fn tokenize_lower(text: &str) -> Vec<String> {
-    text.split(|c: char| !c.is_alphanumeric())
-        .filter(|t| !t.is_empty())
-        .map(|t| t.to_lowercase())
-        .collect()
-}
-
-/// +0.10 when a query token exactly matches a name token ("beach photo" →
-/// "beach-sunset.jpg"). Exact-token equality, not substring: the vector
-/// already captures fuzz; the boost rewards the user typing the real word.
-fn exact_token_boost(query_text: &str, name_lower: &str) -> f64 {
-    let name_tokens = tokenize_lower(name_lower);
-    if tokenize_lower(query_text)
-        .iter()
-        .any(|q| name_tokens.iter().any(|n| n == q))
-    {
-        0.10
-    } else {
-        0.0
-    }
-}
-
-/// +0.02 for entries touched in the last 30 days (launcher-style recency on
-/// top of the semantic band). `now_unix` is a parameter so tests pin time.
-fn recency_boost(mtime: i64, now_unix: i64) -> f64 {
-    if mtime > 0 && now_unix.saturating_sub(mtime) <= 30 * 86_400 {
-        0.02
-    } else {
-        0.0
-    }
-}
-
-/// Full hybrid score for one semantic hit, clamped to `[0, 1]`.
-fn hybrid_score(cosine: f32, query_text: &str, name_lower: &str, mtime: i64, now: i64) -> f64 {
-    (hybrid_base_score(cosine) + exact_token_boost(query_text, name_lower)
-        + recency_boost(mtime, now))
-    .clamp(0.0, 1.0)
 }
 
 /// Human-readable reason on every semantic hit.
@@ -1417,7 +1388,7 @@ mod tests {
 
     #[test]
     fn hybrid_band_maps_cosine_below_prefix_above_fts() {
-        assert_eq!(MIN_SEMANTIC_COSINE, 0.35);
+        assert_eq!(MIN_SEMANTIC_COSINE, 0.65);
         assert_eq!(SEMANTIC_TOP_K, 200);
         assert_eq!(QUERY_CACHE_CAP, 64);
         // Band edges: cosine 0 → 0.45, cosine 1 → 0.90.
@@ -1433,6 +1404,24 @@ mod tests {
         // Below exact-prefix (0.92), and the threshold lands above FTS (0.5).
         assert!(hybrid_base_score(1.0) < 0.92);
         assert!(hybrid_base_score(MIN_SEMANTIC_COSINE) > 0.5);
+    }
+
+    #[test]
+    fn application_query_uses_search_task_prefix() {
+        let (engine,_tree)=semantic_service();
+        engine.set_query_embed_hook(Arc::new(|text| {
+            assert_eq!(text,"task: search result | query: find borrowed books");
+            Ok(vec![1.0,0.0,0.0])
+        }));
+        engine.embed_query("  find borrowed books  ").unwrap();
+    }
+
+    #[test]
+    fn application_rejects_low_confidence_semantic_hits() {
+        let (engine,_tree)=semantic_service();
+        engine.set_query_embed_hook(Arc::new(|_|Ok(vec![0.64,0.0,(1.0_f32-0.64*0.64).sqrt()])));
+        assert!(engine.plan_semantic(&semantic_query("distinct concept"),&HashSet::new()).is_empty(),
+            "0.64 cosine is below the calibrated application admission floor");
     }
 
     #[test]
@@ -1773,6 +1762,35 @@ mod tests {
         // A different text re-embeds.
         assert_eq!(engine.plan_semantic(&semantic_query("other"), &ids).len(), 1);
         assert_eq!(calls.load(AtomicOrdering::SeqCst), 2);
+    }
+
+    #[test]
+    fn application_query_cache_is_fenced_by_model_generation() {
+        use std::sync::atomic::AtomicUsize;
+        let (engine,_tree)=semantic_service();
+        let calls=Arc::new(AtomicUsize::new(0));
+        let observed=Arc::clone(&calls);
+        engine.set_query_embed_hook(Arc::new(move |_| {
+            observed.fetch_add(1,Ordering::SeqCst);
+            Ok(vec![1.0,0.0,0.0])
+        }));
+        engine.embed_query("cached topic").unwrap();
+        engine.indexer.store_lock().reset_content_vectors().unwrap();
+        engine.embed_query("cached topic").unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst),2,"old-space query vector was reused after model migration");
+    }
+
+    #[test]
+    fn application_query_changed_generation_is_never_cached() {
+        let (engine,_tree)=semantic_service();
+        let indexer=Arc::clone(&engine.indexer);
+        engine.set_query_embed_hook(Arc::new(move |_| {
+            indexer.store_lock().reset_content_vectors().unwrap();
+            Ok(vec![1.0,0.0,0.0])
+        }));
+        assert!(engine.embed_query("changing topic").is_err(),"stale-space response was accepted");
+        engine.set_query_embed_hook(Arc::new(|_|Ok(vec![0.0,1.0,0.0])));
+        assert_eq!(engine.embed_query("changing topic").unwrap(),[0.0,1.0,0.0]);
     }
 
     // ---- streaming integration (fake vectors, real pipe frames) ----

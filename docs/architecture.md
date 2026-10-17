@@ -358,9 +358,20 @@ Internal `EmbedImage.token_budget` is optional/default280; no public C# wire
 change is needed. Image/audio share the supervisor's bounded cancellation and
 restart path. An explicit text model uses its own sibling projector. Capability
 tags require a loaded supporting projector (or explicit test-only stub mode).
-`ModelCompat.vector_pipeline_version=1` participates in compatibility; a missing
-field deserializes as legacy0, and malformed/partial identities fail closed.
+`ModelCompat.vector_pipeline_version=2` participates in compatibility; a missing
+field deserializes as legacy0, pipeline1 is incompatible, and malformed/partial identities fail closed.
 Vector replacement preserves durable exact text, locations and parser progress.
+
+Application formatting lives in `ws-modelmgr::recipe`: normal queries use
+`task: search result | query: ...`, code queries use the code-retrieval task,
+and text/code documents use `title: ... | text: ...`. Filename inputs retain
+their original spelling; development measurements rejected document prompts
+and extension stripping for that path. Image/audio inputs and raw runtime
+reference inputs carry no added text prefix. `ws-index::retrieval` owns common
+finite-score admission (cosine >=0.65 for recognized segment kinds) and hybrid
+ranking for daemon and CLI. Query cache keys include the model generation;
+generation changes during embedding, ranking or before semantic delivery
+suppress that stage. In-flight name batches also requeue across a model change.
 
 Independent public synthetic reference inputs/vectors are pinned with license
 and hashes in `ws-embed/tests/fixtures/media`. `cargo test -p ws-embed --test media

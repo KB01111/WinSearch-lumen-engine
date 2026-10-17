@@ -91,20 +91,35 @@ Run via `cargo run -p winsearch-cli -- eval names` (24 fixture entries, 18 queri
 | `names`, ConceptStubEmbedder | 15 positive + 3 negative | **1.000** | **1.000** | **0.000** |
 
 That default embedder is a deterministic concept fixture, not a real model.
-An actual CPU Q8_0 worker evaluation on 2026-10-16 passed all 15 positive
-queries (Recall@5/MRR 1.000) but failed all three negative controls (FP 1.000
-against the unchanged 0.000 gate). Prompt formatting alone did not resolve
-the failure. Real retrieval acceptance remains pending its dedicated fix;
-the earlier fixture result must not be presented as model-quality evidence.
+The original real CPU baseline passed all15positives but failed all3negative
+controls (FP1.000). With pipeline2 application query/document formatting and
+shared admission, the unchanged names suite passes Recall@5/MRR0.933 and
+negativeFP0.000 (`artifacts/retrieval-recipe-names.log`, real CPU/stub:false,
+768dimensions, same pinned Q8_0). The cooking-recipe paraphrase remains a miss.
+The separate development and held-out suites were frozen before calibration;
+full added modality/code/held-out and daemon parity acceptance remain open.
 
 ### Tuned semantic & hybrid ranking thresholds
 
-- `MIN_SEMANTIC_COSINE = 0.35`: the deterministic fixture's negative controls
-  score below 0.15. Real unrelated filename matches scored approximately
-  0.66–0.73, so this cutoff does not establish real-model rejection quality.
+- `MIN_SEMANTIC_COSINE = 0.65` is the common application floor after adding
+  task-aware text formatting. Frozen development query-prefix negative maxima
+  were0.5931(name),0.5912(code), and<=0.5747(other modalities). Its application
+  paraphrase "play a movie" remains a measured miss; it is not relabeled.
+  Filename stripping/normalization/document prompts were also measured and
+  rejected. These development measurements are not held-out acceptance.
 - `SEMANTIC_TOP_K = 200`: candidate pool before per-entry deduplication and hybrid scoring.
 - Hybrid score band `0.45 + 0.45 * cosine` (`[0.45, 0.90]`): places semantic matches below exact/prefix matches (`>= 0.92`) and above weak FTS token matches (`0.50`), with `+0.10` exact-token boost and `+0.02` 30-day recency boost.
 - `QUERY_CACHE_CAP = 64`: LRU cache for query embeddings so repeated/backspaced queries in an overlay session avoid re-embedding.
+
+The genuine production-daemon media check now passes all3positive timestamp/
+thumbnail cases and all3unrelated negative controls with pipeline2
+(`artifacts/indexed-media-recipe-final/results.json`): 38.906s indexing,
+39.765s total, 15video/7audio/565name vectors, actual CPU/stub:false/dim768.
+Sampled job peak working set was1,975,136,256B and private bytes2,322,423,808B,
+including the loaded model. The owned job was emptied and a separate process
+inventory found no remaining WinSearch helpers. This check uses the earlier
+generated media corpus, not the unopened held-out suite. It does not close the
+long-HD, cache-preview, installation, UI, code or Lumen consumer gates.
 
 ## Envelope and interpretation
 

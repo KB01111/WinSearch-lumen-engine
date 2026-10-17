@@ -52,7 +52,8 @@ implemented **and** verified. Legend: `[x]` done+verified · `[~]` partial ·
 - [x] Lazy load / warm-up / idle unload / explicit GPU release (Phase 3)
 - [x] Vector store (FP16, 768-d) + cosine scan (Phase 3)
 - [~] Hybrid ranking + exact boost + explanations + thresholds (Phase 3) —
-      deterministic fixture passes; actual model fails negative controls
+      shared application recipe/admission passes unchanged real CPU names gates;
+      full added modality/code/held-out acceptance remains required
 - [x] Query-embedding cache, cancellation-aware semantic pass (Phase 3)
 
 ## Multimodal content
@@ -134,7 +135,7 @@ implemented **and** verified. Legend: `[x]` done+verified · `[~]` partial ·
       .lnk round-trips, crash/resume, and subst-based drive disconnects
 - [~] Retrieval evals (exact, OCR, PDF page, audio/video timestamps, code) (Phases 3–5) —
       `winsearch-cli eval names` runs Recall@5, MRR and negative controls.
-      Deterministic fixtures pass; the actual-model name baseline fails negative
-      controls. Full indexed OCR/PDF/media/code quality remains required.
+      Deterministic fixtures and the unchanged real-model names gates pass.
+      Full indexed OCR/PDF/media/code and held-out quality remain required.
 - [ ] Resource-behavior tests (Phase 7)
 - [ ] UI verification matrix (Phase 7)

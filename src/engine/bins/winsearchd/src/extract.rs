@@ -643,7 +643,7 @@ impl Indexer {
                     image(&input)
                 }).collect::<Result<Vec<_>, _>>()?
             } else {
-                embed(&chunks.iter().map(|c| c.text.clone()).collect::<Vec<_>>())?
+                embed(&chunks.iter().map(|c| ws_modelmgr::recipe::document(&entry.name, &c.text)).collect::<Vec<_>>())?
             };
             if vectors.len() != chunks.len() {
                 return Err(EmbedError::Protocol("content embed arity".into()));
@@ -923,6 +923,23 @@ mod tests {
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
         indexer
+    }
+
+    #[test]
+    fn application_document_uses_title_and_text_without_changing_exact_content() {
+        let tree=TempTree::new();
+        let text="A library lends books for three weeks.";
+        fs::write(tree.0.join("draft.txt"),text).unwrap();
+        let indexer=seeded_indexer(&tree);
+        let called=std::cell::Cell::new(false);
+        indexer.extract_once_with(&ExtractorRegistry::default(),|texts| {
+            called.set(true);
+            assert_eq!(texts,[format!("title: draft.txt | text: {text}")]);
+            fake_embed(texts)
+        }).unwrap();
+        assert!(called.get());
+        let entry=indexer.store_lock().find_by_path(&tree.0.join("draft.txt").to_string_lossy()).unwrap().unwrap();
+        assert_eq!(indexer.store_lock().list_content_chunks(entry.id).unwrap()[0].text,text);
     }
 
     fn process_registry(cache: &TempTree) -> ExtractorRegistry {

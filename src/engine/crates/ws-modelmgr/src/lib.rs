@@ -15,6 +15,7 @@
 pub mod download;
 pub mod manager;
 pub mod manifest;
+pub mod recipe;
 
 pub use download::{download_file, DownloadError, DownloadOptions, ProgressFn};
 pub use manager::{ModelManager, ModelState, ModelStatus, ManagerError};

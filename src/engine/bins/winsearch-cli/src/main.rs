@@ -306,6 +306,11 @@ fn cmd_eval(suite_name: &str) -> anyhow::Result<()> {
                 outcome.query,
                 outcome.top_hits.len()
             );
+            if outcome.false_positive {
+                for (name, score, explanation) in &outcome.top_hits {
+                    println!("      {name} (score {score:.4}) | {explanation}");
+                }
+            }
         } else {
             let status = if outcome.hit_in_top_5 { "PASS" } else { "MISS" };
             let rank_str = outcome
