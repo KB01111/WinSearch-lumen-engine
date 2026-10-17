@@ -6,6 +6,10 @@ implemented **and** verified. Legend: `[x]` done+verified · `[~]` partial ·
 
 ## Reference
 
+The current [v1 gap matrix](v1-gap-matrix.md) records implementation, missing
+work, source, acceptance evidence and required changes. Its partial statuses
+include Lumen integration and the final native/installed acceptance gates.
+
 - DigUp (MIT, ARahim3/DigUp) — macOS/Swift reference. Architecture notes and
   behaviors ported are documented in `architecture.md`; attribution ships in
   `THIRD-PARTY-NOTICES.txt`.
