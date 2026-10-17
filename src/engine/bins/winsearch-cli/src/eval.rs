@@ -575,29 +575,34 @@ fn validate_fixture_segment(segment: &FixtureSegment) -> anyhow::Result<()> {
         segment.page != Some(0) && segment.line != Some(0),
         "invalid fixture page/line"
     );
-    let timed=segment.start_ms.is_some() || segment.end_ms.is_some();
-    let locations=u8::from(segment.page.is_some())+u8::from(segment.line.is_some())+u8::from(timed);
-    let location_allowed=match segment.kind.as_str() {
-        "doc"|"code"=>segment.page.is_none() && !timed,
-        "pdf"=>segment.line.is_none() && !timed,
-        "image"=>locations==0,
-        "audio"|"video"=>segment.page.is_none() && segment.line.is_none(),
-        "ocr"=>locations<=1,
-        _=>false,
+    let timed = segment.start_ms.is_some() || segment.end_ms.is_some();
+    let locations =
+        u8::from(segment.page.is_some()) + u8::from(segment.line.is_some()) + u8::from(timed);
+    let location_allowed = match segment.kind.as_str() {
+        "doc" | "code" => segment.page.is_none() && !timed,
+        "pdf" => segment.line.is_none() && !timed,
+        "image" => locations == 0,
+        "audio" | "video" => segment.page.is_none() && segment.line.is_none(),
+        "ocr" => locations <= 1,
+        _ => false,
     };
-    anyhow::ensure!(location_allowed,"location fields do not apply to fixture kind {}",segment.kind);
-    if let Some(start)=segment.line {
-        let end=u64::from(start)+segment.text.lines().count().saturating_sub(1) as u64;
-        anyhow::ensure!(end<=ws_code::MAX_CODE_FILE_BYTES+1,"fixture exceeds bounded source lines");
+    anyhow::ensure!(
+        location_allowed,
+        "location fields do not apply to fixture kind {}",
+        segment.kind
+    );
+    if let Some(start) = segment.line {
+        let end = u64::from(start) + segment.text.lines().count().saturating_sub(1) as u64;
+        anyhow::ensure!(
+            end <= ws_code::MAX_CODE_FILE_BYTES + 1,
+            "fixture exceeds bounded source lines"
+        );
     }
     if segment.kind == "pdf" {
         anyhow::ensure!(segment.page.is_some(), "PDF fixture needs its actual page");
     }
     if segment.kind == "code" {
-        anyhow::ensure!(
-            segment.line.is_some(),
-            "code fixture needs its actual line"
-        );
+        anyhow::ensure!(segment.line.is_some(), "code fixture needs its actual line");
     }
     anyhow::ensure!(
         segment.start_ms.is_some() == segment.end_ms.is_some()
@@ -801,7 +806,7 @@ fn index_code_fixtures(
     Ok(())
 }
 
-fn execute_code_query(
+pub fn execute_code_query(
     store: &ws_code::CodeStore,
     embedder: &dyn EvalEmbedder,
     query: &str,
@@ -1133,15 +1138,36 @@ pub fn execute_hybrid_query(
     limit: usize,
     now_unix: i64,
 ) -> anyhow::Result<Vec<RankedEvalHit>> {
-    let text = query_text.trim();
-    if text.is_empty() {
+    execute_hybrid_request(
+        store,
+        embedder,
+        &SearchRequest {
+            text: query_text.into(),
+            limit,
+            ..Default::default()
+        },
+        include_semantic,
+        now_unix,
+    )
+}
+
+/// The same offline ranker with native request filters applied before caps.
+pub fn execute_hybrid_request(
+    store: &IndexStore,
+    embedder: &dyn EvalEmbedder,
+    request: &SearchRequest,
+    include_semantic: bool,
+    now_unix: i64,
+) -> anyhow::Result<Vec<RankedEvalHit>> {
+    let text = request.text.trim();
+    let limit = request.limit;
+    if text.is_empty() || limit == 0 {
         return Ok(Vec::new());
     }
 
     let exact_hits = store.search(&SearchRequest {
         text: text.to_string(),
-        limit,
-        ..Default::default()
+        ..request.clone()
     })?;
 
     let mut exact_ids = HashSet::new();
@@ -1163,6 +1189,20 @@ pub fn execute_hybrid_query(
         return Ok(results);
     }
 
+    let filter = if request.apps_only || request.files_only || !request.kinds.is_empty() {
+        let ids =
+            store.matching_entry_ids(request.apps_only, request.files_only, &request.kinds)?;
+        if ids.is_empty() {
+            return Ok(results);
+        }
+        Some(ws_index::VectorFilter {
+            kinds: Vec::new(),
+            entry_ids: ids,
+        })
+    } else {
+        None
+    };
+
     let query_vecs = embedder.embed_texts(&[ws_modelmgr::recipe::search_query(text)])?;
     let Some(query_vec) = query_vecs.into_iter().next() else {
         return Ok(results);
@@ -1171,7 +1211,7 @@ pub fn execute_hybrid_query(
     let scored = store.search_vectors(
         &query_vec,
         SEMANTIC_TOP_K.max(limit).saturating_mul(8),
-        None,
+        filter.as_ref(),
     )?;
 
     let mut best: HashMap<i64, Vec<_>> = HashMap::new();
@@ -1460,6 +1500,85 @@ mod tests {
     use super::*;
 
     #[test]
+    fn eval_request_filters_apply_before_exact_and_semantic_limits() {
+        let mut store = IndexStore::open_in_memory().unwrap();
+        let root = store.ensure_root("C:/Eval").unwrap();
+        let generation = store.begin_generation(root).unwrap();
+        let records: Vec<_> = [("Report", true), ("report.txt", false)]
+            .into_iter()
+            .enumerate()
+            .map(|(index, (name, is_app))| EntryRecord {
+                root_id: root,
+                parent_id: None,
+                path: format!("C:/Eval/{name}"),
+                name: name.into(),
+                ext: extension_of(name),
+                is_dir: false,
+                size: 1,
+                mtime: 1_760_000_000,
+                volume_serial: 1,
+                file_id: index as u64 + 1,
+                is_app,
+                app_target: String::new(),
+                keywords: String::new(),
+            })
+            .collect();
+        store.apply_batch(root, generation, &records).unwrap();
+        let vector = concept_stub_vector("financial budget", 768);
+        for record in &records {
+            let entry = store.find_by_path(&record.path).unwrap().unwrap();
+            store
+                .upsert_segment(NewSegment {
+                    entry_id: entry.id,
+                    kind: "name",
+                    chunk_index: 0,
+                    text: &entry.name,
+                    page: None,
+                    start_ms: None,
+                    end_ms: None,
+                    line: None,
+                    vector: &vector,
+                })
+                .unwrap();
+        }
+        for (apps_only, files_only, expected) in
+            [(false, true, "report.txt"), (true, false, "Report")]
+        {
+            for (text, semantic) in [("report", false), ("financial budget", true)] {
+                let request = SearchRequest {
+                    text: text.into(),
+                    apps_only,
+                    files_only,
+                    limit: 1,
+                    ..Default::default()
+                };
+                let hits = execute_hybrid_request(
+                    &store,
+                    &ConceptStubEmbedder,
+                    &request,
+                    semantic,
+                    1_760_000_000,
+                )
+                .unwrap();
+                assert_eq!(hits.len(), 1, "{text} {apps_only}/{files_only}");
+                assert_eq!(hits[0].name, expected, "{text} {apps_only}/{files_only}");
+            }
+        }
+        let no_files = SearchRequest {
+            text: "financial budget".into(),
+            apps_only: true,
+            files_only: true,
+            limit: 1,
+            ..Default::default()
+        };
+        assert!(
+            execute_hybrid_request(&store, &ConceptStubEmbedder, &no_files, true, 0)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn expanded_suite_searches_exact_document_content_and_isolates_code_entries() {
         let suite: EvalSuite = serde_json::from_value(serde_json::json!({
             "name":"content-and-code-isolation-fixture",
@@ -1500,8 +1619,11 @@ mod tests {
             serde_json::json!({"kind":"doc","text":"text","line":u32::MAX}),
             serde_json::json!({"kind":"ocr","text":"text","line":u32::MAX}),
         ] {
-            let segment:FixtureSegment=serde_json::from_value(value.clone()).unwrap();
-            assert!(validate_fixture_segment(&segment).is_err(),"incoherent fixture accepted: {value}");
+            let segment: FixtureSegment = serde_json::from_value(value.clone()).unwrap();
+            assert!(
+                validate_fixture_segment(&segment).is_err(),
+                "incoherent fixture accepted: {value}"
+            );
         }
         for value in [
             serde_json::json!({"kind":"ocr","text":"page OCR","page":7}),
@@ -1509,8 +1631,11 @@ mod tests {
             serde_json::json!({"kind":"ocr","text":"image OCR","line":2}),
             serde_json::json!({"kind":"video","asset":"frame.png","start_ms":12,"end_ms":12}),
         ] {
-            let segment:FixtureSegment=serde_json::from_value(value.clone()).unwrap();
-            assert!(validate_fixture_segment(&segment).is_ok(),"valid fixture rejected: {value}");
+            let segment: FixtureSegment = serde_json::from_value(value.clone()).unwrap();
+            assert!(
+                validate_fixture_segment(&segment).is_ok(),
+                "valid fixture rejected: {value}"
+            );
         }
     }
 

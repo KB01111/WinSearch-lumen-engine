@@ -1,14 +1,17 @@
-"""Actual daemon/public CLI DTO parity on generated sources; never offline-eval identity.
+"""Actual daemon/public CLI DTO parity, optionally including offline-ranker snapshots.
 
 Default: native document/PDF/code extraction without a model. --real-model adds
 genuine CPU semantic image/audio/video checks using existing generated fixtures.
 Both modes use an isolated data directory and a kill-on-close Windows job.
+The snapshot option compares query code on the same native indexed vectors;
+fixture seeding and native extraction remain separately classified evidence.
 """
 import argparse
 import csv
 import hashlib
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -93,6 +96,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--real-model', action='store_true')
+    parser.add_argument('--compare-offline', action='store_true',
+        help='also compare shared offline query functions against native DB snapshots')
     options = parser.parse_args()
     output = options.output.resolve()
     assert output.is_relative_to(ROOT/'artifacts') and not output.exists()
@@ -110,6 +115,8 @@ def main():
     if options.real_model:
         summary['model_sha256'] = digest(model)
         summary['projector_sha256'] = digest(projector)
+    if options.compare_offline:
+        summary['offline_comparator_sha256'] = digest(binary/'examples/native-eval-parity.exe')
     (output/'input-lock.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
     sid = next(csv.reader(subprocess.check_output(['whoami', '/user', '/fo', 'csv', '/nh'], text=True).splitlines()))[1]
     instance = 'parity-'+uuid.uuid4().hex
@@ -144,18 +151,46 @@ def main():
             'WS_EMBED_MODEL': str(model if options.real_model else generated/'missing.gguf'),
             'WINSEARCH_TEST_DECODER_DIR': str(ROOT/'artifacts/dependencies/ffmpeg-2026-09-30/ffmpeg-n9.0.2-17-g2a571b6068-win64-lgpl-shared-9.0/bin')}
 
-        def cli(text, mode, semantic):
-            args = [str(binary/'winsearch-cli.exe'), 'search', text, '--json', '--mode', mode, '--limit', '5']
-            if semantic: args.append('--semantic')
+        def owned_command(args, timeout=45):
             # Join the job before this fixed waiting wrapper launches the CLI.
             wrapper = 'import subprocess,sys; sys.stdin.buffer.read(1); sys.exit(subprocess.call(sys.argv[1:]))'
             process = subprocess.Popen([sys.executable, '-c', wrapper, *args], env=environment,
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 creationflags=subprocess.CREATE_NO_WINDOW)
             owner.assign(process)
-            stdout, stderr = process.communicate(input=b'1', timeout=45)
+            stdout, stderr = process.communicate(input=b'1', timeout=timeout)
             assert process.returncode == 0, stderr.decode('utf-8', errors='replace')
+            return stdout, stderr
+
+        def cli(text, mode, semantic):
+            args = [str(binary/'winsearch-cli.exe'), 'search', text, '--json', '--mode', mode, '--limit', '5']
+            if semantic: args.append('--semantic')
+            stdout, _ = owned_command(args)
             return json.loads(stdout)
+
+        def compare_offline():
+            if not options.compare_offline:return
+            snapshots={}
+            for name in ['index','code']:
+                destination=output/f'{name}-snapshot.db'
+                with sqlite3.connect((output/f'data/db/{name}.db').as_uri()+'?mode=ro',uri=True) as source:
+                    with sqlite3.connect(destination) as target:source.backup(target)
+                snapshots[name]=destination
+            manifest={'index':str(snapshots['index']),'code_index':str(snapshots['code']),
+                'model':str(model) if options.real_model else None,
+                'cases':[{'name':case['name'],'query':case['query'],'expected':case['cli']}
+                    for case in summary['queries'] if case['name']!='code_disabled']}
+            input_path=output/'offline-input.json'
+            input_path.write_text(json.dumps(manifest,indent=2),encoding='utf-8')
+            summary['offline_input_sha256']=digest(input_path)
+            summary['offline_snapshot_sha256']={name:digest(path) for name,path in snapshots.items()}
+            result_path=output/'offline-results.json'
+            args=[str(binary/'examples/native-eval-parity.exe'),str(input_path),str(result_path)]
+            stdout,stderr=owned_command(args,timeout=90)
+            (output/'offline-worker.log').write_bytes(stdout+stderr)
+            summary['offline_parity']=json.loads(result_path.read_text(encoding='utf-8'))
+            assert summary['offline_parity']['equal'],summary['offline_parity']
+            summary['checks'].append('shared_offline_ranker_native_snapshot_ordered_ids_and_locations')
 
         def compare(name, text, mode='files', semantic=False, expected=None, location=None, empty=False,
                     expected_rank=1, excerpt=True):
@@ -214,6 +249,7 @@ def main():
                     # Filename embedding can remain pending with semantic search
                     # disabled; exact extraction must still become usable.
                     jobs = connection.execute("SELECT state FROM extract_jobs WHERE kind!='name'").fetchall()
+                assert all(row[0]!='failed' for row in jobs),('native extraction failed',jobs)
                 enough = len(progress) >= (5 if options.real_model else 2)
                 complete = enough and all(row[0] for row in progress) and all(row[0] == 'done' for row in jobs)
                 return complete and (not options.real_model or pending == 0)
@@ -224,6 +260,7 @@ def main():
             compare('pdf_exact', 'pdfparitytoken', expected='item-b.pdf', location={'kind': 'page', 'page': 2})
             hits = compare('code_definition_reference', 'parityneedle', mode='code', expected=source.name, location={'kind': 'line', 'line': 1})
             assert len(hits) == 2 and hits[1]['location'] == {'kind': 'line', 'line': 2}, hits
+            assert [hit['id'].split(':',4)[3] for hit in hits]==['true','false'],hits
             compare('notebook', 'notebookparity', mode='code', expected='cells.ipynb',
                 location={'kind': 'notebook', 'cell_ordinal': 1, 'line': 1, 'end_line': 2})
             compare('code_isolation', 'parityneedle', empty=True)
@@ -234,6 +271,7 @@ def main():
                 with sqlite3.connect((output/'data/db/code.db').as_uri()+'?mode=ro', uri=True) as connection:
                     assert connection.execute('SELECT count(*) FROM code_chunks WHERE norm>0').fetchone()[0] == 0
                 summary['checks'].append('native_code_exact_with_zero_model_vectors')
+                compare_offline()
             if options.real_model:
                 worker = harness.Pipe(r'\\.\pipe\winsearch-embed-'+sid+'-'+instance, child)
                 status = worker.request('status'); worker.stream.close()
@@ -253,8 +291,14 @@ def main():
                     if relevant is None:continue
                     if name in ['audio_semantic', 'video_semantic']:
                         assert relevant['location']['kind'] == 'timestamp', relevant
+                        lower,upper=(50,65) if name=='audio_semantic' else (32.75,65)
+                        begin,end=(relevant['location'][key] for key in ['seconds','end_seconds'])
+                        assert all(isinstance(value,(int,float)) and not isinstance(value,bool)
+                            and math.isfinite(value) for value in [begin,end]),relevant
+                        assert lower<=begin<=end<=upper,relevant
                     if name == 'audio_semantic':
                         assert not relevant.get('excerpt'), 'audio embeddings must not invent a transcript'
+                compare_offline()
                 # A cold query first yields the exact-stage frame. Cancel while
                 # real CPU semantic inference remains outstanding, then require
                 # an empty terminal frame and a live public transport.
