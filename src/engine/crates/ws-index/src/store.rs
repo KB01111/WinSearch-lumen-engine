@@ -409,7 +409,7 @@ impl IndexStore {
         Ok(chunks)
     }
 
-    /// Replace a regenerated derived input without replacing the exact row or claim.
+    /// Replace a regenerated input without changing exact rows or vector state.
     pub fn replace_content_artifact(
         &mut self, chunk: &crate::model::ContentChunk,
         input: &crate::model::DraftEmbeddingInput, revision: i64, generation: i64,
@@ -423,7 +423,7 @@ impl IndexStore {
         }
         let encode = |input| serde_json::to_string(input).map_err(|e| StoreError::InvalidConfig(e.to_string()));
         let tx=self.conn.transaction()?;
-        if tx.execute("UPDATE content_chunks SET embedding_input=?3 WHERE id=?1 AND entry_id=?2 AND embed_state='claimed' AND embedding_input=?4",
+        if tx.execute("UPDATE content_chunks SET embedding_input=?3 WHERE id=?1 AND entry_id=?2 AND embed_state IN ('claimed','done') AND embedding_input=?4",
             params![chunk.id, chunk.entry_id, encode(input)?, encode(&chunk.embedding_input)?])? != 1 { return Ok(false); }
         if let (crate::model::DraftEmbeddingInput::Image { path:old,.. },crate::model::DraftEmbeddingInput::Image { path:new,.. })=(&chunk.embedding_input,input) {
             let (old,new)=(old.to_string_lossy(),new.to_string_lossy());
@@ -2823,6 +2823,17 @@ mod tests {
         assert_eq!(after[0].id, claimed[0].id);
         assert_eq!(after[0].embedding_input, restored);
         assert_eq!(after[0].location.start_ms, Some(50000));
+        assert!(store.commit_content_vectors(&after, &[vec![0.0, 1.0]], progress.revision, generation).unwrap());
+        let segments = store.list_segments_for_entry(job.entry_id).unwrap();
+        let completed_input = DraftEmbeddingInput::Audio { path: "C:/private/cache/completed.wav".into() };
+        assert!(!store.replace_content_artifact(&after[0], &completed_input, progress.revision + 1, generation).unwrap());
+        assert!(!store.replace_content_artifact(&after[0], &completed_input, progress.revision, generation + 1).unwrap());
+        assert!(store.replace_content_artifact(&after[0], &completed_input, progress.revision, generation).unwrap());
+        assert!(!store.replace_content_artifact(&after[0], &completed_input, progress.revision, generation).unwrap());
+        assert!(store.claim_content_vectors(Some(job.entry_id)).unwrap().is_empty());
+        let preserved = store.list_segments_for_entry(job.entry_id).unwrap();
+        assert_eq!(preserved.iter().map(|s| (s.id, &s.vector)).collect::<Vec<_>>(),
+            segments.iter().map(|s| (s.id, &s.vector)).collect::<Vec<_>>());
     }
 
     #[test]

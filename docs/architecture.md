@@ -528,27 +528,33 @@ The parent confines, caps and promotes artifacts before removing scratch.
 Audio additionally requires a canonical bounded PCM16/mono 16k WAV whose sample
 duration agrees with its location. Artifact leases cover typed inputs as well
 as thumbnails. Silent-only progress commits atomically and stale/replayed claims
-cannot advance it. A missing deferred WAV or frame is regenerated from its permitted
-source in a bounded child, then attached to the existing claimed chunk without
-changing exact row IDs or source locations. Generation/revision/policy checks
+cannot advance it. A missing WAV or frame is regenerated from its permitted
+source in a bounded child, then attached to the existing claimed or completed
+chunk without changing vector state, exact row IDs or source locations. Completed
+vector IDs and values remain intact; recovery does not enqueue re-embedding.
+Generation/revision/policy checks
 precede replacement and vector commits; changed sources invalidate old vectors
 before a decoder failure can preserve stale media results. Restoring a video
 frame repairs same-time OCR thumbnail references, including drafts rendered in
-different worker requests. Once vectors are complete, on-demand preview/cache
-regeneration still belongs to the pending preview/maintenance slice.
+different worker requests. Actual audio/frame fixtures exercise completed-chunk
+recovery and rejection of changed sources before parser startup. The public
+on-demand preview and maintenance routes still belong to the pending consumer slice.
 
 Semantic results preserve the actual scored segment's page/line/time, up to 32
 deduplicated matching moments and matching cached thumbnails. Sound matches have
 no invented transcript. Existing entry filters also cover a video's soundtrack.
-The current admission threshold still returns unrelated results; the required
-shared retrieval recipe/confidence work and negative-control gate remain open.
+The initial admission threshold returned unrelated results. The shared pipeline2
+recipe subsequently passed the three native media positives and three unrelated
+controls; historical failures remain recorded in benchmarks. Final native/release
+retrieval acceptance remains separate from that scoped result.
 
 Native fixtures cover Unicode/spaced/dash filenames, three windows in a 65 second recording,
 compressed audio, network-playlist rejection without a loopback connection,
 and a 20 minute silent recording continued across workers. Native video checks add
 shot selection, variable-rate PTS, OCR, phase restart, cache restoration and
 source/pause/root changes. The genuine daemon run indexes later speech at 50..65s
-and retrieves a matching frame at 40s; unrelated negatives still fail. A two-hour
+and retrieves a matching frame at 40s; pipeline2 rejects the three tested unrelated
+queries. A two-hour
 160x100/1fps fixture verifies 1,200 frames plus 288 independent audio windows and
 owned decoder cancellation; it is not high-resolution throughput evidence.
 See benchmarks for measured resources. Full retrieval quality, completed-vector

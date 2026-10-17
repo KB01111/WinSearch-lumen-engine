@@ -1232,6 +1232,67 @@ mod tests {
     }
 
     #[test]
+    fn media_completed_native_cache_recovery_preserves_vectors_and_exact_rows() {
+        use ws_extract::DraftEmbeddingInput;
+        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+        for (kind, fixture) in [
+            ("audio", "artifacts/spoken-fixtures/two-passages-65s.wav"),
+            ("video", "artifacts/media-fixtures/時刻 clip.mp4"),
+        ] {
+            let tree = TempTree::new();
+            let cache = TempTree::new();
+            let source = tree.0.join(if kind == "audio" { "recording.wav" } else { "clip.mp4" });
+            fs::copy(repo.join(fixture), &source).unwrap();
+            let indexer = seeded_indexer(&tree);
+            let registry = process_registry(&cache);
+            let entry = indexer.store_lock().find_by_path(&source.to_string_lossy()).unwrap().unwrap();
+            // Fixture vectors exercise durable states, not model retrieval quality.
+            for _ in 0..8 {
+                indexer.extract_once_inputs(&registry,
+                    |texts| Ok(texts.iter().map(|_| vec![1.0, 0.0]).collect()),
+                    |_| Ok(vec![0.0, 1.0])).unwrap();
+                if indexer.store_lock().content_progress(entry.id, kind).unwrap().is_some_and(|p| p.complete) {
+                    break;
+                }
+            }
+            let progress = indexer.store_lock().content_progress(entry.id, kind).unwrap().unwrap();
+            assert!(progress.complete);
+            assert!(indexer.store_lock().claim_content_vectors(Some(entry.id)).unwrap().is_empty());
+            let before = indexer.store_lock().list_content_chunks(entry.id).unwrap();
+            let vectors = indexer.store_lock().list_segments_for_entry(entry.id).unwrap();
+            let vector_state = vectors.iter().map(|s| (s.id, s.chunk_index, s.vector.clone())).collect::<Vec<_>>();
+            let mut chunk = before.iter().find(|c| c.kind == kind).unwrap().clone();
+            let old = match &chunk.embedding_input {
+                DraftEmbeddingInput::Audio { path } | DraftEmbeddingInput::Image { path, .. } => path.clone(),
+                _ => panic!("media fixture missing derived input"),
+            };
+            fs::remove_file(&old).unwrap();
+            indexer.restore_media_artifact(&registry, &mut chunk, &source, &progress, progress.model_generation)
+                .expect("a completed vector's evicted preview must regenerate without re-embedding");
+            let restored = match &chunk.embedding_input {
+                DraftEmbeddingInput::Audio { path } => { ws_extract::audio::validate_window_wav(path).unwrap(); path },
+                DraftEmbeddingInput::Image { path, .. } => { ws_platform::wic::decode_image_wic(path, 1280).unwrap(); path },
+                _ => unreachable!(),
+            };
+            assert_ne!(restored, &old);
+            assert!(restored.starts_with(&cache.0));
+            let after = indexer.store_lock().list_content_chunks(entry.id).unwrap();
+            assert_eq!(after.iter().map(|c| (c.id, &c.text, c.chunk_index, c.attempts)).collect::<Vec<_>>(),
+                before.iter().map(|c| (c.id, &c.text, c.chunk_index, c.attempts)).collect::<Vec<_>>());
+            let after_vectors = indexer.store_lock().list_segments_for_entry(entry.id).unwrap();
+            assert_eq!(after_vectors.iter().map(|s| (s.id, s.chunk_index, s.vector.clone())).collect::<Vec<_>>(), vector_state);
+            assert_eq!(indexer.store_lock().content_progress(entry.id, kind).unwrap(), Some(progress.clone()));
+            assert!(indexer.store_lock().claim_content_vectors(Some(entry.id)).unwrap().is_empty());
+            fs::write(&source, b"changed corrupt media source").unwrap();
+            let mut unavailable = ExtractorRegistry::production();
+            unavailable.worker = Some(ExtractClient::new(cache.0.join("must-not-run.exe"), cache.0.clone()));
+            let error = indexer.restore_media_artifact(&unavailable, &mut chunk, &source, &progress, progress.model_generation)
+                .expect_err("changed source must be rejected before starting its parser");
+            assert!(error.to_string().contains("cancel"), "{error}");
+        }
+    }
+
+    #[test]
     fn media_audio_native_drafts_defer_without_model_or_fake_transcript() {
         let tree = TempTree::new();
         let cache = TempTree::new();
