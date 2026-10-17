@@ -195,6 +195,21 @@ The no-model native run (`artifacts/retrieval-parity-native-v2/results.json`)
 passed ten queries in 2.103s with zero code vectors. These are small generated
 corpora, not the mandatory large-index or installed-consumer measurements.
 
+The subsequent `9491262` checkpoint additionally runs the CLI's shared offline
+normal/code query functions on SQLite backups of that actual native index.
+`artifacts/retrieval-offline-native-v1/` has seven equal no-model query cases;
+`artifacts/retrieval-offline-cpu-v2/` has fourteen equal genuine CPU cases.
+Ordered public IDs, paths, primary and matching-moment locations match exactly,
+including code definition/reference roles and notebook cell ranges. The latter
+also passes eighteen public queries with the same .90/.85 quality and retained
+image miss/audio rank2. Index87.911s/total110.816s includes an extra offline worker
+load/query phase; no latency improvement is inferred. Binary/native/model,
+comparator, manifest, generated-source and snapshot hashes are retained. This
+compares distinct query code on the same native vectors; independently seeded
+fixtures and native extraction remain separately classified evidence.
+The initial CPU-v1 run failed indexing with a newly rebuilt extractor and an
+older daemon; it is retained, and the pair was rebuilt together before v2.
+
 The 2026-10-17 CPU worker follow-up reproduced all four independent media
 reference cosines (>=.999) but hit the unchanged watchdog at 180 seconds during
 repeated audio requests, before retrieval. This is an incomplete acceptance run,

@@ -56,8 +56,9 @@ include Lumen integration and the final native/installed acceptance gates.
 - [x] Lazy load / warm-up / idle unload / explicit GPU release (Phase 3)
 - [x] Vector store (FP16, 768-d) + cosine scan (Phase 3)
 - [~] Hybrid ranking + exact boost + explanations + thresholds (Phase 3) —
-      shared application recipe/admission passes unchanged real CPU names gates;
-      full added modality/code/held-out acceptance remains required
+      shared recipe/admission passes unchanged real CPU names, development and
+      held-out overall gates; shared offline query/native snapshot parity is
+      verified. Known modality misses remain; final source/release gates are open
 - [x] Query-embedding cache, cancellation-aware semantic pass (Phase 3)
 
 ## Multimodal content
