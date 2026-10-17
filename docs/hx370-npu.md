@@ -5,6 +5,10 @@ NPU device. The installed AMD driver is32.0.20102.3930; native `xrt-smi examine`
 reports XRT2.21.0, firmware1.1.2.64 and an accessible `NPU Strix` device.
 Device discovery is not evidence of EmbeddingGemma 2 inference.
 
+[FastFlowLM's Windows embedding documentation](https://fastflowlm.com/docs/models/embeddinggemma/)
+lists the older `google/embeddinggemma-300m` model. That does not establish
+EmbeddingGemma 2 support and cannot replace its shared text/image/audio space.
+
 Neither of the two requested bundles currently documents a ready native Windows
 model runtime:
 
