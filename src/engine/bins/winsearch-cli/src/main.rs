@@ -25,6 +25,7 @@ pub enum CliCommand {
         mode: SearchMode,
         semantic: bool,
         limit: u32,
+        json: bool,
     },
     Eval {
         suite: String,
@@ -50,10 +51,7 @@ pub fn parse_args(args: &[String]) -> anyhow::Result<CliCommand> {
         "status" => Ok(CliCommand::Status),
         "search" => parse_search_args(&args[1..]),
         "eval" => {
-            let suite = args
-                .get(1)
-                .cloned()
-                .unwrap_or_else(|| "names".to_string());
+            let suite = args.get(1).cloned().unwrap_or_else(|| "names".to_string());
             Ok(CliCommand::Eval { suite })
         }
         "model" => parse_model_args(&args[1..]),
@@ -65,15 +63,20 @@ fn parse_search_args(args: &[String]) -> anyhow::Result<CliCommand> {
     let mut mode = SearchMode::Auto;
     let mut semantic = false;
     let mut limit = 20u32;
+    let mut json = false;
     let mut query_parts: Vec<String> = Vec::new();
 
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
+            "--json" => {
+                json = true;
+                i += 1;
+            }
             "--mode" | "-m" => {
-                let val = args
-                    .get(i + 1)
-                    .ok_or_else(|| anyhow::anyhow!("--mode requires a value (all|files|apps|code)"))?;
+                let val = args.get(i + 1).ok_or_else(|| {
+                    anyhow::anyhow!("--mode requires a value (all|files|apps|code)")
+                })?;
                 mode = parse_search_mode(val)?;
                 i += 2;
             }
@@ -117,6 +120,7 @@ fn parse_search_args(args: &[String]) -> anyhow::Result<CliCommand> {
         mode,
         semantic,
         limit,
+        json,
     })
 }
 
@@ -166,8 +170,9 @@ SUBCOMMANDS:
         Connect to running winsearchd daemon and print engine/model/config status
         (falls back to local on-disk diagnostic when daemon is not running).
 
-    search <query> [--mode <all|files|apps|code>] [--semantic] [--limit <N>]
+    search <query> [--mode <all|files|apps|code>] [--semantic] [--limit <N>] [--json]
         Run a search against the running winsearchd daemon over named-pipe IPC.
+        --json prints the ordered SearchResult array after the final batch.
 
     eval [suite]
         Run headless retrieval evaluation against a fixture index (default: `names`).
@@ -249,7 +254,13 @@ fn cmd_status() -> anyhow::Result<()> {
     }
 }
 
-fn cmd_search(query: String, mode: SearchMode, semantic: bool, limit: u32) -> anyhow::Result<()> {
+fn cmd_search(
+    query: String,
+    mode: SearchMode,
+    semantic: bool,
+    limit: u32,
+    json: bool,
+) -> anyhow::Result<()> {
     let mut client = DaemonClient::connect()?;
     let results = client.search(SearchQuery {
         text: query.clone(),
@@ -258,6 +269,11 @@ fn cmd_search(query: String, mode: SearchMode, semantic: bool, limit: u32) -> an
         include_semantic: semantic,
         categories: Vec::new(),
     })?;
+
+    if json {
+        println!("{}", serde_json::to_string(&results)?);
+        return Ok(());
+    }
 
     println!(
         "search {:?} (mode={:?}, semantic={}) -> {} hit(s):",
@@ -288,8 +304,14 @@ fn cmd_eval(suite_name: &str) -> anyhow::Result<()> {
     println!("=== WinSearch Retrieval Eval: {} ===", report.suite_name);
     println!("suite file:        {}", path.display());
     println!("embedder:          {}", report.embedder_label);
-    println!("vector pipeline:   {}", ws_modelmgr::manifest::VECTOR_PIPELINE_VERSION);
-    println!("semantic floor:    {:.4}", ws_index::retrieval::MIN_SEMANTIC_COSINE);
+    println!(
+        "vector pipeline:   {}",
+        ws_modelmgr::manifest::VECTOR_PIPELINE_VERSION
+    );
+    println!(
+        "semantic floor:    {:.4}",
+        ws_index::retrieval::MIN_SEMANTIC_COSINE
+    );
     println!("fixture entries:   {}", suite.entries.len());
     println!(
         "queries:           {} total ({} positive, {} negative control)",
@@ -301,7 +323,11 @@ fn cmd_eval(suite_name: &str) -> anyhow::Result<()> {
 
     for outcome in &report.outcomes {
         if outcome.expect_empty {
-            let status = if outcome.false_positive { "FAIL (FP)" } else { "PASS (empty)" };
+            let status = if outcome.false_positive {
+                "FAIL (FP)"
+            } else {
+                "PASS (empty)"
+            };
             println!(
                 "  [{status}] [{}] {:?} -> {} hit(s)",
                 outcome.category,
@@ -331,12 +357,22 @@ fn cmd_eval(suite_name: &str) -> anyhow::Result<()> {
         }
         for hit in &outcome.ranked_hits {
             for location in &hit.matches {
-                println!("      {}: page={:?} time_ms={:?}..{:?} line={:?}",
-                    hit.name, location.page, location.start_ms, location.end_ms, location.line);
+                println!(
+                    "      {}: page={:?} time_ms={:?}..{:?} line={:?}",
+                    hit.name, location.page, location.start_ms, location.end_ms, location.line
+                );
             }
             if let Some(code) = &hit.code {
-                println!("      {}: symbol={} kind={} definition={} virtual_lines={}..{} cell={:?}",
-                    hit.path,code.symbol,code.kind,code.is_definition,code.start_line,code.end_line,code.notebook);
+                println!(
+                    "      {}: symbol={} kind={} definition={} virtual_lines={}..{} cell={:?}",
+                    hit.path,
+                    code.symbol,
+                    code.kind,
+                    code.is_definition,
+                    code.start_line,
+                    code.end_line,
+                    code.notebook
+                );
             }
         }
     }
@@ -344,9 +380,19 @@ fn cmd_eval(suite_name: &str) -> anyhow::Result<()> {
     println!();
     println!("Per modality/category (n/a means no queries of that type):");
     for (modality, metrics) in &report.modalities {
-        let metric = |value: Option<f64>| value.map(|n|format!("{n:.3}")).unwrap_or_else(||"n/a".into());
-        println!("  {modality}: positive={} negative={} Recall@5={} MRR={} FP={}",
-            metrics.positive, metrics.negative, metric(metrics.recall()), metric(metrics.mrr()), metric(metrics.fp_rate()));
+        let metric = |value: Option<f64>| {
+            value
+                .map(|n| format!("{n:.3}"))
+                .unwrap_or_else(|| "n/a".into())
+        };
+        println!(
+            "  {modality}: positive={} negative={} Recall@5={} MRR={} FP={}",
+            metrics.positive,
+            metrics.negative,
+            metric(metrics.recall()),
+            metric(metrics.mrr()),
+            metric(metrics.fp_rate())
+        );
     }
     println!();
     println!(
@@ -424,7 +470,10 @@ fn cmd_model_with_pipe(
             for expected in &EXPECTED_FILES {
                 let file_path = model_dir.join(expected.name);
                 if !file_path.is_file() {
-                    println!("  [MISSING] {} (expected {} bytes)", expected.name, expected.size);
+                    println!(
+                        "  [MISSING] {} (expected {} bytes)",
+                        expected.name, expected.size
+                    );
                     all_ok = false;
                     continue;
                 }
@@ -481,7 +530,10 @@ fn cmd_model_with_pipe(
                 }
             }
             Err(IpcError::NotConnected { .. }) => {
-                println!("downloading EmbeddingGemma 2 into {}...", model_dir.display());
+                println!(
+                    "downloading EmbeddingGemma 2 into {}...",
+                    model_dir.display()
+                );
                 let cancel = AtomicBool::new(false);
                 let last_pct = std::sync::Mutex::new(0u64);
                 let progress = |done: u64, total: u64| {
@@ -570,7 +622,8 @@ fn main() -> anyhow::Result<()> {
             mode,
             semantic,
             limit,
-        } => cmd_search(query, mode, semantic, limit),
+            json,
+        } => cmd_search(query, mode, semantic, limit, json),
         CliCommand::Eval { suite } => cmd_eval(&suite),
         CliCommand::Model(sub) => cmd_model(sub),
     }
@@ -590,8 +643,20 @@ mod tests {
     }
 
     #[test]
+    fn search_json_option_is_not_part_of_the_query() {
+        let command =
+            parse_args(&vec_args(&["search", "needle", "--json", "--mode", "code"])).unwrap();
+        assert!(
+            matches!(command, CliCommand::Search { query, mode: SearchMode::Code, json: true, .. } if query == "needle")
+        );
+    }
+
+    #[test]
     fn cli_arg_parsing_covers_all_subcommands() {
-        assert_eq!(parse_args(&vec_args(&["status"])).unwrap(), CliCommand::Status);
+        assert_eq!(
+            parse_args(&vec_args(&["status"])).unwrap(),
+            CliCommand::Status
+        );
         assert_eq!(
             parse_args(&vec_args(&["eval", "names"])).unwrap(),
             CliCommand::Eval {
@@ -621,6 +686,7 @@ mod tests {
                 mode: SearchMode::Files,
                 semantic: true,
                 limit: 10,
+                json: false,
             }
         );
         assert_eq!(
@@ -718,8 +784,8 @@ mod tests {
                                         kind: ResultKind::Document,
                                         title: "semantic-hit.xlsx".into(),
                                         subtitle: "C:\\Docs\\semantic-hit.xlsx".into(),
-                                        match_explanation:
-                                            "semantic name match · similarity 0.84".into(),
+                                        match_explanation: "semantic name match · similarity 0.84"
+                                            .into(),
                                         score: 0.83,
                                         ..Default::default()
                                     }],

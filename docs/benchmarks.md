@@ -164,6 +164,37 @@ in the final performance acceptance scope.
 
 ## Targets (Phase 7 power/performance items)
 
+Current source-consistency checkpoint (2026-10-17, source `52dd9fa`) reran
+the same active-policy standalone 50k probe. It measured exact/name p50
+19.05ms, p95 39.55ms and p99 43.48ms. The 50k cached FP16 scan measured
+p50 76.29ms/p95 122.83ms. Raw log:
+`artifacts/retrieval-source-policy-bench/run.log`. This is slower than the
+earlier run above; these are separate host-time samples, not a controlled A/B
+attribution. The probe uses virtual paths and the offline source callback;
+it exercises current SQLite policy/query views but does not measure native
+filesystem source-validation overhead. Native 1k/10k/50k/200k query, inference,
+hybrid, idle and recovery measurements remain required.
+
+The rebuilt daemon/public CLI comparison used actual generated documents,
+PDF pages, code/notebook sources, images, sound and video. Its CPU run
+`artifacts/retrieval-parity-cpu-v3/results.json` compared complete ordered DTOs
+for 18 queries and passed the unchanged overall Recall@5=.90/MRR=.85/zero-empty-
+control gates. The full-size screenshot query was a miss (visual cosine.642428
+below unchanged.65); the same scene in a resized video frame scored.691191.
+The audio file ranked2 behind the video's soundtrack. These outcomes remain
+reported; they are not converted to perfect modality results. Cancellation
+and live root revocation yielded empty terminal frames with a live transport.
+Indexing took 36.726s, total 43.391s; CPU/stub:false/dim768 was verified and the
+owned job emptied. This establishes public client/daemon DTO parity on this
+corpus, not identity with the offline fixture evaluator or NPU execution.
+The ten positive queries include four document, three code and one each of
+image/audio/video. Per-modality Recall@5/MRR are document 1/1, code 1/1,
+image 0/0, audio 1/.5 and video 1/1. The eight empty-result controls include
+isolation and root revocation; they are not eight independent semantic negatives.
+The no-model native run (`artifacts/retrieval-parity-native-v2/results.json`)
+passed ten queries in 2.103s with zero code vectors. These are small generated
+corpora, not the mandatory large-index or installed-consumer measurements.
+
 The 2026-10-17 CPU worker follow-up reproduced all four independent media
 reference cosines (>=.999) but hit the unchanged watchdog at 180 seconds during
 repeated audio requests, before retrieval. This is an incomplete acceptance run,
