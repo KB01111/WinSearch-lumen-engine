@@ -431,7 +431,12 @@ impl Indexer {
         self.store
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .set_engine_config(config)
+            .set_engine_config(config)?;
+        self.invalidate_vector_cache();
+        if let Some(code)=self.code_service.lock().unwrap_or_else(|p|p.into_inner()).as_ref().and_then(|w|w.upgrade()) {
+            code.policy_changed();
+        }
+        Ok(())
     }
 
     /// Reads a `meta` record (e.g. the `embedding_model` compat record the

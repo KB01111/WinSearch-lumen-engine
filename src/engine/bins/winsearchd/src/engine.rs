@@ -1821,6 +1821,20 @@ mod tests {
     }
 
     #[test]
+    fn application_query_rejects_semantic_disable_then_reenable() {
+        let (engine,_tree)=semantic_service();
+        let indexer=Arc::clone(&engine.indexer);
+        engine.set_query_embed_hook(Arc::new(move |_| {
+            let policy=indexer.get_engine_config().unwrap();
+            let mut disabled=policy.clone();disabled.semantic_enabled=false;
+            indexer.set_engine_config(&disabled).unwrap();
+            indexer.set_engine_config(&policy).unwrap();
+            Ok(vec![1.0,0.0,0.0])
+        }));
+        assert!(engine.plan_semantic(&semantic_query("changing semantic policy"),&HashSet::new()).is_empty());
+    }
+
+    #[test]
     fn application_query_rejects_root_revoke_then_regrant_during_embedding() {
         let (engine,_tree)=semantic_service();
         let indexer=Arc::clone(&engine.indexer);
@@ -1942,6 +1956,22 @@ mod tests {
         q.categories=vec![ResultKind::Video];
         assert!(engine.plan_results(&q).is_empty(),"video-only filters exclude code exact hits");
         assert!(!engine.semantic_allowed(&q),"excluded code must not start inference");
+        assert!(engine.plan_semantic(&q,&HashSet::new()).is_empty());
+        drop(engine);drop(code);fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn code_semantic_rejects_semantic_disable_then_reenable() {
+        let (engine,code,root)=code_search_service();
+        let indexer=Arc::clone(&engine.indexer);
+        engine.set_query_embed_hook(Arc::new(move |_| {
+            let policy=indexer.get_engine_config().unwrap();
+            let mut disabled=policy.clone();disabled.semantic_enabled=false;
+            indexer.set_engine_config(&disabled).unwrap();
+            indexer.set_engine_config(&policy).unwrap();
+            Ok(vec![1.0,0.0,0.0])
+        }));
+        let mut q=semantic_query("changing semantic policy");q.mode=SearchMode::Code;
         assert!(engine.plan_semantic(&q,&HashSet::new()).is_empty());
         drop(engine);drop(code);fs::remove_dir_all(root.parent().unwrap()).unwrap();
     }

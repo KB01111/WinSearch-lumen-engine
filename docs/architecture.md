@@ -432,6 +432,8 @@ delivery. Watcher invalidation or root/exclusion policy changes invalidate old
 requests even if permission is restored before inference returns. Code queries
 use their own parse/policy revision so unrelated ordinary vector batches do not
 invalidate a code request.
+Changing semantic/backend settings advances both request revisions, so a
+disable/re-enable transition cannot revive an earlier search.
 
 Independent public synthetic reference inputs/vectors are pinned with license
 and hashes in `ws-embed/tests/fixtures/media`. `cargo test -p ws-embed --test media
