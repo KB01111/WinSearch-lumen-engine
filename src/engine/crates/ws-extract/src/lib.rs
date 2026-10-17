@@ -1,17 +1,17 @@
 //! Content extraction trait, per-file budgets, overlapping text chunker,
 //! and baseline plain-text extraction for WinSearch (Phase 4, P4.1).
 
-pub mod budget;
 pub mod audio;
-pub mod decoder;
+pub mod budget;
 pub mod chunk;
 pub mod code;
+pub mod decoder;
 pub mod docs;
 pub mod image;
 pub mod ocr;
 pub mod pdf;
-pub mod worker;
 pub mod video;
+pub mod worker;
 
 use std::path::{Path, PathBuf};
 
@@ -27,7 +27,6 @@ pub use chunk::{
     DEFAULT_CHUNK_CHARS, DEFAULT_EXCERPT_CHARS, DEFAULT_OVERLAP_CHARS, DEFAULT_OVERLAP_RATIO,
 };
 pub use docs::{build_document_output, is_numeric_dominated, strip_rtf, DocumentExtractor};
-pub use ws_index::model::DraftEmbeddingInput;
 pub use image::{
     is_screenshot_path, parse_exif_from_bytes, stat_thumbnail_key, thumbnail_cache_path,
     ExifMetadata, ImageExtractor, DEFAULT_MAX_IMAGE_EDGE, DEFAULT_THUMBNAIL_MAX_EDGE,
@@ -36,6 +35,7 @@ pub use ocr::{
     build_ocr_segments, OcrProvider, OcrResultData, OcrWordBox, WinRtOcrProvider,
     DEFAULT_MAX_OCR_LANGUAGES,
 };
+pub use ws_index::model::DraftEmbeddingInput;
 
 /// Outcome status of running an [`Extractor`] on a file.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -170,6 +170,7 @@ pub trait Extractor: Send + Sync {
             total_units: successful.then_some(total),
             diagnostics: Vec::new(),
             media: None,
+            video_selection: None,
         })
     }
 }

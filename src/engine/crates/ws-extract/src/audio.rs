@@ -70,6 +70,7 @@ pub(crate) fn extract_windows(
             frames_ms: vec![],
             has_audio: true,
         }),
+        video_selection: None,
     })
 }
 

@@ -20,9 +20,9 @@ use ws_extract::{
     DocumentExtractor, ExtractBudget, ExtractError, ExtractOutput, ExtractionStatus, Extractor,
     ImageExtractor,
 };
-use ws_index::model::{SEGMENT_KIND_DOC, SEGMENT_KIND_IMAGE, SEGMENT_KIND_PDF};
 #[cfg(test)]
 use ws_index::model::SEGMENT_KIND_OCR;
+use ws_index::model::{SEGMENT_KIND_DOC, SEGMENT_KIND_IMAGE, SEGMENT_KIND_PDF};
 use ws_index::{ExtractJob, StoreError};
 
 use crate::embed_client::{EmbedError, EmbedSupervisor, EMBED_JOB_TIMEOUT};
@@ -272,9 +272,11 @@ impl Indexer {
             .ok()
             .map(|m| (m.len(), m.modified().ok()));
         let identity = ws_platform::identity::file_identity(path);
-        let source_unchanged = || source.is_some()
+        let source_unchanged = || {
+            source.is_some()
             && std::fs::metadata(path).ok().map(|m| (m.len(), m.modified().ok())) == source
-            && ws_platform::identity::file_identity(path) == identity;
+                && ws_platform::identity::file_identity(path) == identity
+        };
         let extract_res = if let Some(client) = &registry.worker {
             let mut request = client.request(
                 path.to_path_buf(),
@@ -283,6 +285,7 @@ impl Indexer {
             );
             request.cursor = progress.cursor;
             request.media_plan = progress.media_plan.clone();
+            request.video_selection = progress.video_selection.clone();
             match client.extract_while(
                 &request,
                 budget
@@ -306,7 +309,9 @@ impl Indexer {
                     return Ok(ExtractStepOutcome { claimed: true, requeued: true, ..Default::default() });
                 }
                 Err(ExtractClientError::Unsupported(_)) => {
-                    Ok(ws_extract::worker::ExtractResponse { code: None,
+                    Ok(ws_extract::worker::ExtractResponse {
+                        code: None,
+                        video_selection: None,
                         output: ExtractOutput::unsupported(),
                         next_cursor: None,
                         total_units: None,
@@ -316,7 +321,9 @@ impl Indexer {
                 }
                 Err(ExtractClientError::Timeout) => Err(ExtractError::DeadlineExceeded),
                 Err(ExtractClientError::Malformed(message)) => Err(ExtractError::Decode(message)),
-                Err(ExtractClientError::Worker(message)) => Err(ExtractError::Io(std::io::Error::other(message))),
+                Err(ExtractClientError::Worker(message)) => {
+                    Err(ExtractError::Io(std::io::Error::other(message)))
+                }
             }
         } else {
             budget
@@ -406,6 +413,7 @@ impl Indexer {
         }
         let next_cursor = response.next_cursor;
         let media_plan = response.media.clone();
+        let video_selection = response.video_selection.clone();
         let output = response.output;
         let mut artifacts = registry.worker.as_ref().map(|_| ArtifactLease::for_output(&output));
 
@@ -469,7 +477,11 @@ impl Indexer {
                     if video_frame!=frame || i==0 {
                         video_frame=frame;
                         video_draft=match ws_extract::video::decode_cursor(progress.cursor).expect("validated video cursor") {
-                            ws_extract::video::Cursor::Frame { index,draft } if index as usize==frame => draft,
+                            ws_extract::video::Cursor::Frame { index, draft }
+                                if index as usize == frame =>
+                            {
+                                draft
+                            }
                             _ => 0,
                         };
                     }
@@ -531,7 +543,14 @@ impl Indexer {
                 attempts: 0,
             });
         }
-        if !store.commit_content_batch_with_media(&job, &progress, &chunks, next_cursor, media_plan.as_ref())? {
+        if !store.commit_content_batch_with_video_selection(
+            &job,
+            &progress,
+            &chunks,
+            next_cursor,
+            media_plan.as_ref(),
+            video_selection.as_ref(),
+        )? {
             store.requeue_extract_job(job.id)?;
             return Ok(ExtractStepOutcome {
                 claimed: true,
@@ -880,9 +899,9 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
     use std::time::Duration;
+    use ws_extract::SegmentDraft;
     use ws_index::model::{SearchRequest, VectorFilter, SEGMENT_KIND_DOC, SEGMENT_KIND_NAME};
     use ws_index::IndexStore;
-    use ws_extract::SegmentDraft;
 
     struct TempTree(PathBuf);
 
@@ -969,11 +988,50 @@ mod tests {
                 let tree=TempTree::new(); let cache=TempTree::new();
                 let path=tree.0.join("clip.mp4");
                 fs::copy(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..")
-                    .join("artifacts/media-fixtures/時刻 clip.mp4"),&path).unwrap();
-                let indexer=seeded_indexer(&tree); let registry=process_registry(&cache);
+                        .join("artifacts/media-fixtures/時刻 clip.mp4"),
+                    &path,
+                )
+                .unwrap();
+                let indexer = seeded_indexer(&tree);
+                let registry = process_registry(&cache);
+                let entry = indexer
+                    .store_lock()
+                    .find_by_path(&path.to_string_lossy())
+                    .unwrap()
+                    .unwrap();
+                for _ in 0..6 {
+                    if indexer
+                        .store_lock()
+                        .content_progress(entry.id, "video")
+                        .unwrap()
+                        .is_some_and(|progress| progress.media_plan.is_some())
+                    {
+                        break;
+                    }
+                    indexer
+                        .extract_once_inputs(
+                            &registry,
+                            |_| panic!("selection has no text drafts"),
+                            |_| panic!("selection must finish before any frame/audio embedding"),
+                        )
+                        .unwrap();
+                }
+                assert!(indexer
+                    .store_lock()
+                    .content_progress(entry.id, "video")
+                    .unwrap()
+                    .unwrap()
+                    .media_plan
+                    .is_some());
                 if audio_phase {
                     indexer.extract_once_inputs(&registry, |_|panic!("no frame OCR in this fixture"),
-                        |_|Err(EmbedError::ModelNotAvailable("fixture deferred frames".into()))).unwrap();
+                            |_| {
+                                Err(EmbedError::ModelNotAvailable(
+                                    "fixture deferred frames".into(),
+                                ))
+                            },
+                        )
+                        .unwrap();
                 }
                 let changed=std::cell::Cell::new(false);
                 let used=std::cell::RefCell::new(Vec::new());
@@ -994,7 +1052,9 @@ mod tests {
                         }
                     }
                     Ok(vec![1.0,0.0]) // protocol fixture, never model-quality evidence
-                }).unwrap();
+                        },
+                    )
+                    .unwrap();
                 assert!(changed.get() && result.requeued,"phase={audio_phase} change={change}");
                 assert_eq!(result.segments_stored,0);
                 let store=indexer.store_lock();
@@ -1078,19 +1138,47 @@ mod tests {
         let entry=indexer.store_lock().find_by_path(&source.to_string_lossy()).unwrap().unwrap();
         let mut registry=process_registry(&cache);
         registry.set_budget_factory(|kind| { let mut budget=ExtractBudget::for_modality(kind); budget.max_segments=1; budget });
-        let unavailable=|| EmbedError::ModelNotAvailable("fixture no model".into());
-        for step in 0..50 {
+        let unavailable = || EmbedError::ModelNotAvailable("fixture no model".into());
+        let mut restarted_visual = false;
+        for step in 0..100 {
             let out=indexer.extract_once_typed(&registry, |_|Err(unavailable()), |_|Err(unavailable())).unwrap();
             assert_eq!(out.status,Some(ExtractionStatus::Extracted));
-            let saved=indexer.store_lock().content_progress(entry.id,"video").unwrap().unwrap();
-            assert!(saved.media_plan.is_some());
-            if step==1 {
+            let saved = indexer
+                .store_lock()
+                .content_progress(entry.id, "video")
+                .unwrap()
+                .unwrap();
+            if saved.media_plan.is_none() {
+                assert!(
+                    saved.video_selection.is_some(),
+                    "scan checkpoint must commit before frames"
+                );
+                assert!(indexer
+                    .store_lock()
+                    .list_content_chunks(entry.id)
+                    .unwrap()
+                    .is_empty());
+            }
+            if step == 1 || (saved.media_plan.is_some() && !restarted_visual) {
                 let ids=indexer.store_lock().list_content_chunks(entry.id).unwrap().iter().map(|c|c.id).collect::<Vec<_>>();
                 indexer.store_lock().reset_content_vectors().unwrap();
                 drop(indexer); indexer=open();
                 let restored=indexer.store_lock().content_progress(entry.id,"video").unwrap().unwrap();
                 assert_eq!(restored.cursor,saved.cursor); assert_eq!(restored.media_plan,saved.media_plan);
-                assert_eq!(indexer.store_lock().list_content_chunks(entry.id).unwrap().iter().map(|c|c.id).collect::<Vec<_>>(),ids);
+                assert_eq!(restored.video_selection, saved.video_selection);
+                assert_eq!(
+                    indexer
+                        .store_lock()
+                        .list_content_chunks(entry.id)
+                        .unwrap()
+                        .iter()
+                        .map(|c| c.id)
+                        .collect::<Vec<_>>(),
+                    ids
+                );
+                if saved.media_plan.is_some() {
+                    restarted_visual = true;
+                }
             }
             if saved.complete { break; }
         }
@@ -1098,7 +1186,15 @@ mod tests {
         assert!(progress.complete);
         let plan=progress.media_plan.unwrap();
         let chunks=indexer.store_lock().list_content_chunks(entry.id).unwrap();
-        let images=chunks.iter().filter(|c| matches!(c.embedding_input,ws_extract::DraftEmbeddingInput::Image { .. })).collect::<Vec<_>>();
+        let images = chunks
+            .iter()
+            .filter(|c| {
+                matches!(
+                    c.embedding_input,
+                    ws_extract::DraftEmbeddingInput::Image { .. }
+                )
+            })
+            .collect::<Vec<_>>();
         assert_eq!(images.iter().map(|c|c.location.start_ms.unwrap()).collect::<Vec<_>>(),plan.frames_ms);
         let windows=chunks.iter().filter(|c|c.kind=="audio").collect::<Vec<_>>();
         assert_eq!(windows.iter().map(|c|c.location.start_ms).collect::<Vec<_>>(),vec![Some(0),Some(25000),Some(50000)]);
@@ -1120,7 +1216,9 @@ mod tests {
                         _ => panic!("text in media callback"),
                     }
                     Ok(vec![0.0,1.0])
-                }).unwrap();
+                    },
+                )
+                .unwrap();
             if out.segments_stored==0 { break; }
         }
         let after=indexer.store_lock().list_content_chunks(entry.id).unwrap();
@@ -2898,4 +2996,3 @@ mod tests {
         }
     }
 }
-

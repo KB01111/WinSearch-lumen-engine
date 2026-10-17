@@ -95,6 +95,7 @@ impl ExtractClient {
             cursor: 0,
             max_units,
             media_plan: None,
+            video_selection: None,
         }
     }
 

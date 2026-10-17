@@ -123,12 +123,13 @@ long-HD, cache-preview, installation, UI, code or Lumen consumer gates.
 
 ## Envelope and interpretation
 
-- Typing in the overlay debounces at 120 ms; a query costs well under a frame
-  budget even at 200k entries, so the interactive path stays responsive while
-  indexing runs in the background.
-- Query cost is bounded by design: each candidate source is capped at 500
-  rows, so worst-case latency does not depend on how many files match.
-- The remaining p95 gap at 200k comes from two-token substring phrases (e.g.
+- Typing in the standalone overlay debounces at 120 ms. The historical 200k
+  exact-query measurements above do not establish current native source-guard,
+  semantic/hybrid, concurrent-indexing or Lumen input responsiveness.
+- Each candidate source returns at most 500 rows. Policy/source admission runs
+  before that cap; the cap does not bound all candidate inspection or vector-scan
+  work. Final native scaling measurements remain required.
+- The historical p95 gap at 200k came from two-token substring phrases (e.g.
   `presentation final`) with thousands of matches in the trigram index;
   measured at ~11 ms worst case.
 - Idle paths use work-queue waits and `ReadDirectoryChangesW`, with timed
@@ -303,3 +304,66 @@ parity, final reviewed-source or complete v1 acceptance.
 The measured CPU cap8 remains the conservative HX370 default above. Native
 Windows XRT detects the laptop's Strix NPU, but neither checked EmbeddingGemma2
 bundle provides verified Windows model execution. See [availability check](hx370-npu.md).
+
+## Resumable video-selection resources, 2026-10-18
+
+Initial shot selection now commits progress before frame rendering. A fixed
+15-second slice baseline made inexpensive sparse video spend most of its time
+starting workers. Adaptive slices use a decoded-pixel estimate and persist the
+chosen span, from 15 to 450 seconds. The owned 120-second watchdog still bounds
+actual work, including GOP preroll. Unknown rates retain 15-second slices.
+
+The final adaptive run reused the exact source files and pinned decoder binaries
+from the baseline, verifying their SHA256 before execution. No competing build,
+native test, inference or formatting process ran during this repeat.
+
+| Native fixture measurement | Fixed 15-second baseline | Adaptive repeat |
+| --- | ---: | ---: |
+| Two-hour 160×100/1fps selection batches | 480 | 16 |
+| Sum of selection-worker wall time | 142.443 s | 3.997 s |
+| Selected visual frames / independent audio windows | 1,200 / 288 | 1,200 / 288 |
+| Maximum batch, including separately checked render/audio | 3.354 s | 2.798 s |
+| Peak sampled owned working set across those batches | 114,536,448 B | 62,074,880 B |
+| Peak sampled owned private bytes | 93,585,408 B | 51,867,648 B |
+| Maximum scratch | 960,044 B | 960,044 B |
+| Actual decoder cancellation to empty owned job | 8.244 ms | 6.647 ms |
+| 120-second 1080p/15fps/GOP450 selection batches | 8 | 8 |
+| HD sum of selection-worker wall time | 8.712 s | 8.010 s |
+| HD decoder cancellation to empty owned job | 7.040 ms | 6.726 ms |
+
+The HD repeat peaked at 72,450,048 B owned working set, 51,494,912 B private bytes
+and zero scratch during selection. Memory is sampled every 20 ms; scratch also
+counts final files. Cancellation starts only after observing the actual ffmpeg
+child and uses QPC. Every batch's owned job was empty after cleanup, with no
+monitoring errors. The existing 1 GiB sampled working-set, 2 MiB scratch and
+120-second per-worker assertions were unchanged.
+
+The two-hour fixture checks early silence and a real late 7100..7130s mono16k WAV,
+plus the complete selection plan; it does not decode/embed all 288 audio windows.
+The improvement is consistent with reducing worker/decoder launches on cheap
+sources. These individual host-time samples do not establish a general speedup
+for other codecs, 4k/high-frame-rate or pathological long-GOP media. No model is
+loaded, so this is extraction evidence, separate from retrieval quality.
+
+Raw results and input locks are under
+`artifacts/media-selection-resources-v1/` and
+`artifacts/media-selection-resources-adaptive-v2/`. An earlier adaptive run
+measured 4.588 s sparse/7.598 s HD; it overlapped controller formatting cleanup
+near the end and is retained separately. Baseline hashes were recorded after
+that original run; adaptive runs record their own inputs before execution.
+
+Reproduce from the repository root, with the pinned decoder bundle available:
+
+```powershell
+python tools/test-media-resources.py --output artifacts/media-selection-new
+python tools/test-media-resources.py --output artifacts/media-selection-repeat --reuse-sources artifacts/media-selection-resources-v1
+```
+
+The current selected Rust packages passed 353 tests, zero ignored, including
+13 actual media fixtures, five actual PDF fixtures and 188 daemon tests:
+`artifacts/media-selection-adaptive-covering-serial.log`. An earlier parallel
+run exposed an obsolete visual-first test setup and a pre-existing 700 ms hostile
+worker readiness race; both failure records are retained. The setup now completes
+selection before testing the same six source/pause/root revocation cases. The
+unchanged selected tests passed serialized. Final whole-workspace, independent
+review, completed-vector preview/maintenance, UI, Lumen and installed gates remain.

@@ -181,5 +181,6 @@ pub fn extract_pdf_batch(
         total_units: Some(u64::from(total)),
         diagnostics,
         media: None,
+        video_selection: None,
     })
 }

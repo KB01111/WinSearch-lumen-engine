@@ -26,6 +26,7 @@ fn run(name: &str, cursor: u64, dependency: Option<&Path>) -> ExtractResponse {
         cursor,
         max_units: 30,
         media_plan: None,
+        video_selection: None,
     };
     assert!(
         req.path.is_file(),

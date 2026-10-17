@@ -17,8 +17,8 @@ use ws_platform::child_job::ChildJob;
 pub const MAX_STREAMS: usize = 32;
 pub const MAX_DURATION_MS: u64 = ws_index::model::MAX_MEDIA_DURATION_MS;
 pub const MAX_PCM_BYTES: usize = 30 * 16000 * 2;
-pub const MAX_SHOT_SAMPLES: usize = 14400;
-pub const SHOT_PIXELS: usize = 32 * 18;
+pub const MAX_SHOT_SAMPLES: usize = ws_index::model::MAX_VIDEO_SHOT_SAMPLES;
+pub const SHOT_PIXELS: usize = ws_index::model::VIDEO_GRAY_PIXELS;
 const FORMATS: &str =
     "aac,ac3,aiff,ape,asf,au,avi,flac,flv,matroska,webm,mov,mp3,mpeg,mpegts,ogg,wav,wv";
 
@@ -27,6 +27,7 @@ pub struct MediaInfo {
     pub duration_ms: u64,
     pub has_audio: bool,
     pub has_video: bool,
+    pub video_pixels_per_second: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -40,6 +41,8 @@ struct Stream {
     codec_name: Option<String>,
     width: Option<u32>,
     height: Option<u32>,
+    avg_frame_rate: Option<String>,
+    r_frame_rate: Option<String>,
     #[serde(default)]
     disposition: Disposition,
 }
@@ -67,6 +70,7 @@ pub fn parse_probe(bytes: &[u8]) -> Result<MediaInfo, ExtractError> {
         duration_ms,
         has_audio: false,
         has_video: false,
+        video_pixels_per_second: None,
     };
     for stream in probe.streams {
         if matches!(stream.codec_type.as_str(), "audio" | "video")
@@ -88,6 +92,33 @@ pub fn parse_probe(bytes: &[u8]) -> Result<MediaInfo, ExtractError> {
                     || u64::from(width) * u64::from(height) > 67_108_864
                 {
                     return Err(decode("media dimensions exceed bounded decoder input"));
+                }
+                if !info.has_video {
+                    info.video_pixels_per_second = [
+                        stream.avg_frame_rate.as_deref(),
+                        stream.r_frame_rate.as_deref(),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|value| {
+                        if value.len() > 32 {
+                            return None;
+                        }
+                        let (numerator, denominator) = value.split_once('/')?;
+                        let (numerator, denominator) = (
+                            numerator.parse::<u64>().ok()?,
+                            denominator.parse::<u64>().ok()?,
+                        );
+                        if numerator == 0 || denominator == 0 {
+                            return None;
+                        }
+                        u64::from(width)
+                            .checked_mul(u64::from(height))?
+                            .checked_mul(numerator)
+                            .map(|pixels| pixels.div_ceil(denominator))
+                            .filter(|pixels| *pixels > 0)
+                    })
+                    .max();
                 }
                 info.has_video = true;
             }
@@ -203,7 +234,7 @@ pub fn probe(path: &Path, budget: &ExtractBudget) -> Result<MediaInfo, ExtractEr
     budget.check_size(std::fs::metadata(path)?.len())?;
     let mut command = command("ffprobe.exe")?;
     input(&mut command, path)?;
-    command.args(["-show_entries", "format=duration:stream=codec_type,codec_name,width,height:stream_disposition=attached_pic",
+    command.args(["-show_entries", "format=duration:stream=codec_type,codec_name,width,height,avg_frame_rate,r_frame_rate:stream_disposition=attached_pic",
         "-of", "json", "-i"]).arg(path);
     parse_probe(&capture(&mut command, 65536, budget)?)
 }
@@ -285,6 +316,56 @@ pub fn sample_video(path: &Path, interval_ms: u64, budget: &ExtractBudget) -> Re
     }
     Ok(times.into_iter().zip(pixels.chunks_exact(SHOT_PIXELS))
         .map(|(time_ms,p)| VideoSample { time_ms, gray:p.to_vec() }).collect())
+}
+
+/// Decode only one source-time slice. Input seeking retains GOP preroll; the
+/// filter's absolute PTS gate prevents an adjacent slice from owning the same frame.
+pub fn sample_video_slice(
+    path: &Path,
+    start_ms: u64,
+    end_ms: u64,
+    interval_ms: u64,
+    previous_ms: Option<u64>,
+    budget: &ExtractBudget,
+) -> Result<Vec<VideoSample>, ExtractError> {
+    if start_ms >= end_ms
+        || end_ms > MAX_DURATION_MS
+        || end_ms - start_ms > ws_index::model::MAX_VIDEO_SELECTION_SPAN_MS
+        || interval_ms == 0
+        || interval_ms > MAX_DURATION_MS
+        || previous_ms.is_some_and(|t| t >= start_ms)
+    {
+        return Err(decode("invalid bounded shot scan"));
+    }
+    let first_allowed =
+        previous_ms.map_or(start_ms, |t| t.saturating_add(interval_ms).max(start_ms));
+    let cap = ((end_ms - start_ms).div_ceil(interval_ms) + 1).min(512) as usize;
+    let mut command = video_command(path)?;
+    command.arg("-ss").arg(seconds(start_ms)).arg("-t").arg(seconds(end_ms-start_ms))
+        .arg("-i").arg(path).args(["-map","0:V:0","-an","-sn","-dn","-vf"])
+        .arg(format!("select='gte(t,{})*lt(t,{})*(isnan(prev_selected_t)+gte(t-prev_selected_t,{}))',scale=32:18,format=gray,showinfo",
+            seconds(first_allowed), seconds(end_ms), seconds(interval_ms)))
+        .args(["-frames:v"]).arg(cap.to_string())
+        .args(["-fps_mode","passthrough","-c:v","rawvideo","-threads","2","-f","rawvideo","pipe:1"]);
+    let (pixels, log) = capture_outputs(&mut command, cap * SHOT_PIXELS, 512 * 1024, budget)?;
+    let times = frame_times(&log, cap)?;
+    if pixels.len() % SHOT_PIXELS != 0
+        || times.len() != pixels.len() / SHOT_PIXELS
+        || times.iter().any(|t| *t < start_ms || *t >= end_ms)
+        || times
+            .windows(2)
+            .any(|p| p[1] < p[0].saturating_add(interval_ms))
+    {
+        return Err(decode("bounded shot pixels/timestamps do not agree"));
+    }
+    Ok(times
+        .into_iter()
+        .zip(pixels.chunks_exact(SHOT_PIXELS))
+        .map(|(time_ms, p)| VideoSample {
+            time_ms,
+            gray: p.to_vec(),
+        })
+        .collect())
 }
 
 fn video_command(path: &Path) -> Result<Command, ExtractError> {

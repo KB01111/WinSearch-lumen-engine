@@ -88,7 +88,9 @@ include Lumen integration and the final native/installed acceptance gates.
       navigation, timeline markers (Phase 4) — native selection/PTS/OCR/phases and
       source-policy/cache recovery verified; genuine frame and later soundtrack
       locations and all3current daemon negative controls pass; timeline/player, complete
-      cache maintenance, expensive long-source scanning and packaging remain open
+      cache maintenance and packaging remain open. Selection now checkpoints before
+      rendering; matched two-hour/1080p fixtures verify bounded scan continuation,
+      source-time coverage and owned cancellation. Broader codec/4k acceptance remains
 
 ## Code search (opt-in)
 

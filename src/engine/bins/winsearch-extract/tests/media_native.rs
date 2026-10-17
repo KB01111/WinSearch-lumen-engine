@@ -20,7 +20,41 @@ fn run(name: &str, kind: &str, cursor: u64, units: u32) -> ExtractResponse {
     run_with_plan(name,kind,cursor,units,None)
 }
 
-fn run_with_plan(name:&str,kind:&str,cursor:u64,units:u32,plan:Option<ws_extract::worker::MediaBatch>) -> ExtractResponse {
+fn run_with_plan(
+    name: &str,
+    kind: &str,
+    cursor: u64,
+    units: u32,
+    plan: Option<ws_extract::worker::MediaBatch>,
+) -> ExtractResponse {
+    let mut response = run_raw(name, kind, cursor, units, plan.clone(), None);
+    if kind == "video" && plan.is_none() && cursor == 0 {
+        while let Some(state) = response.video_selection.clone() {
+            if let Some(plan) = response.media.clone() {
+                response = run_raw(name, kind, 0, units, Some(plan), None);
+                break;
+            }
+            response = run_raw(
+                name,
+                kind,
+                response.next_cursor.unwrap(),
+                units,
+                None,
+                Some(state),
+            );
+        }
+    }
+    response
+}
+
+fn run_raw(
+    name: &str,
+    kind: &str,
+    cursor: u64,
+    units: u32,
+    plan: Option<ws_extract::worker::MediaBatch>,
+    selection: Option<ws_extract::worker::VideoSelection>,
+) -> ExtractResponse {
     let repo = root();
     let source = if name == "two-passages-65s.wav" {
         "spoken-fixtures"
@@ -40,6 +74,7 @@ fn run_with_plan(name:&str,kind:&str,cursor:u64,units:u32,plan:Option<ws_extract
         cursor,
         max_units: units,
         media_plan: plan,
+        video_selection: selection,
     };
     assert!(
         request.path.is_file(),
@@ -169,6 +204,119 @@ fn audio_native_disguised_playlist_cannot_connect_to_network() {
     assert!(response.output.segments.is_empty());
     assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
     std::fs::remove_file(source).unwrap();
+}
+
+#[test]
+fn video_native_short_visual_track_keeps_full_soundtrack() {
+    let repo = root();
+    let name = format!("short-visual-long-audio-{}.mp4", std::process::id());
+    let source = repo.join("artifacts/media-fixtures").join(&name);
+    let decoder=repo.join("artifacts/dependencies/ffmpeg-2026-09-30/ffmpeg-n9.0.2-17-g2a571b6068-win64-lgpl-shared-9.0/bin/ffmpeg.exe");
+    let generated = Command::new(decoder)
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-n",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=0x486878:s=160x100:r=1:d=8",
+            "-i",
+        ])
+        .arg(repo.join("artifacts/spoken-fixtures/two-passages-65s.wav"))
+        .args([
+            "-map", "0:v:0", "-map", "1:a:0", "-c:v", "mpeg4", "-q:v", "4", "-threads", "2",
+            "-c:a", "aac", "-t", "65",
+        ])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        generated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&generated.stderr)
+    );
+    let mut response = run_raw(&name, "video", 0, 1, None, None);
+    for _ in 0..5 {
+        if response.media.is_some() {
+            break;
+        }
+        let state = response.video_selection.clone().unwrap();
+        response = run_raw(
+            &name,
+            "video",
+            response.next_cursor.unwrap(),
+            1,
+            None,
+            Some(state),
+        );
+    }
+    let plan = response
+        .media
+        .expect("selection must finish while only audio remains");
+    assert_eq!(plan.duration_ms, 65_000);
+    assert!(plan.has_audio);
+    assert_eq!(plan.frames_ms.last(), Some(&7_000));
+    let audio = run_raw(
+        &name,
+        "video",
+        ws_extract::video::audio_cursor(2),
+        1,
+        Some(plan),
+        None,
+    );
+    assert!(audio
+        .output
+        .segments
+        .iter()
+        .any(|segment| segment.kind == "audio"
+            && segment.start_ms == Some(50_000)
+            && segment.end_ms == Some(65_000)));
+    std::fs::remove_file(source).unwrap();
+}
+
+#[test]
+fn video_native_commits_selection_before_rendering_frames() {
+    let first = run_raw("時刻 clip.mp4", "video", 0, 1, None, None);
+    assert_eq!(first.output.status, ExtractionStatus::Extracted);
+    assert!(
+        first.output.segments.is_empty(),
+        "initial scan must not render frames"
+    );
+    assert!(
+        first.media.is_none(),
+        "a partial scan must not freeze the plan"
+    );
+    let mut state = first.video_selection.unwrap();
+    assert_eq!(state.next_ms, 15_000);
+    assert!(state.sample_count > 0);
+    let mut cursor = first.next_cursor.unwrap();
+    let mut batches = 1;
+    loop {
+        let response = run_raw(
+            "時刻 clip.mp4",
+            "video",
+            cursor,
+            1,
+            None,
+            Some(state.clone()),
+        );
+        batches += 1;
+        assert!(response.output.segments.is_empty());
+        if let Some(plan) = response.media {
+            assert_eq!(response.next_cursor, Some(0));
+            assert!(plan.frames_ms.iter().any(|t| t.abs_diff(32750) <= 500));
+            assert!(batches > 1);
+            let rendered = run_raw("時刻 clip.mp4", "video", 0, 1, Some(plan), None);
+            assert!(rendered.output.segments.iter().any(|s| s.kind == "video"));
+            break;
+        }
+        state = response.video_selection.unwrap();
+        cursor = response.next_cursor.unwrap();
+        assert_eq!(cursor, ws_extract::video::selection_cursor(state.next_ms));
+    }
 }
 
 #[test]

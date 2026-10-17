@@ -29,6 +29,7 @@ fn run() -> Result<(), String> {
             total_units: None,
             diagnostics: Vec::new(),
             media: None,
+            video_selection: None,
         }
     } else if !request.scratch_dir.is_absolute()
         || !ws_platform::content::local_content_allowed(&request.path)
@@ -43,6 +44,7 @@ fn run() -> Result<(), String> {
             total_units: None,
             diagnostics: Vec::new(),
             media: None,
+            video_selection: None,
         }
     } else {
         let mut budget = ExtractBudget::for_modality(&request.kind);
@@ -71,6 +73,7 @@ fn run() -> Result<(), String> {
             total_units: None,
             diagnostics: Vec::new(),
             media: None,
+            video_selection: None,
         })
     };
     ws_protocol::write_message(&mut stdout, &response).map_err(|e| e.to_string())

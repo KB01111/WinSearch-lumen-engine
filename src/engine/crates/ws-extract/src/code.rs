@@ -89,6 +89,7 @@ pub fn extract_code_batch(
             .map(|d| d.chars().take(256).collect())
             .collect(),
         media: None,
+        video_selection: None,
         code: Some(CodeBatch {
             language: parsed.language,
             units,
@@ -195,6 +196,7 @@ mod tests {
             cursor: 0,
             max_units: 1,
             media_plan: None,
+            video_selection: None,
         };
         let valid = ExtractResponse {
             output: ExtractOutput::extracted(vec![]),
@@ -202,6 +204,7 @@ mod tests {
             total_units: Some(2),
             diagnostics: vec![],
             media: None,
+            video_selection: None,
             code: Some(CodeBatch {
                 language: "rust".into(),
                 units: vec![CodeUnit::Chunk {

@@ -495,20 +495,32 @@ Mean absolute grayscale change of 38/255 marks a shot candidate. Sorted candidat
 within 500 ms collapse; an evenly spaced subsample of the union caps selection at
 1,200 frames and retains first/last coverage. Integer PTS/time-base conversion
 preserves variable-rate source time; no synthetic fps clock supplies locations.
-Shot raw pixels/logs are bounded separately (about 8 MiB each), frame PNGs at 16 MiB,
-rendered sides at 1280 pixels. Each batch emits at most 30 frame units/256 drafts.
+Each long-video scan requests a source-time slice in 15-second increments, up to
+450 seconds. The first visual stream's dimensions and larger valid average/base
+frame rate estimate a 500-million decoded-pixel work budget; unknown rates use
+15 seconds. The request's unit limit further caps the span. This estimate controls
+batch size, while the owned deadline controls actual runtime, including GOP preroll.
+The chosen span is immutable in the revision checkpoint. A batch emits at most
+512 low-resolution samples (32×18 gray, 288 KiB raw pixels and 512 KiB logs).
+Accurate seeking can decode the preceding GOP within the existing owned deadline.
+Frame PNGs remain capped at 16 MiB, rendered sides at 1280 pixels. Visual batches
+emit at most 30 frame units/256 drafts.
 Visual inputs use 70 tokens, or 140 when useful OCR is present; numeric OCR stays
 exact-only. Videos without sound retain visual search; audio-only containers use
 the soundtrack route.
 
-Frame cursors encode `frame_index << 16 | within_frame_draft`; the independent
-soundtrack phase uses `1 << 62 | window_ordinal`. The revision-scoped selection
-and cursor commit with chunks and the extraction claim in one transaction.
-Changing a continued plan, replaying a claim, or skipping phases is rejected.
+Long videos first carry a typed selection checkpoint using `1 << 61 | next_ms`.
+It holds the scan span, bounded candidate times, the preceding 32×18 gray sample and periodic
+position; a scan slice and cursor commit with the claim in one transaction. The
+final plan freezes only when scanning finishes. Frame cursors then encode
+`frame_index << 16 | within_frame_draft`; the independent soundtrack phase uses
+`1 << 62 | window_ordinal`. Selection/plan changes, replayed claims and skipped
+phases are rejected. Older persisted visual/audio plans continue from their
+existing cursors.
 The 1,200-frame cap never truncates the soundtrack's 30 second/25 second-hop windows.
-Initial shot selection still decodes the source sequentially under the 120 second
-budget. The sparse two-hour fixture passes; expensive long/high-resolution scans
-have not established resumable selection and remain a final acceptance concern.
+Every scan worker retains the existing 120-second deadline and owned decoder job.
+Selection progress is durable before frame rendering begins; native long/high-
+resolution resource acceptance is recorded in the selection checkpoint report.
 
 DraftEmbeddingInput distinguishes text, image budgets and derived audio paths;
 it is persisted on each content chunk independently of searchable text.

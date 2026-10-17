@@ -162,10 +162,12 @@ impl IndexStore {
         entry: i64,
         kind: &str,
     ) -> Result<Option<crate::model::ContentProgress>, StoreError> {
-        Ok(self.conn.query_row("SELECT cursor,complete,revision,source,model_generation,media_plan FROM content_progress WHERE entry_id=?1 AND kind=?2", params![entry,kind], |r| Ok(crate::model::ContentProgress {
+        Ok(self.conn.query_row("SELECT cursor,complete,revision,source,model_generation,media_plan,video_selection FROM content_progress WHERE entry_id=?1 AND kind=?2", params![entry,kind], |r| Ok(crate::model::ContentProgress {
             cursor:r.get::<_,i64>(0)? as u64, complete:r.get(1)?, revision:r.get(2)?, source:r.get(3)?, model_generation:r.get(4)?,
             media_plan:r.get::<_,Option<String>>(5)?.map(|s| serde_json::from_str(&s))
                 .transpose().map_err(|e| rusqlite::Error::FromSqlConversionFailure(5,rusqlite::types::Type::Text,Box::new(e)))?,
+            video_selection:r.get::<_,Option<String>>(6)?.map(|s| serde_json::from_str(&s))
+                .transpose().map_err(|e| rusqlite::Error::FromSqlConversionFailure(6,rusqlite::types::Type::Text,Box::new(e)))?,
         })).optional()?)
     }
 
@@ -179,13 +181,17 @@ impl IndexStore {
         let generation = self.model_generation()?;
         if let Some(progress) = self.content_progress(entry, kind)? {
             if !progress.complete && progress.revision == revision && progress.source == source
-                && (kind != "video" || progress.cursor == 0 || progress.media_plan.is_some()) {
+                && (kind != "video"
+                    || progress.cursor == 0
+                    || progress.media_plan.is_some()
+                    || progress.video_selection.is_some())
+            {
                 return Ok(progress);
             }
         }
         self.conn.execute("INSERT INTO content_revisions(entry_id,revision) VALUES(?1,1) ON CONFLICT(entry_id) DO UPDATE SET revision=revision+1",[entry])?;
         let revision = self.content_revision(entry)?;
-        self.conn.execute("INSERT INTO content_progress(entry_id,kind,revision,source,model_generation) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(entry_id,kind) DO UPDATE SET cursor=0,complete=0,revision=excluded.revision,source=excluded.source,model_generation=excluded.model_generation,media_plan=NULL",params![entry,kind,revision,source,generation])?;
+        self.conn.execute("INSERT INTO content_progress(entry_id,kind,revision,source,model_generation) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(entry_id,kind) DO UPDATE SET cursor=0,complete=0,revision=excluded.revision,source=excluded.source,model_generation=excluded.model_generation,media_plan=NULL,video_selection=NULL",params![entry,kind,revision,source,generation])?;
         Ok(self
             .content_progress(entry, kind)?
             .expect("inserted progress"))
@@ -201,6 +207,18 @@ impl IndexStore {
         next: Option<u64>,
         media: Option<&crate::model::MediaPlan>,
     ) -> Result<bool, StoreError> {
+        self.commit_content_batch_with_video_selection(job, progress, chunks, next, media, None)
+    }
+
+    pub fn commit_content_batch_with_video_selection(
+        &mut self,
+        job: &ExtractJob,
+        progress: &crate::model::ContentProgress,
+        chunks: &[crate::model::ContentChunk],
+        next: Option<u64>,
+        media: Option<&crate::model::MediaPlan>,
+        selection: Option<&crate::model::VideoSelection>,
+    ) -> Result<bool, StoreError> {
         if self.content_revision(job.entry_id)? != progress.revision
             || self.model_generation()? != progress.model_generation
         {
@@ -213,12 +231,45 @@ impl IndexStore {
             plan.validate().map_err(|s| StoreError::InvalidConfig(s.into()))?;
             if !matches!(job.kind.as_str(),"audio"|"video")
                 || progress.media_plan.as_ref().is_some_and(|saved| saved != plan) {
-                return Err(StoreError::InvalidConfig("media plan changed within source revision".into()));
+                return Err(StoreError::InvalidConfig(
+                    "media plan changed within source revision".into(),
+                ));
             }
+        }
+        if let Some(state) = selection {
+            state
+                .validate_successor(progress.video_selection.as_ref())
+                .map_err(|s| StoreError::InvalidConfig(s.into()))?;
+            if job.kind != "video"
+                || !chunks.is_empty()
+                || progress.media_plan.is_some()
+                || (progress.video_selection.is_none() && progress.cursor != 0)
+                || progress
+                    .video_selection
+                    .as_ref()
+                    .is_some_and(|p| progress.cursor != ((1u64 << 61) | p.next_ms))
+                || (state.next_ms < state.duration_ms
+                    && (media.is_some() || next != Some((1u64 << 61) | state.next_ms)))
+                || (state.next_ms == state.duration_ms && (media.is_none() || next != Some(0)))
+            {
+                return Err(StoreError::InvalidConfig(
+                    "invalid video selection commit".into(),
+                ));
+            }
+        } else if progress.video_selection.is_some() {
+            return Err(StoreError::InvalidConfig(
+                "selection phase lost its checkpoint".into(),
+            ));
         }
         let media_json = media.map(serde_json::to_string).transpose()
             .map_err(|e| StoreError::InvalidConfig(e.to_string()))?;
-        if next.is_some_and(|n| n <= progress.cursor || n > i64::MAX as u64)
+        let selection_json = selection
+            .filter(|s| s.next_ms < s.duration_ms)
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|e| StoreError::InvalidConfig(e.to_string()))?;
+        let phase_finish = selection.is_some_and(|s| s.next_ms == s.duration_ms) && next == Some(0);
+        if next.is_some_and(|n| (!phase_finish && n <= progress.cursor) || n > i64::MAX as u64)
             || (chunks.is_empty() && next.is_some() && !matches!(job.kind.as_str(), "audio" | "video")) {
             return Err(StoreError::InvalidConfig(
                 "cursor advanced without content".into(),
@@ -260,13 +311,13 @@ impl IndexStore {
             }
         }
         tx.execute(
-            "UPDATE content_progress SET cursor=?3,complete=?4,media_plan=COALESCE(?5,media_plan) WHERE entry_id=?1 AND kind=?2",
+            "UPDATE content_progress SET cursor=?3,complete=?4,media_plan=COALESCE(?5,media_plan),video_selection=?6 WHERE entry_id=?1 AND kind=?2",
             params![
                 job.entry_id,
                 job.kind,
                 next.unwrap_or(progress.cursor + chunks.iter().filter(|c|!c.visual).count() as u64) as i64,
                 next.is_none(),
-                media_json
+                media_json, selection_json
             ],
         )?;
         if next.is_some() {
@@ -675,7 +726,14 @@ impl IndexStore {
         use rusqlite::functions::FunctionFlags;
         conn.create_scalar_function("policy_fold", 1,
             FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
-            |ctx| Ok(ctx.get::<String>(0)?.replace('/', "\\").trim_end_matches('\\').to_lowercase()))?;
+            |ctx| {
+                Ok(ctx
+                    .get::<String>(0)?
+                    .replace('/', "\\")
+                    .trim_end_matches('\\')
+                    .to_lowercase())
+            },
+        )?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
@@ -723,7 +781,16 @@ UPDATE content_chunks SET embed_state='pending' WHERE embed_state='claimed';
         let progress_columns = conn.prepare("PRAGMA table_info(content_progress)")?
             .query_map([], |r| r.get::<_,String>(1))?.collect::<Result<Vec<_>,_>>()?;
         if !progress_columns.iter().any(|c| c == "media_plan") {
-            conn.execute("ALTER TABLE content_progress ADD COLUMN media_plan TEXT", [])?;
+            conn.execute(
+                "ALTER TABLE content_progress ADD COLUMN media_plan TEXT",
+                [],
+            )?;
+        }
+        if !progress_columns.iter().any(|c| c == "video_selection") {
+            conn.execute(
+                "ALTER TABLE content_progress ADD COLUMN video_selection TEXT",
+                [],
+            )?;
         }
         let chunk_columns = conn.prepare("PRAGMA table_info(content_chunks)")?
             .query_map([], |r| r.get::<_, String>(1))?
@@ -772,9 +839,11 @@ COMMIT;
         // Additive migration 1 → 2: fresh DBs land directly on 2, v1 files
         // keep every existing row and just gain the new tables.
         let version: Option<String> = conn
-            .query_row("SELECT value FROM meta WHERE key = 'schema_version'", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'schema_version'",
+                [],
+                |r| r.get(0),
+            )
             .optional()?;
         match version.as_deref() {
             None => {
@@ -2556,6 +2625,175 @@ mod tests {
         let replaced = store.begin_content_batch(job.entry_id, "video", "changed-video").unwrap();
         assert_eq!(replaced.cursor, 0);
         assert_eq!(replaced.media_plan, None);
+    }
+
+    #[test]
+    fn final_selection_with_short_video_and_long_audio_commits_tail() {
+        use crate::model::{VideoSelection, VIDEO_GRAY_PIXELS};
+        let (mut store, old, _) = batch_fixture();
+        store.complete_extract_job(old.id).unwrap();
+        store.enqueue_extract_job(old.entry_id, "video").unwrap();
+        let mut state = VideoSelection {
+            duration_ms: 65_000,
+            scan_span_ms: crate::model::VIDEO_SELECTION_SPAN_MS,
+            has_audio: true,
+            next_ms: 15_000,
+            last_sample_ms: Some(7_000),
+            last_gray: vec![4; VIDEO_GRAY_PIXELS],
+            candidates_ms: vec![0, 5_000],
+            next_periodic_ms: 10_000,
+            sample_count: 8,
+        };
+        for next_ms in [15_000, 30_000, 45_000, 60_000] {
+            let job = store.claim_content_extract_job().unwrap().unwrap();
+            let progress = store
+                .begin_content_batch(job.entry_id, "video", "short-visual-source")
+                .unwrap();
+            state.next_ms = next_ms;
+            assert!(store
+                .commit_content_batch_with_video_selection(
+                    &job,
+                    &progress,
+                    &[],
+                    Some((1u64 << 61) | next_ms),
+                    None,
+                    Some(&state)
+                )
+                .unwrap());
+        }
+        let job = store.claim_content_extract_job().unwrap().unwrap();
+        let progress = store
+            .begin_content_batch(job.entry_id, "video", "short-visual-source")
+            .unwrap();
+        state.next_ms = 65_000;
+        state.candidates_ms.push(7_000);
+        let plan = crate::model::MediaPlan {
+            duration_ms: 65_000,
+            frames_ms: vec![0, 5_000, 7_000],
+            has_audio: true,
+        };
+        assert!(store
+            .commit_content_batch_with_video_selection(
+                &job,
+                &progress,
+                &[],
+                Some(0),
+                Some(&plan),
+                Some(&state)
+            )
+            .expect("completed scan can retain its known visual tail"));
+        assert_eq!(
+            store
+                .content_progress(job.entry_id, "video")
+                .unwrap()
+                .unwrap()
+                .media_plan,
+            Some(plan)
+        );
+    }
+
+    #[test]
+    fn video_selection_checkpoint_cursor_and_claim_commit_atomically() {
+        use crate::model::{VideoSelection, VIDEO_GRAY_PIXELS};
+        let (mut store, old, _) = batch_fixture();
+        store.complete_extract_job(old.id).unwrap();
+        store.enqueue_extract_job(old.entry_id, "video").unwrap();
+        let job = store.claim_content_extract_job().unwrap().unwrap();
+        let progress = store
+            .begin_content_batch(job.entry_id, "video", "selection-source")
+            .unwrap();
+        let state = VideoSelection {
+            duration_ms: 30_000,
+            scan_span_ms: crate::model::VIDEO_SELECTION_SPAN_MS,
+            has_audio: true,
+            next_ms: 15_000,
+            last_sample_ms: Some(14_000),
+            last_gray: vec![4; VIDEO_GRAY_PIXELS],
+            candidates_ms: vec![0, 5_000, 10_000],
+            next_periodic_ms: 15_000,
+            sample_count: 15,
+        };
+        let cursor = (1u64 << 61) | 15_000;
+        store.conn.execute_batch(&format!("CREATE TEMP TRIGGER interrupt_selection BEFORE UPDATE ON content_progress WHEN NEW.cursor={cursor} BEGIN SELECT RAISE(ABORT,'interrupted selection'); END;")).unwrap();
+        assert!(store
+            .commit_content_batch_with_video_selection(
+                &job,
+                &progress,
+                &[],
+                Some(cursor),
+                None,
+                Some(&state)
+            )
+            .is_err());
+        assert_eq!(
+            store
+                .content_progress(job.entry_id, "video")
+                .unwrap()
+                .unwrap(),
+            progress
+        );
+        store
+            .conn
+            .execute_batch("DROP TRIGGER interrupt_selection")
+            .unwrap();
+        assert!(store
+            .commit_content_batch_with_video_selection(
+                &job,
+                &progress,
+                &[],
+                Some(cursor),
+                None,
+                Some(&state)
+            )
+            .unwrap());
+        let saved = store
+            .content_progress(job.entry_id, "video")
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.cursor, cursor);
+        assert_eq!(saved.video_selection, Some(state.clone()));
+        assert!(saved.media_plan.is_none());
+        assert!(!store
+            .commit_content_batch_with_video_selection(
+                &job,
+                &progress,
+                &[],
+                Some(cursor),
+                None,
+                Some(&state)
+            )
+            .unwrap());
+        let resumed = store.claim_content_extract_job().unwrap().unwrap();
+        let final_state = VideoSelection {
+            next_ms: 30_000,
+            last_sample_ms: Some(29_999),
+            candidates_ms: vec![0, 5_000, 10_000, 29_999],
+            next_periodic_ms: 30_000,
+            sample_count: 16,
+            ..state
+        };
+        let plan = crate::model::MediaPlan {
+            duration_ms: 30_000,
+            frames_ms: final_state.candidates_ms.clone(),
+            has_audio: true,
+        };
+        assert!(store
+            .commit_content_batch_with_video_selection(
+                &resumed,
+                &saved,
+                &[],
+                Some(0),
+                Some(&plan),
+                Some(&final_state)
+            )
+            .unwrap());
+        let frozen = store
+            .content_progress(job.entry_id, "video")
+            .unwrap()
+            .unwrap();
+        assert_eq!(frozen.cursor, 0);
+        assert_eq!(frozen.media_plan, Some(plan));
+        assert!(frozen.video_selection.is_none());
     }
 
     #[test]
