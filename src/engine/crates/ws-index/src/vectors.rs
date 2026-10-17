@@ -377,6 +377,18 @@ impl VectorIndex {
         top_k: usize,
         filter: Option<&VectorFilter>,
     ) -> Result<Vec<VectorHit>, VectorError> {
+        self.search_where(query, top_k, filter, |_| true)
+    }
+
+    /// Admit in score order before the result limit. Native source checks can
+    /// stop once k valid hits are found without probing every indexed file.
+    pub fn search_where(
+        &self,
+        query: &[f32],
+        top_k: usize,
+        filter: Option<&VectorFilter>,
+        mut allowed: impl FnMut(&VectorHit) -> bool,
+    ) -> Result<Vec<VectorHit>, VectorError> {
         if top_k == 0 || self.is_empty() {
             return Ok(Vec::new());
         }
@@ -429,8 +441,7 @@ impl VectorIndex {
                 .total_cmp(&a.cosine)
                 .then_with(|| a.id.cmp(&b.id))
         });
-        hits.truncate(top_k);
-        Ok(hits)
+        Ok(hits.into_iter().filter(|hit| allowed(hit)).take(top_k).collect())
     }
 }
 

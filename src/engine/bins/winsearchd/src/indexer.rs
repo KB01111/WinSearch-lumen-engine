@@ -107,16 +107,32 @@ struct RootInfo {
     missing_mark_pending: AtomicBool,
 }
 
+struct CachedVectors {
+    index: ws_index::VectorIndex,
+    sources: std::collections::HashMap<i64, ws_index::store::SegmentSource>,
+}
+
+impl CachedVectors {
+    fn search(&self, query:&[f32], top_k:usize, filter:Option<&VectorFilter>, policy:&ws_protocol::IndexingConfig) -> Vec<ws_index::VectorHit> {
+        let mut checked=std::collections::HashMap::new();
+        self.index.search_where(query,top_k,filter,|hit| {
+            let Some(proof)=self.sources.get(&hit.id) else {return false;};
+            *checked.entry((hit.entry_id,proof.source.as_deref())).or_insert_with(||
+                query_source_allowed(policy,&proof.path,proof.source.as_deref(),proof.is_app))
+        }).unwrap_or_default()
+    }
+}
+
 pub struct Indexer {
     code_service:Mutex<Option<std::sync::Weak<crate::code::CodeService>>>,
     store: Mutex<IndexStore>,
-    vector_index: std::sync::RwLock<Option<ws_index::VectorIndex>>,
+    vector_index: std::sync::RwLock<Option<CachedVectors>>,
     cache_epoch: std::sync::atomic::AtomicU64,
     counters: Mutex<Counters>,
     wake: (Mutex<bool>, Condvar),
     shutdown: AtomicBool,
     roots: std::sync::RwLock<Vec<Arc<RootInfo>>>,
-    policy: std::sync::RwLock<ws_protocol::IndexingConfig>,
+    policy: Arc<std::sync::RwLock<ws_protocol::IndexingConfig>>,
     watchers: Mutex<Vec<Watcher>>,
     configuration_change: Mutex<()>,
 }
@@ -217,6 +233,11 @@ impl Indexer {
             store.set_indexing_config(&config)?;
         }
         let config = crate::policy::validate(&config)?;
+        let policy=Arc::new(std::sync::RwLock::new(config.clone()));
+        let query_policy=policy.clone();
+        store.set_query_source_guard(move |path,source,is_app| {
+            query_source_allowed(&query_policy.read().unwrap_or_else(|p|p.into_inner()),path,source,is_app)
+        })?;
         let selected: Vec<PathBuf> = config.roots.iter().map(PathBuf::from).collect();
         let mut infos = Vec::new();
         for root in &selected {
@@ -242,7 +263,7 @@ impl Indexer {
             wake: (Mutex::new(false), Condvar::new()),
             shutdown: AtomicBool::new(false),
             roots: std::sync::RwLock::new(infos),
-            policy: std::sync::RwLock::new(config),
+            policy,
             watchers: Mutex::new(Vec::new()),
             configuration_change: Mutex::new(()),
         }))
@@ -327,19 +348,18 @@ impl Indexer {
             return Ok(Vec::new());
         }
         let dim = query.len();
+        let policy=self.get_indexing_config()?;
         let need_build = {
             let guard = self.vector_index.read().unwrap_or_else(|p| p.into_inner());
-            !guard.as_ref().is_some_and(|idx| idx.dim() == dim)
+            !guard.as_ref().is_some_and(|cached| cached.index.dim() == dim)
         };
         let hits = if need_build {
             let epoch = self.cache_epoch.load(Ordering::Acquire);
-            let segs = self
-                .store
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .all_segments()?;
-            let built = ws_index::VectorIndex::from_segments(dim, &segs);
-            let hits = built.search(query, top_k, filter).unwrap_or_default();
+            let built = {
+                let store=self.store_lock();
+                CachedVectors {index:ws_index::VectorIndex::from_segments(dim,&store.all_segments()?),sources:store.segment_sources()?}
+            };
+            let hits = built.search(query, top_k, filter,&policy);
             let mut guard = self.vector_index.write().unwrap_or_else(|p| p.into_inner());
             if self.cache_epoch.load(Ordering::Acquire) == epoch {
                 *guard = Some(built);
@@ -348,8 +368,8 @@ impl Indexer {
         } else {
             let guard = self.vector_index.read().unwrap_or_else(|p| p.into_inner());
             match guard.as_ref() {
-                Some(idx) if idx.dim() == dim => {
-                    idx.search(query, top_k, filter).unwrap_or_default()
+                Some(cached) if cached.index.dim() == dim => {
+                    cached.search(query, top_k, filter,&policy)
                 }
                 _ => Vec::new(),
             }
@@ -362,7 +382,7 @@ impl Indexer {
         let mut out = Vec::with_capacity(hits.len());
         for hit in hits {
             if let Some(segment) = store.get_segment(hit.id)? {
-                if !store.entry_visible(segment.entry_id)? { continue; }
+                if !store.segment_source_allowed(&segment)? { continue; }
                 out.push(ScoredSegment {
                     segment,
                     cosine: hit.cosine,
@@ -380,12 +400,14 @@ impl Indexer {
         *self.vector_index.write().unwrap_or_else(|p| p.into_inner()) = None;
     }
 
-    pub(crate) fn update_vector_cache(&self, seg_id: i64, entry_id: i64, kind: &str, vec: &[f32]) {
+    pub(crate) fn update_vector_cache(&self, seg_id: i64, entry: &EntryRow, vec: &[f32]) {
         self.cache_epoch.fetch_add(1, Ordering::AcqRel);
         let mut guard = self.vector_index.write().unwrap_or_else(|p| p.into_inner());
-        if let Some(ref mut idx) = *guard {
-            if idx.dim() == vec.len() {
-                let _ = idx.add_or_update(seg_id, entry_id, kind, vec);
+        if let Some(ref mut cached) = *guard {
+            if cached.index.dim() == vec.len() {
+                if cached.index.add_or_update(seg_id, entry.id, SEGMENT_KIND_NAME, vec).is_ok() {
+                    cached.sources.insert(seg_id,ws_index::store::SegmentSource {path:entry.path.clone(),is_app:entry.is_app,source:None});
+                }
             } else {
                 *guard = None;
             }
@@ -1250,7 +1272,7 @@ impl Indexer {
                 }) {
                     Ok(seg_id) => {
                         store.complete_extract_job(c.job_id)?;
-                        self.update_vector_cache(seg_id, c.entry_id, SEGMENT_KIND_NAME, vec);
+                        self.update_vector_cache(seg_id, &fresh, vec);
                         embedded += 1;
                     }
                     Err(e) => {
@@ -1435,6 +1457,16 @@ impl Indexer {
 
 /// Pseudo-root for the application catalog (its entries carry real paths).
 pub const CATALOG_ROOT: &str = "@apps";
+
+fn query_source_allowed(policy:&ws_protocol::IndexingConfig,path:&str,source:Option<&str>,is_app:bool)->bool {
+    if is_app {return source.is_none();}
+    let path=Path::new(path);
+    crate::policy::path_allowed(policy,&path.to_string_lossy())
+        && crate::policy::metadata_safe(path,source.is_some())
+        && source.is_none_or(|saved| !saved.is_empty()
+            && crate::policy::ordinary_content_allowed(policy,path)
+            && crate::extract::source_snapshot(path)==saved)
+}
 
 fn parent_of(path: &str) -> String {
     Path::new(path)

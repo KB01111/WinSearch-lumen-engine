@@ -150,6 +150,8 @@ pub struct SearchHit {
     /// Optional cached thumbnail path on disk.
     pub thumbnail_path: Option<String>,
     pub matches: Vec<ContentMatch>,
+    /// The result depends on extracted content rather than its name/path.
+    pub content_only: bool,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq)]

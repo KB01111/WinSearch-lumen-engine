@@ -78,7 +78,7 @@ impl IndexStore {
                 true
             })
             .filter_map(|c| {
-                let (score, explanation) = rank(
+                let (score, explanation, content_only) = rank(
                     &c.row,
                     &query_lower,
                     &tokens,
@@ -96,6 +96,7 @@ impl IndexStore {
                     explanation,
                     thumbnail_path: c.row.thumbnail_path,
                     matches: Vec::new(),
+                    content_only,
                 })
             })
             .collect();
@@ -135,7 +136,7 @@ impl IndexStore {
         if expression.is_empty() {
             return Ok(Vec::new());
         }
-        let mut stmt=self.conn().prepare("SELECT f.text,c.page,c.start_ms,c.end_ms,c.line,c.thumbnail_path,highlight(content_fts,2,char(1),char(2)),f.rowid FROM content_fts f LEFT JOIN content_chunks c ON c.id=f.rowid AND c.entry_id=CAST(f.entry_id AS INTEGER) WHERE content_fts MATCH ?1 AND CAST(f.entry_id AS INTEGER)=?2 AND EXISTS(SELECT 1 FROM visible_entries e WHERE e.id=?2 AND e.missing=0) ORDER BY f.rowid LIMIT ?3 OFFSET ?4")?;
+        let mut stmt=self.conn().prepare("SELECT f.text,c.page,c.start_ms,c.end_ms,c.line,c.thumbnail_path,highlight(content_fts,2,char(1),char(2)),f.rowid FROM content_fts f LEFT JOIN content_chunks c ON c.id=f.rowid AND c.entry_id=CAST(f.entry_id AS INTEGER) WHERE content_fts MATCH ?1 AND CAST(f.entry_id AS INTEGER)=?2 AND EXISTS(SELECT 1 FROM query_entries e WHERE e.id=?2 AND e.missing=0) AND EXISTS(SELECT 1 FROM query_content_rows v WHERE v.id=f.rowid) ORDER BY f.rowid LIMIT ?3 OFFSET ?4")?;
         let rows = stmt.query_map(
             params![
                 expression,
@@ -189,7 +190,7 @@ impl IndexStore {
         self.rows_by(
             "SELECT id, root_id, parent_id, path, name, name_lower, ext, is_dir, is_app,
                     size, mtime, missing, thumbnail_path
-             FROM visible_entries
+             FROM query_entries
              WHERE missing = 0 AND name_lower = ?1
              LIMIT 8",
             params![query_lower],
@@ -206,7 +207,7 @@ impl IndexStore {
         self.rows_by(
             "SELECT id, root_id, parent_id, path, name, name_lower, ext, is_dir, is_app,
                     size, mtime, missing, thumbnail_path
-             FROM visible_entries
+             FROM query_entries
              WHERE missing = 0 AND name_lower >= ?1 AND name_lower < ?2
              LIMIT ?3",
             params![query_lower, end, CANDIDATE_CAP as i64],
@@ -225,10 +226,10 @@ impl IndexStore {
         self.rows_by(
             "SELECT id, root_id, parent_id, path, name, name_lower, ext, is_dir, is_app,
                     size, mtime, missing, thumbnail_path
-             FROM visible_entries
+             FROM query_entries
              WHERE id IN (
                  SELECT rowid FROM entries_tri WHERE entries_tri MATCH ?1
-                 AND EXISTS (SELECT 1 FROM visible_entries v WHERE v.id = entries_tri.rowid) LIMIT ?2
+                 AND EXISTS (SELECT 1 FROM query_entries v WHERE v.id = entries_tri.rowid) LIMIT ?2
              )",
             params![format!("\"{escaped}\""), CANDIDATE_CAP as i64],
         )
@@ -246,10 +247,10 @@ impl IndexStore {
         self.rows_by(
             "SELECT id, root_id, parent_id, path, name, name_lower, ext, is_dir, is_app,
                     size, mtime, missing, thumbnail_path
-             FROM visible_entries
+             FROM query_entries
              WHERE id IN (
                  SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?1
-                 AND EXISTS (SELECT 1 FROM visible_entries v WHERE v.id = entries_fts.rowid) LIMIT ?2
+                 AND EXISTS (SELECT 1 FROM query_entries v WHERE v.id = entries_fts.rowid) LIMIT ?2
              )",
             params![match_expr, CANDIDATE_CAP as i64],
         )
@@ -265,11 +266,11 @@ impl IndexStore {
         self.rows_by(
             "SELECT id, root_id, parent_id, path, name, name_lower, ext, is_dir, is_app,
                     size, mtime, missing, thumbnail_path
-             FROM visible_entries
+             FROM query_entries
              WHERE id IN (
                  SELECT DISTINCT CAST(entry_id AS INTEGER) FROM content_fts
                  WHERE content_fts MATCH ?1
-                 AND EXISTS (SELECT 1 FROM visible_entries v WHERE v.id = CAST(content_fts.entry_id AS INTEGER)) LIMIT ?2
+                 AND EXISTS (SELECT 1 FROM query_content_rows v WHERE v.id = content_fts.rowid) LIMIT ?2
              )",
             params![match_expr, CANDIDATE_CAP as i64],
         )
@@ -286,10 +287,10 @@ impl IndexStore {
         self.rows_by(
             "SELECT id, root_id, parent_id, path, name, name_lower, ext, is_dir, is_app,
                     size, mtime, missing, thumbnail_path
-             FROM visible_entries
+             FROM query_entries
              WHERE missing = 0 AND id IN (
                  SELECT rowid FROM entries_path_tri WHERE entries_path_tri MATCH ?1
-                 AND EXISTS (SELECT 1 FROM visible_entries v WHERE v.id = entries_path_tri.rowid) LIMIT ?2
+                 AND EXISTS (SELECT 1 FROM query_entries v WHERE v.id = entries_path_tri.rowid) LIMIT ?2
              )",
             params![escaped, CANDIDATE_CAP as i64],
         )
@@ -314,24 +315,24 @@ fn rank(
     via_fts: bool,
     via_content_fts: bool,
     depth: usize,
-) -> (f64, String) {
+) -> (f64, String, bool) {
     let name = &row.name_lower;
-    let (base, explanation) = if name == query {
-        (1.0, "Exact name match")
+    let (base, explanation, content_only) = if name == query {
+        (1.0, "Exact name match", false)
     } else if name.starts_with(query) {
-        (0.92, "Name starts with query")
+        (0.92, "Name starts with query", false)
     } else if name.contains(query) {
-        (0.78, "Name contains query")
+        (0.78, "Name contains query", false)
     } else if tokens.len() > 1 && all_tokens_match_name(name, tokens) {
-        (0.74, "All words match the name")
+        (0.74, "All words match the name", false)
     } else if via_fts {
-        (0.5, "Matches name or keywords")
+        (0.5, "Matches name or keywords", false)
     } else if via_content_fts {
-        (0.42, "Matches extracted content")
+        (0.42, "Matches extracted content", true)
     } else if row.path.to_lowercase().contains(query) {
-        (0.35, "Path matches query")
+        (0.35, "Path matches query", false)
     } else {
-        return (0.0, String::new());
+        return (0.0, String::new(), false);
     };
 
     let mut score = base;
@@ -349,7 +350,7 @@ fn rank(
         };
     }
     score -= 0.005 * depth.min(12) as f64;
-    (score.clamp(0.0, 1.0), explanation.to_string())
+    (score.clamp(0.0, 1.0), explanation.to_string(), content_only)
 }
 
 fn all_tokens_match_name(name: &str, tokens: &[String]) -> bool {

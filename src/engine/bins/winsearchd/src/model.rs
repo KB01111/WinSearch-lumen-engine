@@ -890,7 +890,7 @@ mod tests {
                 .pop()
                 .unwrap();
             let progress = store
-                .begin_content_batch(entry, "doc", "source-identity")
+                .begin_content_batch(entry, "doc", &crate::extract::source_snapshot(&root.join("keep.txt")))
                 .unwrap();
             let mut chunk = ws_index::model::ContentChunk {
                 id: 0,

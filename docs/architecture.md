@@ -435,6 +435,19 @@ invalidate a code request.
 Changing semantic/backend settings advances both request revisions, so a
 disable/re-enable transition cannot revive an earlier search.
 
+Production `Indexer` also installs a non-deterministic, metadata-only SQLite
+source guard. It checks native path/residency and ordinary-content policy plus
+the durable precise source stamp before exact content candidate limits and
+excerpt reads. Offline fixture stores explicitly retain virtual-path support.
+The vector cache carries durable source proofs alongside its FP16 rows; it
+checks candidates in score order before taking top-k and rechecks joined rows.
+Per-query memoization shares checks for the same entry/source. It never acquires
+the store mutex while holding the vector-cache lock. Every streamed ordinary
+batch validates its internal entry/segment provenance again; expired content
+results are dropped, while valid name/path matches lose stale excerpts,
+locations and thumbnails. This catches source replacement, residency/reparse
+changes, and new project/dataset exclusions before watcher notification.
+
 Independent public synthetic reference inputs/vectors are pinned with license
 and hashes in `ws-embed/tests/fixtures/media`. `cargo test -p ws-embed --test media
 -- --ignored --nocapture --test-threads=1` requires verified model files. The

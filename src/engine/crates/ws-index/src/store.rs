@@ -69,7 +69,43 @@ pub struct IndexStore {
     conn: Connection,
 }
 
+#[derive(Clone)]
+pub struct SegmentSource {
+    pub path: String,
+    pub is_app: bool,
+    /// None is a filename vector; empty is content without a durable proof.
+    pub source: Option<String>,
+}
+
 impl IndexStore {
+    /// Offline fixture stores allow virtual paths; every production Indexer installs
+    /// its metadata-only native/source policy before exposing retrieval.
+    pub fn set_query_source_guard(
+        &self,
+        guard: impl Fn(&str, Option<&str>, bool) -> bool + Send + Sync + 'static,
+    ) -> Result<(), StoreError> {
+        self.conn.create_scalar_function("query_source_allowed", 3,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8,
+            move |ctx| Ok(guard(&ctx.get::<String>(0)?, ctx.get::<Option<String>>(1)?.as_deref(),ctx.get::<bool>(2)?)))?;
+        Ok(())
+    }
+
+    /// Durable source proofs are captured under the store lock, before scoring
+    /// under the vector-cache lock. Missing/legacy content proofs are empty.
+    pub fn segment_sources(&self) -> Result<std::collections::HashMap<i64, SegmentSource>, StoreError> {
+        let mut stmt=self.conn.prepare("SELECT s.id,e.path,e.is_app,CASE WHEN s.kind='name' THEN NULL ELSE COALESCE(p.source,'') END FROM segments s JOIN entries e ON e.id=s.entry_id LEFT JOIN content_chunks c ON c.entry_id=s.entry_id AND c.kind=s.kind AND c.chunk_index=s.chunk_index LEFT JOIN content_revisions r ON r.entry_id=s.entry_id LEFT JOIN content_progress p ON p.entry_id=c.entry_id AND p.kind=c.job_kind AND p.revision=r.revision")?;
+        let rows=stmt.query_map([],|r|Ok((r.get(0)?,SegmentSource {path:r.get(1)?,is_app:r.get(2)?,source:r.get(3)?})))?;
+        Ok(rows.collect::<Result<_,_>>()?)
+    }
+
+    pub fn segment_source_allowed(&self, segment: &Segment) -> Result<bool,StoreError> {
+        Ok(self.conn.query_row("SELECT EXISTS(SELECT 1 FROM segments s JOIN query_entries e ON e.id=s.entry_id LEFT JOIN content_chunks c ON c.entry_id=s.entry_id AND c.kind=s.kind AND c.chunk_index=s.chunk_index LEFT JOIN content_revisions r ON r.entry_id=s.entry_id LEFT JOIN content_progress p ON p.entry_id=c.entry_id AND p.kind=c.job_kind AND p.revision=r.revision WHERE s.id=?1 AND query_source_allowed(e.path,CASE WHEN s.kind='name' THEN NULL ELSE COALESCE(p.source,'') END,e.is_app))",[segment.id],|r|r.get(0))?)
+    }
+
+    pub fn entry_content_allowed(&self, entry:i64) -> Result<bool,StoreError> {
+        Ok(self.conn.query_row("SELECT EXISTS(SELECT 1 FROM query_entries e JOIN content_progress p ON p.entry_id=e.id JOIN content_revisions r ON r.entry_id=e.id AND r.revision=p.revision WHERE e.id=?1 AND query_source_allowed(e.path,p.source,e.is_app))",[entry],|r|r.get(0))?)
+    }
+
     pub fn content_revision(&self, entry: i64) -> Result<i64, StoreError> {
         Ok(self
             .conn
@@ -251,7 +287,7 @@ impl IndexStore {
 
     /// Cached pixels must belong to the exact chunk metadata that was scored.
     pub fn segment_thumbnail(&self,segment:&crate::model::Segment) -> Result<Option<String>,StoreError> {
-        if !self.entry_visible(segment.entry_id)? { return Ok(None); }
+        if !self.segment_source_allowed(segment)? { return Ok(None); }
         Ok(self.conn.query_row("SELECT thumbnail_path FROM content_chunks WHERE entry_id=?1 AND kind=?2 AND chunk_index=?3 AND text=?4 AND page IS ?5 AND start_ms IS ?6 AND end_ms IS ?7 AND line IS ?8 LIMIT 1",
             params![segment.entry_id,segment.kind,segment.chunk_index,segment.text,segment.page,segment.start_ms,segment.end_ms,segment.line],
             |r|r.get::<_,Option<String>>(0)).optional()?.flatten())
@@ -576,7 +612,7 @@ pub const CONFIG_KEY_PREFERRED_BACKEND: &str = "preferred_backend";
 impl IndexStore {
     pub fn entry_visible(&self, id: i64) -> Result<bool, StoreError> {
         Ok(self.conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM visible_entries WHERE id=?1)",
+            "SELECT EXISTS(SELECT 1 FROM query_entries WHERE id=?1)",
             [id],
             |r| r.get(0),
         )?)
@@ -758,7 +794,10 @@ COMMIT;
                 return Err(StoreError::UnsupportedSchemaVersion(other.to_string()));
             }
         }
-        Ok(Self { conn })
+        let store=Self { conn };
+        store.set_query_source_guard(|_,_,_|true)?;
+        store.conn.execute_batch("CREATE TEMP VIEW IF NOT EXISTS query_entries AS SELECT * FROM visible_entries WHERE query_source_allowed(path,NULL,is_app); CREATE TEMP VIEW IF NOT EXISTS query_content_rows AS SELECT f.rowid AS id FROM content_fts f JOIN query_entries e ON e.id=CAST(f.entry_id AS INTEGER) LEFT JOIN content_chunks c ON c.id=f.rowid AND c.entry_id=e.id LEFT JOIN content_revisions r ON r.entry_id=e.id LEFT JOIN content_progress p ON p.entry_id=c.entry_id AND p.kind=c.job_kind AND p.revision=r.revision WHERE query_source_allowed(e.path,COALESCE(p.source,''),e.is_app);")?;
+        Ok(store)
     }
 
     /// Current `meta.schema_version` (`"2"` on fresh and migrated DBs).

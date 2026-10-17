@@ -102,6 +102,12 @@ pub type SharedEngine = Arc<EngineService>;
 #[derive(Clone,Copy)]
 struct SearchRevision {source:u64,code:Option<u64>}
 
+struct ResultSource {
+    entry_id:i64,
+    segment_id:Option<i64>,
+    content_only:bool,
+}
+
 impl EngineService {
     pub fn new(indexer: Arc<Indexer>) -> SharedEngine {
         Self::new_with_model_dir(indexer, paths::model_dir())
@@ -546,7 +552,12 @@ impl EngineService {
     /// Computes the appended semantic hits for one query (no IPC). Empty when
     /// the gate is closed, the embed fails, or nothing passes the cosine
     /// threshold after duplicate suppression.
+    #[cfg(test)]
     fn plan_semantic(&self, query: &SearchQuery, exact_entry_ids: &HashSet<i64>) -> Vec<SearchResult> {
+        self.plan_semantic_with_sources(query,exact_entry_ids,&mut HashMap::new())
+    }
+
+    fn plan_semantic_with_sources(&self, query: &SearchQuery, exact_entry_ids: &HashSet<i64>, sources:&mut HashMap<String,ResultSource>) -> Vec<SearchResult> {
         if !self.semantic_allowed(query) {
             return Vec::new();
         }
@@ -653,6 +664,7 @@ impl EngineService {
             matches.sort_by(|a,b| b.cosine.total_cmp(&a.cosine).then_with(||a.segment.id.cmp(&b.segment.id)));
             let cosine=matches[0].cosine;
             let seg_kind=&matches[0].segment.kind;
+            sources.insert(format!("s{entry_id}"),ResultSource {entry_id,segment_id:Some(matches[0].segment.id),content_only:seg_kind!="name"});
             let terms:Vec<_>=text.split(|c:char|!c.is_alphanumeric()).filter(|s|!s.is_empty()).collect();
             let mut moments:Vec<ws_protocol::MatchingMoment>=Vec::new();
             for hit in &matches {
@@ -732,7 +744,8 @@ impl EngineService {
     ) -> Result<(), FrameError> {
         let code_epoch=self.code_service().filter(|_|query.mode==SearchMode::Code).map(|c|c.query_epoch());
         let revision=SearchRevision {source:self.indexer.search_epoch(),code:code_epoch};
-        let results = self.plan_results(&query);
+        let mut sources=HashMap::new();
+        let results = self.plan_results_with_sources(&query,&mut sources);
         let results=results.into_iter().filter(|r|r.kind!=ResultKind::Code || r.path.as_deref().is_some_and(|p|self.code_service().is_some_and(|c|code_epoch.is_some_and(|e|c.result_allowed(p,e))))).collect::<Vec<_>>();
 
         if cancel.load(Ordering::Relaxed) {
@@ -752,9 +765,11 @@ impl EngineService {
         // overflow streams after so typing stays responsive.
         let limit = (query.limit.max(1) as usize).min(results.len());
         let (first, rest) = results.split_at(limit);
+        let first=self.validate_delivery(first.to_vec(),&sources);
+        let mut exact_ids=exact_entry_ids(&first);
         client.send(&ServerMessage::Results {
             id,
-            batch: if self.query_current(&query,revision) {first.to_vec()} else {Vec::new()},
+            batch: if self.query_current(&query,revision) {first} else {Vec::new()},
             done: rest.is_empty() && !semantic,
         })?;
         if !rest.is_empty() {
@@ -766,9 +781,11 @@ impl EngineService {
                     done: true,
                 });
             }
+            let rest=self.validate_delivery(rest.to_vec(),&sources);
+            exact_ids.extend(exact_entry_ids(&rest));
             client.send(&ServerMessage::Results {
                 id,
-                batch: if self.query_current(&query,revision) {rest.to_vec()} else {Vec::new()},
+                batch: if self.query_current(&query,revision) {rest} else {Vec::new()},
                 done: !semantic,
             })?;
         }
@@ -780,7 +797,6 @@ impl EngineService {
         // Semantic stage runs off the connection read loop so an in-band
         // `Cancel` or superseding `Search` on the same pipe can be read and
         // applied while `embed_query` is in flight.
-        let exact_ids = exact_entry_ids(&results);
         let this = Arc::clone(self);
         let thread_client = client.clone();
         if let Err(e) = std::thread::Builder::new()
@@ -837,8 +853,10 @@ impl EngineService {
             });
         }
         let generation = self.indexer.store_lock().model_generation().ok();
-        let mut hits = self.plan_semantic(query, exact_ids);
+        let mut sources=HashMap::new();
+        let mut hits = self.plan_semantic_with_sources(query, exact_ids,&mut sources);
         hits.retain(|r|r.kind!=ResultKind::Code || r.path.as_deref().is_some_and(|p|self.code_service().is_some_and(|c|revision.code.is_some_and(|e|c.result_allowed(p,e)))));
+        hits=self.validate_delivery(hits,&sources);
         if generation.is_none() || self.indexer.store_lock().model_generation().ok() != generation
             || !self.semantic_allowed(query) || !self.query_current(query,revision) {
             hits.clear();
@@ -859,7 +877,36 @@ impl EngineService {
 
     /// Computes the ranked result list for one query (no IPC). Split from
     /// `run_search` so the pipeline is directly testable.
+    #[cfg(test)]
     fn plan_results(&self, query: &SearchQuery) -> Vec<SearchResult> {
+        self.plan_results_with_sources(query,&mut HashMap::new())
+    }
+
+    fn validate_delivery(&self,mut results:Vec<SearchResult>,sources:&HashMap<String,ResultSource>)->Vec<SearchResult> {
+        let store=self.indexer.store_lock();
+        results.retain_mut(|result| {
+            let Some(source)=sources.get(&result.id) else {return true;};
+            if !store.entry_visible(source.entry_id).unwrap_or(false) {return false;}
+            let Ok(Some(entry))=store.get_entry(source.entry_id) else {return false;};
+            if result.path.as_deref()!=Some(&entry.path) {return false;}
+            if let Some(segment_id)=source.segment_id {
+                let Ok(Some(segment))=store.get_segment(segment_id) else {return false;};
+                if !store.segment_source_allowed(&segment).unwrap_or(false) {return false;}
+            }
+            if !store.entry_content_allowed(source.entry_id).unwrap_or(false) {
+                if source.content_only {return false;}
+                // A name/path can remain valid after its content proof expires.
+                result.excerpt=None;
+                result.location=None;
+                result.thumbnail_path=None;
+                result.matching_moments.clear();
+            }
+            true
+        });
+        results
+    }
+
+    fn plan_results_with_sources(&self, query: &SearchQuery,sources:&mut HashMap<String,ResultSource>) -> Vec<SearchResult> {
         let text = query.text.trim();
         if text.is_empty() {
             return Vec::new();
@@ -933,6 +980,7 @@ impl EngineService {
             match self.indexer.search(&request) {
                 Ok(hits) => {
                     for hit in hits {
+                        sources.insert(format!("e{}",hit.entry_id),ResultSource {entry_id:hit.entry_id,segment_id:None,content_only:hit.content_only});
                         let terms: Vec<&str> = text
                             .split(|c: char| !c.is_alphanumeric())
                             .filter(|s| !s.is_empty())
@@ -1606,6 +1654,41 @@ mod tests {
     }
 
     #[test]
+    fn source_guard_delivery_rechecks_content_after_ranking_without_watcher() {
+        let tree=TempTree::new();
+        let path=tree.0.join("sampletoken-notes.txt");
+        fs::write(&path,"sampletoken documentonlytoken passage").unwrap();
+        let indexer=Indexer::open(fixture_store(),&[tree.0.clone()]).unwrap();
+        indexer.enqueue_initial_scan().unwrap();
+        while indexer.scan_available(64)>0 {}
+        indexer.extract_once_with(&crate::extract::ExtractorRegistry::default(),|texts|Ok(vec![vec![1.0,0.0];texts.len()])).unwrap();
+        let engine=EngineService::new(indexer);
+        engine.set_model_ready_override(Some(true));
+        engine.set_query_embed_hook(Arc::new(|_|Ok(vec![1.0,0.0])));
+        let mut exact_sources=HashMap::new();
+        let exact=engine.plan_results_with_sources(&query("documentonlytoken"),&mut exact_sources);
+        assert_eq!(exact.len(),1);
+        let mut name_sources=HashMap::new();
+        let names=engine.plan_results_with_sources(&query("sampletoken"),&mut name_sources);
+        assert_eq!(names.len(),1);
+        assert!(!names[0].matching_moments.is_empty());
+        let mut semantic_sources=HashMap::new();
+        let semantic=engine.plan_semantic_with_sources(&semantic_query("indirect concept"),&HashSet::new(),&mut semantic_sources);
+        assert_eq!(semantic.len(),1);
+        let epoch=engine.indexer.search_epoch();
+        fs::write(&path,"replacement source").unwrap();
+        assert_eq!(engine.indexer.search_epoch(),epoch,"test must not rely on watcher notification");
+        assert!(engine.validate_delivery(exact,&exact_sources).is_empty(),"old exact excerpt reached delivery");
+        assert!(engine.validate_delivery(semantic,&semantic_sources).is_empty(),"old semantic excerpt reached delivery");
+        let names=engine.validate_delivery(names,&name_sources);
+        assert_eq!(names.len(),1,"valid filename must remain available");
+        assert!(names[0].excerpt.is_none());
+        assert!(names[0].location.is_none());
+        assert!(names[0].thumbnail_path.is_none());
+        assert!(names[0].matching_moments.is_empty());
+    }
+
+    #[test]
     fn media_semantic_results_preserve_ranked_moments_thumbnails_and_file_filters() {
         use ws_index::model::{ContentChunk,ContentMatch,DraftEmbeddingInput,NewSegment};
         let tree=TempTree::new();
@@ -1618,7 +1701,7 @@ mod tests {
             let song=store.find_by_path(&tree.0.join("song.wav").to_string_lossy()).unwrap().unwrap().id;
             let pdf=store.find_by_path(&tree.0.join("archive.pdf").to_string_lossy()).unwrap().unwrap().id;
             let job=store.claim_extract_jobs_batch_for_kind("video",1).unwrap().pop().unwrap();
-            let progress=store.begin_content_batch(clip,"video","metadata fixture").unwrap();
+            let progress=store.begin_content_batch(clip,"video",&crate::extract::source_snapshot(&tree.0.join("clip.mp4"))).unwrap();
             let thumbnail=tree.0.join("cached-frame.png").to_string_lossy().into_owned();
             let chunks=[
                 ContentChunk { id:0,entry_id:clip,job_kind:"video".into(),kind:"video".into(),chunk_index:65536,text:"".into(),
@@ -1635,6 +1718,15 @@ mod tests {
             for (chunk,vector) in chunks.iter().zip([vec![0.8,0.6],vec![0.9,0.4358899],vec![1.0,0.0]]) {
                 store.upsert_segment(NewSegment { entry_id:clip,kind:&chunk.kind,chunk_index:chunk.chunk_index,text:&chunk.text,
                     page:None,start_ms:chunk.location.start_ms.map(|v|v as i64),end_ms:chunk.location.end_ms.map(|v|v as i64),line:None,vector:&vector }).unwrap();
+            }
+            for (entry,kind,file,text,location) in [
+                (song,"audio","song.wav","",ContentMatch {start_ms:Some(7000),end_ms:Some(8000),..Default::default()}),
+                (pdf,"pdf","archive.pdf","Actual legacy page excerpt",ContentMatch {page:Some(35),..Default::default()}),
+            ] {
+                let job=store.claim_extract_jobs_batch_for_kind(kind,1).unwrap().pop().unwrap();
+                let progress=store.begin_content_batch(entry,kind,&crate::extract::source_snapshot(&tree.0.join(file))).unwrap();
+                let chunk=ContentChunk {id:0,entry_id:entry,job_kind:kind.into(),kind:kind.into(),chunk_index:0,text:text.into(),location,embed:true,visual:false,attempts:0,embedding_input:DraftEmbeddingInput::Text};
+                assert!(store.commit_content_batch(&job,&progress,&[chunk],None).unwrap());
             }
             store.upsert_segment(NewSegment { entry_id:song,kind:"audio",chunk_index:0,text:"",
                 page:None,start_ms:Some(7000),end_ms:Some(8000),line:None,vector:&[1.0,0.0] }).unwrap();

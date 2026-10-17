@@ -861,7 +861,7 @@ impl Indexer {
     }
 }
 
-fn source_snapshot(path: &Path) -> String {
+pub(crate) fn source_snapshot(path: &Path) -> String {
     match std::fs::metadata(path) {
         Ok(m) => format!(
             "{}|{}|{:?}|{:?}",
@@ -1820,6 +1820,121 @@ mod tests {
                 .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(1_750_000_000)),
         )
         .unwrap();
+    }
+
+    fn assert_content_hidden_name_available(indexer: &Indexer, path: &Path) {
+        let request = |text: &str| SearchRequest { text:text.into(),limit:5,..Default::default() };
+        assert!(indexer.search(&request("uniqueoldtoken")).unwrap().is_empty(), "stale exact excerpt survived before watcher notification");
+        assert!(indexer.search_vectors(&[1.0,0.0],5,Some(&VectorFilter { kinds:vec!["doc".into()],entry_ids:vec![] })).unwrap().is_empty(), "stale content vector survived before watcher notification");
+        let names=indexer.search(&request(&path.file_name().unwrap().to_string_lossy())).unwrap();
+        assert_eq!(names.len(),1,"valid filename must remain searchable");
+        assert!(names[0].matches.is_empty(),"name-only result retained stale preview");
+    }
+
+    #[test]
+    fn query_source_guard_precise_change_without_watcher() {
+        let tree=TempTree::new();let path=tree.0.join("mutable.txt");
+        same_second_write(&path,"uniqueoldtoken statement");
+        let indexer=seeded_indexer(&tree);
+        indexer.extract_once_with(&ExtractorRegistry::default(),|texts|Ok(vec![vec![1.0,0.0];texts.len()])).unwrap();
+        assert_eq!(indexer.search_vectors(&[1.0,0.0],5,None).unwrap().len(),1,"prime vector cache");
+        fs::write(&path,"uniquenewtoken statement").unwrap();
+        fs::OpenOptions::new().write(true).open(&path).unwrap().set_times(fs::FileTimes::new().set_modified(std::time::UNIX_EPOCH+Duration::from_secs(1_750_000_000)+Duration::from_nanos(100))).unwrap();
+        assert_content_hidden_name_available(&indexer,&path);
+    }
+
+    #[test]
+    fn query_source_guard_native_replacement_without_watcher() {
+        let tree=TempTree::new();let path=tree.0.join("mutable.txt");
+        same_second_write(&path,"uniqueoldtoken statement");
+        let indexer=seeded_indexer(&tree);
+        indexer.extract_once_with(&ExtractorRegistry::default(),|texts|Ok(vec![vec![1.0,0.0];texts.len()])).unwrap();
+        assert_eq!(indexer.search_vectors(&[1.0,0.0],5,None).unwrap().len(),1);
+        let before=ws_platform::identity::file_identity(&path);
+        fs::rename(&path,tree.0.join("retained-old.txt")).unwrap();
+        same_second_write(&path,"uniquenewtoken statement");
+        assert_ne!(ws_platform::identity::file_identity(&path),before,"generated replacement must have another native identity");
+        assert_content_hidden_name_available(&indexer,&path);
+    }
+
+    #[test]
+    fn query_source_guard_new_project_marker_without_watcher() {
+        let tree=TempTree::new();let path=tree.0.join("mutable.txt");
+        fs::write(&path,"uniqueoldtoken statement").unwrap();
+        let indexer=seeded_indexer(&tree);
+        indexer.extract_once_with(&ExtractorRegistry::default(),|texts|Ok(vec![vec![1.0,0.0];texts.len()])).unwrap();
+        assert_eq!(indexer.search_vectors(&[1.0,0.0],5,None).unwrap().len(),1);
+        fs::write(tree.0.join("Cargo.toml"),"[package]").unwrap();
+        assert_content_hidden_name_available(&indexer,&path);
+    }
+
+    #[test]
+    fn query_source_guard_new_dataset_without_watcher() {
+        let tree=TempTree::new();let directory=tree.0.join("collection");fs::create_dir(&directory).unwrap();
+        let path=directory.join("notes.txt");fs::write(&path,"uniqueoldtoken statement").unwrap();
+        let indexer=seeded_indexer(&tree);
+        indexer.extract_once_with(&ExtractorRegistry::default(),|texts|Ok(vec![vec![1.0,0.0];texts.len()])).unwrap();
+        assert_eq!(indexer.search_vectors(&[1.0,0.0],5,None).unwrap().len(),1);
+        for n in 0..300 {fs::write(directory.join(format!("clip_{n:06}.jpg")),b"").unwrap();}
+        assert_content_hidden_name_available(&indexer,&path);
+    }
+
+    #[test]
+    fn query_source_guard_native_offline_flag_without_hydrating_content() {
+        use std::os::windows::fs::MetadataExt;
+        use windows::{core::PCWSTR,Win32::Storage::FileSystem::{SetFileAttributesW,FILE_FLAGS_AND_ATTRIBUTES}};
+        let tree=TempTree::new();let path=tree.0.join("resident.txt");
+        fs::write(&path,"uniqueoldtoken statement").unwrap();
+        let indexer=seeded_indexer(&tree);
+        indexer.extract_once_with(&ExtractorRegistry::default(),|texts|Ok(vec![vec![1.0,0.0];texts.len()])).unwrap();
+        assert_eq!(indexer.search_vectors(&[1.0,0.0],5,None).unwrap().len(),1);
+        let flags=fs::metadata(&path).unwrap().file_attributes();
+        let wide:Vec<_>=path.as_os_str().to_string_lossy().encode_utf16().chain(Some(0)).collect();
+        unsafe {SetFileAttributesW(PCWSTR(wide.as_ptr()),FILE_FLAGS_AND_ATTRIBUTES(flags|0x1000)).unwrap();}
+        assert_content_hidden_name_available(&indexer,&path);
+        unsafe {SetFileAttributesW(PCWSTR(wide.as_ptr()),FILE_FLAGS_AND_ATTRIBUTES(flags)).unwrap();}
+    }
+
+    #[test]
+    fn query_source_guard_new_junction_ancestor_without_watcher() {
+        use std::os::windows::process::CommandExt;
+        let tree=TempTree::new();let directory=tree.0.join("ordinary");fs::create_dir(&directory).unwrap();
+        let path=directory.join("notes.txt");fs::write(&path,"uniqueoldtoken statement").unwrap();
+        let indexer=seeded_indexer(&tree);
+        indexer.extract_once_with(&ExtractorRegistry::default(),|texts|Ok(vec![vec![1.0,0.0];texts.len()])).unwrap();
+        assert_eq!(indexer.search_vectors(&[1.0,0.0],5,None).unwrap().len(),1);
+        let retained=tree.0.join("retained");fs::rename(&directory,&retained).unwrap();
+        let status=std::process::Command::new("cmd.exe").args(["/C","mklink","/J"]).arg(&directory).arg(&retained).creation_flags(0x08000000).output().unwrap();
+        assert!(status.status.success(),"{}",String::from_utf8_lossy(&status.stderr));
+        assert!(indexer.search(&SearchRequest{text:"uniqueoldtoken".into(),limit:5,..Default::default()}).unwrap().is_empty());
+        assert!(indexer.search(&SearchRequest{text:"notes.txt".into(),limit:5,..Default::default()}).unwrap().is_empty(),"a reparse ancestor also denies names");
+        assert!(indexer.search_vectors(&[1.0,0.0],5,None).unwrap().is_empty());
+        fs::remove_dir(&directory).unwrap();
+    }
+
+    #[test]
+    fn query_source_guard_denied_population_cannot_consume_exact_or_vector_limits() {
+        let tree=TempTree::new();let denied=tree.0.join("denied");fs::create_dir(&denied).unwrap();
+        for n in 0..501 {fs::write(denied.join(format!("ordinary{n}.txt")),"uniquepopulationtoken").unwrap();}
+        let valid=tree.0.join("allowed.txt");fs::write(&valid,"uniquepopulationtoken").unwrap();
+        let indexer=seeded_indexer(&tree);
+        {
+            let mut store=indexer.store_lock();
+            for job in store.claim_extract_jobs_batch_for_kind("doc",502).unwrap() {
+                let entry=store.get_entry(job.entry_id).unwrap().unwrap();
+                let progress=store.begin_content_batch(entry.id,"doc",&source_snapshot(Path::new(&entry.path))).unwrap();
+                let chunk=ws_index::model::ContentChunk {id:0,entry_id:entry.id,job_kind:"doc".into(),kind:"doc".into(),chunk_index:0,text:"uniquepopulationtoken".into(),location:Default::default(),embed:true,visual:false,attempts:0,embedding_input:ws_index::model::DraftEmbeddingInput::Text};
+                store.commit_content_batch(&job,&progress,&[chunk],None).unwrap();
+                store.upsert_segment(ws_index::model::NewSegment{entry_id:entry.id,kind:"doc",chunk_index:0,text:"uniquepopulationtoken",page:None,start_ms:None,end_ms:None,line:None,vector:&[1.0,0.0]}).unwrap();
+            }
+        }
+        assert_eq!(indexer.search_vectors(&[1.0,0.0],1,None).unwrap().len(),1,"prime cache");
+        fs::write(denied.join("Cargo.toml"),"[package]").unwrap();
+        let exact=indexer.search(&SearchRequest{text:"uniquepopulationtoken".into(),limit:1,..Default::default()}).unwrap();
+        assert_eq!(exact.len(),1);assert_eq!(exact[0].path,valid.to_string_lossy(),"denied content consumed exact candidate cap");
+        let vectors=indexer.search_vectors(&[1.0,0.0],1,None).unwrap();
+        assert_eq!(vectors.len(),1,"denied content consumed vector top-k");
+        assert_eq!(indexer.get_entry_by_id(vectors[0].segment.entry_id).unwrap().unwrap().path,valid.to_string_lossy());
     }
 
     #[test]
