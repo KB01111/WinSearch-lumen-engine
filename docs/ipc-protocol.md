@@ -213,8 +213,10 @@ The C# client checks the capability before sending, snapshots mutable caller
 arguments, correlates replies and rejects foreign IDs/proofs, missing metadata
 and paths outside the returned local root. Those lexical checks complement the
 engine's native residency/reparse/current-policy checks; they do not replace them.
-The additive operation retains protocol version1. Content previews, code identity
-mapping and the reusable Rust client remain required by the integration plan.
+The additive operation retains protocol version1. The
+[async Rust client](headless-client.md) performs equivalent reply checks and
+uses the same shared DTOs. Content previews, code identity mapping, actual
+content provenance and Lumen host integration remain open.
 
 ## Internal embed-worker protocol (P3.2)
 

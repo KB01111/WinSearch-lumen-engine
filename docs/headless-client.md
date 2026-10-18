@@ -1,0 +1,110 @@
+# Headless Rust client
+
+`src/engine/crates/ws-client` is the asynchronous native transport for Rust hosts,
+including the planned Lumen adapter. It uses Tokio 1 and the actual `ws-protocol`
+types. It does not start an engine, crawl files, load a model or depend on WinUI,
+Tauri or `ws-embed`. Protocol types are re-exported as `ws_client::protocol`.
+
+The native host must verify and own the daemon/workers and their Job Object,
+derive its own user SID and instance, and supply the local pipe name. The client
+accepts `\\.\pipe\winsearch-S-1-…` names; remote paths, worker pipes and unrelated
+namespaces are rejected. Namespace validation does not authenticate a server
+process. The host must preserve executable and instance ownership; the engine
+retains its per-user pipe DACL. Tokio's `SECURITY_IDENTIFICATION` default is kept.
+
+```rust,no_run
+use ws_client::{Client, protocol::{SearchMode, SearchQuery}};
+
+async fn example(pipe_name: String) -> Result<(), ws_client::Error> {
+let client = Client::new(pipe_name)?;
+let mut search = client.search(SearchQuery {
+    text: "invoice".into(),
+    mode: SearchMode::Files,
+    limit: 20,
+    include_semantic: false,
+    ..Default::default()
+}).await?;
+while let Some(frame) = search.next().await? {
+    // Forward typed results only after the host rechecks current query/root grants.
+    for result in frame.batch {
+        println!("{}", result.title);
+    }
+}
+Ok(())
+}
+```
+
+`search` preserves ordered progressive batches, actual locations/excerpts and
+the engine's terminal flag. `SearchStream::cancel(self)` sends the correlated
+cancel and disconnects, with a one-second send bound. Dropping a stream or a
+pending `next()` read closes its connection; a subsequent `next()` on that
+interrupted stream reports the closed connection once, then returns `None`.
+An error or terminal batch also closes the connection and releases admission.
+There are no detached client tasks, retries of applied requests or queued result
+batches. Polling/owning and dropping these futures remains the host's responsibility.
+
+`status`, `model_status`, `config`, `set_config`, `indexing_config`,
+`set_indexing_config`, `resolve_entry` and explicit model download/import/delete
+methods return shared typed DTOs. Calling the client does not implicitly download
+or import a model. A mutation may have applied before its reply is lost; the host
+must reconcile current state before deciding whether to issue another mutation.
+A cancelled, interrupted or unacknowledged mutation fences all further mutations
+through that client and its clones with `MutationOutcomeUnknown`. Reads and
+subscriptions remain available. The host must stop/restart its owned engine,
+reconcile persisted policy/model state and construct a fresh client before
+resuming mutations; recreating a client alone cannot order an older server task.
+A correlated server rejection completes the request and does not fence the lane.
+
+Each operation uses one owned connection. Clones share four read slots, one
+serialized mutation slot and one separate status subscription slot. Admission,
+connect, handshake, writes and ordinary request reads share a 35-second total
+deadline; connect/handshake also has a five-second bound. Only a missing/busy
+pipe is retried, before any request is sent. Each request ID is positive and
+unique across clones. Wrong IDs, unexpected response types or invalid versions
+fail closed. Known unsolicited status/configuration frames cannot extend the
+deadline. A status broadcast can race the handshake; it is discarded until the
+version acknowledgement is validated.
+
+The shared 16 MiB frame cap is checked before allocating an incoming body.
+Search accepts at most 64 KiB of query text and a requested limit of 4,096;
+delivery is bounded to 4,096 total results and 64 result frames. These client
+resource bounds do not change engine ranking or retrieval acceptance thresholds.
+`subscribe()` delivers typed status/model/configuration events on its own
+connection. Idle subscriptions can remain quiet indefinitely, but a started
+frame must finish within 35 seconds. Interrupted, expired or malformed reads
+and partial writes close their owned connection instead of reusing partial bytes.
+
+Exact search requires `search.exact`; semantic requests also require
+`search.semantic`, code mode requires `code`, and entry resolution requires
+`entry.resolve`. Capability presence is not semantic/model readiness. Existing
+`EngineStatus.model_loaded` and `ModelStatus` are returned unchanged; the richer
+semantic outcome/provenance contract remains part of the unfinished Lumen work.
+
+`resolve_entry` checks the requested identity/source proof, nonempty metadata,
+positive optional index revision and lexical local-disk root containment before
+returning a reply. The [source proof](ipc-protocol.md#indexed-entry-resolution)
+is opaque metadata/policy identity, **not a file hash or permission to open a
+file**. Native consumers must revalidate their own currently authorized roots,
+source identity and residency before preview/open/read. Ordinary indexed `e…`
+identities are supported today; code-specific resolution/content preview and
+actual hash/provenance, Related and expanded filters remain open.
+
+From `src/engine`, `cargo test -p ws-client --all-targets` runs framing and real
+Windows-pipe transport fixtures without models or a daemon. The
+`native-client-smoke` example is a separate assertion-based fixture for the
+actual owned daemon. Build it and the parity binaries, then from the repository
+root run:
+
+```powershell
+python tools/test-search-parity.py --output artifacts/client-native-new --compare-offline --compare-client
+```
+
+Use a fresh output directory. The harness creates its generated sources,
+isolated data/instance and kill-on-close job, exercises current native indexes,
+and requires the job to be empty afterward. The example changes only that
+explicit fixture instance's root/pause policy and restores it. Its document and
+code DTOs must equal the existing public CLI results; revocation must hide
+ordinary results and invalidate old proofs even after root restoration.
+These are native transport/extraction checks, not installed Lumen, model quality
+or launcher responsiveness acceptance. See the
+[gap matrix](v1-gap-matrix.md) for the remaining full v1 work.

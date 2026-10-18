@@ -1,0 +1,218 @@
+cargo :    Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearc
+hd)
+At line:1 char:27
++ ... src/engine; cargo test -p winsearchd --bin winsearchd --all-targets * ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling wi...ins\winsearchd):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.32s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-ea492ede1f9fd55e.exe)
+
+running 190 tests
+test catalog::tests::app_roots_cover_user_and_machine_menus ... ok
+test catalog::tests::display_names_are_cleaned ... ok
+test embed_client::tests::backoff_doubles_and_caps ... ok
+test embed_client::tests::config_env_fallbacks ... ok
+test embed_client::tests::bounded_accounting_never_waits_for_worker_startup_slot ... ok
+test crawl::tests::depth_cap_stops_recursion ... ok
+test catalog::tests::catalogs_executables_with_display_names ... ok
+test crawl::tests::missing_directory_is_not_an_error ... ok
+test crawl::tests::identity_survives_rename ... ok
+test crawl::tests::hidden_items_are_skipped ... ok
+test crawl::tests::record_for_path_captures_metadata ... ok
+test crawl::tests::excludes_dev_trees_and_sensitive_files ... ok
+test crawl::tests::scans_files_and_subdirectories ... ok
+test embed_client::tests::bounded_calls_return_by_deadline_while_worker_slot_is_held ... ok
+test embed_client::tests::timeout_cleanup_preserves_newer_worker_or_bounded_caller ... ok
+test engine::tests::application_query_cache_is_fenced_by_model_generation ... ok
+test engine::tests::application_query_changed_generation_is_never_cached ... ok
+test engine::tests::application_query_rejects_root_revoke_then_regrant_during_embedding ... ok
+test engine::tests::application_query_rejects_semantic_disable_then_reenable ... ok
+test engine::tests::application_query_rejects_source_change_during_embedding ... ok
+test engine::tests::application_query_uses_search_task_prefix ... ok
+test engine::tests::application_rejects_low_confidence_semantic_hits ... ok
+test catalog::tests::resolves_real_shortcuts_created_by_the_shell ... ok
+test code::tests::native_coordinator_exact_without_model_and_live_revocation ... ok
+test code::tests::committing_native_parse_invalidates_inflight_query_revision ... ok
+test engine::tests::calculator_errors_are_reported_honestly ... ok
+test engine::tests::calculator_results_are_synthesized ... ok
+test engine::tests::client_scoped_cancellation_does_not_cancel_other_client_same_request_id ... ok
+test engine::tests::application_stream_rejects_revoke_then_regrant_between_stages ... ok
+test engine::tests::code_mode_returns_no_file_results ... ok
+test engine::tests::category_filters_restrict_kinds ... ok
+test code::tests::watcher_same_second_edit_hides_then_coalesces ... ok
+test engine::tests::cold_start_model_ready_when_model_service_is_ready ... ok
+test engine::tests::embed_query_caches_per_text ... ok
+test engine::tests::exact_entry_ids_parses_index_hits_only ... ok
+test engine::tests::exact_token_boost_rewards_real_words_only ... ok
+test engine::tests::explicit_apps_and_files_modes_exclude_calculator_and_settings ... ok
+test engine::tests::file_hits_come_from_the_index ... ok
+test engine::tests::hybrid_band_maps_cosine_below_prefix_above_fts ... ok
+test engine::tests::hybrid_score_combines_band_and_boosts ... ok
+test engine::tests::code_semantic_rejects_revoke_then_regrant_during_embedding ... ok
+test engine::tests::code_semantic_rejects_semantic_disable_then_reenable ... ok
+test engine::tests::code_search_honors_categories_before_exact_and_semantic_planning ... ok
+test engine::tests::query_cache_evicts_lru_at_capacity ... ok
+test engine::tests::query_cache_holds_configured_capacity ... ok
+test engine::tests::recency_boost_is_small_and_recent_only ... ok
+test engine::tests::semantic_explanation_names_similarity ... ok
+test engine::tests::code_zero_limit_uses_same_effective_limit_for_duplicate_suppression ... ok
+test engine::tests::non_index_category_filter_excludes_file_and_app_hits ... ok
+test engine::tests::semantic_gate_requires_request_policy_and_model ... ok
+test engine::tests::code_stream_rejects_revoke_then_regrant_between_stages ... ok
+test engine::tests::settings_results_are_synthesized ... ok
+test engine::tests::status_reports_segments_and_embedding_activity ... ok
+test code::tests::background_vector_turn_retains_continuation_through_hidden_pages ... ok
+test engine::tests::streaming_code_mode_has_no_semantic_stage ... ok
+test engine::tests::plan_semantic_appends_deduped_thresholded_hits ... ok
+test engine::tests::media_semantic_results_preserve_ranked_moments_thumbnails_and_file_filters ... ok
+test engine::tests::streaming_cancel_between_stages_yields_empty_terminal ... ok
+test engine::tests::streaming_exact_first_semantic_appends ... ok
+test engine::tests::source_guard_delivery_rechecks_content_after_ranking_without_watcher ... ok
+test extract::tests::application_document_uses_title_and_text_without_changing_exact_content ... ok
+test engine::tests::task2_no_model_result_carries_actual_excerpt_and_line ... ok
+test extract::tests::budget_abort_marks_oversized_or_expired_job_failed_without_blocking_queue ... ok
+test extract::tests::crash_resume_releases_claimed_content_jobs_on_reopen ... ok
+test extract::tests::image_reextraction_without_ocr_clears_stale_ocr_segments ... ok
+test extract::tests::crawl_enqueues_content_jobs_and_extracts_chunks_into_fts_and_vectors ... ok
+test engine::tests::task2_normalized_fts_excerpts_anchor_primary_and_all_moments ... ok
+test engine::tests::task2_adjacent_literal_marker_runs_do_not_shift_public_match_anchor ... ok
+test code::tests::background_vectors_cancel_promptly_on_source_pause_or_root_change ... ok
+test extract::tests::image_exif_ocr_screenshot_semantic_and_thumbnail_end_to_end ... ok
+test code::tests::owned_child_inflight_is_cancelled_by_source_pause_and_root_revocation ... ok
+test extract::tests::numeric_heavy_csv_indexes_fts_without_storing_vectors ... ok
+test extract::tests::pdf_native_completed_requeue_clears_derived_vectors ... ok
+test extract::tests::media_audio_native_drafts_defer_without_model_or_fake_transcript ... ok
+test code::tests::deterministic_supervisor_vectors_defer_resume_and_reject_model_swap_inflight ... ok
+test extract::tests::pdf_native_failed_replacement_clears_derived_vectors ... ok
+test embed_client::tests::real_binary::idle_worker_exits_and_respawns_on_demand ... ok
+test embed_client::tests::empty_batch_is_rejected_before_touching_the_worker ... ok
+test embed_client::tests::definitive_worker_errors_are_not_retried ... ok
+test embed_client::tests::ping_reports_worker_snapshot ... ok
+test embed_client::tests::crash_mid_job_restarts_and_retries_once ... ok
+test embed_client::tests::live_worker_reuse_never_sleeps ... ok
+test extract::tests::pdf_native_ocr_exact_and_visual_embedding_consumes_rendered_png ... ok
+test extract::tests::pdf_native_modified_while_parsing_cannot_commit_and_new_primary_replaces_old ... ok
+test embed_client::tests::caller_cancellation_does_not_cancel_another_shared_call ... ok
+test extract::tests::media_video_native_ocr_exact_survives_model_and_frame_cache_absence ... ok
+test extract::tests::query_source_guard_native_offline_flag_without_hydrating_content ... ok
+test extract::tests::native_retained_cleanup_after_claim_preserves_unrelated_queue_and_artifacts ... ok
+test extract::tests::native_retained_cleanup_before_claim_preserves_unrelated_queue_and_artifacts ... ok
+test extract::tests::query_source_guard_native_replacement_without_watcher ... ok
+test extract::tests::query_source_guard_new_project_marker_without_watcher ... ok
+test extract::tests::real_worker_missing_binary_cannot_fall_back_to_registered_inline_extractor ... ok
+test embed_client::tests::bounded_call_times_out_on_hanging_worker ... ok
+test extract::tests::query_source_guard_new_junction_ancestor_without_watcher ... ok
+test embed_client::tests::large_batches_split_into_capped_jobs ... ok
+test extract::tests::query_source_guard_precise_change_without_watcher ... ok
+test extract::tests::task2_long_document_first_batch_is_thirty ... ok
+test extract::tests::real_worker_production_registry_indexes_generated_text_without_inline_provider ... ok
+test extract::tests::task2_inflight_same_metadata_modified_rejects_old_batch ... ok
+test extract::tests::query_source_guard_new_dataset_without_watcher ... ok
+test extract::tests::task2_no_model_keeps_exact_content ... ok
+test extract::tests::pdf_native_huge_page_restart_has_stable_chunk_ordinals ... ok
+test extract::tests::unsupported_or_failed_reextraction_clears_stale_content_fts_and_segments ... ok
+test extract::tests::task2_same_size_same_second_modified_requeues ... ok
+test extract::tests::queue_drains_small_files_first_then_recent_first ... ok
+test extract::tests::task2_native_modified_same_second_and_inflight ... ok
+test extract::tests::pdf_native_durable_restart_exact_pages_primary_thumbnail_and_policy ... ok
+test extract_client::tests::missing_worker_fails_without_in_process_fallback ... ok
+test embed_client::tests::bounded_second_batch_proceeds_while_first_hangs ... ok
+test extract_client::tests::code_native_child_keeps_notebook_coordinates_and_excludes_outputs ... ok
+test extract_client::tests::code_native_child_parses_source_under_shared_owned_transport ... ok
+test extract_client::tests::media_artifact_outside_private_scratch_is_rejected ... ok
+test extract_client::tests::media_artifact_is_promoted_and_owned_until_durable_commit ... ok
+test indexer::tests::application_name_batch_cannot_commit_across_model_generation ... ok
+test extract::tests::pdf_native_unchanged_requeue_missing_dependency_preserves_content ... ok
+test indexer::tests::delete_event_removes_entries ... ok
+test extract::tests::real_worker_discards_promoted_artifacts_when_pause_or_source_changes_before_commit ... ok
+test indexer::tests::extension_rename_within_modality_clears_content_and_requeues ... ok
+test extract_client::tests::native_extract_rejects_replaced_scratch_root_and_preserves_external_file ... ok
+test extract_client::tests::real_extract_image_promotes_thumbnail_and_cleans_private_directory ... ok
+test extract_client::tests::native_extract_rejects_hostile_frames_and_outside_scratch ... ok
+test indexer::tests::failed_disconnect_update_is_retried_without_repeating_successful_writes ... ok
+test indexer::tests::overflow_rescans_claimed_descendants_before_sweeping ... ok
+test indexer::tests::full_scan_indexes_files_and_search_finds_them ... ok
+test indexer::tests::disconnected_volumes_are_preserved_and_reconciled ... ok
+test extract_client::tests::native_extract_deadline_unblocks_a_request_larger_than_pipe_capacity ... ok
+test indexer::tests::pipeline_crawl_enqueues_and_embeds_names ... ok
+test indexer::tests::pipeline_crash_mid_queue_restart_resumes_idempotently ... ok
+test extract_client::tests::real_extract_binary_returns_actual_text_lines_and_explicit_unsupported ... ok
+test indexer::tests::pipeline_attempt_cap_poisons_persistently_failing_job ... ok
+test indexer::tests::pipeline_delete_removes_segments ... ok
+test indexer::tests::pipeline_failed_batch_releases_claims_for_retry ... ok
+test indexer::tests::pipeline_new_files_first_lifo_within_priority ... ok
+test indexer::tests::pipeline_purge_and_requeue_reembeds_everything ... ok
+test indexer::tests::removed_root_readded_offline_preserves_identity_and_reconciles ... ok
+test indexer::tests::pipeline_mid_batch_change_requeues_instead_of_stale_upsert ... ok
+test indexer::tests::pipeline_rename_keeps_segment_identity_and_reembeds ... ok
+test indexer::tests::rescan_after_crash_resumes_from_queue ... ok
+test indexer::tests::rename_event_preserves_identity ... ok
+test indexer::tests::revoked_inflight_name_and_content_jobs_cannot_commit ... ok
+test indexer::tests::dynamic_policy_revokes_claims_results_and_resumes_durable_work ... ok
+test indexer::tests::touch_subtree_generation_protects_descendants_from_stale_sweep ... ok
+test indexer::tests::superseded_inflight_scan_does_not_stamp_overflow_generation ... ok
+test indexer::tests::watcher_point_commit_rechecks_exclusions_after_metadata_collection ... ok
+test indexer::tests::startup_offline_root_marks_entries_missing_and_reconnects_on_presence ... ok
+test extract_client::tests::native_cleanup_failure_retains_live_thread_and_pipe_ownership ... ok
+test model::tests::cancelled_word_in_other_errors_is_not_cancel ... ok
+test model::tests::blocked_start_notification_does_not_hold_active_or_stop_import ... ok
+test model::tests::cancel_download_does_not_cancel_an_import ... ok
+test indexer::tests::watcher_events_under_excluded_ancestors_are_ignored ... ok
+test model::tests::cancel_without_active_op_is_noop ... ok
+test model::tests::blocked_first_notification_cannot_publish_terminal_after_second_start ... ok
+test model::tests::busy_import_refused_while_download_runs ... ok
+test model::tests::compat_record_written_and_checked ... ok
+test policy::tests::cloud_attributes_never_allow_content ... ok
+test policy::tests::consent_boundaries_and_reinclusion ... ok
+test policy::tests::dataset_boundaries_and_camera_roll ... ok
+test model::tests::delete_while_idle_clears_files ... ok
+test policy::tests::pause_precedence_and_unknown_power_is_conservative ... ok
+test policy::tests::schedule_wraps_and_equal_means_all_day ... ok
+test model::tests::superseded_operation_cannot_overwrite_newer_outcome ... ok
+test policy::tests::validates_and_normalizes_without_dropping_offline_roots ... ok
+test model::tests::notification_callback_can_delete_finished_import ... ok
+test model::tests::full_download_thread_reports_ready_and_writes_compat ... ok
+test policy::tests::selected_project_subfolder_keeps_documents_name_only ... ok
+test watcher::tests::parses_notify_stream_with_rename_pair ... ok
+test model::tests::incompatible_compat_purges_vectors_and_requeues_on_restart ... ok
+test server::tests::indexing_config_roundtrips_over_pipe_and_survives_reconnect ... ok
+test model::tests::legacy_media_pipeline_requeues_vectors_and_preserves_exact_chunks ... ok
+test watcher::tests::watches_create_modify_rename_delete ... ok
+test extract_client::tests::native_extract_timeout_kills_owned_descendants_and_cancel_cleans_scratch ... FAILED
+test extract_client::tests::code_native_child_denies_sensitive_and_oversized_sources ... ok
+test policy::tests::dataset_explicit_root_override_and_project_screenshots ... ok
+test server::tests::in_band_cancel_on_pipe_aborts_slow_semantic_stage ... ok
+test server::tests::resolves_native_entry_identity_and_rejects_stale_source_or_grants ... ok
+test extract::tests::pdf_native_later_failure_and_missing_dependency_preserve_committed_pages ... ok
+test embed_client::tests::real_binary::killing_the_worker_mid_job_restarts_and_retries ... ok
+test embed_client::tests::task2_supervisor_model_recovery_embeds_persisted_exact_without_reparse ... ok
+test code::tests::background_vector_failure_retains_a_wake_and_recovers_without_signal ... ok
+test embed_client::tests::real_binary::real_worker_round_trips_a_text_batch ... ok
+test extract::tests::task2_native_worker_seventy_five_chunks_resume_after_restart ... ok
+test model::tests::cancel_mid_download_then_resume_to_ready ... ok
+test extract_client::tests::code_native_child_continuations_preserve_the_complete_source_and_symbol_tail ... ok
+test extract::tests::media_completed_native_cache_recovery_preserves_vectors_and_exact_rows ... ok
+test extract::tests::pdf_native_snapshot_replacement_clears_derived_vectors ... ok
+test extract::tests::task2_native_worker_beyond_legacy_cap_reaches_final_sentinel ... ok
+test extract::tests::media_video_native_restart_defers_all_phases_and_restores_primary_frame ... ok
+test model::tests::busy_second_import_refused_while_import_runs ... ok
+test extract::tests::query_source_guard_denied_population_cannot_consume_exact_or_vector_limits ... ok
+test extract::tests::media_video_native_both_phases_reject_source_pause_and_root_changes ... ok
+
+failures:
+
+---- extract_client::tests::native_extract_timeout_kills_owned_descendants_and_cancel_cleans_scratch stdout ----
+
+thread 'extract_client::tests::native_extract_timeout_kills_owned_descendants_and_cancel_cleans_scratch' (78044) panicked at bins\winsearchd\src\extract_client.rs:693:14:
+called `Result::unwrap()` on an `Err` value: Os { code: 2, kind: NotFound, message: "Det går inte att hitta filen." }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    extract_client::tests::native_extract_timeout_kills_owned_descendants_and_cancel_cleans_scratch
+
+test result: FAILED. 189 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 19.43s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

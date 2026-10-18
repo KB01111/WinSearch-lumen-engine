@@ -1,0 +1,42 @@
+cargo :     Checking log v0.4.34
+At line:1 char:51
++ ...  ws-client; cargo clippy -p ws-client --all-targets -- -D warnings *> ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Checking log v0.4.34:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Checking windows-sys v0.61.2
+    Checking tracing-core v0.1.36
+    Checking memchr v2.8.3
+    Checking thiserror v2.0.21
+    Checking serde v1.0.229
+    Checking rustls v0.23.46
+    Checking ureq-proto v0.6.4
+    Checking tracing v0.1.44
+    Checking serde_json v1.0.154
+    Checking mio v1.2.4
+    Checking socket2 v0.6.5
+    Checking tokio v1.53.3
+    Checking ureq v3.4.2
+    Checking ws-modelmgr v0.1.0 (<checkout>\src\engine\crates\ws-modelmgr)
+error: this `impl` can be derived
+  --> crates\ws-modelmgr\src\download.rs:44:1
+   |
+44 | / impl Default for DownloadOptions {
+45 | |     fn default() -> Self {
+46 | |         Self {
+47 | |             base_url_override: None,
+...  |
+50 | | }
+   | |_^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#derivable_impls
+   = note: `-D clippy::derivable-impls` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::derivable_impls)]`
+help: replace the manual implementation with a derive attribute
+   |
+40 + #[derive(Default)]
+41 | pub struct DownloadOptions {
+   |
+
+error: could not compile `ws-modelmgr` (lib) due to 1 previous error

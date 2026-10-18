@@ -1,0 +1,53 @@
+cargo :    Compiling ws-client v0.1.0 (<checkout>\src\engine\crates\ws-clie
+nt)
+At line:1 char:27
++ ... src/engine; cargo test -p ws-client --lib client::tests *> ../../arti ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...ates\ws-client):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.02s
+     Running unittests src\lib.rs (target\debug\deps\ws_client-dc52a795d104f408.exe)
+
+running 4 tests
+test client::tests::refuses_remote_worker_and_foreign_pipe_namespaces ... FAILED
+test client::tests::unavailable_pipe_has_bounded_connect_deadline ... FAILED
+test client::tests::status_uses_secured_pipe_framing_and_ignores_only_pushes ... FAILED
+test client::tests::unary_rejects_wrong_id_and_type_and_preserves_matching_errors ... FAILED
+
+failures:
+
+---- client::tests::refuses_remote_worker_and_foreign_pipe_namespaces stdout ----
+
+thread 'client::tests::refuses_remote_worker_and_foreign_pipe_namespaces' (104480) panicked at crates\ws-client\src\client.rs:50:13:
+\\server\pipe\winsearch-S-1-5-21
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- client::tests::unavailable_pipe_has_bounded_connect_deadline stdout ----
+
+thread 'client::tests::unavailable_pipe_has_bounded_connect_deadline' (66820) panicked at crates\ws-client\src\client.rs:97:9:
+assertion failed: matches!(client.status().await, Err(Error::Timeout))
+
+---- client::tests::status_uses_secured_pipe_framing_and_ignores_only_pushes stdout ----
+
+thread 'client::tests::status_uses_secured_pipe_framing_and_ignores_only_pushes' (41484) panicked at crates\ws-client\src\client.rs:64:42:
+called `Result::unwrap()` on an `Err` value: Protocol("typed requests are not implemented")
+
+---- client::tests::unary_rejects_wrong_id_and_type_and_preserves_matching_errors stdout ----
+
+thread 'client::tests::unary_rejects_wrong_id_and_type_and_preserves_matching_errors' (68360) panicked at crates\ws-client\src\client.rs:36:76:
+called `Result::unwrap()` on an `Err` value: Elapsed(())
+
+thread 'client::tests::unary_rejects_wrong_id_and_type_and_preserves_matching_errors' (68360) panicked at crates\ws-client\src\client.rs:88:24:
+called `Result::unwrap()` on an `Err` value: JoinError::Panic(Id(2), "called `Result::unwrap()` on an `Err` value: Elapsed(())", ...)
+
+
+failures:
+    client::tests::refuses_remote_worker_and_foreign_pipe_namespaces
+    client::tests::status_uses_secured_pipe_framing_and_ignores_only_pushes
+    client::tests::unary_rejects_wrong_id_and_type_and_preserves_matching_errors
+    client::tests::unavailable_pipe_has_bounded_connect_deadline
+
+test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 9 filtered out; finished in 1.01s
+
+error: test failed, to rerun pass `-p ws-client --lib`

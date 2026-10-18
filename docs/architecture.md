@@ -39,6 +39,16 @@ Typed IPC messages (`ClientMessage`/`ServerMessage`) and the framing codec
 (4-byte LE length + UTF-8 JSON, 16 MiB cap). Protocol version is **1**; see
 `ipc-protocol.md` for the wire contract.
 
+### `ws-client` (crates/ws-client)
+
+Typed asynchronous Tokio client for a host-owned engine instance. It reuses
+`ws-protocol`, bounds concurrent reads and serialized mutations separately, and
+owns each request/search/subscription connection so cancellation closes partial
+frames safely. It has no frontend or native inference dependency and performs
+no crawling, model loading or process startup. See
+[headless client](headless-client.md) for APIs, native fixture checks and the
+remaining Lumen consumer/security responsibilities.
+
 ### `ws-platform` (crates/ws-platform)
 
 Win32 plumbing: named pipe with a per-user DACL and

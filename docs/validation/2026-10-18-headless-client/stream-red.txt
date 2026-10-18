@@ -1,0 +1,81 @@
+cargo :    Compiling ws-client v0.1.0 (<checkout>\src\engine\crates\ws-clie
+nt)
+At line:1 char:27
++ ... src/engine; cargo test -p ws-client --lib *> ../../artifacts/ws-clien ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...ates\ws-client):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.15s
+     Running unittests src\lib.rs (target\debug\deps\ws_client-dc52a795d104f408.exe)
+
+running 22 tests
+test client::tests::refuses_remote_worker_and_foreign_pipe_namespaces ... ok
+test tests::async_reader_distinguishes_closed_and_truncated_connections ... ok
+test tests::async_reader_rejects_oversized_headers_before_reading_a_body ... ok
+test tests::async_reader_accepts_the_existing_shared_wire_codec ... ok
+test transport::tests::handshake_sends_current_version_then_accepts_ack ... ok
+test client::tests::invalid_search_frames_fail_once_and_close_the_stream ... FAILED
+test client::tests::search_delivers_ordered_batches_then_releases_connection_at_terminal ... FAILED
+test client::tests::legacy_capabilities_refuse_entry_resolution_before_sending_an_unknown_frame ... ok
+test client::tests::search_bounds_input_before_connect_and_checks_optional_capabilities ... FAILED
+test transport::tests::handshake_preserves_connection_scoped_remote_error ... ok
+test client::tests::explicit_search_cancel_and_drop_both_close_owned_pipe ... FAILED
+test transport::tests::handshake_rejects_foreign_version_and_wrong_envelope ... ok
+test client::tests::status_uses_secured_pipe_framing_and_ignores_only_pushes ... ok
+test client::tests::subscriptions_deliver_only_unsolicited_typed_events ... FAILED
+test transport::tests::subscription_allows_quiet_idle_but_bounds_started_frames ... FAILED
+test client::tests::unary_rejects_wrong_id_and_type_and_preserves_matching_errors ... ok
+test client::tests::typed_configuration_and_model_operations_preserve_wire_values ... ok
+test client::tests::entry_resolution_checks_identity_proof_and_lexical_root_before_delivery ... ok
+test client::tests::unavailable_pipe_has_bounded_connect_deadline ... ok
+test transport::tests::dropped_partial_send_closes_owned_connection ... ok
+test transport::tests::dropped_partial_receive_closes_io_instead_of_reusing_partial_frame ... ok
+test transport::tests::receive_timeout_and_malformed_frame_close_owned_connection ... ok
+
+failures:
+
+---- client::tests::invalid_search_frames_fail_once_and_close_the_stream stdout ----
+
+thread 'client::tests::invalid_search_frames_fail_once_and_close_the_stream' (103648) panicked at crates\ws-client\src\client.rs:503:74:
+called `Result::unwrap()` on an `Err` value: Protocol("search streaming is not implemented")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- client::tests::search_delivers_ordered_batches_then_releases_connection_at_terminal stdout ----
+
+thread 'client::tests::search_delivers_ordered_batches_then_releases_connection_at_terminal' (37204) panicked at crates\ws-client\src\client.rs:480:119:
+called `Result::unwrap()` on an `Err` value: Protocol("search streaming is not implemented")
+
+---- client::tests::search_bounds_input_before_connect_and_checks_optional_capabilities stdout ----
+
+thread 'client::tests::search_bounds_input_before_connect_and_checks_optional_capabilities' (102032) panicked at crates\ws-client\src\client.rs:534:9:
+assertion failed: matches!(client.search(SearchQuery
+    { limit: 4097, ..Default::default() }).await, Err(Error::InvalidInput(_)))
+
+---- client::tests::explicit_search_cancel_and_drop_both_close_owned_pipe stdout ----
+
+thread 'client::tests::explicit_search_cancel_and_drop_both_close_owned_pipe' (3360) panicked at crates\ws-client\src\client.rs:524:74:
+called `Result::unwrap()` on an `Err` value: Protocol("search streaming is not implemented")
+
+---- client::tests::subscriptions_deliver_only_unsolicited_typed_events stdout ----
+
+thread 'client::tests::subscriptions_deliver_only_unsolicited_typed_events' (104216) panicked at crates\ws-client\src\client.rs:563:61:
+called `Result::unwrap()` on an `Err` value: Protocol("status subscription is not implemented")
+
+---- transport::tests::subscription_allows_quiet_idle_but_bounds_started_frames stdout ----
+
+thread 'transport::tests::subscription_allows_quiet_idle_but_bounds_started_frames' (7120) panicked at crates\ws-client\src\transport.rs:231:9:
+assertion failed: matches!(result, Ok(Err(Error::Timeout)))
+
+
+failures:
+    client::tests::explicit_search_cancel_and_drop_both_close_owned_pipe
+    client::tests::invalid_search_frames_fail_once_and_close_the_stream
+    client::tests::search_bounds_input_before_connect_and_checks_optional_capabilities
+    client::tests::search_delivers_ordered_batches_then_releases_connection_at_terminal
+    client::tests::subscriptions_deliver_only_unsolicited_typed_events
+    transport::tests::subscription_allows_quiet_idle_but_bounds_started_frames
+
+test result: FAILED. 16 passed; 6 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `-p ws-client --lib`

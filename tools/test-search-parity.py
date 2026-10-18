@@ -98,6 +98,8 @@ def main():
     parser.add_argument('--real-model', action='store_true')
     parser.add_argument('--compare-offline', action='store_true',
         help='also compare shared offline query functions against native DB snapshots')
+    parser.add_argument('--compare-client', action='store_true',
+        help='exercise ws-client against the same owned native engine and source fixtures')
     options = parser.parse_args()
     output = options.output.resolve()
     assert output.is_relative_to(ROOT/'artifacts') and not output.exists()
@@ -117,6 +119,8 @@ def main():
         summary['projector_sha256'] = digest(projector)
     if options.compare_offline:
         summary['offline_comparator_sha256'] = digest(binary/'examples/native-eval-parity.exe')
+    if options.compare_client:
+        summary['headless_client_sha256'] = digest(binary/'examples/native-client-smoke.exe')
     (output/'input-lock.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
     sid = next(csv.reader(subprocess.check_output(['whoami', '/user', '/fo', 'csv', '/nh'], text=True).splitlines()))[1]
     instance = 'parity-'+uuid.uuid4().hex
@@ -279,6 +283,16 @@ def main():
             compare('absent_exact', 'unfindableparitytoken', empty=True)
             compare('code_absent_exact', 'unfindableparitytoken', mode='code', empty=True)
             summary['checks'].append('native_extraction_exact_code_opt_in_and_payload_parity')
+            if options.compare_client:
+                stdout, stderr = owned_command([str(binary/'examples/native-client-smoke.exe')], timeout=90)
+                (output/'headless-client.log').write_bytes(stdout+stderr)
+                native_client = json.loads(stdout)
+                assert native_client['document'] == document_hits, ('client document DTO parity', native_client)
+                expected_code = next(record['cli'] for record in summary['queries']
+                    if record['name'] == 'code_definition_reference')
+                assert native_client['code'] == expected_code, ('client code DTO parity', native_client)
+                summary['headless_client'] = native_client
+                summary['checks'].append('typed_async_client_native_dto_status_pause_revoke_restore_reconnect')
             if not options.real_model:
                 with sqlite3.connect((output/'data/db/code.db').as_uri()+'?mode=ro', uri=True) as connection:
                     assert connection.execute('SELECT count(*) FROM code_chunks WHERE norm>0').fetchone()[0] == 0
