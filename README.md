@@ -20,10 +20,19 @@ in the [gap matrix](docs/v1-gap-matrix.md); the
 [Lumen integration plan](docs/superpowers/plans/2026-10-17-v1-lumen-engine.md)
 define the full scope.
 
+The latest [query-filter checkpoint](docs/validation/2026-10-18-query-filters/README.md)
+records verified subsystem behavior and the retained native failure. The tasks
+below still require implementation or final acceptance; they are not release
+completion claims.
+
 ### Lumen integration and native contract
 
-- [ ] Complete the engine contracts for Related search, remaining scopes/file-kind
-  filters, and explicit semantic availability, outcomes and provenance.
+- [ ] Complete Related search, finer file-kind scopes and remaining provenance
+  contracts; expose the existing extension filters through CLI arguments.
+- [ ] Complete terminal search outcomes across the daemon, Rust/C# clients and
+  CLI. Distinguish complete, superseded, canceled and failed requests; report
+  semantic disabled/ready/degraded states with bounded reasons. Preserve exact
+  results when optional inference fails and legacy peers' unknown state.
 - [ ] Distinguish superseded queries from genuine empty results and resolve the
   transient native pause/resume result failure; preserve current source fences.
 - [ ] Implement the typed WinSearch adapter behind Lumen's existing SearchService.
