@@ -419,6 +419,18 @@ impl Client {
         .await
     }
 
+    pub async fn preview_text(&self,request:ws_protocol::PreviewRequest)->Result<ws_protocol::EntryPreview,Error> {
+        if request.reference.result_id.len()>32 || request.reference.source_revision.as_ref().is_some_and(|proof|proof.len()>64*1024)
+            || !ws_protocol::valid_preview_location(request.location) {
+            return Err(Error::InvalidInput("preview exceeds its request budget"));
+        }
+        let expected=request.clone();
+        self.unary(false,Some("entry.preview.text"),|id|ClientMessage::PreviewEntry {id,request},|message|match message {
+            ServerMessage::EntryPreview {preview,..} if preview_matches(&preview,&expected)=>Ok(preview),
+            _=>Err(Error::Protocol("preview identity, location, state or budget changed")),
+        }).await
+    }
+
     pub async fn search(&self, query: SearchQuery) -> Result<SearchStream, Error> {
         if query.limit as usize > MAX_SEARCH_RESULTS || query.text.len() > 64 * 1024 {
             return Err(Error::InvalidInput("search exceeds its request budget"));
@@ -499,6 +511,33 @@ fn entry_matches(entry: &ResolvedEntry, expected: &EntryReference) -> bool {
             .all(|(a, b)| a.eq_ignore_ascii_case(b))
 }
 
+fn preview_matches(preview:&ws_protocol::EntryPreview,expected:&ws_protocol::PreviewRequest)->bool {
+    use ws_protocol::{MatchLocation,PreviewState,MAX_PREVIEW_EXTRACTIONS,MAX_PREVIEW_TEXT_BYTES,MAX_PREVIEW_TEXT_PARTS};
+    let known_kind=|kind:&str|matches!(kind,"doc"|"pdf"|"ocr"|"image"|"audio"|"video");
+    if !entry_matches(&preview.entry,&expected.reference) || preview.parts.len()>MAX_PREVIEW_TEXT_PARTS
+        || preview.extraction.len()>MAX_PREVIEW_EXTRACTIONS {return false;}
+    let ready=preview.state==PreviewState::Ready;
+    if ready==preview.parts.is_empty() || (ready && preview.entry.index_revision.is_none())
+        || (preview.state==PreviewState::NotIndexed && preview.entry.index_revision.is_some())
+        || (preview.state==PreviewState::LocationUnavailable && expected.location.is_none()) {return false;}
+    let mut bytes=0usize;
+    for part in &preview.parts {
+        bytes=match bytes.checked_add(part.text.len()) {Some(value) if value<=MAX_PREVIEW_TEXT_BYTES=>value,_=>return false};
+        if part.text.is_empty() || !known_kind(&part.kind) || !ws_protocol::valid_preview_location(part.location) {return false;}
+        let matches=match (expected.location,part.location) {
+            (None,_)=>true,
+            (Some(MatchLocation::Page {page:expected}),Some(MatchLocation::Page {page}))=>expected==page,
+            (Some(MatchLocation::Line {line:expected}),Some(MatchLocation::Line {line}))=>expected>=line
+                && u64::from(expected-line)<part.text.split('\n').count() as u64,
+            (Some(MatchLocation::Timestamp {seconds:expected,end_seconds:expected_end}),Some(MatchLocation::Timestamp {seconds,end_seconds}))=>expected==seconds && expected_end==end_seconds,
+            _=>false,
+        };
+        if !matches {return false;}
+    }
+    preview.extraction.iter().all(|item|known_kind(&item.kind)
+        && !matches!((item.indexed_units,item.source_units),(Some(indexed),Some(source)) if indexed>source))
+}
+
 fn local_parts(value: &str) -> Option<Vec<String>> {
     let value = value.replace('/', r"\");
     let value = value.strip_prefix(r"\\?\").unwrap_or(&value);
@@ -566,6 +605,7 @@ fn validate_id(message: &ServerMessage, expected: u64) -> Result<(), Error> {
         | ServerMessage::Error { id, .. } => *id,
         ServerMessage::Pong { id }
         | ServerMessage::ResolvedEntry { id, .. }
+        | ServerMessage::EntryPreview { id, .. }
         | ServerMessage::Results { id, .. } => Some(*id),
         ServerMessage::HelloAck { .. } => None,
     };
@@ -837,6 +877,74 @@ mod tests {
             modified_unix_seconds: Some(1),
             index_revision: Some(2),
             source_revision: "proof".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn preview_legacy_capability_closes_before_writing_an_unknown_request() {
+        use tokio::io::AsyncReadExt;
+        let (client,mut peer)=fixture();
+        let task=tokio::spawn(async move {
+            peer.connect().await.unwrap();let _=read_client(&mut peer).await;
+            let mut hello=ack();
+            if let ServerMessage::HelloAck {features,..}=&mut hello {features.clear();}
+            send_server(&mut peer,&hello).await;
+            assert_eq!(peer.read(&mut [0]).await.unwrap(),0,"legacy engine must receive no preview frame");
+        });
+        assert!(matches!(client.preview_text(ws_protocol::PreviewRequest {
+            reference:EntryReference {result_id:"e42".into(),source_revision:None},location:None,
+        }).await,Err(Error::Unsupported("entry.preview.text"))));
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn preview_invalid_locations_are_rejected_before_connecting() {
+        use ws_protocol::{MatchLocation,PreviewRequest};
+        let (client,peer)=fixture();drop(peer);
+        for location in [MatchLocation::Page {page:0},MatchLocation::Page {page:5001},
+            MatchLocation::Line {line:0},MatchLocation::Timestamp {seconds:f64::NAN,end_seconds:1.0},
+            MatchLocation::Timestamp {seconds:2.0,end_seconds:1.0}] {
+            assert!(matches!(client.preview_text(PreviewRequest {reference:EntryReference {result_id:"e42".into(),source_revision:None},location:Some(location)}).await,Err(Error::InvalidInput(_))));
+        }
+    }
+
+    #[tokio::test]
+    async fn preview_checks_identity_location_utf8_budget_and_partial_state_before_delivery() {
+        use ws_protocol::{EntryPreview,MatchLocation,PreviewExtraction,PreviewRequest,PreviewState,PreviewTextPart};
+        for case in 0..14 {
+            let (client,mut peer)=fixture();
+            let task=tokio::spawn(async move {
+                peer.connect().await.unwrap();let _=read_client(&mut peer).await;
+                let mut hello=ack();
+                if let ServerMessage::HelloAck {features,..}=&mut hello {features.push("entry.preview.text".into());}
+                send_server(&mut peer,&hello).await;
+                let ClientMessage::PreviewEntry {id,request}=read_client(&mut peer).await else {panic!("preview request missing");};
+                assert_eq!(request.reference.result_id,"e42");assert_eq!(request.location,Some(MatchLocation::Page {page:8}));
+                let mut preview=EntryPreview {entry:resolved(),state:PreviewState::Ready,
+                    parts:vec![PreviewTextPart {kind:"pdf".into(),text:"Actual eighth page".into(),location:Some(MatchLocation::Page {page:8})}],
+                    truncated:false,extraction:vec![PreviewExtraction {kind:"pdf".into(),complete_within_limit:true,source_units:None,indexed_units:None,capped:None}]};
+                match case {
+                    1=>preview.entry.result_id="e43".into(),
+                    2=>preview.entry.source_revision="stale".into(),
+                    3=>preview.entry.path=r"C:\outside\report.txt".into(),
+                    4=>preview.parts=vec![preview.parts[0].clone();65],
+                    5=>preview.parts[0].text="🌿".repeat(17000),
+                    6=>preview.parts[0].location=Some(MatchLocation::Page {page:9}),
+                    7=>preview.parts.clear(),
+                    8=>preview.state=PreviewState::NoCachedText,
+                    9=>preview.extraction=vec![preview.extraction[0].clone();9],
+                    10=>preview.extraction[0].kind="unrecognized".into(),
+                    11=>preview.entry.index_revision=None,
+                    12=>preview.parts[0].text.clear(),
+                    13=>preview.parts[0].kind="C:/must-not-open".into(),
+                    _=>(),
+                }
+                send_server(&mut peer,&ServerMessage::EntryPreview {id,preview}).await;
+            });
+            let result=client.preview_text(PreviewRequest {reference:EntryReference {result_id:"e42".into(),source_revision:Some("proof".into())},location:Some(MatchLocation::Page {page:8})}).await;
+            if case==0 {assert_eq!(result.unwrap().parts[0].text,"Actual eighth page");}
+            else {assert!(matches!(result,Err(Error::Protocol(_))),"case {case}: {result:?}");}
+            task.await.unwrap();
         }
     }
 

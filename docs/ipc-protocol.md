@@ -215,8 +215,55 @@ and paths outside the returned local root. Those lexical checks complement the
 engine's native residency/reparse/current-policy checks; they do not replace them.
 The additive operation retains protocol version1. The
 [async Rust client](headless-client.md) performs equivalent reply checks and
-uses the same shared DTOs. Content previews, code identity mapping, actual
-content provenance and Lumen host integration remain open.
+uses the same shared DTOs. The cached-text route below is additive; code identity
+mapping, actual content provenance and Lumen host integration remain open.
+
+## Cached text previews
+
+Peers advertising `entry.preview.text` accept an ordinary indexed identity and
+an optional actual page, line or timestamp. No caller source/cache path is accepted:
+
+```json
+{"type":"preview_entry","id":42,"request":{"reference":{"result_id":"e23","source_revision":null},"location":{"kind":"page","page":2}}}
+```
+
+The correlated `entry_preview` contains `preview.entry` (the same current metadata
+as `resolved_entry`), `state`, `parts`, `truncated` and `extraction`. Each text part
+has `kind`, UTF-8 `text` and nullable actual `location`. States are `ready`,
+`not_indexed`, `no_cached_text` and `location_unavailable`; only `ready` has text.
+Requests accept pages1..5000, lines1..67108864 and finite ordered timestamps within
+366days. Pages and timestamp pairs select exact stored positions; a line selects
+cached text covering that line and returns its actual start line. A missing position
+never causes a fabricated page/line/time or a fallback to unrelated text.
+
+The reply is bounded to **64KiB aggregate UTF-8 text, 64parts and eight extraction
+kinds**, preserving codepoint boundaries. `truncated` reports the transport text/part
+limit. Each extraction item reports `complete_within_limit`; `source_units`,
+`indexed_units` and `capped` are currently null because full source coverage has not
+been persisted. Completion within a limit is not full-document completion.
+
+SQLite selects only bounded text prefixes/locations through current source/root/
+revision guards before the row limit. It does not load vector inputs, artifact
+paths or all content chunks. This route starts no parser or inference and reads no
+source content; already cached text remains available while indexing is paused.
+Current native source metadata, model generation, revision and policy proof are
+revalidated after the query and again after acquiring the response writer. Cancelled,
+disconnected or replaced requests cannot reuse an earlier delivery decision.
+
+At most two preview jobs are admitted by the daemon engine; further requests return
+`not_ready` with a busy message. Work runs away from the connection reader, so a
+database wait does not block in-band Ping/Cancel. Admission is retained through
+delivery/cleanup. This bound does not add a server-side deadline to the existing
+synchronous pipe writer; a raw client that stops reading can hold admitted work
+until its connection closes. Rust/C# preview clients own and close their read
+connections on cancellation or the35second total deadline. The C# client has two
+local preview slots and leaves its UI/control connection independent.
+
+Both clients require the capability and validate identity/proof, local root,
+state, kinds, locations and reply budgets. Capability presence establishes cached
+text only. Raster/page thumbnails, media playback, uncached/on-demand rendering,
+code/notebook references, actual content hashes and the consumer UI remain open.
+Protocol version remains1. See [validation](validation/2026-10-18-preview-text/README.md).
 
 ## Internal embed-worker protocol (P3.2)
 

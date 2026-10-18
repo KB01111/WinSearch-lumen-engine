@@ -66,6 +66,9 @@ internal sealed class FakeEngineClient : IEngineClient
     public Task<EngineStatus> GetStatusAsync(CancellationToken cancellationToken = default)
         => Task.FromResult(CurrentStatus);
 
+    public Task<EntryPreview> PreviewTextAsync(PreviewRequest request, CancellationToken cancellationToken = default)
+        => Task.FromException<EntryPreview>(new EngineException(ErrorCode.Unsupported, "fixture has no cached previews"));
+
     public Task<ResolvedEntry> ResolveEntryAsync(EntryReference reference, CancellationToken cancellationToken = default)
         => Task.FromException<ResolvedEntry>(new EngineException(ErrorCode.NotReady, "no indexed entry in fixture"));
 

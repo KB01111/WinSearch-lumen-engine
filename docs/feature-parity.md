@@ -117,6 +117,9 @@ include Lumen integration and the final native/installed acceptance gates.
 - [x] Tray icon: open/settings/exit, indexing tooltip
 - [x] Settings window (theme, hotkey rebind w/ conflict detection, query memory)
 - [ ] Expanded search explorer: list + grid, category filters, preview pane (Phase 6)
+- [~] Native preview contract: bounded cached document/PDF/OCR text with actual
+      locations, source/root checks and cancellation in Rust/C# clients;
+      raster/media/uncached/code preview and explorer wiring remain open
 - [ ] Onboarding (6 steps incl. model download, folder estimates, shortcut) (Phase 6)
 - [ ] Full settings sections (General/Search/Folders/Code/AI/Performance/Storage/About) (Phase 6)
 - [ ] Animations (overlay, selection, category), reduced-motion + high contrast (Phase 6)

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.IO.Pipes;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Text;
 using System.Threading.Channels;
 using WinSearch.Core.Protocol;
 
@@ -24,6 +25,7 @@ public interface IEngineClient : IAsyncDisposable
 
     Task<EngineStatus> GetStatusAsync(CancellationToken cancellationToken = default);
     Task<ResolvedEntry> ResolveEntryAsync(EntryReference reference, CancellationToken cancellationToken = default);
+    Task<EntryPreview> PreviewTextAsync(PreviewRequest request, CancellationToken cancellationToken = default);
     Task<ModelStatus> StartModelDownloadAsync(CancellationToken cancellationToken = default);
     Task<ModelStatus> CancelModelDownloadAsync(CancellationToken cancellationToken = default);
     Task<ModelStatus> ImportModelAsync(string path, CancellationToken cancellationToken = default);
@@ -47,6 +49,7 @@ public sealed class EngineClient : IEngineClient
     private const int ConnectTimeoutMs = 15000;
 
     private readonly SemaphoreSlim _writeLock = new(1, 1);
+    private readonly SemaphoreSlim _previewSlots = new(2, 2);
     private readonly ConcurrentDictionary<ulong, TaskCompletionSource<ServerMessage>> _unary = new();
     private readonly ConcurrentDictionary<ulong, Channel<SearchBatch>> _streams = new();
     private readonly string _clientName;
@@ -58,6 +61,7 @@ public sealed class EngineClient : IEngineClient
     private long _nextRequestId;
     private string[] _features = [];
     private bool _disposed;
+    private bool _oneShot;
 
     public string PipeName { get; }
     public string ClientVersion { get; }
@@ -190,6 +194,77 @@ public sealed class EngineClient : IEngineClient
                 Reference = new() { ResultId = resultId, SourceRevision = sourceRevision } }, m =>
             m is ResolvedEntryMessage resolved && ResolvedEntryMatches(resolved.Entry, resultId, sourceRevision)
                 ? resolved.Entry : throw new EngineException(ErrorCode.InvalidRequest, "entry resolution identity changed"), cancellationToken);
+    }
+
+    public async Task<EntryPreview> PreviewTextAsync(PreviewRequest request, CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        if (request?.Reference is null || string.IsNullOrWhiteSpace(request.Reference.ResultId)
+            || Encoding.UTF8.GetByteCount(request.Reference.ResultId) > 32
+            || (request.Reference.SourceRevision is { } proof && Encoding.UTF8.GetByteCount(proof) > 65536)
+            || !PreviewLocationValid(request.Location))
+            throw new EngineException(ErrorCode.InvalidRequest, "invalid preview request");
+        var snapshot = new PreviewRequest { Reference = new() { ResultId = request.Reference.ResultId, SourceRevision = request.Reference.SourceRevision },
+            Location = request.Location switch {
+                null => null, PageLocation page => new PageLocation { Page = page.Page },
+                LineLocation line => new LineLocation { Line = line.Line },
+                TimestampLocation time => new TimestampLocation { Seconds = time.Seconds, EndSeconds = time.EndSeconds },
+                _ => throw new EngineException(ErrorCode.InvalidRequest, "unsupported preview location") } };
+        if (IsConnected && !_features.Contains("entry.preview.text", StringComparer.Ordinal))
+            throw new EngineException(ErrorCode.Unsupported, "engine does not support cached text previews");
+        using var total = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+        total.CancelAfter(TimeSpan.FromSeconds(35));
+        await _previewSlots.WaitAsync(total.Token);
+        try
+        {
+            // An owned read connection can be retired on partial I/O without corrupting UI/control traffic.
+            await using var owned = new EngineClient(PipeName, _clientName, ClientVersion) { _oneShot = true };
+            var info = await owned.ConnectOnceAsync(total.Token);
+            if (!info.Features.Contains("entry.preview.text", StringComparer.Ordinal))
+                throw new EngineException(ErrorCode.Unsupported, "engine does not support cached text previews");
+            return await owned.UnaryAsync(id => new PreviewEntryMessage { Id = id, Request = snapshot }, message =>
+                message is EntryPreviewMessage reply && PreviewMatches(reply.Preview, snapshot)
+                    ? reply.Preview : throw new EngineException(ErrorCode.InvalidRequest, "preview identity, location, state or budget changed"), total.Token);
+        }
+        catch (Exception) when (total.IsCancellationRequested) { throw new OperationCanceledException(total.Token); }
+        finally { _previewSlots.Release(); }
+    }
+
+    private static bool PreviewLocationValid(MatchLocation? location) => location switch {
+        null => true,
+        PageLocation page => page.Page is > 0 and <= 5000,
+        LineLocation line => line.Line is > 0 and <= 64 * 1024 * 1024,
+        TimestampLocation time => double.IsFinite(time.Seconds) && double.IsFinite(time.EndSeconds)
+            && time.Seconds >= 0 && time.EndSeconds >= time.Seconds && time.EndSeconds <= 366 * 86400,
+        _ => false };
+
+    private static bool PreviewMatches(EntryPreview? preview, PreviewRequest expected)
+    {
+        static bool Known(string? kind) => kind is "doc" or "pdf" or "ocr" or "image" or "audio" or "video";
+        if (preview?.Parts is null || preview.Extraction is null || !Enum.IsDefined(preview.State)
+            || !ResolvedEntryMatches(preview.Entry, expected.Reference.ResultId, expected.Reference.SourceRevision)
+            || preview.Parts.Count > 64 || preview.Extraction.Count > 8) return false;
+        var ready = preview.State == PreviewState.Ready;
+        if (ready == (preview.Parts.Count == 0) || (ready && preview.Entry.IndexRevision is null)
+            || (preview.State == PreviewState.NotIndexed && preview.Entry.IndexRevision is not null)
+            || (preview.State == PreviewState.LocationUnavailable && expected.Location is null)) return false;
+        var bytes = 0;
+        foreach (var part in preview.Parts)
+        {
+            if (part is null || string.IsNullOrEmpty(part.Text) || !Known(part.Kind) || !PreviewLocationValid(part.Location)) return false;
+            bytes += Encoding.UTF8.GetByteCount(part.Text);
+            if (bytes > 65536) return false;
+            var matches = (expected.Location, part.Location) switch {
+                (null, _) => true,
+                (PageLocation first, PageLocation actual) => first.Page == actual.Page,
+                (LineLocation first, LineLocation actual) => first.Line >= actual.Line
+                    && (ulong)(first.Line - actual.Line) < (ulong)part.Text.Count(c => c == '\n') + 1,
+                (TimestampLocation first, TimestampLocation actual) => first.Seconds == actual.Seconds && first.EndSeconds == actual.EndSeconds,
+                _ => false };
+            if (!matches) return false;
+        }
+        return preview.Extraction.All(item => item is not null && Known(item.Kind)
+            && !(item.IndexedUnits is { } indexed && item.SourceUnits is { } source && indexed > source));
     }
 
     private static bool ResolvedEntryMatches(ResolvedEntry? entry, string resultId, string? sourceRevision)
@@ -428,6 +503,10 @@ public sealed class EngineClient : IEngineClient
                 if (_unary.TryRemove(resolved.Id, out var resolvedTcs))
                     resolvedTcs.TrySetResult(resolved);
                 break;
+            case EntryPreviewMessage preview:
+                if (_unary.TryRemove(preview.Id, out var previewTcs))
+                    previewTcs.TrySetResult(preview);
+                break;
             case IndexingConfigMessage indexing:
                 if (indexing.Id is { } indexingId && _unary.TryRemove(indexingId, out var indexingTcs))
                     indexingTcs.TrySetResult(indexing);
@@ -507,6 +586,7 @@ public sealed class EngineClient : IEngineClient
     private void HandleDisconnect()
     {
         FailPending(new IOException("engine connection lost"));
+        if (_oneShot) return;
         Disconnected?.Invoke(this, EventArgs.Empty);
         _ = ReconnectLoopAsync();
     }

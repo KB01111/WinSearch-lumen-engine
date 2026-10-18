@@ -1,0 +1,25 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  WinSearch.Core -> <checkout>\src\app\WinSearch.Core\bin\Debug\net8.0-windows10.0.19041.0\WinSearch.Core.dll
+  WinSearch.ViewModels -> <checkout>\src\app\WinSearch.ViewModels\bin\Debug\net8.0-windows10.0.19041.0\WinSearch.ViewModels.dll
+  WinSearch.Tests -> <checkout>\src\app\WinSearch.Tests\bin\Debug\net8.0-windows10.0.19041.0\WinSearch.Tests.dll
+Test run for <checkout>\src\app\WinSearch.Tests\bin\Debug\net8.0-windows10.0.19041.0\WinSearch.Tests.dll (.NETCoreApp,Version=v8.0)
+A total of 1 test files matched the specified pattern.
+rtk : [xUnit.net 00:00:00.19]     WinSearch.Tests.IndexingPipeTests.PreviewSnapshotsArgumentsRejectsMalformedRepliesAnd
+ClosesItsOwnedConnection [FAIL]
+At line:1 char:1
++ rtk proxy dotnet test WinSearch.slnx --nologo --filter FullyQualified ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([xUnit.net 00:0...nnection [FAIL]:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+  Failed WinSearch.Tests.IndexingPipeTests.PreviewSnapshotsArgumentsRejectsMalformedRepliesAndClosesItsOwnedConnection [18 ms]
+  Error Message:
+   WinSearch.Core.Protocol.EngineException : preview unavailable
+  Stack Trace:
+     at WinSearch.Tests.IndexingPipeTests.PreviewSnapshotsArgumentsRejectsMalformedRepliesAndClosesItsOwnedConnection() in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 61
+   at WinSearch.Tests.IndexingPipeTests.PreviewSnapshotsArgumentsRejectsMalformedRepliesAndClosesItsOwnedConnection() in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 76
+   at WinSearch.Tests.IndexingPipeTests.PreviewSnapshotsArgumentsRejectsMalformedRepliesAndClosesItsOwnedConnection() in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 76
+--- End of stack trace from previous location ---
+
+Failed!  - Failed:     1, Passed:     0, Skipped:     0, Total:     1, Duration: 18 ms - WinSearch.Tests.dll (net8.0)

@@ -1,0 +1,34 @@
+rtk :    Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-prot
+ocol)
+At line:1 char:1
++ rtk proxy cargo test -p winsearchd preview_pipe -- --test-threads=1 > ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-platform v0.1.0 (<checkout>\src\engine\crates\ws-platform)
+   Compiling ws-index v0.1.0 (<checkout>\src\engine\crates\ws-index)
+   Compiling ws-code v0.1.0 (<checkout>\src\engine\crates\ws-code)
+   Compiling ws-extract v0.1.0 (<checkout>\src\engine\crates\ws-extract)
+   Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearchd)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 16.04s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-ea492ede1f9fd55e.exe)
+
+running 1 test
+test server::tests::preview_pipe_bounds_work_accepts_in_band_cancel_and_revalidates_roots_and_sources ... FAILED
+
+failures:
+
+---- server::tests::preview_pipe_bounds_work_accepts_in_band_cancel_and_revalidates_roots_and_sources stdout ----
+
+thread 'server::tests::preview_pipe_bounds_work_accepts_in_band_cancel_and_revalidates_roots_and_sources' (29848) panicked at bins\winsearchd\src\server.rs:282:79:
+replacement metadata unavailable
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    server::tests::preview_pipe_bounds_work_accepts_in_band_cancel_and_revalidates_roots_and_sources
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 199 filtered out; finished in 0.21s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

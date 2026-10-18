@@ -1,0 +1,36 @@
+rtk :    Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearchd
+)
+At line:1 char:1
++ rtk proxy cargo test -p winsearchd preview_ -- --test-threads=1 > C:/ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling wi...ins\winsearchd):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 17.30s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-ea492ede1f9fd55e.exe)
+
+running 2 tests
+test engine::tests::preview_request_reuse_cancels_old_work_without_losing_the_new_token ... FAILED
+test engine::tests::preview_returns_current_bounded_cached_text_while_paused_and_rejects_changed_sources ... FAILED
+
+failures:
+
+---- engine::tests::preview_request_reuse_cancels_old_work_without_losing_the_new_token stdout ----
+
+thread 'engine::tests::preview_request_reuse_cancels_old_work_without_losing_the_new_token' (113284) panicked at bins\winsearchd\src\engine.rs:1326:9:
+reusing an active request ID must retire its previous work
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- engine::tests::preview_returns_current_bounded_cached_text_while_paused_and_rejects_changed_sources stdout ----
+
+thread 'engine::tests::preview_returns_current_bounded_cached_text_while_paused_and_rejects_changed_sources' (75616) panicked at bins\winsearchd\src\engine.rs:1344:63:
+already indexed preview must work while paused without a model: Unsupported
+
+
+failures:
+    engine::tests::preview_request_reuse_cancels_old_work_without_losing_the_new_token
+    engine::tests::preview_returns_current_bounded_cached_text_while_paused_and_rejects_changed_sources
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 197 filtered out; finished in 0.07s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

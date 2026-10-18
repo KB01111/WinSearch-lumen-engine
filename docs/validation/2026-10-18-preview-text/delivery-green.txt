@@ -1,0 +1,15 @@
+rtk :    Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearchd
+)
+At <checkout>\artifacts\preview-rust-checks.ps1:13 char:22
++ ... ry-green' { rtk proxy cargo test -p winsearchd preview_delivery_reche ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling wi...ins\winsearchd):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.43s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-ea492ede1f9fd55e.exe)
+
+running 1 test
+test engine::tests::preview_delivery_rechecks_cancellation_identity_and_source_after_waiting_to_write ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 200 filtered out; finished in 0.17s

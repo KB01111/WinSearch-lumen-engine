@@ -1,0 +1,30 @@
+rtk :    Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-prot
+ocol)
+At line:1 char:1
++ rtk proxy cargo test -p ws-protocol --test preview > <user>/. ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.26s
+     Running tests\preview.rs (target\debug\deps\preview-46b81d6297b182b2.exe)
+
+running 2 tests
+test preview_request_cannot_smuggle_a_path_or_extra_reference_field ... ok
+test preview_contract_uses_indexed_identity_and_preserves_actual_location_and_partial_state ... FAILED
+
+failures:
+
+---- preview_contract_uses_indexed_identity_and_preserves_actual_location_and_partial_state stdout ----
+
+thread 'preview_contract_uses_indexed_identity_and_preserves_actual_location_and_partial_state' (111104) panicked at crates\ws-protocol\tests\preview.rs:9:71:
+indexed preview request: Error("unknown variant `preview_entry`, expected one of `hello`, `ping`, `resolve_entry`, `search`, `cancel`, `get_status`, `model_download_start`, `model_download_cancel`, `model_import`, `model_delete`, `get_model_status`, `get_config`, `set_config`, `get_indexing_config`, `set_indexing_config`", line: 0, column: 0)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    preview_contract_uses_indexed_identity_and_preserves_actual_location_and_partial_state
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p ws-protocol --test preview`

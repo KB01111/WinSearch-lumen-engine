@@ -318,6 +318,7 @@ def main():
                     if record['name'] == 'code_definition_reference')
                 assert native_client['code'] == expected_code, ('client code DTO parity', native_client)
                 assert len(native_client['semantic_checks']) == (3 if options.real_model else 0), native_client
+                assert len(native_client['preview_checks']) == 4, native_client
                 summary['headless_client'] = native_client
                 summary['checks'].append('typed_async_client_native_dto_status_pause_revoke_restore_reconnect')
             if not options.real_model:

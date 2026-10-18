@@ -7,6 +7,31 @@ namespace WinSearch.Tests;
 public class IndexingContractTests
 {
     [Fact]
+    public void PreviewCodecPreservesSourceLocationAndUnknownFullCoverage()
+    {
+        const string json = """
+            {"type":"entry_preview","id":17,"preview":{
+              "entry":{"result_id":"e12","root_path":"C:/Docs","path":"C:/Docs/source.pdf",
+                "name":"source.pdf","kind":"document","size_bytes":19,"modified_unix_seconds":1,
+                "index_revision":3,"source_revision":"current-proof"},
+              "state":"ready","parts":[{"kind":"pdf","text":"actual eighth page","location":{"kind":"page","page":8}}],
+              "truncated":false,"extraction":[{"kind":"pdf","complete_within_limit":true,
+                "source_units":null,"indexed_units":8,"capped":null}]}}
+            """;
+        var message = JsonSerializer.Deserialize<ServerMessage>(json, ProtocolJson.Options)!;
+        using var encoded = JsonDocument.Parse(JsonSerializer.Serialize(message, ProtocolJson.Options));
+        var preview = encoded.RootElement.GetProperty("preview");
+        Assert.Equal("current-proof", preview.GetProperty("entry").GetProperty("source_revision").GetString());
+        Assert.Equal(8, preview.GetProperty("parts")[0].GetProperty("location").GetProperty("page").GetInt32());
+        var extraction = preview.GetProperty("extraction")[0];
+        Assert.True(extraction.GetProperty("complete_within_limit").GetBoolean());
+        Assert.True(!extraction.TryGetProperty("source_units", out var source) || source.ValueKind == JsonValueKind.Null);
+        Assert.True(!extraction.TryGetProperty("capped", out var capped) || capped.ValueKind == JsonValueKind.Null);
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<ClientMessage>(
+            """{"type":"preview_entry","id":1,"request":{"reference":{"result_id":"e12"},"path":"C:/outside"}}""", ProtocolJson.Options));
+    }
+
+    [Fact]
     public void NativeResolvedEntryRetainsCurrentSourceAndContentRevisionSeparately()
     {
         const string json = """

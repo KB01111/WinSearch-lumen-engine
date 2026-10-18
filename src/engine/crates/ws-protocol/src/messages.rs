@@ -27,6 +27,10 @@ pub enum ClientMessage {
         id: RequestId,
         reference: crate::EntryReference,
     },
+    PreviewEntry {
+        id: RequestId,
+        request: crate::PreviewRequest,
+    },
     /// Execute a search. Results stream back as `Results` frames with the same
     /// id; the last frame has `done: true`. Superseded/cancelled requests are
     /// closed early with `done: true`.
@@ -109,6 +113,10 @@ pub enum ServerMessage {
     ResolvedEntry {
         id: RequestId,
         entry: crate::ResolvedEntry,
+    },
+    EntryPreview {
+        id: RequestId,
+        preview: crate::EntryPreview,
     },
     Results {
         id: RequestId,

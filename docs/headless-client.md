@@ -44,7 +44,7 @@ There are no detached client tasks, retries of applied requests or queued result
 batches. Polling/owning and dropping these futures remains the host's responsibility.
 
 `status`, `model_status`, `config`, `set_config`, `indexing_config`,
-`set_indexing_config`, `resolve_entry` and explicit model download/import/delete
+`set_indexing_config`, `resolve_entry`, `preview_text` and explicit model download/import/delete
 methods return shared typed DTOs. Calling the client does not implicitly download
 or import a model. A mutation may have applied before its reply is lost; the host
 must reconcile current state before deciding whether to issue another mutation.
@@ -76,7 +76,8 @@ and partial writes close their owned connection instead of reusing partial bytes
 
 Exact search requires `search.exact`; semantic requests also require
 `search.semantic`, code mode requires `code`, and entry resolution requires
-`entry.resolve`. Capability presence is not semantic/model readiness. Existing
+`entry.resolve`; cached text preview requires `entry.preview.text`.
+Capability presence is not semantic/model readiness. Existing
 `EngineStatus.model_loaded` and `ModelStatus` are returned unchanged; the richer
 semantic outcome/provenance contract remains part of the unfinished Lumen work.
 
@@ -86,8 +87,14 @@ returning a reply. The [source proof](ipc-protocol.md#indexed-entry-resolution)
 is opaque metadata/policy identity, **not a file hash or permission to open a
 file**. Native consumers must revalidate their own currently authorized roots,
 source identity and residency before preview/open/read. Ordinary indexed `e…`
-identities are supported today; code-specific resolution/content preview and
-actual hash/provenance, Related and expanded filters remain open.
+identities are supported today. `preview_text(PreviewRequest)` returns bounded
+cached text and actual locations through the same owned read lane. Dropping the
+future closes that connection; identity/proof, local root, state, kinds, aggregate
+64KiB/64part and eight extraction-kind bounds are checked before delivery.
+See the [cached-text contract](ipc-protocol.md#cached-text-previews). Extraction
+completion is within product limits; full source totals and cap state remain
+unknown. Code-specific references, raster/media/uncached preview and actual
+hash/provenance, Related and expanded filters remain open.
 
 From `src/engine`, `cargo test -p ws-client --all-targets` runs framing and real
 Windows-pipe transport fixtures without models or a daemon. The
@@ -105,6 +112,8 @@ and requires the job to be empty afterward. The example changes only that
 explicit fixture instance's root/pause policy and restores it. Its document and
 code DTOs must equal the existing public CLI results; revocation must hide
 ordinary results and invalidate old proofs even after root restoration.
+The same example now requires four preview checks: actual cached document text,
+PDF page2 and rejection of revoked roots/previous proofs after restoration.
 These are native transport/extraction checks, not installed Lumen, model quality
 or launcher responsiveness acceptance. See the
 [gap matrix](v1-gap-matrix.md) for the remaining full v1 work.

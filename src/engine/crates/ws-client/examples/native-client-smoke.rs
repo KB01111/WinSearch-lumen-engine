@@ -93,6 +93,19 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
         source_revision: Some(entry.source_revision.clone()),
     };
     assert_eq!(client.resolve_entry(reference.clone()).await?, entry);
+    let document_preview = client.preview_text(ws_client::protocol::PreviewRequest {
+        reference: reference.clone(),
+        location: Some(ws_client::protocol::MatchLocation::Line { line: 2 }),
+    }).await?;
+    assert!(document_preview.parts.iter().any(|part| part.text.contains("amberparitytoken")));
+    assert!(document_preview.extraction.iter().all(|progress| progress.source_units.is_none() && progress.capped.is_none()));
+    let pdf = search(client, "pdfparitytoken", SearchMode::Files, false).await?;
+    let pdf_preview = client.preview_text(ws_client::protocol::PreviewRequest {
+        reference: EntryReference { result_id: pdf[0].id.clone(), source_revision: None },
+        location: Some(ws_client::protocol::MatchLocation::Page { page: 2 }),
+    }).await?;
+    assert!(pdf_preview.parts.iter().any(|part| part.text.contains("pdfparitytoken")
+        && part.location == Some(ws_client::protocol::MatchLocation::Page { page: 2 })));
 
     // Disconnect before consuming results, then reconnect for an independent operation.
     drop(
@@ -110,6 +123,9 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
     let mut revoked = original.clone();
     revoked.roots.clear();
     client.set_indexing_config(revoked).await?;
+    assert!(matches!(client.preview_text(ws_client::protocol::PreviewRequest {
+        reference: reference.clone(), location: None,
+    }).await, Err(ws_client::Error::Remote { code: ErrorCode::NotReady, .. })));
     assert!(matches!(
         client.resolve_entry(reference.clone()).await,
         Err(ws_client::Error::Remote {
@@ -121,6 +137,9 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
         .await?
         .is_empty());
     client.set_indexing_config(original.clone()).await?;
+    assert!(matches!(client.preview_text(ws_client::protocol::PreviewRequest {
+        reference: reference.clone(), location: None,
+    }).await, Err(ws_client::Error::Remote { code: ErrorCode::NotReady, .. })));
     assert!(matches!(
         client.resolve_entry(reference).await,
         Err(ws_client::Error::Remote {
@@ -142,6 +161,9 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
         "engine_version": info.engine_version, "features": info.features,
         "initial_status": status, "model_status": model, "engine_config": engine_config,
         "document": document, "code": code, "semantic_code": semantic_code,
+        "document_preview": document_preview, "pdf_preview": pdf_preview,
+        "preview_checks": ["current_metadata_bound_document_text", "actual_pdf_page_two",
+            "preview_rejects_revoked_root", "preview_proof_stays_invalid_after_restore"],
         "semantic_checks": if semantic_code.is_some() { vec!["exact_only_control_empty", "semantic_only_code", "semantic_negative_empty"] } else { vec![] },
         "entry_size_bytes": fresh.size_bytes, "entry_index_revision": fresh.index_revision,
         "checks": ["typed_status_and_configuration", "paused_policy_pushed_subscription",

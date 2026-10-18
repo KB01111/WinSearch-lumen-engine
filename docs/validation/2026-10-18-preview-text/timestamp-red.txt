@@ -1,0 +1,30 @@
+rtk :    Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-prot
+ocol)
+At line:1 char:142
++ ... rc/engine'; rtk proxy cargo test -p ws-index preview_text_preserves_p ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-index v0.1.0 (<checkout>\src\engine\crates\ws-index)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.90s
+     Running unittests src\lib.rs (target\debug\deps\ws_index-70ff3159c871f712.exe)
+
+running 1 test
+test store::tests::preview_text_preserves_page_line_and_time_without_fabricating_requested_positions ... FAILED
+
+failures:
+
+---- store::tests::preview_text_preserves_page_line_and_time_without_fabricating_requested_positions stdout ----
+
+thread 'store::tests::preview_text_preserves_page_line_and_time_without_fabricating_requested_positions' (16560) panicked at crates\ws-index\src\store.rs:2649:13:
+assertion failed: store.preview_text(job.entry_id, Some(focus)).unwrap().0.is_empty()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    store::tests::preview_text_preserves_page_line_and_time_without_fabricating_requested_positions
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 84 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p ws-index --lib`

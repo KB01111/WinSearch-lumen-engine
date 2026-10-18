@@ -10,6 +10,7 @@ namespace WinSearch.Core.Protocol;
 [JsonDerivedType(typeof(HelloMessage), "hello")]
 [JsonDerivedType(typeof(PingMessage), "ping")]
 [JsonDerivedType(typeof(ResolveEntryMessage), "resolve_entry")]
+[JsonDerivedType(typeof(PreviewEntryMessage), "preview_entry")]
 [JsonDerivedType(typeof(SearchMessage), "search")]
 [JsonDerivedType(typeof(CancelMessage), "cancel")]
 [JsonDerivedType(typeof(GetStatusMessage), "get_status")]
@@ -40,6 +41,46 @@ public sealed class ResolveEntryMessage : ClientMessage
 {
     public ulong Id { get; set; }
     public EntryReference Reference { get; set; } = new();
+}
+
+public sealed class PreviewEntryMessage : ClientMessage
+{
+    public ulong Id { get; set; }
+    public PreviewRequest Request { get; set; } = new();
+}
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed class PreviewRequest
+{
+    public EntryReference Reference { get; set; } = new();
+    public MatchLocation? Location { get; set; }
+}
+
+public enum PreviewState { Ready, NotIndexed, NoCachedText, LocationUnavailable }
+
+public sealed class PreviewTextPart
+{
+    public string Kind { get; set; } = "";
+    public string Text { get; set; } = "";
+    public MatchLocation? Location { get; set; }
+}
+
+public sealed class PreviewExtraction
+{
+    public string Kind { get; set; } = "";
+    public bool CompleteWithinLimit { get; set; }
+    public ulong? SourceUnits { get; set; }
+    public ulong? IndexedUnits { get; set; }
+    public bool? Capped { get; set; }
+}
+
+public sealed class EntryPreview
+{
+    public ResolvedEntry Entry { get; set; } = new();
+    public PreviewState State { get; set; }
+    public List<PreviewTextPart> Parts { get; set; } = new();
+    public bool Truncated { get; set; }
+    public List<PreviewExtraction> Extraction { get; set; } = new();
 }
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
@@ -131,6 +172,7 @@ public sealed class SetIndexingConfigMessage : ClientMessage
 [JsonDerivedType(typeof(HelloAckMessage), "hello_ack")]
 [JsonDerivedType(typeof(PongMessage), "pong")]
 [JsonDerivedType(typeof(ResolvedEntryMessage), "resolved_entry")]
+[JsonDerivedType(typeof(EntryPreviewMessage), "entry_preview")]
 [JsonDerivedType(typeof(ResultsMessage), "results")]
 [JsonDerivedType(typeof(StatusMessage), "status")]
 [JsonDerivedType(typeof(ModelStatusMessage), "model_status")]
@@ -155,6 +197,12 @@ public sealed class ResolvedEntryMessage : ServerMessage
 {
     public ulong Id { get; set; }
     public ResolvedEntry Entry { get; set; } = new();
+}
+
+public sealed class EntryPreviewMessage : ServerMessage
+{
+    public ulong Id { get; set; }
+    public EntryPreview Preview { get; set; } = new();
 }
 
 public sealed class ResultsMessage : ServerMessage

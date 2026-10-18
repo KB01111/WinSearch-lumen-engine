@@ -10,6 +10,154 @@ namespace WinSearch.Tests;
 
 public class IndexingPipeTests
 {
+    [Fact]
+    public async Task PreviewRequiresCapabilityBeforeSendingAndClosesTheLegacyConnection()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var pipe = "winsearch-preview-legacy-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        async Task Serve()
+        {
+            await server.WaitForConnectionAsync(timeout.Token);
+            Assert.IsType<HelloMessage>(await ReadAsync(server, timeout.Token));
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1 }, timeout.Token);
+            Assert.Equal(0, await server.ReadAsync(new byte[1], timeout.Token));
+        }
+        var serving = Serve();
+        await using var client = new EngineClient(pipe);
+        try
+        {
+            var error = await Assert.ThrowsAsync<EngineException>(() => client.PreviewTextAsync(
+                new() { Reference = new() { ResultId = "e23" } }, timeout.Token));
+            Assert.Equal(ErrorCode.Unsupported, error.Code);
+            await serving;
+        }
+        finally
+        {
+            timeout.Cancel();
+            try { await serving; } catch (OperationCanceledException) { }
+        }
+    }
+
+    [Fact]
+    public async Task PreviewRejectsInvalidNumericLocationsBeforeConnecting()
+    {
+        await using var client = new EngineClient("unused-preview-" + Guid.NewGuid());
+        foreach (var location in new MatchLocation[] {
+            new PageLocation { Page = 0 }, new PageLocation { Page = 5001 },
+            new LineLocation { Line = 0 }, new LineLocation { Line = 64 * 1024 * 1024 + 1 },
+            new TimestampLocation { Seconds = double.NaN, EndSeconds = 0 },
+            new TimestampLocation { Seconds = 1, EndSeconds = 0 },
+            new TimestampLocation { Seconds = 0, EndSeconds = double.PositiveInfinity } })
+        {
+            var error = await Assert.ThrowsAsync<EngineException>(() => client.PreviewTextAsync(
+                new() { Reference = new() { ResultId = "e23" }, Location = location }));
+            Assert.Equal(ErrorCode.InvalidRequest, error.Code);
+        }
+    }
+
+    [Fact]
+    public async Task PreviewCancellationClosesItsOwnedPipeAndReleasesTheReadSlot()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cancel = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+        var pipe = "winsearch-preview-cancel-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        var received = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        async Task Serve()
+        {
+            await server.WaitForConnectionAsync(timeout.Token);
+            Assert.IsType<HelloMessage>(await ReadAsync(server, timeout.Token));
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1, Features = ["entry.preview.text"] }, timeout.Token);
+            Assert.IsType<PreviewEntryMessage>(await ReadAsync(server, timeout.Token));
+            received.TrySetResult();
+            Assert.Equal(0, await server.ReadAsync(new byte[1], timeout.Token));
+        }
+        var serving = Serve();
+        await using var client = new EngineClient(pipe);
+        try
+        {
+            var pending = client.PreviewTextAsync(new() { Reference = new() { ResultId = "e23" } }, cancel.Token);
+            await received.Task.WaitAsync(timeout.Token);
+            cancel.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+            await serving;
+            var slots = (SemaphoreSlim)typeof(EngineClient).GetField("_previewSlots", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(client)!;
+            Assert.Equal(2, slots.CurrentCount);
+        }
+        finally
+        {
+            timeout.Cancel();
+            try { await serving; } catch (OperationCanceledException) { }
+        }
+    }
+
+    [Fact]
+    public async Task PreviewSnapshotsArgumentsRejectsMalformedRepliesAndClosesItsOwnedConnection()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = timeout.Token;
+        var pipe = "winsearch-preview-" + Guid.NewGuid();
+        var received = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        async Task Serve()
+        {
+            for (var index = 0; index < 11; index++)
+            {
+                using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+                await server.WaitForConnectionAsync(token);
+                Assert.IsType<HelloMessage>(await ReadAsync(server, token));
+                await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1, Features = ["entry.preview.text"] }, token);
+                var request = Assert.IsType<PreviewEntryMessage>(await ReadAsync(server, token));
+                Assert.Equal("e23", request.Request.Reference.ResultId);
+                Assert.Equal("proof", request.Request.Reference.SourceRevision);
+                Assert.Equal((uint)8, Assert.IsType<PageLocation>(request.Request.Location).Page);
+                if (index == 0) { received.TrySetResult(); await release.Task.WaitAsync(token); }
+                var preview = new EntryPreview {
+                    Entry = new() { ResultId = "e23", RootPath = @"C:\fixture", Path = @"C:\fixture\report.pdf",
+                        Name = "report.pdf", Kind = ResultKind.Document, SourceRevision = "proof", IndexRevision = 3 },
+                    State = PreviewState.Ready, Parts = [new() { Kind = "pdf", Text = "actual page eight", Location = new PageLocation { Page = 8 } }] };
+                switch (index)
+                {
+                    case 1: preview.Entry.ResultId = "e24"; break;
+                    case 2: preview.Parts[0].Text = new string('界', 30000); break;
+                    case 3: preview.Parts[0].Location = new PageLocation { Page = 9 }; break;
+                    case 4: preview.State = PreviewState.NoCachedText; break;
+                    case 5: preview.Parts = null!; break;
+                    case 6: preview.Entry = null!; break;
+                    case 7: preview.Parts = Enumerable.Repeat(preview.Parts[0], 65).ToList(); break;
+                    case 8: preview.Parts[0].Kind = "C:/must-not-open"; break;
+                    case 9: preview.Entry.SourceRevision = "stale"; break;
+                    case 10: preview = null!; break;
+                }
+                await WriteAsync(server, new EntryPreviewMessage { Id = request.Id, Preview = preview }, token);
+                Assert.Equal(0, await server.ReadAsync(new byte[1], token));
+            }
+        }
+        var serving = Serve();
+        await using var client = new EngineClient(pipe);
+        try
+        {
+            var request = new PreviewRequest { Reference = new() { ResultId = "e23", SourceRevision = "proof" }, Location = new PageLocation { Page = 8 } };
+            var pending = client.PreviewTextAsync(request, token);
+            if (await Task.WhenAny(pending, received.Task).WaitAsync(token) == pending) await pending;
+            await received.Task.WaitAsync(token);
+            request.Reference.ResultId = "e99";
+            ((PageLocation)request.Location).Page = 99;
+            release.TrySetResult();
+            Assert.Equal("actual page eight", (await pending).Parts[0].Text);
+            for (var index = 1; index < 11; index++)
+                await Assert.ThrowsAsync<EngineException>(() => client.PreviewTextAsync(new() {
+                    Reference = new() { ResultId = "e23", SourceRevision = "proof" }, Location = new PageLocation { Page = 8 } }, token));
+            await serving;
+        }
+        finally
+        {
+            timeout.Cancel();
+            try { await serving; } catch (OperationCanceledException) { }
+        }
+    }
+
     private static async Task<ClientMessage> ReadAsync(Stream stream, CancellationToken token)
     {
         var header = new byte[4]; await stream.ReadExactlyAsync(header, token);

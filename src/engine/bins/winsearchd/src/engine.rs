@@ -77,6 +77,7 @@ pub struct EngineService {
     clients: Mutex<Vec<ClientHandle>>,
     /// Cancellation flags for in-flight search requests, keyed by `(client_id, request_id)`.
     cancels: Mutex<HashMap<(u64, RequestId), Arc<AtomicBool>>>,
+    preview_jobs: Arc<std::sync::atomic::AtomicUsize>,
     next_client_id: std::sync::atomic::AtomicU64,
     indexer: Arc<Indexer>,
     extractors: Arc<crate::extract::ExtractorRegistry>,
@@ -102,6 +103,19 @@ pub type SharedEngine = Arc<EngineService>;
 
 #[derive(Clone,Copy)]
 struct SearchRevision {source:u64,code:Option<u64>}
+
+struct PreviewWork {
+    engine:SharedEngine,
+    client_id:u64,
+    id:RequestId,
+    cancel:Arc<AtomicBool>,
+}
+impl Drop for PreviewWork {
+    fn drop(&mut self) {
+        self.engine.end_request_for_client(self.client_id,self.id,&self.cancel);
+        self.engine.preview_jobs.fetch_sub(1,Ordering::AcqRel);
+    }
+}
 
 struct ResultSource {
     entry_id:i64,
@@ -151,6 +165,7 @@ impl EngineService {
             }),
             clients: Mutex::new(Vec::new()),
             cancels: Mutex::new(HashMap::new()),
+            preview_jobs: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             next_client_id: std::sync::atomic::AtomicU64::new(1),
             indexer,
             extractors: Arc::new(crate::extract::ExtractorRegistry::production()),
@@ -252,6 +267,9 @@ impl EngineService {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .retain(|c| c.id != client.id);
+        self.cancels.lock().unwrap_or_else(|p|p.into_inner()).retain(|(owner,_),flag| {
+            if *owner==client.id {flag.store(true,Ordering::Release);false} else {true}
+        });
     }
 
     fn broadcast(&self, msg: &ServerMessage) {
@@ -271,18 +289,20 @@ impl EngineService {
 
     pub fn begin_request_for_client(&self, client_id: u64, id: RequestId) -> Arc<AtomicBool> {
         let flag = Arc::new(AtomicBool::new(false));
-        self.cancels
+        if let Some(previous)=self.cancels
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .insert((client_id, id), flag.clone());
+            .insert((client_id, id), flag.clone()) {
+            previous.store(true,Ordering::Release);
+        }
         flag
     }
 
-    pub fn end_request_for_client(&self, client_id: u64, id: RequestId) {
-        self.cancels
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .remove(&(client_id, id));
+    pub fn end_request_for_client(&self, client_id: u64, id: RequestId, token:&Arc<AtomicBool>) {
+        let mut requests=self.cancels.lock().unwrap_or_else(|p|p.into_inner());
+        if requests.get(&(client_id,id)).is_some_and(|current|Arc::ptr_eq(current,token)) {
+            requests.remove(&(client_id,id));
+        }
     }
 
     pub fn cancel(&self, id: RequestId) {
@@ -314,6 +334,70 @@ impl EngineService {
                 message: "entry is unavailable or changed".into() },
         };
         let _ = client.send(&response);
+    }
+
+    pub fn preview_entry(self:&Arc<Self>,client:&ClientHandle,id:RequestId,request:ws_protocol::PreviewRequest) {
+        if self.preview_jobs.fetch_update(Ordering::AcqRel,Ordering::Acquire,|jobs|(jobs<2).then(||jobs+1)).is_err() {
+            let _=client.send(&ServerMessage::Error {id:Some(id),code:ErrorCode::NotReady,message:"preview resources are busy".into()});return;
+        }
+        let cancel=self.begin_request_for_client(client.id(),id);
+        let work=PreviewWork {engine:Arc::clone(self),client_id:client.id(),id,cancel};
+        let client=client.clone();
+        let failure_client=client.clone();
+        if std::thread::Builder::new().name("winsearch-preview".into()).spawn(move || {
+            let response=match work.engine.preview_snapshot(&request,&work.cancel) {
+                Ok(preview)=>ServerMessage::EntryPreview {id,preview},
+                Err(code)=>ServerMessage::Error {id:Some(id),code,message:"preview is unavailable or changed".into()},
+            };
+            // Waiting for another writer must not preserve an obsolete content decision.
+            let mut stream=client.stream.lock().unwrap_or_else(|p|p.into_inner());
+            if let Some(response)=work.engine.preview_response_for_delivery(client.id(),id,&work.cancel,response) {
+                let _=write_message(&mut *stream,&response);
+            }
+        }).is_err() {
+            let _=failure_client.send(&ServerMessage::Error {id:Some(id),code:ErrorCode::Internal,message:"preview could not start".into()});
+        }
+    }
+
+    fn preview_response_for_delivery(&self,client_id:u64,id:RequestId,cancel:&Arc<AtomicBool>,response:ServerMessage)->Option<ServerMessage> {
+        let current=||self.cancels.lock().unwrap_or_else(|p|p.into_inner())
+            .get(&(client_id,id)).is_some_and(|token|Arc::ptr_eq(token,cancel));
+        if !current() {return None;}
+        let response=if let ServerMessage::EntryPreview {preview,..}=&response {
+            let reference=ws_protocol::EntryReference {result_id:preview.entry.result_id.clone(),source_revision:Some(preview.entry.source_revision.clone())};
+            if !self.resolve_entry_snapshot(&reference).is_ok_and(|entry|entry==preview.entry) {
+                ServerMessage::Error {id:Some(id),code:ErrorCode::NotReady,message:"preview is unavailable or changed".into()}
+            } else {response}
+        } else {response};
+        if !current() {return None;}
+        Some(if cancel.load(Ordering::Acquire) {
+            ServerMessage::Error {id:Some(id),code:ErrorCode::Cancelled,message:"preview was cancelled".into()}
+        } else {response})
+    }
+
+    fn preview_snapshot(&self,request:&ws_protocol::PreviewRequest,cancel:&Arc<AtomicBool>)
+        ->Result<ws_protocol::EntryPreview,ErrorCode> {
+        use ws_protocol::{EntryPreview,EntryReference,PreviewState};
+        if cancel.load(Ordering::Acquire) {return Err(ErrorCode::Cancelled);}
+        if !ws_protocol::valid_preview_location(request.location) {return Err(ErrorCode::InvalidRequest);}
+        let entry=self.resolve_entry_snapshot(&request.reference)?;
+        if cancel.load(Ordering::Acquire) {return Err(ErrorCode::Cancelled);}
+        let id=entry.result_id.strip_prefix('e').and_then(|id|id.parse::<i64>().ok()).ok_or(ErrorCode::InvalidRequest)?;
+        let (parts,truncated,extraction)=if entry.index_revision.is_some() {
+            let store=self.indexer.store_lock();
+            let (parts,truncated)=store.preview_text(id,request.location).map_err(|_|ErrorCode::Internal)?;
+            let extraction=store.preview_extraction(id).map_err(|_|ErrorCode::Internal)?;
+            (parts,truncated,extraction)
+        } else {(Vec::new(),false,Vec::new())};
+        if cancel.load(Ordering::Acquire) {return Err(ErrorCode::Cancelled);}
+        let current=self.resolve_entry_snapshot(&EntryReference {result_id:entry.result_id.clone(),source_revision:Some(entry.source_revision.clone())})?;
+        if current!=entry {return Err(ErrorCode::NotReady);}
+        if cancel.load(Ordering::Acquire) {return Err(ErrorCode::Cancelled);}
+        let state=if !parts.is_empty() {PreviewState::Ready}
+            else if entry.index_revision.is_none() {PreviewState::NotIndexed}
+            else if request.location.is_some() {PreviewState::LocationUnavailable}
+            else {PreviewState::NoCachedText};
+        Ok(EntryPreview {entry,state,parts,truncated,extraction})
     }
 
     pub(crate) fn resolve_entry_snapshot(&self, reference: &ws_protocol::EntryReference)
@@ -786,9 +870,9 @@ impl EngineService {
     /// client can retire it.
     pub fn search(self: &Arc<Self>, client: &ClientHandle, id: RequestId, query: SearchQuery) {
         let cancel = self.begin_request_for_client(client.id(), id);
-        let outcome = self.run_search(client, id, query, cancel);
+        let outcome = self.run_search(client, id, query, Arc::clone(&cancel));
         if let Err(e) = outcome {
-            self.end_request_for_client(client.id(), id);
+            self.end_request_for_client(client.id(), id, &cancel);
             let _ = client.send(&ServerMessage::Error {
                 id: Some(id),
                 code: ws_protocol::ErrorCode::Internal,
@@ -816,7 +900,7 @@ impl EngineService {
         let results=results.into_iter().filter(|r|r.kind!=ResultKind::Code || r.path.as_deref().is_some_and(|p|self.code_service().is_some_and(|c|code_epoch.is_some_and(|e|c.result_allowed(p,e))))).collect::<Vec<_>>();
 
         if cancel.load(Ordering::Relaxed) {
-            self.end_request_for_client(client.id(), id);
+            self.end_request_for_client(client.id(), id, &cancel);
             return client.send(&ServerMessage::Results {
                 id,
                 batch: Vec::new(),
@@ -841,7 +925,7 @@ impl EngineService {
         })?;
         if !rest.is_empty() {
             if cancel.load(Ordering::Relaxed) {
-                self.end_request_for_client(client.id(), id);
+                self.end_request_for_client(client.id(), id, &cancel);
                 return client.send(&ServerMessage::Results {
                     id,
                     batch: Vec::new(),
@@ -857,7 +941,7 @@ impl EngineService {
             })?;
         }
         if !semantic {
-            self.end_request_for_client(client.id(), id);
+            self.end_request_for_client(client.id(), id, &cancel);
             return Ok(());
         }
 
@@ -866,12 +950,13 @@ impl EngineService {
         // applied while `embed_query` is in flight.
         let this = Arc::clone(self);
         let thread_client = client.clone();
+        let thread_cancel=Arc::clone(&cancel);
         if let Err(e) = std::thread::Builder::new()
             .name("winsearch-semantic".into())
             .spawn(move || {
                 let outcome =
-                    this.run_semantic_stage(&thread_client, id, &query, &exact_ids, &cancel,revision);
-                this.end_request_for_client(thread_client.id(), id);
+                    this.run_semantic_stage(&thread_client, id, &query, &exact_ids, &thread_cancel,revision);
+                this.end_request_for_client(thread_client.id(), id, &thread_cancel);
                 if let Err(err) = outcome {
                     let _ = thread_client.send(&ServerMessage::Error {
                         id: Some(id),
@@ -887,7 +972,7 @@ impl EngineService {
             })
         {
             warn!(error = %e, "semantic stage: thread spawn failed; closing stream");
-            self.end_request_for_client(client.id(), id);
+            self.end_request_for_client(client.id(), id, &cancel);
             return client.send(&ServerMessage::Results {
                 id,
                 batch: Vec::new(),
@@ -1309,6 +1394,80 @@ mod tests {
     }
 
     #[test]
+    fn preview_request_reuse_cancels_old_work_without_losing_the_new_token() {
+        let tree=TempTree::new();let engine=service_with(&tree,&[]);
+        let old=engine.begin_request_for_client(7,9);
+        let current=engine.begin_request_for_client(7,9);
+        assert!(old.load(Ordering::Acquire),"reusing an active request ID must retire its previous work");
+        engine.end_request_for_client(7,9,&old);
+        engine.cancel_for_client(7,9);
+        assert!(current.load(Ordering::Acquire),"an old completion cannot remove a newer cancellation token");
+    }
+
+    #[test]
+    fn preview_delivery_rechecks_cancellation_identity_and_source_after_waiting_to_write() {
+        use ws_protocol::{EntryReference,PreviewRequest};
+        let tree=TempTree::new();let source=tree.0.join("delivery.txt");
+        fs::write(&source,"cached text to withhold").unwrap();
+        let engine=service_with(&tree,&[]);
+        engine.indexer.extract_once_with(&crate::extract::ExtractorRegistry::default(),|_|Err("no model".into())).unwrap();
+        let entry=engine.indexer.store_lock().find_by_path(&source.to_string_lossy()).unwrap().unwrap().id;
+        let request=PreviewRequest {reference:EntryReference {result_id:format!("e{entry}"),source_revision:None},location:None};
+        let cancel=engine.begin_request_for_client(7,1);
+        let preview=engine.preview_snapshot(&request,&cancel).unwrap();
+        let response=||ServerMessage::EntryPreview {id:1,preview:preview.clone()};
+        assert!(matches!(engine.preview_response_for_delivery(7,1,&cancel,response()),Some(ServerMessage::EntryPreview {..})));
+        engine.cancel_for_client(7,1);
+        assert!(matches!(engine.preview_response_for_delivery(7,1,&cancel,response()),Some(ServerMessage::Error {code:ErrorCode::Cancelled,..})));
+        cancel.store(false,Ordering::Release);
+        fs::write(&source,"new source bytes with different length").unwrap();
+        assert!(matches!(engine.preview_response_for_delivery(7,1,&cancel,response()),Some(ServerMessage::Error {code:ErrorCode::NotReady,..})));
+        let mut config=engine.indexer.get_indexing_config().unwrap();config.roots.clear();
+        engine.indexer.set_indexing_config(&config).unwrap();
+        assert!(matches!(engine.preview_response_for_delivery(7,1,&cancel,response()),Some(ServerMessage::Error {code:ErrorCode::NotReady,..})));
+        let _replacement=engine.begin_request_for_client(7,1);
+        assert!(engine.preview_response_for_delivery(7,1,&cancel,response()).is_none());
+    }
+
+    #[test]
+    fn preview_returns_current_bounded_cached_text_while_paused_and_rejects_changed_sources() {
+        use ws_protocol::{EntryReference,PreviewRequest,PreviewState};
+        let tree=TempTree::new();let source=tree.0.join("preview.txt");
+        fs::write(&source,"Header\nActual source text\nLast line").unwrap();
+        let engine=service_with(&tree,&[]);
+        engine.indexer.extract_once_with(&crate::extract::ExtractorRegistry::default(),|_|Err("no model".into())).unwrap();
+        let id=engine.indexer.store_lock().find_by_path(&source.to_string_lossy()).unwrap().unwrap().id;
+        let mut config=engine.indexer.get_indexing_config().unwrap();config.paused=true;
+        engine.indexer.set_indexing_config(&config).unwrap();
+        let request=PreviewRequest {reference:EntryReference {result_id:format!("e{id}"),source_revision:None},location:None};
+        let cancel=Arc::new(AtomicBool::new(false));
+        let preview=engine.preview_snapshot(&request,&cancel).expect("already indexed preview must work while paused without a model");
+        assert_eq!(preview.state,PreviewState::Ready);
+        assert_eq!(preview.parts.iter().map(|p|p.text.as_str()).collect::<String>(),"Header\nActual source text\nLast line");
+        assert_eq!(preview.extraction.len(),1);
+        assert!(preview.extraction[0].complete_within_limit);
+        assert_eq!(preview.extraction[0].source_units,None,"completion is not full source coverage");
+        let mut bound=request.clone();bound.reference.source_revision=Some(preview.entry.source_revision);
+        cancel.store(true,Ordering::Release);
+        assert_eq!(engine.preview_snapshot(&bound,&cancel).unwrap_err(),ErrorCode::Cancelled);
+        cancel.store(false,Ordering::Release);
+        fs::write(&source,"replacement file bytes").unwrap();
+        assert_eq!(engine.preview_snapshot(&bound,&cancel).unwrap_err(),ErrorCode::NotReady);
+        let deadline=std::time::Instant::now()+Duration::from_secs(5);
+        let unavailable=loop {
+            match engine.preview_snapshot(&request,&cancel) {
+                Ok(preview)=>break preview,
+                Err(ErrorCode::NotReady) if std::time::Instant::now()<deadline=>std::thread::sleep(Duration::from_millis(2)),
+                response=>panic!("fresh metadata did not settle after source change: {response:?}"),
+            }
+        };
+        assert_eq!(unavailable.state,PreviewState::NotIndexed);
+        assert!(unavailable.parts.is_empty(),"old cache cannot be relabelled as the replacement source");
+        config.roots.clear();engine.indexer.set_indexing_config(&config).unwrap();
+        assert_eq!(engine.preview_snapshot(&request,&cancel).unwrap_err(),ErrorCode::NotReady);
+    }
+
+    #[test]
     fn calculator_results_are_synthesized() {
         let tree = TempTree::new();
         let engine = service_with(&tree, &[]);
@@ -1510,8 +1669,8 @@ mod tests {
             flag_b.load(Ordering::Relaxed),
             "client 2's request id 1 must be cancelled"
         );
-        engine.end_request_for_client(1, 1);
-        engine.end_request_for_client(2, 1);
+        engine.end_request_for_client(1, 1, &flag_a);
+        engine.end_request_for_client(2, 1, &flag_b);
     }
 
     #[test]

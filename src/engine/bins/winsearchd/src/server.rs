@@ -13,7 +13,7 @@ use crate::engine::SharedEngine;
 pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn features() -> Vec<String> {
-    vec!["search.exact".to_string(), "search.semantic".to_string(), "code".to_string(), "entry.resolve".to_string()]
+    vec!["search.exact".to_string(), "search.semantic".to_string(), "code".to_string(), "entry.resolve".to_string(), "entry.preview.text".to_string()]
 }
 
 pub fn handle_connection(stream: PipeStream, engine: SharedEngine) {
@@ -90,6 +90,7 @@ pub fn handle_connection(stream: PipeStream, engine: SharedEngine) {
 
         match msg {
             ClientMessage::ResolveEntry { id, reference } => engine.resolve_entry(&client, id, reference),
+            ClientMessage::PreviewEntry { id, request } => engine.preview_entry(&client, id, request),
             ClientMessage::GetIndexingConfig { id } => engine.get_indexing_config(&client, id),
             ClientMessage::SetIndexingConfig { id, config } => engine.set_indexing_config(&client, id, config),
             ClientMessage::Hello { .. } => {
@@ -219,6 +220,78 @@ mod tests {
                 None => panic!("pipe closed before Results frame"),
             }
         }
+    }
+
+    #[test]
+    fn preview_pipe_bounds_work_accepts_in_band_cancel_and_revalidates_roots_and_sources() {
+        use ws_protocol::{EntryReference,PreviewRequest,PreviewState,ErrorCode};
+        let root=std::env::temp_dir().join(format!("winsearch-preview-{}-{}",std::process::id(),SERVER_PIPE_SEQ.fetch_add(1,Ordering::SeqCst)));
+        std::fs::create_dir(&root).unwrap();let source=root.join("preview.txt");
+        std::fs::write(&source,"Header\nactual cached preview text").unwrap();
+        let indexer=Indexer::open(ws_index::IndexStore::open_in_memory().unwrap(),&[root.clone()]).unwrap();
+        indexer.enqueue_initial_scan().unwrap();while indexer.scan_available(64)>0 {}
+        indexer.extract_once_with(&crate::extract::ExtractorRegistry::default(),|_|Err("no model".into())).unwrap();
+        let entry=indexer.store_lock().find_by_path(&source.to_string_lossy()).unwrap().unwrap().id;
+        let engine=EngineService::new_with_model_dir(indexer.clone(),root.join("unused-models"));
+        let pipe=unique_pipe();let server_pipe=pipe.clone();
+        std::thread::spawn(move || {let _=ws_platform::pipe::serve(&server_pipe,move |stream|handle_connection(stream,engine.clone()));});
+        let mut client=connect_retry(&pipe);
+        write_message(&mut client,&ClientMessage::Hello {protocol_version:1,client:"preview-test".into(),client_version:"1".into()}).unwrap();
+        let Some(ServerMessage::HelloAck {features,..})=read_message::<_,ServerMessage>(&mut client).unwrap() else {panic!("preview handshake");};
+        assert!(features.iter().any(|feature|feature=="entry.preview.text"));
+        assert!(matches!(read_message::<_,ServerMessage>(&mut client).unwrap(),Some(ServerMessage::Status {..})));
+        fn reply(client:&mut PipeStream)->ServerMessage {
+            loop {let message=read_message::<_,ServerMessage>(client).unwrap().unwrap();if !matches!(message,ServerMessage::Status {..}) {return message;}}
+        }
+        fn request(client:&mut PipeStream,id:u64,entry:i64,proof:Option<String>) {
+            write_message(client,&ClientMessage::PreviewEntry {id,request:PreviewRequest {reference:EntryReference {result_id:format!("e{entry}"),source_revision:proof},location:None}}).unwrap();
+        }
+        let blocked=indexer.store_lock();
+        request(&mut client,10,entry,None);request(&mut client,11,entry,None);
+        write_message(&mut client,&ClientMessage::Ping {id:12}).unwrap();
+        assert!(matches!(reply(&mut client),ServerMessage::Pong {id:12}),"preview work cannot block control traffic");
+        request(&mut client,13,entry,None);
+        assert!(matches!(reply(&mut client),ServerMessage::Error {id:Some(13),code:ErrorCode::NotReady,..}),"a third request cannot create unbounded blocked work");
+        for id in [10,11] {write_message(&mut client,&ClientMessage::Cancel {id}).unwrap();}
+        write_message(&mut client,&ClientMessage::Ping {id:14}).unwrap();
+        assert!(matches!(reply(&mut client),ServerMessage::Pong {id:14}));
+        drop(blocked);
+        let mut cancelled=std::collections::HashSet::new();
+        for _ in 0..2 {
+            let ServerMessage::Error {id:Some(id),code:ErrorCode::Cancelled,..}=reply(&mut client) else {panic!("cancelled preview delivered content");};
+            assert!([10,11].contains(&id));cancelled.insert(id);
+        }
+        assert_eq!(cancelled.len(),2);
+        let mut id=20;let deadline=std::time::Instant::now()+Duration::from_secs(5);
+        let preview=loop {
+            request(&mut client,id,entry,None);
+            match reply(&mut client) {
+                ServerMessage::EntryPreview {id:actual,preview}=>{assert_eq!(actual,id);break preview;},
+                ServerMessage::Error {code:ErrorCode::NotReady,..} if std::time::Instant::now()<deadline=>{std::thread::sleep(Duration::from_millis(2));id+=1;},
+                response=>panic!("freed preview capacity did not recover: {response:?}"),
+            }
+        };
+        assert_eq!(preview.state,PreviewState::Ready);
+        assert_eq!(preview.parts[0].text,"Header\nactual cached preview text");
+        let config=indexer.get_indexing_config().unwrap();let mut revoked=config.clone();revoked.roots.clear();
+        indexer.set_indexing_config(&revoked).unwrap();request(&mut client,40,entry,None);
+        assert!(matches!(reply(&mut client),ServerMessage::Error {id:Some(40),code:ErrorCode::NotReady,..}));
+        indexer.set_indexing_config(&config).unwrap();request(&mut client,41,entry,Some(preview.entry.source_revision));
+        assert!(matches!(reply(&mut client),ServerMessage::Error {id:Some(41),code:ErrorCode::NotReady,..}));
+        std::fs::write(&source,"replacement bytes").unwrap();
+        // The restored native watcher can advance metadata while a fresh proof is being resolved.
+        let deadline=std::time::Instant::now()+Duration::from_secs(5);let mut id=42;
+        let preview=loop {
+            request(&mut client,id,entry,None);
+            match reply(&mut client) {
+                ServerMessage::EntryPreview {preview,..}=>break preview,
+                ServerMessage::Error {code:ErrorCode::NotReady,..} if std::time::Instant::now()<deadline=>{std::thread::sleep(Duration::from_millis(2));id+=1;},
+                response=>panic!("replacement metadata unavailable: {response:?}"),
+            }
+        };
+        assert_eq!(preview.state,PreviewState::NotIndexed);assert!(preview.parts.is_empty());
+        indexer.set_indexing_config(&revoked).unwrap();drop(client);
+        std::fs::remove_file(&source).unwrap();std::fs::remove_dir(&root).unwrap();
     }
 
     #[test]

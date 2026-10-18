@@ -1496,11 +1496,13 @@ mod tests {
     use std::fs;
     #[test]
     fn watcher_point_commit_rechecks_exclusions_after_metadata_collection() {
-        let tree = TempTree::new();
-        let indexer =
-            Indexer::open(IndexStore::open_in_memory().unwrap(), &[tree.0.clone()]).unwrap();
-        let root_id = indexer.root_snapshot()[0].id;
         for extension_rule in [false, true] {
+            // Each policy change starts watchers; isolate cases so an earlier
+            // watcher cannot commit the next file before the tested revocation.
+            let tree = TempTree::new();
+            let indexer =
+                Indexer::open(IndexStore::open_in_memory().unwrap(), &[tree.0.clone()]).unwrap();
+            let root_id = indexer.root_snapshot()[0].id;
             let file = tree.0.join(if extension_rule {
                 "extension.race"
             } else {

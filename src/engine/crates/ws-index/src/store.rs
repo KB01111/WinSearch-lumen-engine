@@ -336,6 +336,74 @@ impl IndexStore {
         self.content_chunks_by("WHERE entry_id=?1 ORDER BY chunk_index", entry)
     }
 
+    /// Reads only a bounded byte prefix and source locations from admitted rows.
+    pub fn preview_text(&self, entry:i64, location:Option<ws_protocol::MatchLocation>)
+        -> Result<(Vec<ws_protocol::PreviewTextPart>,bool),StoreError> {
+        use ws_protocol::{MatchLocation,PreviewTextPart,MAX_PREVIEW_TEXT_BYTES,MAX_PREVIEW_TEXT_PARTS};
+        let (mut page,mut line,mut start,mut end)=(None,None,None,None);
+        match location {
+            Some(MatchLocation::Page {page:value}) if (1..=5000).contains(&value)=>page=Some(value),
+            Some(MatchLocation::Line {line:value}) if value>0=>line=Some(value),
+            Some(MatchLocation::Timestamp {seconds,end_seconds})
+                if seconds.is_finite() && end_seconds.is_finite() && seconds>=0.0
+                    && end_seconds>=seconds && end_seconds<=366.0*86400.0=> {
+                start=Some(seconds);end=Some(end_seconds);
+            }
+            None=>(),
+            _=>return Err(StoreError::InvalidConfig("unsupported preview location".into())),
+        }
+        let mut statement=self.conn.prepare("SELECT c.kind,substr(CAST(c.text AS BLOB),1,?2),length(CAST(c.text AS BLOB)),c.page,c.start_ms,c.end_ms,c.line FROM content_chunks c JOIN query_content_rows admitted ON admitted.id=c.id WHERE c.entry_id=?1 AND c.text!='' AND (?3 IS NULL OR c.page=?3) AND (?4 IS NULL OR c.line<=?4) AND (?5 IS NULL OR (c.start_ms/1000.0=?5 AND COALESCE(c.end_ms,c.start_ms)/1000.0=?6)) ORDER BY CASE WHEN ?4 IS NOT NULL THEN -c.line ELSE 0 END,c.chunk_index,c.id LIMIT ?7")?;
+        let mut rows=statement.query(params![entry,(MAX_PREVIEW_TEXT_BYTES+1) as i64,page,line,start,end,(MAX_PREVIEW_TEXT_PARTS+1) as i64])?;
+        let (mut parts,mut used,mut seen,mut truncated)=(Vec::new(),0,0,false);
+        while let Some(row)=rows.next()? {
+            seen+=1;
+            if seen>MAX_PREVIEW_TEXT_PARTS {truncated=true;break;}
+            let bytes:Vec<u8>=row.get(1)?;
+            let original_size=usize::try_from(row.get::<_,i64>(2)?)
+                .map_err(|_|StoreError::InvalidConfig("invalid cached preview size".into()))?;
+            let available=MAX_PREVIEW_TEXT_BYTES-used;
+            let prefix=&bytes[..bytes.len().min(available)];
+            let text=match std::str::from_utf8(prefix) {
+                Ok(text)=>text,
+                Err(error) if error.error_len().is_none()=>std::str::from_utf8(&prefix[..error.valid_up_to()]).expect("validated UTF8 prefix"),
+                Err(_)=>return Err(StoreError::InvalidConfig("cached preview text is not UTF8".into())),
+            };
+            let part_line:Option<u32>=row.get(6)?;
+            if line.is_some_and(|focus|part_line.is_none_or(|first|
+                focus<first || u64::from(focus-first)>=text.split('\n').count() as u64)) {
+                truncated|=original_size>text.len();continue;
+            }
+            let part_page:Option<u32>=row.get(3)?;
+            let part_start:Option<i64>=row.get(4)?;
+            let part_end:Option<i64>=row.get(5)?;
+            let location=if let Some(page)=part_page {Some(MatchLocation::Page {page})}
+                else if let Some(start)=part_start {
+                    let end=part_end.unwrap_or(start);
+                    if start<0 || end<start || end>366*86400*1000 {return Err(StoreError::InvalidConfig("invalid cached preview time".into()));}
+                    Some(MatchLocation::Timestamp {seconds:start as f64/1000.0,end_seconds:end as f64/1000.0})
+                } else {part_line.map(|line|MatchLocation::Line {line})};
+            if !text.is_empty() {
+                used+=text.len();
+                parts.push(PreviewTextPart {kind:row.get(0)?,text:text.to_owned(),location});
+            }
+            if original_size>text.len() {truncated=true;break;}
+        }
+        Ok((parts,truncated))
+    }
+
+    pub fn preview_extraction(&self,entry:i64)->Result<Vec<ws_protocol::PreviewExtraction>,StoreError> {
+        let mut statement=self.conn.prepare("SELECT substr(p.kind,1,33),p.complete FROM content_progress p JOIN content_revisions r ON r.entry_id=p.entry_id AND r.revision=p.revision JOIN query_entries e ON e.id=p.entry_id WHERE p.entry_id=?1 AND query_source_allowed(e.path,p.source,e.is_app) ORDER BY p.kind LIMIT ?2")?;
+        let rows=statement.query_map(params![entry,(ws_protocol::MAX_PREVIEW_EXTRACTIONS+1) as i64],|row| {
+            Ok(ws_protocol::PreviewExtraction {kind:row.get(0)?,complete_within_limit:row.get(1)?,
+                source_units:None,indexed_units:None,capped:None})
+        })?;
+        let metadata=rows.collect::<Result<Vec<_>,_>>()?;
+        if metadata.len()>ws_protocol::MAX_PREVIEW_EXTRACTIONS || metadata.iter().any(|m|!crate::CONTENT_SEGMENT_KINDS.contains(&m.kind.as_str())) {
+            return Err(StoreError::InvalidConfig("invalid preview extraction metadata".into()));
+        }
+        Ok(metadata)
+    }
+
     /// Cached pixels must belong to the exact chunk metadata that was scored.
     pub fn segment_thumbnail(&self,segment:&crate::model::Segment) -> Result<Option<String>,StoreError> {
         if !self.segment_source_allowed(segment)? { return Ok(None); }
@@ -2520,6 +2588,65 @@ mod tests {
             visual: false,
             embedding_input: Default::default(),
             attempts: 0,
+        }
+    }
+
+    #[test]
+    fn preview_text_bounds_utf8_and_rows_without_loading_vectors_or_artifact_inputs() {
+        let (mut store,job,progress)=batch_fixture();
+        let text=format!("ab{}","🌿".repeat(18000));
+        let chunk=content_chunk(&job,0,&text);
+        assert!(store.commit_content_batch(&job,&progress,&[chunk],None).unwrap());
+        store.conn.execute("UPDATE content_chunks SET embedding_input='not valid JSON',thumbnail_path='C:/must-not-open'",[]).unwrap();
+        let (parts,truncated)=store.preview_text(job.entry_id,None).unwrap();
+        assert!(truncated);
+        assert_eq!(parts.len(),1);
+        assert_eq!(parts[0].text.len(),65534);
+        assert_eq!(parts[0].text,format!("ab{}","🌿".repeat(16383)));
+
+        let (mut store,job,progress)=batch_fixture();
+        let chunks=(0..65).map(|index|content_chunk(&job,index,"row")).collect::<Vec<_>>();
+        assert!(store.commit_content_batch(&job,&progress,&chunks,None).unwrap());
+        let (parts,truncated)=store.preview_text(job.entry_id,None).unwrap();
+        assert_eq!(parts.len(),64);
+        assert!(truncated,"the bounded extra row must expose omitted content");
+    }
+
+    #[test]
+    fn preview_text_applies_current_source_guard_before_row_limit() {
+        let (mut store,job,progress)=batch_fixture();
+        let chunks=(0..65).map(|index|content_chunk(&job,index,if index==64 {"admitted tail"} else {"stale private text"})).collect::<Vec<_>>();
+        assert!(store.commit_content_batch(&job,&progress,&chunks,None).unwrap());
+        store.conn.execute("INSERT INTO content_progress(entry_id,kind,cursor,complete,revision,source,model_generation) VALUES(?1,'stale',64,1,?2,'stale-source',?3)",params![job.entry_id,progress.revision,progress.model_generation]).unwrap();
+        store.conn.execute("UPDATE content_chunks SET job_kind='stale' WHERE chunk_index<64",[]).unwrap();
+        store.set_query_source_guard(|_,source,_|source.is_none_or(|source|source=="fixture-source")).unwrap();
+        let (parts,truncated)=store.preview_text(job.entry_id,None).unwrap();
+        assert_eq!(parts.len(),1);
+        assert_eq!(parts[0].text,"admitted tail");
+        assert!(!truncated);
+        store.invalidate_content_source(job.entry_id).unwrap();
+        assert!(store.preview_text(job.entry_id,None).unwrap().0.is_empty());
+    }
+
+    #[test]
+    fn preview_text_preserves_page_line_and_time_without_fabricating_requested_positions() {
+        use ws_protocol::MatchLocation;
+        let (mut store,job,progress)=batch_fixture();
+        let mut page=content_chunk(&job,0,"actual page eight");page.location.page=Some(8);
+        let mut lines=content_chunk(&job,1,"first\nsecond\nthird");lines.location.line=Some(20);
+        let mut timed=content_chunk(&job,2,"screen words");timed.location.start_ms=Some(50250);timed.location.end_ms=Some(50250);
+        assert!(store.commit_content_batch(&job,&progress,&[page,lines,timed],None).unwrap());
+        for (focus,text,actual) in [
+            (MatchLocation::Page {page:8},"actual page eight",MatchLocation::Page {page:8}),
+            (MatchLocation::Line {line:21},"first\nsecond\nthird",MatchLocation::Line {line:20}),
+            (MatchLocation::Timestamp {seconds:50.25,end_seconds:50.25},"screen words",MatchLocation::Timestamp {seconds:50.25,end_seconds:50.25}),
+        ] {
+            let (parts,truncated)=store.preview_text(job.entry_id,Some(focus)).unwrap();
+            assert_eq!(parts.len(),1);assert_eq!(parts[0].text,text);
+            assert_eq!(parts[0].location,Some(actual));assert!(!truncated);
+        }
+        for focus in [MatchLocation::Page {page:9},MatchLocation::Line {line:23},MatchLocation::Timestamp {seconds:50.251,end_seconds:50.251},MatchLocation::Timestamp {seconds:50.2501,end_seconds:50.2501}] {
+            assert!(store.preview_text(job.entry_id,Some(focus)).unwrap().0.is_empty());
         }
     }
 
