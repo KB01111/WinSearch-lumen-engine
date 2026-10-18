@@ -7,6 +7,44 @@ namespace WinSearch.Tests;
 public class IndexingContractTests
 {
     [Fact]
+    public void SearchOutcomesValidateTerminalStateAndRetainLegacyUnknown()
+    {
+        var legacy = JsonSerializer.Deserialize<ResultsMessage>("""{"id":1,"batch":[],"done":true}""", ProtocolJson.Options)!;
+        Assert.Null(legacy.Outcome);
+        var ready = new SearchOutcome { Disposition = SearchDisposition.Complete, Semantic = new() { Phase = SemanticPhase.Ready } };
+        Assert.True(ready.ValidFor(true, true, true));
+        Assert.False(ready.ValidFor(false, true, true));
+        Assert.False(ready.ValidFor(true, true, false));
+        foreach (var disposition in new[] { SearchDisposition.Superseded, SearchDisposition.Canceled, SearchDisposition.Failed })
+        {
+            var outcome = new SearchOutcome { Disposition = disposition };
+            Assert.True(outcome.ValidFor(true, true, true));
+            Assert.False(outcome.ValidFor(true, false, true));
+            outcome.Semantic = new() { Phase = SemanticPhase.Disabled };
+            Assert.False(outcome.ValidFor(true, true, true));
+        }
+        foreach (var semantic in new SemanticOutcome[] { new() { Phase = SemanticPhase.Degraded },
+            new() { Phase = SemanticPhase.Disabled, Reason = SemanticIssue.NoVectors },
+            new() { Phase = SemanticPhase.Ready, Reason = SemanticIssue.EmbeddingFailed }, new() })
+            Assert.False(new SearchOutcome { Disposition = SearchDisposition.Complete, Semantic = semantic }.ValidFor(true, true, true));
+        Assert.False(new SearchOutcome().ValidFor(true, true, true));
+    }
+
+    [Fact]
+    public void SearchOutcomeEnumsRejectNumericUnknownAndPrivateReasonValues()
+    {
+        foreach (var json in new[] {
+            """{"disposition":0,"semantic":{"phase":"disabled"}}""",
+            """{"disposition":"complete","semantic":{"phase":0}}""",
+            """{"disposition":"COMPLETE","semantic":{"phase":"ready"}}""",
+            """{"disposition":"complete","semantic":{"phase":"Ready"}}""",
+            """{"disposition":"complete","semantic":{"phase":"degraded","reason":"ModelUnavailable"}}""",
+            """{"disposition":"complete","semantic":{"phase":"degraded","reason":"private worker exception"}}""",
+            """{"disposition":"complete","semantic":{"phase":"ready"},"path":"C:/private"}""" })
+            Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<SearchOutcome>(json, ProtocolJson.Options));
+    }
+
+    [Fact]
     public void BoundReferencesAndSourceHashesRoundTripWithoutChangingHitIds()
     {
         const string hitJson = """{"id":"code:42:1:true:needle","kind":"code","entry_reference":{"result_id":"c42","source_revision":"proof"}}""";

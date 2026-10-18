@@ -1,0 +1,32 @@
+cargo :    Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearc
+hd)
+At line:1 char:1
++ cargo test -p winsearchd --bin winsearchd streaming_terminal_outcomes ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling wi...ins\winsearchd):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 14.11s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-6efc366c82f15041.exe)
+
+running 1 test
+test engine::tests::streaming_terminal_outcomes_report_exact_sql_failure_instead_of_empty_success ... FAILED
+
+failures:
+
+---- engine::tests::streaming_terminal_outcomes_report_exact_sql_failure_instead_of_empty_success stdout ----
+
+thread '<unnamed>' (123172) panicked at bins\winsearchd\src\engine.rs:2461:67:
+PRIVATE exact SQL detail
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'engine::tests::streaming_terminal_outcomes_report_exact_sql_failure_instead_of_empty_success' (127484) panicked at bins\winsearchd\src\engine.rs:2466:20:
+exact failures must be errors: Results { id: 84, batch: [], done: true, outcome: Some(SearchOutcome { disposition: Complete, semantic: Some(SemanticOutcome { phase: Disabled, reason: None }) }) }
+
+
+failures:
+    engine::tests::streaming_terminal_outcomes_report_exact_sql_failure_instead_of_empty_success
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 221 filtered out; finished in 0.06s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

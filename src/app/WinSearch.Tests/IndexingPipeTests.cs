@@ -11,6 +11,50 @@ namespace WinSearch.Tests;
 public class IndexingPipeTests
 {
     [Theory]
+    [InlineData(0)] [InlineData(1)] [InlineData(2)] [InlineData(3)] [InlineData(4)] [InlineData(5)] [InlineData(6)]
+    [InlineData(7)] [InlineData(8)] [InlineData(9)] [InlineData(10)] [InlineData(11)] [InlineData(12)] [InlineData(13)]
+    public async Task SearchOutcomesAreRequiredAndValidatedBeforeDelivery(int scenario)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10)); var token = timeout.Token;
+        var pipe = "winsearch-outcomes-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        var requested = scenario is 3 or 7 or 9 or 10 or 11;
+        SearchOutcome Complete(SemanticPhase phase, SemanticIssue? reason = null) => new() {
+            Disposition = SearchDisposition.Complete, Semantic = new() { Phase = phase, Reason = reason } };
+        var outcome = scenario switch {
+            0 => null,
+            1 or 8 => Complete(SemanticPhase.Disabled),
+            2 => new SearchOutcome { Disposition = SearchDisposition.Complete },
+            3 => Complete(SemanticPhase.Ready, SemanticIssue.EmbeddingFailed),
+            4 or 9 => Complete(SemanticPhase.Ready),
+            5 or 11 => new SearchOutcome { Disposition = SearchDisposition.Superseded },
+            6 => new SearchOutcome { Disposition = SearchDisposition.Canceled, Semantic = new() { Phase = SemanticPhase.Disabled } },
+            7 => Complete(SemanticPhase.Degraded),
+            10 => Complete(SemanticPhase.Degraded, SemanticIssue.ModelUnavailable),
+            12 => new SearchOutcome { Disposition = SearchDisposition.Canceled },
+            _ => new SearchOutcome { Disposition = SearchDisposition.Failed } };
+        async Task Serve()
+        {
+            await server.WaitForConnectionAsync(token); await ReadAsync(server, token);
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1,
+                Features = ["search.exact", "search.semantic", "search.outcomes"] }, token);
+            var search = Assert.IsType<SearchMessage>(await ReadAsync(server, token));
+            await WriteAsync(server, new ResultsMessage { Id = search.Id, Done = scenario != 1, Outcome = outcome,
+                Batch = scenario == 5 ? [new SearchResult()] : [] }, token);
+            if (scenario == 1) await WriteAsync(server, new ResultsMessage { Id = search.Id, Done = true,
+                Outcome = Complete(SemanticPhase.Disabled) }, token);
+        }
+        var serving = Serve(); await using var client = new EngineClient(pipe); await client.ConnectAsync(token);
+        SearchOutcome? observed = null;
+        var failure = await Record.ExceptionAsync(async () => {
+            await foreach (var batch in client.SearchAsync(new() { IncludeSemantic = requested }, token)) observed = batch.Outcome;
+        });
+        await serving;
+        if (scenario < 8) Assert.Equal(ErrorCode.InvalidRequest, Assert.IsType<EngineException>(failure).Code);
+        else { Assert.Null(failure); Assert.NotNull(observed); Assert.Equal(outcome!.Disposition, observed.Disposition); }
+    }
+
+    [Theory]
     [InlineData("")] [InlineData(".")] [InlineData("..pdf")] [InlineData("*.pdf")]
     [InlineData("a/b")] [InlineData("a\\b")] [InlineData("å")]
     public async Task ExtensionFilterRejectsInvalidInputBeforeConnecting(string extension)

@@ -20,7 +20,7 @@ in the [gap matrix](docs/v1-gap-matrix.md); the
 [Lumen integration plan](docs/superpowers/plans/2026-10-17-v1-lumen-engine.md)
 define the full scope.
 
-The latest [query-filter checkpoint](docs/validation/2026-10-18-query-filters/README.md)
+The latest [search-outcome checkpoint](docs/validation/2026-10-18-search-outcomes/README.md)
 records verified subsystem behavior and the retained native failure. The tasks
 below still require implementation or final acceptance; they are not release
 completion claims.
@@ -29,10 +29,10 @@ completion claims.
 
 - [ ] Complete Related search, finer file-kind scopes and remaining provenance
   contracts; expose the existing extension filters through CLI arguments.
-- [ ] Complete terminal search outcomes across the daemon, Rust/C# clients and
-  CLI. Distinguish complete, superseded, canceled and failed requests; report
-  semantic disabled/ready/degraded states with bounded reasons. Preserve exact
-  results when optional inference fails and legacy peers' unknown state.
+- [ ] Consume and verify the engine's terminal outcomes in Lumen and the
+  standalone UI, preserving complete/superseded/canceled/failed and semantic
+  disabled/ready/degraded states, exact results on optional failure and legacy
+  peers' unknown state. Complete independent review and installed acceptance.
 - [ ] Distinguish superseded queries from genuine empty results and resolve the
   transient native pause/resume result failure; preserve current source fences.
 - [ ] Implement the typed WinSearch adapter behind Lumen's existing SearchService.
@@ -49,6 +49,9 @@ completion claims.
 
 - [ ] Complete source-byte hashes for larger files and existing indexes, and
   report accurate extraction totals and limits.
+- [ ] Complete source-attestation device/recovery and independent review after
+  the native change/restore fix. Unavailable read-change notifications must
+  retain an unknown hash; timestamp equality alone can miss rapid edits.
 - [ ] Complete confined raster/image/PDF-page thumbnails, rich previews,
   uncached rendering and cache maintenance within existing host resource bounds.
 - [ ] Wire PDF page, source line and notebook-cell navigation into consumer

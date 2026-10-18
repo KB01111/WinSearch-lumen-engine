@@ -49,11 +49,16 @@ include Lumen integration and the final native/installed acceptance gates.
 - [x] Disconnected-drive preservation + reconnect reconciliation (Phase 2) —
       verified end-to-end with a mapped drive (subst)
 - [~] Ordinary source-byte provenance — bounded native SHA256, revision binding,
-      atomic chunks/cursor commit and source/cache mismatch rejection implemented;
-      larger-source/legacy recovery and complete extraction coverage remain open
+      atomic chunks/cursor commit, native read-change notification and source/cache
+      mismatch rejection implemented; larger-source/legacy recovery, unsupported
+      notification coverage and final device/review acceptance remain open
 - [~] Query scopes/filters — app/file/category filters precede candidate caps;
       typed ordinary/code extension filters and semantic pre-top-k admission work;
-      finer file-kind scopes, Related and explicit outcomes remain open
+      finer file-kind scopes and Related remain open
+- [~] Terminal source/semantic outcomes — daemon, Rust/C# clients and CLI now
+      distinguish completion/interruption and disabled/ready/degraded with closed
+      reasons; legacy remains unknown. [Local native/model evidence](validation/2026-10-18-search-outcomes/README.md)
+      passes; consumer wiring, independent review and installed acceptance remain open
 
 ## Semantic search (EmbeddingGemma 2)
 

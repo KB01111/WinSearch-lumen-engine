@@ -1,0 +1,162 @@
+[
+  [
+    {
+      "changed_and_restored": false,
+      "compatible_read": true,
+      "break_observed": false,
+      "ack_required": false,
+      "write_seconds": 4.00003045797348e-07
+    },
+    {
+      "changed_and_restored": true,
+      "compatible_read": true,
+      "break_observed": true,
+      "ack_required": false,
+      "write_seconds": 0.0008837999776005745
+    }
+  ],
+  [
+    {
+      "changed_and_restored": false,
+      "compatible_read": true,
+      "break_observed": false,
+      "ack_required": false,
+      "write_seconds": 3.00002284348011e-07
+    },
+    {
+      "changed_and_restored": true,
+      "compatible_read": true,
+      "break_observed": true,
+      "ack_required": false,
+      "write_seconds": 0.0007745999901089817
+    }
+  ],
+  [
+    {
+      "changed_and_restored": false,
+      "compatible_read": true,
+      "break_observed": false,
+      "ack_required": false,
+      "write_seconds": 3.00002284348011e-07
+    },
+    {
+      "changed_and_restored": true,
+      "compatible_read": true,
+      "break_observed": true,
+      "ack_required": false,
+      "write_seconds": 0.0013672999921254814
+    }
+  ],
+  [
+    {
+      "changed_and_restored": false,
+      "compatible_read": true,
+      "break_observed": false,
+      "ack_required": false,
+      "write_seconds": 5.00003807246685e-07
+    },
+    {
+      "changed_and_restored": true,
+      "compatible_read": true,
+      "break_observed": true,
+      "ack_required": false,
+      "write_seconds": 0.0008384999819099903
+    }
+  ],
+  [
+    {
+      "changed_and_restored": false,
+      "compatible_read": true,
+      "break_observed": false,
+      "ack_required": false,
+      "write_seconds": 5.00003807246685e-07
+    },
+    {
+      "changed_and_restored": true,
+      "compatible_read": true,
+      "break_observed": true,
+      "ack_required": false,
+      "write_seconds": 0.0009379000111948699
+    }
+  ],
+  [
+    {
+      "changed_and_restored": false,
+      "compatible_read": true,
+      "break_observed": false,
+      "ack_required": false,
+      "write_seconds": 6.00004568696022e-07
+    },
+    {
+      "changed_and_restored": true,
+      "compatible_read": true,
+      "break_observed": true,
+      "ack_required": false,
+      "write_seconds": 0.0008072000055108219
+    }
+  ],
+  [
+    {
+      "changed_and_restored": false,
+      "compatible_read": true,
+      "break_observed": false,
+      "ack_required": false,
+      "write_seconds": 4.00003045797348e-07
+    },
+    {
+      "changed_and_restored": true,
+      "compatible_read": true,
+      "break_observed": true,
+      "ack_required": false,
+      "write_seconds": 0.0007645000005140901
+    }
+  ],
+  [
+    {
+      "changed_and_restored": false,
+      "compatible_read": true,
+      "break_observed": false,
+      "ack_required": false,
+      "write_seconds": 4.00003045797348e-07
+    },
+    {
+      "changed_and_restored": true,
+      "compatible_read": true,
+      "break_observed": true,
+      "ack_required": false,
+      "write_seconds": 0.000884100008988753
+    }
+  ],
+  [
+    {
+      "changed_and_restored": false,
+      "compatible_read": true,
+      "break_observed": false,
+      "ack_required": false,
+      "write_seconds": 2.00001522898674e-07
+    },
+    {
+      "changed_and_restored": true,
+      "compatible_read": true,
+      "break_observed": true,
+      "ack_required": false,
+      "write_seconds": 0.0008113000076264143
+    }
+  ],
+  [
+    {
+      "changed_and_restored": false,
+      "compatible_read": true,
+      "break_observed": false,
+      "ack_required": false,
+      "write_seconds": 3.00002284348011e-07
+    },
+    {
+      "changed_and_restored": true,
+      "compatible_read": true,
+      "break_observed": true,
+      "ack_required": false,
+      "write_seconds": 0.0007366999925579876
+    }
+  ]
+]

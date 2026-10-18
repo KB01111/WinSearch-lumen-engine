@@ -8,11 +8,13 @@
 pub mod entry;
 pub mod framing;
 pub mod messages;
+pub mod outcome;
 pub mod preview;
 
 pub use entry::{EntryReference, ResolvedEntry, IndexedEntryId, valid_content_sha256};
 pub use framing::{read_message, write_message, FrameError, MAX_FRAME_BYTES};
 pub use messages::*;
+pub use outcome::*;
 pub use preview::*;
 
 // Model lifecycle snapshots ride the wire verbatim; the canonical shape lives

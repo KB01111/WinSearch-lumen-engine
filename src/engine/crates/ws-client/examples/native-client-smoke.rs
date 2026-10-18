@@ -2,7 +2,7 @@
 //! This fixture changes that instance's root policy and restores it before exit.
 use std::{error::Error, time::Duration};
 use ws_client::{
-    protocol::{ErrorCode, IndexingConfig, SearchMode, SearchQuery, SearchResult},
+    protocol::{ErrorCode, IndexingConfig, SearchMode, SearchQuery, SearchResult,SearchDisposition,SemanticPhase},
     Client, EngineEvent,
 };
 
@@ -24,11 +24,18 @@ async fn search(
 }
 
 async fn search_query(client:&Client,query:SearchQuery)->Result<Vec<SearchResult>> {
+    let requested_semantic=query.include_semantic;
     let mut stream=client.search(query).await?;
     let mut results = Vec::new();
     let mut terminal = false;
     while let Some(frame) = stream.next().await? {
         terminal |= frame.done;
+        if frame.done {
+            let outcome=frame.outcome.expect("native engine must supply terminal outcomes");
+            eprintln!("typed search outcome: {}",serde_json::to_string(&outcome)?);
+            assert_eq!(outcome.disposition,SearchDisposition::Complete,"native acceptance requires a completed snapshot; no implicit retry");
+            assert_eq!(outcome.semantic.unwrap().phase,if requested_semantic {SemanticPhase::Ready} else {SemanticPhase::Disabled});
+        }
         results.extend(frame.batch);
     }
     assert!(terminal, "search must deliver a terminal frame");
@@ -37,7 +44,7 @@ async fn search_query(client:&Client,query:SearchQuery)->Result<Vec<SearchResult
 
 async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_json::Value> {
     let info = client.info().await?;
-    for feature in ["search.entry_references","entry.resolve.code","entry.preview.code","search.filters"] {assert!(info.supports(feature));}
+    for feature in ["search.entry_references","entry.resolve.code","entry.preview.code","search.filters","search.outcomes"] {assert!(info.supports(feature));}
     let status = client.status().await?;
     let model = client.model_status().await?;
     let engine_config = client.config().await?;
@@ -208,6 +215,7 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
         "document": document, "code": code, "semantic_code": semantic_code,
         "extension_filters":extension_filters,
         "extension_checks":["pdf_extension_and_case", "excluded_document_extension", "code_extension", "excluded_code_extension"],
+        "outcome_checks":["advertised_terminal_state_required", "completed_snapshot_without_retry", "actual_semantic_phase"],
         "notebook":notebook,"code_entries":code_entries,
         "reference_checks":["bound_document_and_pdf_refs", "bound_code_and_notebook_refs",
             "resolved_code_hashes", "code_proof_stays_invalid_after_restore"],

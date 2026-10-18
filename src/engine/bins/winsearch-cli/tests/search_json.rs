@@ -3,12 +3,17 @@ use std::{process::Command, sync::mpsc, time::Duration};
 use ws_protocol::{
     read_message, write_message, ClientMessage, ErrorCode, MatchLocation, MatchingMoment,
     ResultKind, SearchResult, ServerMessage, PROTOCOL_VERSION,
+    SearchDisposition,SearchOutcome,SemanticIssue,SemanticOutcome,
 };
 
 fn run_search(
     label: &str,
     reply: impl Fn(u64) -> Vec<ServerMessage> + Send + Sync + 'static,
 ) -> std::process::Output {
+    run_search_with_features(label,vec![],reply)
+}
+
+fn run_search_with_features(label:&str,features:Vec<String>,reply:impl Fn(u64)->Vec<ServerMessage>+Send+Sync+'static)->std::process::Output {
     let pipe = format!(
         r"\\.\pipe\winsearch-cli-json-{}-{label}",
         std::process::id()
@@ -27,7 +32,7 @@ fn run_search(
                 &ServerMessage::HelloAck {
                     protocol_version: PROTOCOL_VERSION,
                     engine_version: "test".into(),
-                    features: vec![],
+                    features: features.clone(),
                 },
             )
             .unwrap();
@@ -35,7 +40,7 @@ fn run_search(
                 // An unrelated request's frame must not leak into the CLI JSON.
                 write_message(
                     &mut stream,
-                    &ServerMessage::Results {
+                    &ServerMessage::Results { outcome:None,
                         id: id + 99,
                         batch: vec![hit("unrelated")],
                         done: true,
@@ -80,12 +85,12 @@ fn hit(id: &str) -> SearchResult {
 fn json_preserves_order_and_complete_dtos_across_progressive_batches() {
     let output = run_search("progressive", |id| {
         vec![
-            ServerMessage::Results {
+            ServerMessage::Results { outcome:None,
                 id,
                 batch: vec![hit("exact")],
                 done: false,
             },
-            ServerMessage::Results {
+            ServerMessage::Results { outcome:None,
                 id,
                 batch: vec![hit("semantic")],
                 done: true,
@@ -105,7 +110,7 @@ fn json_preserves_order_and_complete_dtos_across_progressive_batches() {
 #[test]
 fn json_rejection_is_an_empty_array() {
     let output = run_search("empty", |id| {
-        vec![ServerMessage::Results {
+        vec![ServerMessage::Results { outcome:None,
             id,
             batch: vec![],
             done: true,
@@ -122,7 +127,7 @@ fn json_rejection_is_an_empty_array() {
 fn json_server_error_fails_without_a_success_payload() {
     let output = run_search("error", |id| {
         vec![
-            ServerMessage::Results {
+            ServerMessage::Results { outcome:None,
                 id,
                 batch: vec![hit("partial")],
                 done: false,
@@ -137,4 +142,44 @@ fn json_server_error_fails_without_a_success_payload() {
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).contains("cancelled test request"));
+}
+
+#[test]
+fn json_requires_advertised_terminal_outcome_and_rejects_premature_or_malformed_state() {
+    for case in 0..3 {
+        let output=run_search_with_features(&format!("bad-outcome-{case}"),vec!["search.outcomes".into()],move |id| {
+            let ready=Some(SearchOutcome::complete(SemanticOutcome::READY));
+            if case==1 {return vec![ServerMessage::Results {id,batch:vec![],done:false,outcome:ready},
+                ServerMessage::Results {id,batch:vec![],done:true,outcome:ready}];}
+            vec![ServerMessage::Results {id,batch:vec![],done:true,outcome:if case==0 {None} else {
+                Some(SearchOutcome::interrupted(SearchDisposition::Complete))}}]
+        });
+        assert!(!output.status.success(),"case{case} must reject invalid outcome");
+        assert!(output.stdout.is_empty());
+    }
+}
+
+#[test]
+fn json_does_not_publish_partial_hits_as_success_after_interruption() {
+    for disposition in [SearchDisposition::Superseded,SearchDisposition::Canceled,SearchDisposition::Failed] {
+        let output=run_search_with_features(&format!("interrupted-{disposition:?}"),vec!["search.outcomes".into()],move |id|vec![
+            ServerMessage::Results {id,batch:vec![hit("partial")],done:false,outcome:None},
+            ServerMessage::Results {id,batch:vec![],done:true,outcome:Some(SearchOutcome::interrupted(disposition))},
+        ]);
+        assert!(!output.status.success(),"{disposition:?} cannot be reported as a successful result array");
+        assert!(output.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&output.stderr).to_lowercase().contains(&format!("{disposition:?}").to_lowercase()));
+    }
+}
+
+#[test]
+fn json_preserves_exact_hits_and_reports_bounded_optional_semantic_failure() {
+    let output=run_search_with_features("degraded-outcome",vec!["search.outcomes".into()],|id|vec![
+        ServerMessage::Results {id,batch:vec![hit("exact")],done:false,outcome:None},
+        ServerMessage::Results {id,batch:vec![],done:true,outcome:Some(SearchOutcome::complete(
+            SemanticOutcome::degraded(SemanticIssue::EmbeddingFailed)))},
+    ]);
+    assert!(output.status.success());
+    assert_eq!(serde_json::from_slice::<Vec<SearchResult>>(&output.stdout).unwrap(),vec![hit("exact")]);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("embedding_failed"));
 }

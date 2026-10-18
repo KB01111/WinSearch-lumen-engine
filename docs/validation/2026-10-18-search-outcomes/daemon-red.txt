@@ -1,0 +1,90 @@
+cargo :    Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-pr
+otocol)
+At line:1 char:1
++ cargo test -p winsearchd --bin winsearchd outcomes -- --test-threads= ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-platform v0.1.0 (<checkout>\src\engine\crates\ws-platform)
+   Compiling ws-index v0.1.0 (<checkout>\src\engine\crates\ws-index)
+   Compiling ws-code v0.1.0 (<checkout>\src\engine\crates\ws-code)
+   Compiling ws-extract v0.1.0 (<checkout>\src\engine\crates\ws-extract)
+   Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearchd)
+warning: unused import: `SearchDisposition`
+  --> bins\winsearchd\src\engine.rs:26:5
+   |
+26 |     SearchDisposition, SearchOutcome, SemanticIssue, SemanticOutcome,
+   |     ^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused `Result` that must be used
+    --> bins\winsearchd\src\engine.rs:2388:9
+     |
+2388 |         engine.indexer.store_lock().set_query_source_guard(|_,_,_|panic!("PRIVATE SQLite callback detail"));
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: this `Result` may be an `Err` variant, which should be handled
+     = note: `#[warn(unused_must_use)]` (part of `#[warn(unused)]`) on by default
+help: use `let _ = ...` to ignore the resulting value
+     |
+2388 |         let _ = engine.indexer.store_lock().set_query_source_guard(|_,_,_|panic!("PRIVATE SQLite callback detail
+"));
+     |         +++++++
+
+warning: `winsearchd` (bin "winsearchd" test) generated 2 warnings (run `cargo fix --bin "winsearchd" -p winsearchd --t
+ests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 30.29s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-6efc366c82f15041.exe)
+
+running 4 tests
+test engine::tests::semantic_outcomes_distinguish_disabled_missing_model_and_actual_ready_lookup ... FAILED
+test engine::tests::semantic_outcomes_expose_bounded_embedding_failure_and_preserve_exact_hits ... FAILED
+test engine::tests::semantic_outcomes_separate_no_vectors_and_real_sql_retrieval_failure ... FAILED
+test engine::tests::streaming_terminal_outcomes_preserve_exact_when_semantics_fails ... FAILED
+
+failures:
+
+---- engine::tests::semantic_outcomes_distinguish_disabled_missing_model_and_actual_ready_lookup stdout ----
+
+thread 'engine::tests::semantic_outcomes_distinguish_disabled_missing_model_and_actual_ready_lookup' (110288) panicked at bins\winsearchd\src\engine.rs:2364:9:
+assertion `left == right` failed
+  left: SemanticOutcome { phase: Disabled, reason: None }
+ right: SemanticOutcome { phase: Degraded, reason: Some(ModelUnavailable) }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- engine::tests::semantic_outcomes_expose_bounded_embedding_failure_and_preserve_exact_hits stdout ----
+
+thread 'engine::tests::semantic_outcomes_expose_bounded_embedding_failure_and_preserve_exact_hits' (74736) panicked at bins\winsearchd\src\engine.rs:2381:34:
+assertion `left == right` failed
+  left: SemanticOutcome { phase: Disabled, reason: None }
+ right: SemanticOutcome { phase: Degraded, reason: Some(EmbeddingFailed) }
+
+---- engine::tests::semantic_outcomes_separate_no_vectors_and_real_sql_retrieval_failure stdout ----
+
+thread 'engine::tests::semantic_outcomes_separate_no_vectors_and_real_sql_retrieval_failure' (76660) panicked at bins\winsearchd\src\engine.rs:2388:67:
+PRIVATE SQLite callback detail
+
+thread 'engine::tests::semantic_outcomes_separate_no_vectors_and_real_sql_retrieval_failure' (76660) panicked at bins\winsearchd\src\engine.rs:2390:34:
+assertion `left == right` failed
+  left: SemanticOutcome { phase: Disabled, reason: None }
+ right: SemanticOutcome { phase: Degraded, reason: Some(RetrievalFailed) }
+
+---- engine::tests::streaming_terminal_outcomes_preserve_exact_when_semantics_fails stdout ----
+
+thread 'engine::tests::streaming_terminal_outcomes_preserve_exact_when_semantics_fails' (123840) panicked at bins\winsearchd\src\engine.rs:2409:17:
+assertion `left == right` failed
+  left: None
+ right: Some(SearchOutcome { disposition: Complete, semantic: Some(SemanticOutcome { phase: Degraded, reason: Some(EmbeddingFailed) }) })
+
+
+failures:
+    engine::tests::semantic_outcomes_distinguish_disabled_missing_model_and_actual_ready_lookup
+    engine::tests::semantic_outcomes_expose_bounded_embedding_failure_and_preserve_exact_hits
+    engine::tests::semantic_outcomes_separate_no_vectors_and_real_sql_retrieval_failure
+    engine::tests::streaming_terminal_outcomes_preserve_exact_when_semantics_fails
+
+test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 216 filtered out; finished in 0.15s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

@@ -26,16 +26,27 @@ pub fn with_source_sha256(
         return extract();
     }
     let before = source_digest(&request.path, budget)?;
+    let guard = ws_platform::source_guard::SourceReadGuard::open(&request.path);
+    if guard.as_ref().is_some_and(|guard| {
+        !guard.intact()
+            || before
+                .as_ref()
+                .is_some_and(|source| guard.identity() != Some(source.identity))
+    }) {
+        return Err(ExtractError::SourceChanged);
+    }
     let mut response = extract()?;
     response.source_sha256 = if matches!(
         response.output.status,
         crate::ExtractionStatus::Extracted | crate::ExtractionStatus::ExactOnly
     ) {
         let after = source_digest(&request.path, budget)?;
-        if after != before {
+        if after != before || guard.as_ref().is_some_and(|guard| !guard.intact()) {
             return Err(ExtractError::SourceChanged);
         }
-        after.map(|source| source.sha256)
+        after
+            .filter(|_| guard.is_some())
+            .map(|source| source.sha256)
     } else {
         None
     };
@@ -43,7 +54,25 @@ pub fn with_source_sha256(
 }
 
 pub fn source_sha256(path: &Path, budget: &ExtractBudget) -> Result<Option<String>, ExtractError> {
-    source_digest(path, budget).map(|source| source.map(|source| source.sha256))
+    budget.check_deadline()?;
+    if !path.is_absolute() || !ws_platform::content::local_content_allowed(path) {
+        return Err(ExtractError::Decode(
+            "source is not admitted for byte provenance".into(),
+        ));
+    }
+    let guard = ws_platform::source_guard::SourceReadGuard::open(path);
+    let source = source_digest(path, budget)?;
+    if guard.as_ref().is_some_and(|guard| {
+        !guard.intact()
+            || source
+                .as_ref()
+                .is_some_and(|source| guard.identity() != Some(source.identity))
+    }) {
+        return Err(ExtractError::SourceChanged);
+    }
+    Ok(source
+        .filter(|_| guard.is_some())
+        .map(|source| source.sha256))
 }
 
 fn source_digest(
@@ -331,10 +360,12 @@ mod tests {
         let fixture = Fixture::new(b"abc");
         let request = request(&fixture);
         let legacy = response();
-        assert!(serde_json::to_value(&legacy)
-            .unwrap()
-            .get("source_sha256")
-            .is_none());
+        assert!(
+            serde_json::to_value(&legacy)
+                .unwrap()
+                .get("source_sha256")
+                .is_none()
+        );
         crate::worker::validate_response(&request, &legacy).unwrap();
         let mut valid = response();
         valid.source_sha256 = Some("a".repeat(64));

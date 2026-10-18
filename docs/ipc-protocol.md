@@ -65,9 +65,9 @@ All messages carry a `type` discriminator (snake_case). Requests carry `id`
 
 | type | fields | description |
 |---|---|---|
-| `hello_ack` | `protocol_version`, `engine_version`, `features[]` | Handshake reply; `features` lists `["search.exact", "search.semantic", "code"]`. Code availability still follows the opt-in policy. |
+| `hello_ack` | `protocol_version`, `engine_version`, `features[]` | Capability discovery, including `search.exact`, `search.outcomes` and optional operations described below. Code availability still follows the opt-in policy. |
 | `pong` | `id` | Heartbeat reply. |
-| `results` | `id`, `batch[]`, `done` | Streamed result batches; terminal frame has `done: true` (also sent when cancelled). |
+| `results` | `id`, `batch[]`, `done`, `outcome?` | Streamed result batches; terminal frame has `done: true`. Peers advertising `search.outcomes` include a typed terminal outcome. |
 | `status` | `id?`, `status` | `id: null` is a pushed update (indexing progress); `id` set answers `get_status`. |
 | `model_status` | `id?`, `status` | `id: null` is a pushed update (download progress / completion); `id` set answers a model request. |
 | `config` | `id?`, `config` | `id` set answers `get_config` or `set_config`. |
@@ -77,7 +77,7 @@ All messages carry a `type` discriminator (snake_case). Requests carry `id`
 ### Payload models
 
 - `SearchQuery`: `text`, `mode` (`auto|apps|files|code`), `limit`,
-  `include_semantic`, `categories[]`.
+  `include_semantic`, `categories[]`, `extensions[]`.
 - `SearchResult`: `id`, `kind`, `title`, `subtitle`, `match_explanation`,
   `score`, `path?`, `location?`, `thumbnail_path?`.
 - `MatchLocation` (discriminator `kind`):
@@ -325,10 +325,16 @@ See [code-preview validation](validation/2026-10-18-code-preview/README.md).
 
 Ordinary source hashing runs within the existing owned extraction child, using
 64KiB buffers, the same deadline and resident/reparse/native-identity checks.
-Supported sources are hashed before and after parsing. Opened-handle native
-identity and change time also bind those reads; normal changes restored to the
-original bytes/mtime are rejected. Missing native identity/change time leaves the
-hash unknown. Changed sources return the internal `SourceChanged` outcome.
+Supported sources are hashed before and after parsing. An advisory native
+read-cache break notification guards parsing and the final digest, without
+requiring write acknowledgement. Opened identity and metadata checks remain;
+timestamp equality alone cannot detect every rapid change/restore. Notification
+buffers and handles remain owned through cancellation completion inside the
+bounded extraction worker. Missing/ungrantable notifications or native
+identity/change time leave the hash unknown. Observed source changes return the
+internal `SourceChanged` outcome. The unchanged change/restore assertion and
+native parser evidence are recorded in the
+[outcome/integrity checkpoint](validation/2026-10-18-search-outcomes/README.md).
 The daemon discards/requeues that work without
 charging a poison attempt. Hashes are committed with chunks/cursor and explicitly
 bound to the parsed content revision, so a retained hash from an older writer
@@ -360,8 +366,51 @@ Candidate/result bounds, model space, ranking and semantic thresholds are unchan
 Rust/C# clients reject nonempty extension filters on peers without the capability,
 validate request budgets and reject replies outside the selected extensions.
 C# snapshots the query and its lists before awaiting writes. Omitted extension
-fields remain compatible with older clients. Related search, finer file-kind
-scopes and explicit semantic outcomes remain separate unfinished contracts.
+fields remain compatible with older clients. Related search and finer file-kind
+scopes remain separate unfinished contracts.
+
+### Terminal search outcomes
+
+Peers advertising `search.outcomes` include `outcome` on every terminal
+`results` frame and omit it on progressive frames. Legacy omission remains
+unknown; clients must not infer successful semantic retrieval from it.
+
+```json
+{"type":"results","id":7,"batch":[],"done":true,"outcome":{"disposition":"complete","semantic":{"phase":"degraded","reason":"no_vectors"}}}
+```
+
+`disposition` is one of `complete`, `superseded`, `canceled` or `failed`.
+Only `complete` carries `semantic`; interrupted terminal batches are empty and
+have no semantic state. Previously streamed hits belong to the interrupted
+request and must not become a successful snapshot. Request-ID reuse suppresses
+old work entirely so it cannot terminate the replacement request.
+
+For completed requests, `semantic.phase` is `disabled`, `ready` or `degraded`.
+Disabled/ready have no reason; degraded requires exactly one closed reason:
+`model_unavailable`, `no_vectors`, `embedding_failed`, `retrieval_failed` or
+`index_changed`. No worker exception text or paths are reason codes. Without
+requested semantics, only disabled is valid. Readiness requires a successful
+query embedding and lookup against eligible, current, dimension-compatible
+vectors. Zero matches after the unchanged cosine threshold or duplicate
+suppression can still be ready; model-file presence alone cannot establish it.
+No eligible vectors in the requested scope is degraded/no_vectors.
+
+Optional semantic failure preserves exact results. Exact database failure is
+an `error` followed by an empty failed terminal frame, with a fixed public
+message. Cancellation and source/model/query checks are repeated after obtaining
+the writer. A changed epoch or removed candidate closes as superseded with no
+terminal hits; it is not silently reported as a genuine empty match. Existing
+native source checks, limits, model recipes and ranking thresholds remain in
+force. A newer in-band search cancels the preceding request through the existing
+cancel path. Transport failure may prevent any terminal frame from arriving.
+
+Rust/C# clients and the CLI validate presence, terminal placement, phase/reason
+pairings and request consistency. Unknown fields/codes and numeric outcome enums
+are rejected. CLI text includes the terminal outcome; `--json` preserves the
+existing result array on stdout and emits the typed outcome on stderr. An
+interrupted CLI request exits unsuccessfully without a success array. This
+contract does not establish the cause or fix of the retained native pause/resume
+failure; native and installed consumer acceptance remain separate gates.
 
 ## Internal embed-worker protocol (P3.2)
 

@@ -1,0 +1,27 @@
+{
+  "cpu": {
+    "Name": "AMD Ryzen AI 9 HX 370 w/ Radeon 890M           ",
+    "NumberOfCores": 12,
+    "NumberOfLogicalProcessors": 24
+  },
+  "os": {
+    "Caption": "Microsoft Windows 11 Pro",
+    "Version": "10.0.26300",
+    "BuildNumber": "26300"
+  },
+  "total_physical_memory_bytes": 33412722688,
+  "display_devices": [
+    {
+      "Name": "USB Mobile Monitor Virtual Display",
+      "DriverVersion": "2.0.0.1"
+    },
+    {
+      "Name": "AMD Radeon(TM) 890M Graphics",
+      "DriverVersion": "32.0.31041.1004"
+    }
+  ],
+  "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "dotnet_sdk": "10.0.402",
+  "python": "Python 3.12.14",
+  "execution": "CPU debug binaries; no GPU/NPU execution acceptance"
+}

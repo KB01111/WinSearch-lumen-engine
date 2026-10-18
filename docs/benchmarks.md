@@ -517,3 +517,31 @@ zero failed/ignored/skipped; coherent CPU/x64 builds pass with seven existing
 daemon dead-code warnings and zero x64 warnings/errors. Author review only;
 full review, size/device/idle/installed and whole-workspace gates remain open.
 [Logs, native samples, failures, hashes and commands](validation/2026-10-18-query-filters/README.md).
+
+## 2026-10-18 terminal outcomes and source-integrity checkpoint
+
+[Evidence, commands, hashes and retained failures](validation/2026-10-18-search-outcomes/README.md).
+Current local checks execute617 Rust checks (591 workspace,25 embedding and the
+explicit real-worker replay),105 .NET tests and a zero-warning/error x64 build.
+The workspace initially failed the unchanged source change/restore assertion;
+that failure remains recorded. Native read-change notification fixes that
+attestation path; the original fast assertion passes30/30 independent samples.
+The default worker test was ignored until explicitly rerun with actual weights.
+
+| Final coherent profile | Public / offline queries | Whole harness | Indexing |
+| --- | --- | --- | --- |
+| No model |10 /7 |8.204s |3.115s |
+| Actual managed CPU |21 /17 |138.776s |120.334s |
+
+The CPU run is slower than the earlier query-filter sample85.869s/index66.469s;
+these are uncontrolled whole-harness samples with different executable/backend
+builds, staging, hashes and comparisons. They establish no causal optimization
+or regression attribution. Controlled overhead and1k/10k/50k/200k gates remain.
+
+Real text references retain worst drift1.32e-4 across10 cases; image/audio/frame
+reference cosines .999942/.999751/.999815/.999698 pass the unchanged .999 floor.
+Native original Recall@5/MRR remain .90/.85; expanded .9091/.8636, ten empty
+controls FP0. Screenshot miss and audio rank2 remain. Both owned jobs empty.
+The optional CUDA backend compiled; these model runs explicitly use CPU and
+establish no CUDA/Vulkan calibration or installed acceptance. Independent review,
+consumer integration, resource/scale/release and hosted gates remain open.

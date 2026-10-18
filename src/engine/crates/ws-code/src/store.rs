@@ -417,22 +417,29 @@ impl CodeStore {
     /// Corroborate code-task affinity with general retrieval before truncation;
     /// callers supply the same application admission rule for both raw cosines.
     pub fn search_semantic(&self,query:&[f32],corroboration:&[f32],limit:usize,allowed:impl Fn(&CodeFileRow)->bool,admitted:impl Fn(f32)->bool)->Result<Vec<crate::model::CodeSearchHit>,CodeStoreError> {
+        Ok(self.search_semantic_report(query,corroboration,limit,allowed,admitted)?.0)
+    }
+    /// Availability is established by an eligible vector before cosine admission.
+    pub fn search_semantic_report(&self,query:&[f32],corroboration:&[f32],limit:usize,allowed:impl Fn(&CodeFileRow)->bool,admitted:impl Fn(f32)->bool)
+        ->Result<(Vec<crate::model::CodeSearchHit>,bool),CodeStoreError> {
         use crate::model::CodeSearchHit;
         let (q,norm)=normalize_vector(query);
         let (confirmation,confirmation_norm)=normalize_vector(corroboration);
-        if norm==0.0 || confirmation_norm==0.0 || confirmation.len()!=q.len() || limit==0 {return Ok(Vec::new());}
+        if norm==0.0 || confirmation_norm==0.0 || confirmation.len()!=q.len() || limit==0 {return Ok((Vec::new(),false));}
         let mut hits=Vec::new();
+        let mut eligible=false;
         let mut stmt=self.conn.prepare("SELECT id,file_id,chunk_index,start_line,end_line,symbol_name,symbol_kind,text,vector,norm,notebook_cell,cell_start_line,cell_end_line FROM code_chunks WHERE norm>0")?;
         for chunk in stmt.query_map([],map_code_chunk_row)? {
             let c=chunk?;
             let Some(file)=self.get_file(c.file_id)?.filter(&allowed) else {continue};
-            if c.vector.len()!=q.len() {continue;}
+            if c.vector.len()!=q.len() || !c.vector.iter().all(|value|value.is_finite()) {continue;}
+            eligible=true;
             let score=c.vector.iter().zip(&q).map(|(a,b)|a*b).sum();
             if !admitted(score) || !admitted(c.vector.iter().zip(&confirmation).map(|(a,b)|a*b).sum()) {continue;}
             hits.push(CodeSearchHit { file,excerpt:c.text,symbol_name:c.symbol_name,symbol_kind:c.symbol_kind,is_definition:false,start_line:c.start_line,end_line:c.end_line,notebook:c.notebook,score });
         }
         hits.sort_by(|a,b|b.score.total_cmp(&a.score).then_with(||a.file.id.cmp(&b.file.id)).then_with(||a.start_line.cmp(&b.start_line)));
-        hits.truncate(limit); Ok(hits)
+        hits.truncate(limit); Ok((hits,eligible))
     }
     /// Whole-file replacement, including all FTS rows and parse state.
     pub fn commit_parsed_file(&mut self, file: i64, parsed: &crate::ParsedCodeFile) -> Result<Vec<i64>, CodeStoreError> {
@@ -1734,6 +1741,10 @@ mod tests {
             assert!(store.search_semantic(&invalid,&[0.0,1.0],1,|_|true,admitted).unwrap().is_empty());
         }
         assert!(store.search_semantic(&[1.0,0.0],&[0.0,1.0],1,|file|file.name=="affinity.rs",admitted).unwrap().is_empty());
+        let (hits,eligible)=store.search_semantic_report(&[1.0,0.0],&[0.0,1.0],1,|file|file.name=="affinity.rs",admitted).unwrap();
+        assert!(hits.is_empty() && eligible,"below-threshold current vectors are a completed lookup");
+        assert!(!store.search_semantic_report(&[1.0,0.0],&[0.0,1.0],1,|_|false,admitted).unwrap().1,"excluded vectors cannot imply readiness");
+        assert!(!store.search_semantic_report(&[1.0,0.0,0.0],&[0.0,1.0,0.0],1,|_|true,admitted).unwrap().1,"wrong-dimension vectors cannot imply readiness");
     }
 
     #[test]

@@ -13,7 +13,7 @@ use crate::engine::SharedEngine;
 pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn features() -> Vec<String> {
-    vec!["search.exact".to_string(), "search.semantic".to_string(), "search.filters".to_string(), "code".to_string(), "entry.resolve".to_string(), "entry.resolve.code".to_string(), "search.entry_references".to_string(), "entry.preview.text".to_string(), "entry.preview.code".to_string()]
+    vec!["search.exact".to_string(), "search.semantic".to_string(), "search.filters".to_string(), "search.outcomes".to_string(), "code".to_string(), "entry.resolve".to_string(), "entry.resolve.code".to_string(), "search.entry_references".to_string(), "entry.preview.text".to_string(), "entry.preview.code".to_string()]
 }
 
 pub fn handle_connection(stream: PipeStream, engine: SharedEngine) {
@@ -214,7 +214,7 @@ mod tests {
             let msg: Option<ServerMessage> =
                 read_message(stream).expect("read server frame");
             match msg {
-                Some(ServerMessage::Results { id, batch, done }) => return (id, batch, done),
+                Some(ServerMessage::Results { id, batch, done, .. }) => return (id, batch, done),
                 Some(ServerMessage::Status { .. }) => continue,
                 Some(other) => panic!("unexpected server frame: {other:?}"),
                 None => panic!("pipe closed before Results frame"),

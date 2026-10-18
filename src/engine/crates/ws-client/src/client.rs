@@ -63,6 +63,7 @@ impl Operation {
 pub struct SearchBatch {
     pub batch: Vec<SearchResult>,
     pub done: bool,
+    pub outcome: Option<ws_protocol::SearchOutcome>,
 }
 
 /// Dropping the stream (or a pending next call) closes its owned connection.
@@ -72,6 +73,8 @@ pub struct SearchStream {
     frames: usize,
     mode: ws_protocol::SearchMode,
     extensions: Vec<String>,
+    require_outcome: bool,
+    requested_semantic: bool,
 }
 
 impl SearchStream {
@@ -86,13 +89,17 @@ impl SearchStream {
                     continue;
                 }
                 validate_id(&message, operation.id)?;
-                let ServerMessage::Results { batch, done, .. } = message else {
+                let ServerMessage::Results { batch, done, outcome, .. } = message else {
                     return Err(Error::Protocol("expected search results"));
                 };
                 self.frames += 1;
                 self.results = self.results.saturating_add(batch.len());
                 if self.frames > MAX_SEARCH_FRAMES || self.results > MAX_SEARCH_RESULTS {
                     return Err(Error::Protocol("search stream exceeded its result budget"));
+                }
+                if (done && self.require_outcome && outcome.is_none()) || outcome.as_ref()
+                    .is_some_and(|value|!value.valid_for(done,batch.is_empty(),self.requested_semantic)) {
+                    return Err(Error::Protocol("search returned an invalid or missing terminal outcome"));
                 }
                 if batch.iter().any(|hit|hit.entry_reference.as_ref().is_some_and(|reference|
                     !reference.is_bound() || !reference_matches_kind(reference,hit.kind)
@@ -105,7 +112,7 @@ impl SearchStream {
                         std::path::Path::new(path).extension().and_then(|extension|extension.to_str()).unwrap_or("")))) {
                     return Err(Error::Protocol("search returned a result outside the extension filter"));
                 }
-                return Ok(SearchBatch { batch, done });
+                return Ok(SearchBatch { batch, done, outcome });
             }
         }
         .await;
@@ -470,6 +477,8 @@ impl Client {
         }
         let mode=query.mode;
         let extensions=query.extensions.clone();
+        let requested_semantic=query.include_semantic;
+        let require_outcome=operation.session.info.supports("search.outcomes");
         operation
             .session
             .send(
@@ -486,6 +495,8 @@ impl Client {
             frames: 0,
             mode,
             extensions,
+            require_outcome,
+            requested_semantic,
         })
     }
 
@@ -728,7 +739,7 @@ mod tests {
                 let mut response=ack();if let ServerMessage::HelloAck {features,..}=&mut response {features.push("search.filters".into());}
                 send_server(&mut peer,&response).await;
                 let ClientMessage::Search {id,..}=read_client(&mut peer).await else {panic!("expected filtered search");};
-                send_server(&mut peer,&ServerMessage::Results {id,batch:vec![SearchResult {id:"e1".into(),path,kind,..Default::default()}],done:true}).await;
+                send_server(&mut peer,&ServerMessage::Results { outcome:None,id,batch:vec![SearchResult {id:"e1".into(),path,kind,..Default::default()}],done:true}).await;
             });
             let mut stream=client.search(SearchQuery {extensions:vec!["pdf".into()],..Default::default()}).await.unwrap();
             let result=stream.next().await;
@@ -743,6 +754,44 @@ mod tests {
         let (client,_peer)=fixture();
         for extensions in [vec!["../pdf".into()],vec!["pdf".into();65],vec!["a".repeat(33)]] {
             assert!(matches!(client.search(SearchQuery {extensions,..Default::default()}).await,Err(Error::InvalidInput(_))));
+        }
+    }
+
+    #[tokio::test]
+    async fn search_outcomes_are_required_when_advertised_and_validated_before_delivery() {
+        use ws_protocol::{SearchDisposition as D,SearchOutcome as O,SemanticOutcome as S,SemanticPhase as P,SemanticIssue as I};
+        for case in 0..14 {
+            let requested=matches!(case,3|7|9|10|11);
+            let outcome=match case {
+                0=>None,
+                1|8=>Some(O::complete(S::DISABLED)),
+                2=>Some(O::interrupted(D::Complete)),
+                3=>Some(O::complete(S {phase:P::Ready,reason:Some(I::EmbeddingFailed)})),
+                4|9=>Some(O::complete(S::READY)),
+                5|11=>Some(O::interrupted(D::Superseded)),
+                6=>Some(O {disposition:D::Canceled,semantic:Some(S::DISABLED)}),
+                7=>Some(O::complete(S {phase:P::Degraded,reason:None})),
+                10=>Some(O::complete(S::degraded(I::ModelUnavailable))),
+                12=>Some(O::interrupted(D::Canceled)),
+                _=>Some(O::interrupted(D::Failed)),
+            };
+            let expected=outcome;
+            let (client,mut peer)=fixture();
+            let task=tokio::spawn(async move {
+                peer.connect().await.unwrap();let _=read_client(&mut peer).await;
+                let mut response=ack();if let ServerMessage::HelloAck {features,..}=&mut response {
+                    features.extend(["search.outcomes".into(),"search.semantic".into()]);
+                }
+                send_server(&mut peer,&response).await;
+                let ClientMessage::Search {id,..}=read_client(&mut peer).await else {panic!("expected search");};
+                send_server(&mut peer,&ServerMessage::Results {id,done:case!=1,outcome,
+                    batch:if case==5 {vec![SearchResult::default()]} else {vec![]}}).await;
+            });
+            let mut stream=client.search(SearchQuery {include_semantic:requested,..Default::default()}).await.unwrap();
+            let result=stream.next().await;
+            if case<8 {assert!(matches!(result,Err(Error::Protocol(_))),"case{case}");}
+            else {assert_eq!(result.unwrap().unwrap().outcome,expected,"case{case}");}
+            task.await.unwrap();
         }
     }
 
@@ -1244,7 +1293,7 @@ mod tests {
                     10=>hit.kind=ResultKind::Code,
                     _=>{},
                 }
-                send_server(&mut peer,&ServerMessage::Results {id,batch:vec![hit],done:true}).await;
+                send_server(&mut peer,&ServerMessage::Results { outcome:None,id,batch:vec![hit],done:true}).await;
             });
             let mut stream=client.search(SearchQuery {mode:if case>=9 {SearchMode::Code}else{SearchMode::Auto},..Default::default()}).await.unwrap();
             let result=stream.next().await;
@@ -1303,7 +1352,7 @@ mod tests {
             assert_eq!(query.text, "invoice");
             send_server(
                 &mut peer,
-                &ServerMessage::Results {
+                &ServerMessage::Results { outcome:None,
                     id,
                     batch: vec![SearchResult {
                         id: "e1".into(),
@@ -1324,7 +1373,7 @@ mod tests {
             .await;
             send_server(
                 &mut peer,
-                &ServerMessage::Results {
+                &ServerMessage::Results { outcome:None,
                     id,
                     batch: vec![SearchResult {
                         id: "e2".into(),
@@ -1365,13 +1414,13 @@ mod tests {
                     panic!("expected search");
                 };
                 let response = match case {
-                    0 => ServerMessage::Results {
+                    0 => ServerMessage::Results { outcome:None,
                         id: id + 1,
                         batch: vec![],
                         done: true,
                     },
                     1 => ServerMessage::Pong { id },
-                    _ => ServerMessage::Results {
+                    _ => ServerMessage::Results { outcome:None,
                         id,
                         batch: vec![SearchResult::default(); 4097],
                         done: true,
@@ -1398,7 +1447,7 @@ mod tests {
                 };
                 send_server(
                     &mut peer,
-                    &ServerMessage::Results {
+                    &ServerMessage::Results { outcome:None,
                         id,
                         batch: vec![],
                         done: false,
@@ -1537,7 +1586,7 @@ mod tests {
             for _ in 0..65 {
                 send_server(
                     &mut peer,
-                    &ServerMessage::Results {
+                    &ServerMessage::Results { outcome:None,
                         id,
                         batch: vec![],
                         done: false,

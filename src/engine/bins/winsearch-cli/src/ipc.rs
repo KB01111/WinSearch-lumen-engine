@@ -5,7 +5,7 @@ use ws_platform::identity;
 use ws_platform::pipe::PipeStream;
 use ws_protocol::{
     read_message, write_message, ClientMessage, EngineConfig, EngineStatus, ModelStatus,
-    SearchQuery, SearchResult, ServerMessage, PROTOCOL_VERSION,
+    SearchDisposition, SearchOutcome, SearchQuery, SearchResult, ServerMessage, PROTOCOL_VERSION,
 };
 
 pub const CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -27,6 +27,10 @@ pub enum IpcError {
     },
     #[error("unexpected EOF from daemon")]
     UnexpectedEof,
+    #[error("invalid or missing terminal search outcome")]
+    InvalidSearchOutcome,
+    #[error("search interrupted: {0:?}")]
+    SearchInterrupted(SearchDisposition),
 }
 
 pub struct DaemonClient {
@@ -35,6 +39,7 @@ pub struct DaemonClient {
     pub engine_version: String,
     pub features: Vec<String>,
     pub initial_status: Option<EngineStatus>,
+    pub last_search_outcome: Option<SearchOutcome>,
     next_id: u64,
 }
 
@@ -86,6 +91,7 @@ impl DaemonClient {
             engine_version,
             features,
             initial_status: None,
+            last_search_outcome: None,
             next_id: 1,
         })
     }
@@ -169,6 +175,9 @@ impl DaemonClient {
     /// Executes a streaming search over IPC and collects all batches until
     /// `done: true`.
     pub fn search(&mut self, query: SearchQuery) -> Result<Vec<SearchResult>, IpcError> {
+        self.last_search_outcome=None;
+        let requested_semantic=query.include_semantic;
+        let require_outcome=self.features.iter().any(|feature|feature=="search.outcomes");
         let id = self.alloc_id();
         write_message(&mut self.stream, &ClientMessage::Search { id, query })?;
         let mut results = Vec::new();
@@ -178,9 +187,18 @@ impl DaemonClient {
                     id: resp_id,
                     batch,
                     done,
+                    outcome,
                 }) if resp_id == id => {
+                    if (done && require_outcome && outcome.is_none()) || outcome.as_ref()
+                        .is_some_and(|state|!state.valid_for(done,batch.is_empty(),requested_semantic)) {
+                        return Err(IpcError::InvalidSearchOutcome);
+                    }
                     results.extend(batch);
                     if done {
+                        self.last_search_outcome=outcome;
+                        if let Some(outcome)=outcome.filter(|state|state.disposition!=SearchDisposition::Complete) {
+                            return Err(IpcError::SearchInterrupted(outcome.disposition));
+                        }
                         return Ok(results);
                     }
                 }

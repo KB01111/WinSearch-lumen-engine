@@ -379,6 +379,7 @@ public sealed class EngineClient : IEngineClient
             throw new EngineException(ErrorCode.Unsupported, "engine does not support search filters");
         var id = NextRequestId();
         var mode = snapshot.Mode;
+        var requireOutcome = _features.Contains("search.outcomes", StringComparer.Ordinal);
         var channel = Channel.CreateUnbounded<SearchBatch>(new UnboundedChannelOptions
         {
             SingleReader = true,
@@ -397,6 +398,9 @@ public sealed class EngineClient : IEngineClient
             await WriteAsync(new SearchMessage { Id = id, Query = snapshot }, cancellationToken);
             await foreach (var batch in channel.Reader.ReadAllAsync(cancellationToken))
             {
+                if ((batch.Done && requireOutcome && batch.Outcome is null) || (batch.Outcome is { } outcome
+                    && !outcome.ValidFor(batch.Done, batch.Results is { Count: 0 }, snapshot.IncludeSemantic)))
+                    throw new EngineException(ErrorCode.InvalidRequest, "search returned an invalid or missing terminal outcome");
                 if (batch.Results is null || batch.Results.Any(hit => hit is null || (snapshot.Extensions.Count > 0 && hit.Kind == ResultKind.Folder)
                     || !SearchExtensionMatches(snapshot.Extensions, hit.Path) || (hit.EntryReference is { } reference
                     && (!ReferenceValid(reference, bound: true) || !ReferenceKindMatches(reference, hit.Kind)
@@ -602,6 +606,7 @@ public sealed class EngineClient : IEngineClient
                     {
                         Results = results.Batch,
                         Done = results.Done,
+                        Outcome = results.Outcome,
                     });
                     if (results.Done)
                     {

@@ -122,6 +122,8 @@ pub enum ServerMessage {
         id: RequestId,
         batch: Vec<SearchResult>,
         done: bool,
+        #[serde(default,skip_serializing_if="Option::is_none")]
+        outcome: Option<crate::SearchOutcome>,
     },
     /// `id: Some(_)` answers a `GetStatus` request; `id: None` is a pushed
     /// update (e.g. indexing progress) sent proactively to all clients.
@@ -439,6 +441,7 @@ mod tests {
     #[test]
     fn server_message_json_round_trip() {
         let msg = ServerMessage::Results {
+            outcome: None,
             id: 7,
             batch: vec![SearchResult {
                 entry_reference:None,
@@ -470,6 +473,7 @@ mod tests {
     #[test]
     fn timestamp_location_round_trip() {
         let msg = ServerMessage::Results {
+            outcome: None,
             id: 1,
             batch: vec![SearchResult {
                 location: Some(MatchLocation::Timestamp {

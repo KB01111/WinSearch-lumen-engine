@@ -5,8 +5,12 @@ PDF/media/code/explorer/onboarding/settings/release requirements remain binding.
 Prioritize the engine, retrieval and this consumer integration before standalone
 WinUI polish. This plan is pending implementation and proves no integration yet.
 
-Reference: KB-Helios/Lumen main `8ab5a6fdde39013c867d2caca314a738de23de00`,
-verified against GitHub and the local origin/main ref. The user's existing Lumen
+Reference: KB-Helios/Lumen main `3b60ba43104ec7c450423c13db4bc5ee06662e68`,
+refreshed against GitHub and the local origin/main ref on 2026-10-18. Compared
+with the earlier `8ab5a6f` audit, production search contracts are unchanged; the
+search embedding diff changes only a deadline-test fixture. CI/performance-test
+changes in that interval must remain in the eventual consumer baseline.
+The user's existing Lumen
 UI branch differs; preserve it. Recheck current main before implementation.
 Its native index, hybrid/Related/Recent search, pins/history, answer context,
 consent and bounded previews already work in source and must be preserved.

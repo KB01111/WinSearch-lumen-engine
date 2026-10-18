@@ -23,6 +23,7 @@ use ws_platform::pipe::PipeStream;
 use ws_protocol::{
     write_message, EngineConfig, ErrorCode, EngineRunState, EngineStatus, FrameError, MatchLocation,
     RequestId, ResultKind, SearchMode, SearchQuery, SearchResult, ServerMessage,
+    SearchDisposition, SearchOutcome, SemanticIssue, SemanticOutcome,
 };
 
 use crate::embed_client::EmbedSupervisor;
@@ -103,7 +104,9 @@ pub struct EngineService {
 pub type SharedEngine = Arc<EngineService>;
 
 #[derive(Clone,Copy)]
-struct SearchRevision {source:u64,code:Option<u64>}
+struct SearchRevision {source:u64,code:Option<u64>,model:Option<i64>}
+
+struct SentSearchBatch {ids:HashSet<i64>,done:bool}
 
 struct SearchDelivery<'a> {
     query:&'a SearchQuery,
@@ -662,26 +665,28 @@ impl EngineService {
             || self.models.status().state == ws_modelmgr::ModelState::Ready
     }
 
-    /// Whether the `config` policy currently allows semantic retrieval.
-    /// A store read failure fails open (the stage still needs a ready model
-    /// and a successful embed, so nothing unranked can leak through).
-    fn semantic_enabled(&self) -> bool {
-        self.indexer
-            .get_engine_config()
-            .map(|c| c.semantic_enabled)
-            .unwrap_or(true)
-    }
-
     /// The full semantic gate: requested by the client, allowed by policy,
     /// servable by the model, with code opt-in and category filters applied.
+    #[cfg(test)]
     fn semantic_allowed(&self, query: &SearchQuery) -> bool {
-        query.include_semantic
-            && !query.text.trim().is_empty()
-            && (query.mode != SearchMode::Code ||
-                ((query.categories.is_empty() || query.categories.contains(&ResultKind::Code))
-                    && self.indexer.get_indexing_config().is_ok_and(|c|c.code_enabled)))
-            && self.semantic_enabled()
-            && self.model_ready()
+        self.semantic_unavailable(query).is_none()
+    }
+
+    fn semantic_unavailable(&self,query:&SearchQuery)->Option<SemanticOutcome> {
+        if !query.include_semantic || query.text.trim().is_empty()
+            || (query.mode==SearchMode::Code && !query.categories.is_empty() && !query.categories.contains(&ResultKind::Code))
+            || (query.mode!=SearchMode::Code && !query.categories.is_empty() && hit_kinds(&query.categories).is_empty()) {
+            return Some(SemanticOutcome::DISABLED);
+        }
+        let config=match self.indexer.get_engine_config() {
+            Ok(config)=>config,
+            Err(_)=>return Some(SemanticOutcome::degraded(SemanticIssue::RetrievalFailed)),
+        };
+        if !config.semantic_enabled || (query.mode==SearchMode::Code
+            && !self.indexer.get_indexing_config().is_ok_and(|config|config.code_enabled)) {
+            return Some(SemanticOutcome::DISABLED);
+        }
+        (!self.model_ready()).then_some(SemanticOutcome::degraded(SemanticIssue::ModelUnavailable))
     }
 
     /// Embeds one query text, consulting the LRU first. Failures (worker
@@ -719,6 +724,11 @@ impl EngineService {
             return Err("model generation changed during query embedding".into());
         }
         let vectors=vectors.into_iter().collect::<Option<Vec<_>>>().ok_or("missing query vector")?;
+        let dimension=vectors.first().map(Vec::len).unwrap_or(0);
+        if dimension==0 || vectors.iter().any(|vector|vector.len()!=dimension
+            || ws_index::vectors::normalize_vector(vector).1==0.0) {
+            return Err("invalid query embedding".into());
+        }
         let mut cache=self.query_cache.lock().unwrap_or_else(|p|p.into_inner());
         for (key,vector) in keys.into_iter().zip(&vectors) {cache.put(key,vector.clone());}
         Ok(vectors)
@@ -732,41 +742,46 @@ impl EngineService {
         self.plan_semantic_with_sources(query,exact_entry_ids,&mut HashMap::new())
     }
 
-    fn plan_semantic_with_sources(&self, query: &SearchQuery, exact_entry_ids: &HashSet<i64>, sources:&mut HashMap<String,ResultSource>) -> Vec<SearchResult> {
-        if !self.semantic_allowed(query) {
-            return Vec::new();
-        }
+    #[cfg(test)]
+    fn plan_semantic_with_sources(&self,query:&SearchQuery,exact:&HashSet<i64>,sources:&mut HashMap<String,ResultSource>)->Vec<SearchResult> {
+        self.plan_semantic_outcome(query,exact,sources).0
+    }
+
+    fn plan_semantic_checked(&self, query: &SearchQuery, exact_entry_ids: &HashSet<i64>, sources:&mut HashMap<String,ResultSource>) -> Result<Vec<SearchResult>,SemanticIssue> {
+        use SemanticIssue::{EmbeddingFailed,IndexChanged,NoVectors,RetrievalFailed};
         if query.mode==SearchMode::Code {
-            let Some(code)=self.code_service() else {return Vec::new();};
+            let code=self.code_service().ok_or(NoVectors)?;
             let epoch=code.query_epoch();
-            let Ok(vectors)=self.embed_query_inputs(&[
+            let vectors=self.embed_query_inputs(&[
                 ws_modelmgr::recipe::code_query(&query.text),
                 ws_modelmgr::recipe::search_query(&query.text),
-            ]) else {return Vec::new();};
-            if code.query_epoch()!=epoch {return Vec::new();}
-            let exact=code.exact_filtered(&query.text,query.limit.max(1) as usize,&query.extensions);
+            ]).map_err(|_|EmbeddingFailed)?;
+            if code.query_epoch()!=epoch {return Err(IndexChanged);}
+            let exact=code.exact_filtered_checked(&query.text,query.limit.max(1) as usize,&query.extensions).map_err(|_|RetrievalFailed)?;
             let candidates=(query.limit as usize).max(SEMANTIC_TOP_K).saturating_mul(8);
-            let mut hits=code.semantic_filtered(&vectors[0],&vectors[1],candidates,&query.extensions).into_iter().filter(|h|!exact.iter().any(|e|e.file.id==h.file.id && e.start_line>=h.start_line && e.start_line<=h.end_line)).map(|h|{let score=hybrid_score(h.score,&query.text,&h.file.name_lower,h.file.mtime,crate::code::now()/1000);let mut r=code_result(h);r.score=score;r}).collect::<Vec<_>>();
+            let (candidates,eligible)=code.semantic_filtered_checked(&vectors[0],&vectors[1],candidates,&query.extensions)?;
+            if !eligible {return Err(NoVectors);}
+            let mut hits=candidates.into_iter().filter(|h|!exact.iter().any(|e|e.file.id==h.file.id && e.start_line>=h.start_line && e.start_line<=h.end_line)).map(|h|{let score=hybrid_score(h.score,&query.text,&h.file.name_lower,h.file.mtime,crate::code::now()/1000);let mut r=code_result(h);r.score=score;r}).collect::<Vec<_>>();
             hits.sort_by(|a,b|b.score.total_cmp(&a.score));hits.truncate(query.limit.max(1) as usize);
-            if code.query_epoch()!=epoch {return Vec::new();}
-            return hits;
+            if code.query_epoch()!=epoch {return Err(IndexChanged);}
+            return Ok(hits);
         }
-        let Ok(generation) = self.indexer.store_lock().model_generation() else { return Vec::new(); };
+        let generation = self.indexer.store_lock().model_generation().map_err(|_|RetrievalFailed)?;
         let source_epoch=self.indexer.search_epoch();
         let kinds = hit_kinds(&query.categories);
         if !query.categories.is_empty() && kinds.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
         let text = query.text.trim();
         let query_vec = match self.embed_query(text) {
             Ok(v) => v,
             Err(e) => {
                 warn!(error = %e, "semantic stage: query embed failed; exact results stand");
-                return Vec::new();
+                return Err(EmbeddingFailed);
             }
         };
         if self.indexer.store_lock().model_generation().ok() != Some(generation) || self.indexer.search_epoch()!=source_epoch {
-            return Vec::new();
+            return Err(IndexChanged);
         }
         let candidate_limit = (query.limit.max(1) as usize)
             .max(SEMANTIC_TOP_K)
@@ -783,11 +798,11 @@ impl EngineService {
                 Ok(ids) => ids,
                 Err(e) => {
                     warn!(error = %e, "semantic stage: entry filter query failed; exact results stand");
-                    return Vec::new();
+                    return Err(RetrievalFailed);
                 }
             };
             if matching_ids.is_empty() {
-                return Vec::new();
+                return Err(NoVectors);
             }
             Some(ws_index::VectorFilter {
                 kinds: Vec::new(),
@@ -801,9 +816,11 @@ impl EngineService {
             Ok(s) => s,
             Err(e) => {
                 warn!(error = %e, "semantic stage: vector search failed; exact results stand");
-                return Vec::new();
+                return Err(RetrievalFailed);
             }
         };
+        if self.indexer.search_epoch()!=source_epoch {return Err(IndexChanged);}
+        if scored.is_empty() {return Err(NoVectors);}
         // Best cosine per entry across all segment kinds (`name`, `doc`, `image`, `ocr`, `pdf`, ...).
         let mut best: HashMap<i64, Vec<_>> = HashMap::new();
         for hit in &scored {
@@ -824,7 +841,7 @@ impl EngineService {
                 Ok(None) => continue, // deleted between vector search and join
                 Err(e) => {
                     warn!(error = %e, entry = entry_id, "semantic stage: entry lookup failed");
-                    continue;
+                    return Err(RetrievalFailed);
                 }
             };
             if entry.missing {
@@ -885,9 +902,18 @@ impl EngineService {
         });
         out.truncate(query.limit.max(1) as usize);
         if self.indexer.store_lock().model_generation().ok() != Some(generation) || self.indexer.search_epoch()!=source_epoch {
-            return Vec::new();
+            return Err(IndexChanged);
         }
-        out
+        Ok(out)
+    }
+
+    fn plan_semantic_outcome(&self,query:&SearchQuery,exact:&HashSet<i64>,sources:&mut HashMap<String,ResultSource>)
+        ->(Vec<SearchResult>,SemanticOutcome) {
+        if let Some(outcome)=self.semantic_unavailable(query) {return (Vec::new(),outcome);}
+        match self.plan_semantic_checked(query,exact,sources) {
+            Ok(hits)=>(hits,SemanticOutcome::READY),
+            Err(issue)=>(Vec::new(),SemanticOutcome::degraded(issue)),
+        }
     }
 
     /// Executes one search, streaming result batches to the client. Exact
@@ -900,25 +926,28 @@ impl EngineService {
     pub fn search(self: &Arc<Self>, client: &ClientHandle, id: RequestId, query: SearchQuery) {
         let cancel = self.begin_request_for_client(client.id(), id);
         if !ws_protocol::valid_search_extensions(&query.extensions) {
+            let _=self.send_search_failure(client,id,&cancel,ErrorCode::InvalidRequest);
             self.end_request_for_client(client.id(),id,&cancel);
-            let _=client.send(&ServerMessage::Error {id:Some(id),code:ErrorCode::InvalidRequest,message:"invalid search extension filter".into()});
-            let _=client.send(&ServerMessage::Results {id,batch:Vec::new(),done:true});
             return;
         }
-        let outcome = self.run_search(client, id, query, Arc::clone(&cancel));
-        if let Err(e) = outcome {
+        if let Err(error) = self.run_search(client, id, query, Arc::clone(&cancel)) {
+            warn!(id,error=%error,"search transport failed");
             self.end_request_for_client(client.id(), id, &cancel);
-            let _ = client.send(&ServerMessage::Error {
-                id: Some(id),
-                code: ws_protocol::ErrorCode::Internal,
-                message: e.to_string(),
-            });
-            let _ = client.send(&ServerMessage::Results {
-                id,
-                batch: Vec::new(),
-                done: true,
-            });
         }
+    }
+
+    fn send_search_failure(&self,client:&ClientHandle,id:RequestId,cancel:&Arc<AtomicBool>,code:ErrorCode)->Result<(),FrameError> {
+        let mut stream=client.stream.lock().unwrap_or_else(|p|p.into_inner());
+        if !self.cancels.lock().unwrap_or_else(|p|p.into_inner()).get(&(client.id(),id))
+            .is_some_and(|token|Arc::ptr_eq(token,cancel)) {return Ok(());}
+        let canceled=cancel.load(Ordering::Acquire);
+        if !canceled {
+            write_message(&mut *stream,&ServerMessage::Error {id:Some(id),code,message:"search request failed".into()})?;
+        }
+        if !self.cancels.lock().unwrap_or_else(|p|p.into_inner()).get(&(client.id(),id))
+            .is_some_and(|token|Arc::ptr_eq(token,cancel)) {return Ok(());}
+        write_message(&mut *stream,&ServerMessage::Results {id,batch:Vec::new(),done:true,
+            outcome:Some(SearchOutcome::interrupted(if canceled {SearchDisposition::Canceled} else {SearchDisposition::Failed}))})
     }
 
     fn run_search(
@@ -929,36 +958,32 @@ impl EngineService {
         cancel: Arc<AtomicBool>,
     ) -> Result<(), FrameError> {
         let code_epoch=self.code_service().filter(|_|query.mode==SearchMode::Code).map(|c|c.query_epoch());
-        let revision=SearchRevision {source:self.indexer.search_epoch(),code:code_epoch};
+        let revision=SearchRevision {source:self.indexer.search_epoch(),code:code_epoch,model:self.indexer.store_lock().model_generation().ok()};
         let mut sources=HashMap::new();
-        let results = self.plan_results_with_sources(&query,&mut sources);
-        let results=results.into_iter().filter(|r|r.kind!=ResultKind::Code || r.path.as_deref().is_some_and(|p|self.code_service().is_some_and(|c|code_epoch.is_some_and(|e|c.result_allowed(p,e))))).collect::<Vec<_>>();
+        let results=match self.try_plan_results_with_sources(&query,&mut sources) {
+            Ok(results)=>results,
+            Err(code)=> {
+                let outcome=self.send_search_failure(client,id,&cancel,code);
+                self.end_request_for_client(client.id(),id,&cancel);
+                return outcome;
+            }
+        };
         let delivery=SearchDelivery {query:&query,revision,cancel:&cancel,sources:&sources};
-
-        if cancel.load(Ordering::Relaxed) {
-            let outcome=self.send_results(client,id,Vec::new(),true,&delivery).map(|_|());
-            self.end_request_for_client(client.id(), id, &cancel);
-            return outcome;
-        }
-
-        // Whether a semantic stage will follow: when it will, the exact
-        // terminal frame says `done: false` so the client keeps listening.
-        let semantic = self.semantic_allowed(&query) && self.query_current(&query,revision);
+        let unavailable=self.semantic_unavailable(&query);
+        let terminal=unavailable.map(SearchOutcome::complete);
 
         // Progressive response: the first batch is what the overlay shows;
         // overflow streams after so typing stays responsive.
         let limit = (query.limit.max(1) as usize).min(results.len());
         let (first, rest) = results.split_at(limit);
-        let mut exact_ids=self.send_results(client,id,first.to_vec(),rest.is_empty() && !semantic,&delivery)?;
-        if !rest.is_empty() {
-            if cancel.load(Ordering::Relaxed) {
-                let outcome=self.send_results(client,id,Vec::new(),true,&delivery).map(|_|());
-                self.end_request_for_client(client.id(), id, &cancel);
-                return outcome;
-            }
-            exact_ids.extend(self.send_results(client,id,rest.to_vec(),!semantic,&delivery)?);
+        let first=self.send_results(client,id,first.to_vec(),if rest.is_empty() {terminal} else {None},&delivery)?;
+        let mut done=first.done;
+        let mut exact_ids=first.ids;
+        if !done && !rest.is_empty() {
+            let sent=self.send_results(client,id,rest.to_vec(),terminal,&delivery)?;
+            done=sent.done;exact_ids.extend(sent.ids);
         }
-        if !semantic {
+        if done {
             self.end_request_for_client(client.id(), id, &cancel);
             return Ok(());
         }
@@ -969,63 +994,61 @@ impl EngineService {
         let this = Arc::clone(self);
         let thread_client = client.clone();
         let thread_cancel=Arc::clone(&cancel);
+        let thread_query=query.clone();
         if let Err(e) = std::thread::Builder::new()
             .name("winsearch-semantic".into())
             .spawn(move || {
                 let outcome =
-                    this.run_semantic_stage(&thread_client, id, &query, &exact_ids, &thread_cancel,revision);
+                    this.run_semantic_stage(&thread_client, id, &thread_query, &exact_ids, &thread_cancel,revision);
                 this.end_request_for_client(thread_client.id(), id, &thread_cancel);
                 if let Err(err) = outcome {
-                    let _ = thread_client.send(&ServerMessage::Error {
-                        id: Some(id),
-                        code: ws_protocol::ErrorCode::Internal,
-                        message: err.to_string(),
-                    });
-                    let _ = thread_client.send(&ServerMessage::Results {
-                        id,
-                        batch: Vec::new(),
-                        done: true,
-                    });
+                    warn!(id,error=%err,"semantic result transport failed");
                 }
             })
         {
             warn!(error = %e, "semantic stage: thread spawn failed; closing stream");
+            let outcome=self.send_results(client,id,Vec::new(),Some(SearchOutcome::complete(
+                SemanticOutcome::degraded(SemanticIssue::RetrievalFailed))),&delivery).map(|_|());
             self.end_request_for_client(client.id(), id, &cancel);
-            return client.send(&ServerMessage::Results {
-                id,
-                batch: Vec::new(),
-                done: true,
-            });
+            return outcome;
         }
         Ok(())
     }
 
     fn query_current(&self,query:&SearchQuery,revision:SearchRevision)->bool {
-        if query.mode==SearchMode::Code {
-            self.code_service().is_some_and(|code|Some(code.query_epoch())==revision.code)
-        } else {self.indexer.search_epoch()==revision.source}
+        let source=if query.mode==SearchMode::Code {
+            self.code_service().map(|code|code.query_epoch())==revision.code
+        } else {self.indexer.search_epoch()==revision.source};
+        source && revision.model.is_none_or(|model|self.indexer.store_lock().model_generation().ok()==Some(model))
     }
 
-    fn send_results(&self,client:&ClientHandle,id:RequestId,batch:Vec<SearchResult>,done:bool,delivery:&SearchDelivery<'_>)
-        ->Result<HashSet<i64>,FrameError> {
+    fn send_results(&self,client:&ClientHandle,id:RequestId,batch:Vec<SearchResult>,mut outcome:Option<SearchOutcome>,delivery:&SearchDelivery<'_>)
+        ->Result<SentSearchBatch,FrameError> {
         let mut stream=client.stream.lock().unwrap_or_else(|p|p.into_inner());
         let current=||self.cancels.lock().unwrap_or_else(|p|p.into_inner()).get(&(client.id(),id))
             .is_some_and(|token|Arc::ptr_eq(token,delivery.cancel));
-        if !current() {return Ok(HashSet::new());}
-        let mut batch=if delivery.cancel.load(Ordering::Acquire) || !self.query_current(delivery.query,delivery.revision) {
+        if !current() {return Ok(SentSearchBatch {ids:HashSet::new(),done:true});}
+        let count=batch.len();
+        let mut interrupted=delivery.cancel.load(Ordering::Acquire) || !self.query_current(delivery.query,delivery.revision);
+        let mut batch=if interrupted {
             tracing::debug!(id,expected_epoch=delivery.revision.source,current_epoch=self.indexer.search_epoch(),
                 canceled=delivery.cancel.load(Ordering::Acquire),"discarded outdated search batch before delivery");
             Vec::new()
         } else {self.validate_delivery(batch,delivery.sources)};
-        if !current() {return Ok(HashSet::new());}
-        if delivery.cancel.load(Ordering::Acquire) || !self.query_current(delivery.query,delivery.revision) {
+        if !current() {return Ok(SentSearchBatch {ids:HashSet::new(),done:true});}
+        interrupted|=batch.len()!=count || delivery.cancel.load(Ordering::Acquire) || !self.query_current(delivery.query,delivery.revision);
+        if interrupted {
             tracing::debug!(id,expected_epoch=delivery.revision.source,current_epoch=self.indexer.search_epoch(),
                 canceled=delivery.cancel.load(Ordering::Acquire),"discarded outdated search batch after validation");
             batch.clear();
+            outcome=Some(SearchOutcome::interrupted(if delivery.cancel.load(Ordering::Acquire) {
+                SearchDisposition::Canceled
+            } else {SearchDisposition::Superseded}));
         }
         let sent=exact_entry_ids(&batch);
-        write_message(&mut *stream,&ServerMessage::Results {id,batch,done})?;
-        Ok(sent)
+        let done=outcome.is_some();
+        write_message(&mut *stream,&ServerMessage::Results {outcome,id,batch,done})?;
+        Ok(SentSearchBatch {ids:sent,done})
     }
 
     fn run_semantic_stage(
@@ -1037,22 +1060,13 @@ impl EngineService {
         cancel: &Arc<AtomicBool>,
         revision:SearchRevision,
     ) -> Result<(), FrameError> {
-        if cancel.load(Ordering::Relaxed) {
-            return self.send_results(client,id,Vec::new(),true,&SearchDelivery {
-                query,revision,cancel,sources:&HashMap::new()}).map(|_|());
-        }
-        let generation = self.indexer.store_lock().model_generation().ok();
         let mut sources=HashMap::new();
-        let mut hits = self.plan_semantic_with_sources(query, exact_ids,&mut sources);
-        hits.retain(|r|r.kind!=ResultKind::Code || r.path.as_deref().is_some_and(|p|self.code_service().is_some_and(|c|revision.code.is_some_and(|e|c.result_allowed(p,e)))));
-        if generation.is_none() || self.indexer.store_lock().model_generation().ok() != generation
-            || !self.semantic_allowed(query) || !self.query_current(query,revision) {
-            hits.clear();
-        }
-        if cancel.load(Ordering::Relaxed) {
-            hits.clear();
-        }
-        self.send_results(client,id,hits,true,&SearchDelivery {query,revision,cancel,sources:&sources}).map(|_|())
+        let (mut hits,mut semantic)=if cancel.load(Ordering::Acquire) || !self.query_current(query,revision) {
+            (Vec::new(),SemanticOutcome::degraded(SemanticIssue::IndexChanged))
+        } else {self.plan_semantic_outcome(query,exact_ids,&mut sources)};
+        if let Some(unavailable)=self.semantic_unavailable(query) {hits.clear();semantic=unavailable;}
+        self.send_results(client,id,hits,Some(SearchOutcome::complete(semantic)),&SearchDelivery {
+            query,revision,cancel,sources:&sources}).map(|_|())
     }
 
     /// Computes the ranked result list for one query (no IPC). Split from
@@ -1111,14 +1125,19 @@ impl EngineService {
         results
     }
 
-    fn plan_results_with_sources(&self, query: &SearchQuery,sources:&mut HashMap<String,ResultSource>) -> Vec<SearchResult> {
+    #[cfg(test)]
+    fn plan_results_with_sources(&self,query:&SearchQuery,sources:&mut HashMap<String,ResultSource>)->Vec<SearchResult> {
+        self.try_plan_results_with_sources(query,sources).unwrap_or_default()
+    }
+    fn try_plan_results_with_sources(&self, query: &SearchQuery,sources:&mut HashMap<String,ResultSource>) -> Result<Vec<SearchResult>,ErrorCode> {
         let text = query.text.trim();
         if text.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
         if query.mode==SearchMode::Code {
-            if !query.categories.is_empty() && !query.categories.contains(&ResultKind::Code) {return Vec::new();}
-            return self.code_service().map(|code|code.exact_filtered(text,query.limit.max(1) as usize,&query.extensions).into_iter().map(code_result).collect()).unwrap_or_default();
+            if !query.categories.is_empty() && !query.categories.contains(&ResultKind::Code) {return Ok(Vec::new());}
+            return self.code_service().map(|code|code.exact_filtered_checked(text,query.limit.max(1) as usize,&query.extensions)
+                .map(|hits|hits.into_iter().map(code_result).collect()).map_err(|_|ErrorCode::Internal)).unwrap_or_else(||Ok(Vec::new()));
         }
 
         let mut results = Vec::new();
@@ -1230,10 +1249,11 @@ impl EngineService {
                 }
                 Err(e) => {
                     warn!(error = %e, "exact index search failed");
+                    return Err(ErrorCode::Internal);
                 }
             }
         }
-        results
+        Ok(results)
     }
 }
 
@@ -1556,7 +1576,7 @@ mod tests {
 
     #[test]
     fn entry_reference_delivery_withholds_prepared_content_after_source_change_or_request_reuse() {
-        for change in ["source","policy","reuse"] {
+        for change in ["source","policy","model","cancel","reuse"] {
             let reused=change=="reuse";
             let tree=TempTree::new();let path=tree.0.join("report.txt");
             fs::write(&path,b"cached_delivery_secret").unwrap();
@@ -1574,7 +1594,7 @@ mod tests {
             let stream=receive.recv_timeout(Duration::from_secs(30)).unwrap();
             let client=engine.register_client(stream);
             let cancel=engine.begin_request_for_client(client.id(),71);
-            let revision=SearchRevision {source:engine.indexer.search_epoch(),code:None};
+            let revision=SearchRevision {source:engine.indexer.search_epoch(),code:None,model:engine.indexer.store_lock().model_generation().ok()};
             std::thread::scope(|scope| {
                 let writer=client.stream.lock().unwrap();
                 let (started,waiting)=std::sync::mpsc::channel();
@@ -1583,26 +1603,34 @@ mod tests {
                 let sending_engine=&engine;let sending_client=&client;
                 let sender=scope.spawn(move || {
                     started.send(()).unwrap();
-                    let result=sending_engine.send_results(sending_client,71,prepared,true,&delivery);
+                    let result=sending_engine.send_results(sending_client,71,prepared,Some(SearchOutcome::complete(SemanticOutcome::DISABLED)),&delivery);
                     let _=finished.send(());result
                 });
                 waiting.recv_timeout(Duration::from_secs(5)).unwrap();
                 let blocked=completion.recv_timeout(Duration::from_millis(150));
                 let current=if reused {Some(engine.begin_request_for_client(client.id(),71))} else {
                     if change=="source" {fs::write(&path,b"replacement bytes without the original marker").unwrap();}
+                    else if change=="model" {engine.indexer.store_lock().reset_content_vectors().unwrap();}
+                    else if change=="cancel" {engine.cancel_for_client(client.id(),71);}
                     else {let mut policy=engine.indexer.get_indexing_config().unwrap();policy.roots.clear();engine.indexer.set_indexing_config(&policy).unwrap();}
                     None
                 };
                 drop(writer);
                 let sent=sender.join().unwrap().unwrap();
                 assert!(matches!(blocked,Err(std::sync::mpsc::RecvTimeoutError::Timeout)),"delivery must wait for the held writer");
-                assert!(sent.is_empty(),"only actually delivered exact IDs may suppress semantic hits");
+                assert!(sent.ids.is_empty() && sent.done,"only actually delivered exact IDs may suppress semantic hits");
                 if let Some(current)=current {engine.end_request_for_client(client.id(),71,&current);}
             });
             if reused {
                 assert_eq!(peer.peek_available().unwrap(),Some(0),"old work cannot terminate the newer request");
             } else {
-                let (hits,done)=read_one(&mut peer);assert!(hits.is_empty() && done);
+                match ws_protocol::read_message::<_,ServerMessage>(&mut peer).unwrap().unwrap() {
+                    ServerMessage::Results {batch,done,outcome,..}=> {
+                        assert!(batch.is_empty() && done);
+                        assert_eq!(outcome,Some(SearchOutcome::interrupted(if change=="cancel" {SearchDisposition::Canceled} else {SearchDisposition::Superseded})));
+                    }
+                    other=>panic!("unexpected frame: {other:?}"),
+                }
                 engine.end_request_for_client(client.id(),71,&cancel);
             }
             engine.unregister_client(&client);
@@ -2350,6 +2378,103 @@ mod tests {
     }
 
     #[test]
+    fn semantic_outcomes_distinguish_disabled_missing_model_and_actual_ready_lookup() {
+        let (engine,_tree)=semantic_service();
+        let state=|request:&SearchQuery|engine.plan_semantic_outcome(request,&HashSet::new(),&mut HashMap::new());
+        assert_eq!(state(&query("meeting")).1,SemanticOutcome::DISABLED);
+        engine.set_model_ready_override(Some(false));
+        assert_eq!(state(&semantic_query("meeting")).1,SemanticOutcome::degraded(SemanticIssue::ModelUnavailable));
+        engine.set_model_ready_override(Some(true));
+        let (hits,outcome)=state(&semantic_query("indirect banquet"));
+        assert!(!hits.is_empty());assert_eq!(outcome,SemanticOutcome::READY);
+        engine.set_query_embed_hook(Arc::new(|_|Ok(vec![0.0,0.0,1.0])));
+        let (hits,outcome)=state(&semantic_query("orthogonal concept"));
+        assert!(hits.is_empty());assert_eq!(outcome,SemanticOutcome::READY,"valid below-threshold lookup is not unavailable");
+        engine.indexer.set_engine_config(&ws_index::EngineConfig {semantic_enabled:false,preferred_backend:ws_index::PreferredBackend::Auto}).unwrap();
+        assert_eq!(state(&semantic_query("policy disabled")).1,SemanticOutcome::DISABLED);
+    }
+
+    #[test]
+    fn semantic_outcomes_expose_bounded_embedding_failure_and_preserve_exact_hits() {
+        let (engine,_tree)=semantic_service();
+        engine.set_query_embed_hook(Arc::new(|_|Err("PRIVATE worker detail must never be a wire reason".into())));
+        assert!(!engine.plan_results(&query("meeting")).is_empty());
+        let (hits,outcome)=engine.plan_semantic_outcome(&semantic_query("meeting"),&HashSet::new(),&mut HashMap::new());
+        assert!(hits.is_empty());assert_eq!(outcome,SemanticOutcome::degraded(SemanticIssue::EmbeddingFailed));
+        assert!(!serde_json::to_string(&outcome).unwrap().contains("PRIVATE"));
+    }
+
+    #[test]
+    fn semantic_outcomes_separate_no_vectors_and_real_sql_retrieval_failure() {
+        let (engine,_tree)=semantic_service();
+        engine.indexer.store_lock().set_query_source_guard(|_,_,_|panic!("PRIVATE SQLite callback detail")).unwrap();
+        let (hits,outcome)=engine.plan_semantic_outcome(&semantic_query("lookup fails"),&HashSet::new(),&mut HashMap::new());
+        assert!(hits.is_empty());assert_eq!(outcome,SemanticOutcome::degraded(SemanticIssue::RetrievalFailed));
+        engine.indexer.store_lock().purge_segments_by_kind("name").unwrap();
+        engine.indexer.invalidate_vector_cache();
+        let (hits,outcome)=engine.plan_semantic_outcome(&semantic_query("empty vector store"),&HashSet::new(),&mut HashMap::new());
+        assert!(hits.is_empty());assert_eq!(outcome,SemanticOutcome::degraded(SemanticIssue::NoVectors));
+    }
+
+    #[test]
+    fn streaming_terminal_outcomes_preserve_exact_when_semantics_fails() {
+        let (engine,_tree)=semantic_service();
+        engine.set_query_embed_hook(Arc::new(|_|Err("PRIVATE worker detail".into())));
+        let pipe=unique_pipe();serve_search(engine,&pipe,83,semantic_query("meeting"));
+        let mut stream=connect_retry(&pipe);
+        let first:ServerMessage=ws_protocol::read_message(&mut stream).unwrap().unwrap();
+        assert!(matches!(first,ServerMessage::Results {ref batch,done:false,outcome:None,..} if !batch.is_empty()));
+        let terminal:ServerMessage=ws_protocol::read_message(&mut stream).unwrap().unwrap();
+        match terminal {
+            ServerMessage::Results {batch,done,outcome,..}=> {
+                assert!(done && batch.is_empty());
+                assert_eq!(outcome,Some(SearchOutcome::complete(SemanticOutcome::degraded(SemanticIssue::EmbeddingFailed))));
+            }
+            other=>panic!("unexpected terminal: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn semantic_outcomes_require_valid_vectors_and_current_code_fingerprint() {
+        let (engine,_tree)=semantic_service();
+        for (index,vector) in [vec![],vec![0.0,0.0,0.0],vec![f32::NAN,0.0,0.0],vec![f32::INFINITY,0.0,0.0]].into_iter().enumerate() {
+            engine.set_query_embed_hook(Arc::new(move |_|Ok(vector.clone())));
+            let (_,outcome)=engine.plan_semantic_outcome(&semantic_query(&format!("bad vector {index}")),&HashSet::new(),&mut HashMap::new());
+            assert_eq!(outcome,SemanticOutcome::degraded(SemanticIssue::EmbeddingFailed));
+        }
+        let (engine,code,root)=code_search_service();
+        crate::code::tests::stop_fixture_watchers(&code);
+        let mut request=semantic_query("conceptual code description");request.mode=SearchMode::Code;
+        engine.set_query_embed_hook(Arc::new(|_|Ok(vec![0.0,1.0,0.0])));
+        let (hits,outcome)=engine.plan_semantic_outcome(&request,&HashSet::new(),&mut HashMap::new());
+        assert!(hits.is_empty());assert_eq!(outcome,SemanticOutcome::READY);
+        engine.indexer.store_lock().reset_content_vectors().unwrap();
+        let (_,outcome)=engine.plan_semantic_outcome(&request,&HashSet::new(),&mut HashMap::new());
+        assert_eq!(outcome,SemanticOutcome::degraded(SemanticIssue::NoVectors));
+        engine.code.lock().unwrap().take();drop(code);drop(engine);
+        fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn streaming_terminal_outcomes_report_exact_sql_failure_instead_of_empty_success() {
+        let (engine,_tree)=semantic_service();
+        engine.indexer.store_lock().set_query_source_guard(|_,_,_|panic!("PRIVATE exact SQL detail")).unwrap();
+        let pipe=unique_pipe();serve_search(engine,&pipe,84,query("meeting"));
+        let mut stream=connect_retry(&pipe);
+        match ws_protocol::read_message::<_,ServerMessage>(&mut stream).unwrap().unwrap() {
+            ServerMessage::Error {code:ErrorCode::Internal,message,..}=>assert_eq!(message,"search request failed"),
+            other=>panic!("exact failures must be errors: {other:?}"),
+        }
+        match ws_protocol::read_message::<_,ServerMessage>(&mut stream).unwrap().unwrap() {
+            ServerMessage::Results {batch,done,outcome,..}=> {
+                assert!(done && batch.is_empty());
+                assert_eq!(outcome,Some(SearchOutcome::interrupted(SearchDisposition::Failed)));
+            }
+            other=>panic!("unexpected failure completion: {other:?}"),
+        }
+    }
+
+    #[test]
     fn cold_start_model_ready_when_model_service_is_ready() {
         let tree = TempTree::new();
         fs::write(tree.0.join("banquet-hall.txt"), b"x").unwrap();
@@ -2741,7 +2866,11 @@ mod tests {
         let msg: Option<ServerMessage> =
             ws_protocol::read_message(stream).expect("read frame");
         match msg {
-            Some(ServerMessage::Results { batch, done, .. }) => (batch, done),
+            Some(ServerMessage::Results { batch, done, outcome, .. }) => {
+                assert_eq!(outcome.is_some(),done,"new engine outcomes belong only to terminal frames");
+                if let Some(outcome)=outcome {assert!(outcome.valid_for(done,batch.is_empty(),true));}
+                (batch,done)
+            }
             Some(ServerMessage::Error { code, message, .. }) => {
                 panic!("engine error {code:?}: {message}")
             }

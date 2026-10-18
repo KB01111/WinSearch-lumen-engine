@@ -134,41 +134,53 @@ impl CodeService {
     #[cfg(test)]
     pub fn exact(&self,text:&str,limit:usize)->Vec<CodeSearchHit> {self.exact_filtered(text,limit,&[])}
 
-    pub fn exact_filtered(&self, text: &str, limit: usize,extensions:&[String]) -> Vec<CodeSearchHit> {
+    #[cfg(test)]
+    pub fn exact_filtered(&self,text:&str,limit:usize,extensions:&[String])->Vec<CodeSearchHit> {
+        self.exact_filtered_checked(text,limit,extensions).unwrap_or_default()
+    }
+    pub fn exact_filtered_checked(&self, text: &str, limit: usize,extensions:&[String]) -> Result<Vec<CodeSearchHit>,ws_code::store::CodeStoreError> {
         let store = self.store.lock().unwrap_or_else(|p| p.into_inner());
-        store
+        let failure=std::cell::RefCell::new(None);
+        let hits=store
             .search_exact(text, limit, |file| {
-                ws_protocol::search_extension_allowed(extensions,&file.ext) && self.visible(
-                    file,
-                    store.source_snapshot(file.id).ok().flatten().as_deref(),
-                )
-            })
-            .unwrap_or_default()
+                if !ws_protocol::search_extension_allowed(extensions,&file.ext) {return false;}
+                match store.source_snapshot(file.id) {
+                    Ok(source)=>self.visible(file,source.as_deref()),
+                    Err(error)=>{*failure.borrow_mut()=Some(error);false}
+                }
+            })?;
+        if let Some(error)=failure.into_inner() {return Err(error);}
+        Ok(hits)
     }
     #[cfg(test)]
     pub fn semantic(&self,vector:&[f32],corroboration:&[f32],limit:usize)->Vec<CodeSearchHit> {
         self.semantic_filtered(vector,corroboration,limit,&[])
     }
 
-    pub fn semantic_filtered(&self, vector: &[f32], corroboration: &[f32], limit: usize,extensions:&[String]) -> Vec<CodeSearchHit> {
+    #[cfg(test)]
+    pub fn semantic_filtered(&self,vector:&[f32],corroboration:&[f32],limit:usize,extensions:&[String])->Vec<CodeSearchHit> {
+        self.semantic_filtered_checked(vector,corroboration,limit,extensions).unwrap_or_default().0
+    }
+    pub fn semantic_filtered_checked(&self, vector: &[f32], corroboration: &[f32], limit: usize,extensions:&[String])
+        ->Result<(Vec<CodeSearchHit>,bool),ws_protocol::SemanticIssue> {
+        use ws_protocol::SemanticIssue::RetrievalFailed;
+        let fingerprint=self.fingerprint_checked().map_err(|_|RetrievalFailed)?;
         let store = self.store.lock().unwrap_or_else(|p| p.into_inner());
-        if store
-            .meta_get("vector_fingerprint")
-            .ok()
-            .flatten()
-            .as_deref()
-            != self.fingerprint().as_deref()
-        {
-            return Vec::new();
+        if store.meta_get("vector_fingerprint").map_err(|_|RetrievalFailed)?.as_deref()!=Some(&fingerprint) {
+            return Ok((Vec::new(),false));
         }
-        store
-            .search_semantic(vector, corroboration, limit, |file| {
-                ws_protocol::search_extension_allowed(extensions,&file.ext) && self.visible(
-                    file,
-                    store.source_snapshot(file.id).ok().flatten().as_deref(),
-                )
+        let failed=std::cell::Cell::new(false);
+        let report=store
+            .search_semantic_report(vector, corroboration, limit, |file| {
+                if !ws_protocol::search_extension_allowed(extensions,&file.ext) {return false;}
+                match store.source_snapshot(file.id) {
+                    Ok(source)=>self.visible(file,source.as_deref()),
+                    Err(_)=>{failed.set(true);false}
+                }
             }, |score|ws_index::retrieval::semantic_admitted("code",score))
-            .unwrap_or_default()
+            .map_err(|_|RetrievalFailed)?;
+        if failed.get() {return Err(RetrievalFailed);}
+        Ok(report)
     }
     pub fn result_allowed(&self, path: &str, epoch: u64) -> bool {
         let store = self.store.lock().unwrap_or_else(|p| p.into_inner());
@@ -250,14 +262,16 @@ impl CodeService {
             content_sha256:state.filter(|_|indexed).and_then(|state|state.sha256)})
     }
     fn fingerprint(&self) -> Option<String> {
-        let generation = self.indexer.store_lock().model_generation().ok()?;
+        self.fingerprint_checked().ok()
+    }
+    fn fingerprint_checked(&self)->Result<String,ws_index::StoreError> {
+        let generation = self.indexer.store_lock().model_generation()?;
         let compat = self
             .indexer
             .meta_get(ws_modelmgr::EMBEDDING_MODEL_META_KEY)
-            .ok()
-            .flatten()
+            ?
             .unwrap_or_default();
-        Some(format!("{generation}:{compat}:code-v1"))
+        Ok(format!("{generation}:{compat}:code-v1"))
     }
     pub fn changed(&self, root: &str, event: WatchEvent) -> anyhow::Result<()> {
         self.epoch.fetch_add(1, Ordering::AcqRel);

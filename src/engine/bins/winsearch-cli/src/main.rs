@@ -272,6 +272,9 @@ fn cmd_search(
     })?;
 
     if json {
+        if let Some(outcome)=client.last_search_outcome {
+            eprintln!("search outcome: {}",serde_json::to_string(&outcome)?);
+        }
         println!("{}", serde_json::to_string(&results)?);
         return Ok(());
     }
@@ -283,6 +286,10 @@ fn cmd_search(
         semantic,
         results.len()
     );
+    match client.last_search_outcome {
+        Some(outcome)=>println!("outcome: {}",serde_json::to_string(&outcome)?),
+        None=>println!("outcome: unknown (legacy peer)"),
+    }
     for (idx, r) in results.iter().enumerate() {
         println!(
             "  {:>2}. [{:?}] {} (score {:.3}) — {} [{}]",
@@ -761,7 +768,7 @@ mod tests {
                         ClientMessage::Search { id, query } => {
                             write_message(
                                 &mut stream,
-                                &ServerMessage::Results {
+                                &ServerMessage::Results { outcome:None,
                                     id,
                                     batch: vec![SearchResult {
                                         id: "e1".into(),
@@ -778,7 +785,7 @@ mod tests {
                             .unwrap();
                             write_message(
                                 &mut stream,
-                                &ServerMessage::Results {
+                                &ServerMessage::Results { outcome:None,
                                     id,
                                     batch: vec![SearchResult {
                                         id: "s2".into(),

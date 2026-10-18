@@ -43,6 +43,16 @@ An error or terminal batch also closes the connection and releases admission.
 There are no detached client tasks, retries of applied requests or queued result
 batches. Polling/owning and dropping these futures remains the host's responsibility.
 
+`SearchBatch.outcome` preserves the optional typed terminal state. Peers with
+`search.outcomes` must supply it on terminal frames; missing, premature or
+inconsistent outcomes fail validation. Older peers retain `None` (unknown).
+Complete requests expose semantic disabled/ready/degraded with closed reasons;
+superseded/canceled/failed requests have empty terminal batches and no semantic
+state. The host must retire any earlier hits from an interrupted request. An
+optional semantic failure can preserve exact hits as complete/degraded. See the
+[wire contract](ipc-protocol.md#terminal-search-outcomes). The client does not
+retry interrupted searches or infer availability from model files.
+
 `status`, `model_status`, `config`, `set_config`, `indexing_config`,
 `set_indexing_config`, `resolve_entry`, `preview_text` and explicit model download/import/delete
 methods return shared typed DTOs. Calling the client does not implicitly download

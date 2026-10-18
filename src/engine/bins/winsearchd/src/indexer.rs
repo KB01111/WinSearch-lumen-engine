@@ -113,13 +113,13 @@ struct CachedVectors {
 }
 
 impl CachedVectors {
-    fn search(&self, query:&[f32], top_k:usize, filter:Option<&VectorFilter>, policy:&ws_protocol::IndexingConfig) -> Vec<ws_index::VectorHit> {
+    fn search(&self, query:&[f32], top_k:usize, filter:Option<&VectorFilter>, policy:&ws_protocol::IndexingConfig) -> Result<Vec<ws_index::VectorHit>,StoreError> {
         let mut checked=std::collections::HashMap::new();
         self.index.search_where(query,top_k,filter,|hit| {
             let Some(proof)=self.sources.get(&hit.id) else {return false;};
             *checked.entry((hit.entry_id,proof.source.as_deref())).or_insert_with(||
                 query_source_allowed(policy,&proof.path,proof.source.as_deref(),proof.is_app))
-        }).unwrap_or_default()
+        }).map_err(|error|StoreError::InvalidVector(error.to_string()))
     }
 }
 
@@ -363,7 +363,7 @@ impl Indexer {
                 let store=self.store_lock();
                 CachedVectors {index:ws_index::VectorIndex::from_segments(dim,&store.all_segments()?),sources:store.segment_sources()?}
             };
-            let hits = built.search(query, top_k, filter,&policy);
+            let hits = built.search(query, top_k, filter,&policy)?;
             let mut guard = self.vector_index.write().unwrap_or_else(|p| p.into_inner());
             if self.cache_epoch.load(Ordering::Acquire) == epoch {
                 *guard = Some(built);
@@ -373,7 +373,7 @@ impl Indexer {
             let guard = self.vector_index.read().unwrap_or_else(|p| p.into_inner());
             match guard.as_ref() {
                 Some(cached) if cached.index.dim() == dim => {
-                    cached.search(query, top_k, filter,&policy)
+                    cached.search(query, top_k, filter,&policy)?
                 }
                 _ => Vec::new(),
             }

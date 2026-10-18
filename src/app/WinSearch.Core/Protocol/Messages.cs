@@ -211,6 +211,7 @@ public sealed class ResultsMessage : ServerMessage
     public ulong Id { get; set; }
     public List<SearchResult> Batch { get; set; } = new();
     public bool Done { get; set; }
+    public SearchOutcome? Outcome { get; set; }
 }
 
 public sealed class StatusMessage : ServerMessage
@@ -421,6 +422,7 @@ public sealed class SearchBatch
 {
     public required IReadOnlyList<SearchResult> Results { get; init; }
     public bool Done { get; init; }
+    public SearchOutcome? Outcome { get; init; }
 }
 
 /// <summary>Raised when the engine rejects a request.</summary>
