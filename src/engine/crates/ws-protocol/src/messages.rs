@@ -266,6 +266,22 @@ pub struct SearchQuery {
     pub include_semantic: bool,
     /// Restrict to these result kinds; empty means all.
     pub categories: Vec<ResultKind>,
+    /// Restrict indexed files to these extensions; optional leading dot, ASCII case-insensitive.
+    #[serde(skip_serializing_if="Vec::is_empty")]
+    pub extensions: Vec<String>,
+}
+
+pub fn valid_search_extensions(extensions:&[String])->bool {
+    extensions.len()<=64 && extensions.iter().all(|value| {
+        let extension=value.strip_prefix('.').unwrap_or(value);
+        !extension.is_empty() && extension.len()<=32 && extension.bytes()
+            .all(|byte|byte.is_ascii_alphanumeric() || matches!(byte,b'+'|b'-'|b'_'))
+    })
+}
+
+pub fn search_extension_allowed(extensions:&[String],extension:&str)->bool {
+    extensions.is_empty() || extensions.iter().any(|value|
+        value.strip_prefix('.').unwrap_or(value).eq_ignore_ascii_case(extension))
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -379,6 +395,29 @@ mod tests {
     use ws_modelmgr::ModelState;
 
     #[test]
+    fn search_extensions_validate_budgets_and_reject_path_or_wildcard_syntax() {
+        for values in [vec![],vec!["pdf".into(),".PDF".into(),"c++".into(),"7z".into()]] {
+            assert!(valid_search_extensions(&values));
+        }
+        for value in ["",".","..pdf","../pdf","ab/c","ab\\c","*.pdf","a\0b","has space","å"] {
+            assert!(!valid_search_extensions(&[value.into()]),"{value:?}");
+        }
+        assert!(!valid_search_extensions(&["a".repeat(33)]));
+        assert!(!valid_search_extensions(&vec!["pdf".into();65]));
+    }
+
+    #[test]
+    fn search_extensions_are_additive_and_match_only_explicit_file_extensions() {
+        let legacy:SearchQuery=serde_json::from_str(r#"{"text":"needle","mode":"files","limit":20}"#).unwrap();
+        assert!(legacy.extensions.is_empty());
+        assert!(serde_json::to_value(&legacy).unwrap().get("extensions").is_none());
+        let filters=vec![".PDF".into(),"rs".into()];
+        assert!(search_extension_allowed(&filters,"pdf"));assert!(search_extension_allowed(&filters,"RS"));
+        assert!(!search_extension_allowed(&filters,"png"));assert!(!search_extension_allowed(&filters,""));
+        assert!(search_extension_allowed(&[],""));
+    }
+
+    #[test]
     fn client_message_json_round_trip() {
         let msg = ClientMessage::Search {
             id: 42,
@@ -388,6 +427,7 @@ mod tests {
                 limit: 20,
                 include_semantic: true,
                 categories: vec![ResultKind::Image, ResultKind::Video],
+                extensions: Vec::new(),
             },
         };
         let json = serde_json::to_string(&msg).unwrap();

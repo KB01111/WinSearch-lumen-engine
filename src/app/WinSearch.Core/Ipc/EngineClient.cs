@@ -371,8 +371,14 @@ public sealed class EngineClient : IEngineClient
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
+        if (query is null || query.Categories is null || !SearchExtensionsValid(query.Extensions))
+            throw new EngineException(ErrorCode.InvalidRequest, "invalid search extension filter");
+        var snapshot = new SearchQuery { Text = query.Text, Mode = query.Mode, Limit = query.Limit,
+            IncludeSemantic = query.IncludeSemantic, Categories = query.Categories.ToList(), Extensions = query.Extensions.ToList() };
+        if (snapshot.Extensions.Count > 0 && IsConnected && !_features.Contains("search.filters", StringComparer.Ordinal))
+            throw new EngineException(ErrorCode.Unsupported, "engine does not support search filters");
         var id = NextRequestId();
-        var mode = query.Mode;
+        var mode = snapshot.Mode;
         var channel = Channel.CreateUnbounded<SearchBatch>(new UnboundedChannelOptions
         {
             SingleReader = true,
@@ -388,13 +394,14 @@ public sealed class EngineClient : IEngineClient
 
         try
         {
-            await WriteAsync(new SearchMessage { Id = id, Query = query }, cancellationToken);
+            await WriteAsync(new SearchMessage { Id = id, Query = snapshot }, cancellationToken);
             await foreach (var batch in channel.Reader.ReadAllAsync(cancellationToken))
             {
-                if (batch.Results is null || batch.Results.Any(hit => hit is null || (hit.EntryReference is { } reference
+                if (batch.Results is null || batch.Results.Any(hit => hit is null || (snapshot.Extensions.Count > 0 && hit.Kind == ResultKind.Folder)
+                    || !SearchExtensionMatches(snapshot.Extensions, hit.Path) || (hit.EntryReference is { } reference
                     && (!ReferenceValid(reference, bound: true) || !ReferenceKindMatches(reference, hit.Kind)
                         || ((reference.ResultId[0] == 'c') != (mode == SearchMode.Code))))))
-                    throw new EngineException(ErrorCode.InvalidRequest, "search returned an invalid bound entry reference");
+                    throw new EngineException(ErrorCode.InvalidRequest, "search returned an invalid reference or filtered result");
                 yield return batch;
             }
         }
@@ -402,6 +409,28 @@ public sealed class EngineClient : IEngineClient
         {
             _streams.TryRemove(id, out _);
         }
+    }
+
+    private static bool SearchExtensionsValid(IReadOnlyList<string>? extensions)
+    {
+        if (extensions is null || extensions.Count > 64) return false;
+        foreach (var value in extensions)
+        {
+            if (value is null) return false;
+            var extension = value.StartsWith(".", StringComparison.Ordinal) ? value[1..] : value;
+            if (extension.Length is < 1 or > 32 || !extension.All(character => character is >= 'a' and <= 'z'
+                or >= 'A' and <= 'Z' or >= '0' and <= '9' or '+' or '-' or '_')) return false;
+        }
+        return true;
+    }
+
+    private static bool SearchExtensionMatches(IReadOnlyList<string> extensions, string? path)
+    {
+        if (extensions.Count == 0) return true;
+        if (path is null) return false;
+        var extension = System.IO.Path.GetExtension(path);
+        return extension.Length > 1 && extensions.Any(value => string.Equals(
+            value.StartsWith(".", StringComparison.Ordinal) ? value[1..] : value, extension[1..], StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task TryCancelAsync(ulong id)

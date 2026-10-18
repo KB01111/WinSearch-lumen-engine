@@ -1,0 +1,33 @@
+failures:
+
+---- search::tests::apps_mode_precedes_every_candidate_cap stdout ----
+
+thread 'search::tests::apps_mode_precedes_every_candidate_cap' (121736) panicked at crates\ws-index\src\search.rs:559:9:
+assertion `left == right` failed: excluded candidates cannot consume the scoped candidate budget
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- search::tests::category_filter_precedes_every_candidate_cap stdout ----
+
+thread 'search::tests::category_filter_precedes_every_candidate_cap' (121396) panicked at crates\ws-index\src\search.rs:559:9:
+assertion `left == right` failed: excluded candidates cannot consume the scoped candidate budget
+  left: 0
+ right: 1
+
+---- search::tests::files_mode_precedes_every_candidate_cap stdout ----
+
+thread 'search::tests::files_mode_precedes_every_candidate_cap' (121700) panicked at crates\ws-index\src\search.rs:559:9:
+assertion `left == right` failed: excluded candidates cannot consume the scoped candidate budget
+  left: 0
+ right: 1
+
+
+failures:
+    search::tests::apps_mode_precedes_every_candidate_cap
+    search::tests::category_filter_precedes_every_candidate_cap
+    search::tests::files_mode_precedes_every_candidate_cap
+
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 92 filtered out; finished in 0.18s
+
+error: test failed, to rerun pass `-p ws-index --lib`

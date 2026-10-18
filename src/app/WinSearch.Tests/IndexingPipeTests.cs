@@ -10,6 +10,85 @@ namespace WinSearch.Tests;
 
 public class IndexingPipeTests
 {
+    [Theory]
+    [InlineData("")] [InlineData(".")] [InlineData("..pdf")] [InlineData("*.pdf")]
+    [InlineData("a/b")] [InlineData("a\\b")] [InlineData("å")]
+    public async Task ExtensionFilterRejectsInvalidInputBeforeConnecting(string extension)
+    {
+        await using var client = new EngineClient("unused-filter-" + Guid.NewGuid());
+        var error = await Assert.ThrowsAsync<EngineException>(async () => {
+            await foreach (var _ in client.SearchAsync(new() { Extensions = [extension] })) { }
+        });
+        Assert.Equal(ErrorCode.InvalidRequest, error.Code);
+    }
+
+    [Fact]
+    public async Task ExtensionFilterRejectsOversizedListsAndComponentsBeforeConnecting()
+    {
+        await using var client = new EngineClient("unused-filter-budget-" + Guid.NewGuid());
+        foreach (var extensions in new List<string>[] { Enumerable.Repeat("pdf", 65).ToList(), [new string('a', 33)] })
+        {
+            var error = await Assert.ThrowsAsync<EngineException>(async () => {
+                await foreach (var _ in client.SearchAsync(new() { Extensions = extensions })) { }
+            });
+            Assert.Equal(ErrorCode.InvalidRequest, error.Code);
+        }
+    }
+
+    [Fact]
+    public async Task ExtensionFilterRequiresThePeerCapabilityBeforeSending()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10)); var token = timeout.Token;
+        var pipe = "winsearch-filter-legacy-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        async Task<bool> Serve()
+        {
+            await server.WaitForConnectionAsync(token); await ReadAsync(server, token);
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1, Features = ["search.exact"] }, token);
+            try {
+                var query = Assert.IsType<SearchMessage>(await ReadAsync(server, token));
+                await WriteAsync(server, new ResultsMessage { Id = query.Id, Done = true }, token);
+                return true;
+            }
+            catch (EndOfStreamException) { return false; }
+        }
+        var serving = Serve(); await using var client = new EngineClient(pipe); await client.ConnectAsync(token);
+        var failure = await Record.ExceptionAsync(async () => {
+            await foreach (var _ in client.SearchAsync(new() { Extensions = ["pdf"] }, token)) { }
+        });
+        await client.DisposeAsync();
+        Assert.False(await serving);
+        Assert.Equal(ErrorCode.Unsupported, Assert.IsType<EngineException>(failure).Code);
+    }
+
+    [Theory]
+    [InlineData("C:/Docs/image.png", ResultKind.Image, false)]
+    [InlineData("C:/Docs/source.PDF", ResultKind.Document, true)]
+    [InlineData(null, ResultKind.File, false)]
+    [InlineData("C:/Docs/folder.pdf", ResultKind.Folder, false)]
+    public async Task ExtensionFilterRejectsUnselectedResultsFromThePeer(string? path, ResultKind kind, bool allowed)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10)); var token = timeout.Token;
+        var pipe = "winsearch-filter-reply-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        async Task Serve()
+        {
+            await server.WaitForConnectionAsync(token); await ReadAsync(server, token);
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1, Features = ["search.exact", "search.filters"] }, token);
+            var search = Assert.IsType<SearchMessage>(await ReadAsync(server, token));
+            Assert.Equal(new[] { ".PDF" }, search.Query.Extensions);
+            await WriteAsync(server, new ResultsMessage { Id = search.Id, Done = true,
+                Batch = [new SearchResult { Id = "e1", Path = path, Kind = kind }] }, token);
+        }
+        var serving = Serve(); await using var client = new EngineClient(pipe); await client.ConnectAsync(token);
+        var failure = await Record.ExceptionAsync(async () => {
+            await foreach (var _ in client.SearchAsync(new() { Extensions = [".PDF"] }, token)) { }
+        });
+        await serving;
+        if (allowed) Assert.Null(failure);
+        else Assert.Equal(ErrorCode.InvalidRequest, Assert.IsType<EngineException>(failure).Code);
+    }
+
     [Fact]
     public async Task CodePreviewRequiresItsOwnCapabilityBeforeSending()
     {

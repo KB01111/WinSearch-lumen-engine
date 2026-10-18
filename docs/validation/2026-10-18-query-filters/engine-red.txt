@@ -1,0 +1,23 @@
+failures:
+
+---- engine::tests::extension_filter_excludes_synthetic_results_and_unselected_code_files stdout ----
+
+thread 'engine::tests::extension_filter_excludes_synthetic_results_and_unselected_code_files' (122468) panicked at bins\winsearchd\src\engine.rs:1443:9:
+file extensions exclude synthetic calculator/settings hits
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- engine::tests::extension_filter_precedes_semantic_topk_in_the_actual_indexer stdout ----
+
+thread 'engine::tests::extension_filter_precedes_semantic_topk_in_the_actual_indexer' (122116) panicked at bins\winsearchd\src\engine.rs:1463:34:
+assertion `left == right` failed: excluded higher-score entries cannot consume semantic top-k
+  left: "noise-1005.txt"
+ right: "wanted.pdf"
+
+
+failures:
+    engine::tests::extension_filter_excludes_synthetic_results_and_unselected_code_files
+    engine::tests::extension_filter_precedes_semantic_topk_in_the_actual_indexer
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 213 filtered out; finished in 73.22s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

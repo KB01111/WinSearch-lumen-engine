@@ -744,9 +744,9 @@ impl EngineService {
                 ws_modelmgr::recipe::search_query(&query.text),
             ]) else {return Vec::new();};
             if code.query_epoch()!=epoch {return Vec::new();}
-            let exact=code.exact(&query.text,query.limit.max(1) as usize);
+            let exact=code.exact_filtered(&query.text,query.limit.max(1) as usize,&query.extensions);
             let candidates=(query.limit as usize).max(SEMANTIC_TOP_K).saturating_mul(8);
-            let mut hits=code.semantic(&vectors[0],&vectors[1],candidates).into_iter().filter(|h|!exact.iter().any(|e|e.file.id==h.file.id && e.start_line>=h.start_line && e.start_line<=h.end_line)).map(|h|{let score=hybrid_score(h.score,&query.text,&h.file.name_lower,h.file.mtime,crate::code::now()/1000);let mut r=code_result(h);r.score=score;r}).collect::<Vec<_>>();
+            let mut hits=code.semantic_filtered(&vectors[0],&vectors[1],candidates,&query.extensions).into_iter().filter(|h|!exact.iter().any(|e|e.file.id==h.file.id && e.start_line>=h.start_line && e.start_line<=h.end_line)).map(|h|{let score=hybrid_score(h.score,&query.text,&h.file.name_lower,h.file.mtime,crate::code::now()/1000);let mut r=code_result(h);r.score=score;r}).collect::<Vec<_>>();
             hits.sort_by(|a,b|b.score.total_cmp(&a.score));hits.truncate(query.limit.max(1) as usize);
             if code.query_epoch()!=epoch {return Vec::new();}
             return hits;
@@ -771,13 +771,14 @@ impl EngineService {
         let candidate_limit = (query.limit.max(1) as usize)
             .max(SEMANTIC_TOP_K)
             .saturating_mul(8);
-        let filter = if query.mode == SearchMode::Auto && kinds.is_empty() {
+        let filter = if query.mode == SearchMode::Auto && kinds.is_empty() && query.extensions.is_empty() {
             None
         } else {
-            let matching_ids = match self.indexer.matching_entry_ids(
+            let matching_ids = match self.indexer.matching_entry_ids_with_extensions(
                 query.mode == SearchMode::Apps,
                 query.mode == SearchMode::Files,
                 &kinds,
+                &query.extensions,
             ) {
                 Ok(ids) => ids,
                 Err(e) => {
@@ -898,6 +899,12 @@ impl EngineService {
     /// client can retire it.
     pub fn search(self: &Arc<Self>, client: &ClientHandle, id: RequestId, query: SearchQuery) {
         let cancel = self.begin_request_for_client(client.id(), id);
+        if !ws_protocol::valid_search_extensions(&query.extensions) {
+            self.end_request_for_client(client.id(),id,&cancel);
+            let _=client.send(&ServerMessage::Error {id:Some(id),code:ErrorCode::InvalidRequest,message:"invalid search extension filter".into()});
+            let _=client.send(&ServerMessage::Results {id,batch:Vec::new(),done:true});
+            return;
+        }
         let outcome = self.run_search(client, id, query, Arc::clone(&cancel));
         if let Err(e) = outcome {
             self.end_request_for_client(client.id(), id, &cancel);
@@ -1006,10 +1013,16 @@ impl EngineService {
             .is_some_and(|token|Arc::ptr_eq(token,delivery.cancel));
         if !current() {return Ok(HashSet::new());}
         let mut batch=if delivery.cancel.load(Ordering::Acquire) || !self.query_current(delivery.query,delivery.revision) {
+            tracing::debug!(id,expected_epoch=delivery.revision.source,current_epoch=self.indexer.search_epoch(),
+                canceled=delivery.cancel.load(Ordering::Acquire),"discarded outdated search batch before delivery");
             Vec::new()
         } else {self.validate_delivery(batch,delivery.sources)};
         if !current() {return Ok(HashSet::new());}
-        if delivery.cancel.load(Ordering::Acquire) || !self.query_current(delivery.query,delivery.revision) {batch.clear();}
+        if delivery.cancel.load(Ordering::Acquire) || !self.query_current(delivery.query,delivery.revision) {
+            tracing::debug!(id,expected_epoch=delivery.revision.source,current_epoch=self.indexer.search_epoch(),
+                canceled=delivery.cancel.load(Ordering::Acquire),"discarded outdated search batch after validation");
+            batch.clear();
+        }
         let sent=exact_entry_ids(&batch);
         write_message(&mut *stream,&ServerMessage::Results {id,batch,done})?;
         Ok(sent)
@@ -1105,14 +1118,14 @@ impl EngineService {
         }
         if query.mode==SearchMode::Code {
             if !query.categories.is_empty() && !query.categories.contains(&ResultKind::Code) {return Vec::new();}
-            return self.code_service().map(|code|code.exact(text,query.limit.max(1) as usize).into_iter().map(code_result).collect()).unwrap_or_default();
+            return self.code_service().map(|code|code.exact_filtered(text,query.limit.max(1) as usize,&query.extensions).into_iter().map(code_result).collect()).unwrap_or_default();
         }
 
         let mut results = Vec::new();
         let wants_index = query.mode != SearchMode::Code;
-        let wants_calc = query.mode == SearchMode::Auto
+        let wants_calc = query.mode == SearchMode::Auto && query.extensions.is_empty()
             && (query.categories.is_empty() || query.categories.contains(&ResultKind::Calculator));
-        let wants_settings = query.mode == SearchMode::Auto
+        let wants_settings = query.mode == SearchMode::Auto && query.extensions.is_empty()
             && (query.categories.is_empty()
                 || query.categories.contains(&ResultKind::Settings)
                 || query.categories.contains(&ResultKind::Action));
@@ -1164,6 +1177,7 @@ impl EngineService {
         if wants_index && (query.categories.is_empty() || !kinds.is_empty()) {
             let request = SearchRequest {
                 text: text.to_string(),
+                extensions:query.extensions.clone(),
                 apps_only: query.mode == SearchMode::Apps,
                 files_only: query.mode == SearchMode::Files,
                 kinds,
@@ -1433,6 +1447,39 @@ mod tests {
             limit: 20,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn extension_filter_excludes_synthetic_results() {
+        let tree=TempTree::new();let engine=service_with(&tree,&[]);
+        let mut request=query("1+2");request.extensions=vec!["pdf".into()];
+        assert!(engine.plan_results(&request).is_empty(),"file extensions exclude synthetic calculator/settings hits");
+    }
+
+    #[test]
+    fn extension_filter_excludes_unselected_code_files() {
+        let (engine,code,_root)=code_search_service();crate::code::tests::stop_fixture_watchers(&code);
+        let mut request=query("needle");request.mode=SearchMode::Code;request.extensions=vec!["py".into()];
+        assert!(engine.plan_results(&request).is_empty(),"code filters must be applied before result limits");
+        request.extensions=vec![".RS".into()];assert!(!engine.plan_results(&request).is_empty());
+    }
+
+    #[test]
+    fn extension_filter_precedes_semantic_topk_in_the_actual_indexer() {
+        let tree=TempTree::new();
+        let mut names=(0..SEMANTIC_TOP_K*8+9).map(|index|format!("noise-{index}.txt")).collect::<Vec<_>>();
+        names.push("wanted.pdf".into());let files=names.iter().map(String::as_str).collect::<Vec<_>>();
+        let engine=service_with(&tree,&files);
+        while engine.indexer.embed_queue_depth().unwrap()>0 {
+            let outcome=engine.indexer.embed_once_with(|texts|Ok(texts.iter().map(|text|
+                if text.contains("wanted") {vec![0.8,0.6]} else {vec![1.0,0.0]}).collect())).unwrap();
+            assert!(outcome.embedded>0,"static semantic fixture must make progress: {outcome:?}");
+        }
+        engine.set_model_ready_override(Some(true));engine.set_query_embed_hook(Arc::new(|_|Ok(vec![1.0,0.0])));
+        let mut request=semantic_query("unmatched concept");request.limit=1;request.extensions=vec![".PDF".into()];
+        let hits=engine.plan_semantic(&request,&HashSet::new());
+        assert_eq!(hits.len(),1);assert_eq!(hits[0].title,"wanted.pdf",
+            "excluded higher-score entries cannot consume semantic top-k");
     }
 
     #[test]

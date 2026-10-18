@@ -51,6 +51,9 @@ include Lumen integration and the final native/installed acceptance gates.
 - [~] Ordinary source-byte provenance — bounded native SHA256, revision binding,
       atomic chunks/cursor commit and source/cache mismatch rejection implemented;
       larger-source/legacy recovery and complete extraction coverage remain open
+- [~] Query scopes/filters — app/file/category filters precede candidate caps;
+      typed ordinary/code extension filters and semantic pre-top-k admission work;
+      finer file-kind scopes, Related and explicit outcomes remain open
 
 ## Semantic search (EmbeddingGemma 2)
 

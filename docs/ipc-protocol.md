@@ -339,6 +339,30 @@ preserve valid byte provenance. Resolution/preview still read metadata and cache
 content only; they do not rehash source bytes. The trusted host must keep its own
 current grants and content-access freshness checks.
 
+### Extension filters and candidate admission
+
+Peers advertising `search.filters` accept optional `SearchQuery.extensions`.
+It selects indexed source-file extensions in ordinary and code queries, including
+semantic retrieval. An empty list preserves existing behavior. Each of up to64
+values has1..32 ASCII letters/digits/`+`/`-`/`_`, with an optional leading dot;
+matching is case-insensitive. Wildcards, path syntax and malformed/oversized lists
+return `invalid_request`. Folders and synthetic calculator/settings hits cannot
+satisfy a nonempty extension filter. Application filtering uses the indexed
+shortcut/executable extension, not its launch target's extension.
+
+Mode, category and extension admission precede each exact/name/FTS/content/path
+candidate cap. Semantic entry filtering precedes vector top-k; code exact and
+semantic filters reuse the existing admitted-file predicates before their limits.
+The connection-local request scope does not alter native source/root admission or
+metadata/preview access. A subsequent search replaces its previous request scope.
+Candidate/result bounds, model space, ranking and semantic thresholds are unchanged.
+
+Rust/C# clients reject nonempty extension filters on peers without the capability,
+validate request budgets and reject replies outside the selected extensions.
+C# snapshots the query and its lists before awaiting writes. Omitted extension
+fields remain compatible with older clients. Related search, finer file-kind
+scopes and explicit semantic outcomes remain separate unfinished contracts.
+
 ## Internal embed-worker protocol (P3.2)
 
 `winsearchd` talks to its inference worker `winsearch-embed` over a **second**

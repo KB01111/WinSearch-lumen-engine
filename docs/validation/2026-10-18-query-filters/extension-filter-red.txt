@@ -1,0 +1,17 @@
+failures:
+
+---- search::tests::extension_filter_precedes_candidate_caps_and_preserves_case_and_dot_compatibility stdout ----
+
+thread 'search::tests::extension_filter_precedes_candidate_caps_and_preserves_case_and_dot_compatibility' (122872) panicked at crates\ws-index\src\search.rs:622:38:
+assertion `left == right` failed
+  left: "C:\\data\\needle-0000.png"
+ right: "C:\\data\\needlez.pdf"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    search::tests::extension_filter_precedes_candidate_caps_and_preserves_case_and_dot_compatibility
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 95 filtered out; finished in 0.05s
+
+error: test failed, to rerun pass `-p ws-index --lib`

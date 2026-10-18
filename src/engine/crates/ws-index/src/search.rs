@@ -27,6 +27,27 @@ struct Candidate {
 }
 
 impl IndexStore {
+    pub(crate) fn set_search_request_filter(&self,req:&SearchRequest)->Result<(),StoreError> {
+        if !ws_protocol::valid_search_extensions(&req.extensions) {
+            return Err(StoreError::InvalidConfig("invalid search extension filter".into()));
+        }
+        let (apps_only,files_only,kinds)=(req.apps_only,req.files_only,req.kinds.clone());
+        let extensions=req.extensions.clone();
+        // Connection-local request scope must not change admission/metadata in query_entries.
+        self.conn().create_scalar_function("search_request_allowed",4,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8,move|ctx| {
+                let path=ctx.get::<String>(0)?;let ext=ctx.get::<String>(1)?;
+                let is_dir=ctx.get::<bool>(2)?;let is_app=ctx.get::<bool>(3)?;
+                let kind=if is_app {HitKind::Application} else if is_dir {HitKind::Folder}
+                    else {crate::model::kind_for_path_and_ext(&path,&ext).hit_kind()};
+                Ok((!apps_only || is_app) && (!files_only || !is_app)
+                    && (kinds.is_empty() || kinds.contains(&kind))
+                    && (extensions.is_empty() || !is_dir)
+                    && ws_protocol::search_extension_allowed(&extensions,&ext))
+            })?;
+        Ok(())
+    }
+
     /// Runs one retrieval pass. Results are ranked, filtered by the request's
     /// mode/kinds, and truncated to `limit`.
     pub fn search(&self, req: &SearchRequest) -> Result<Vec<SearchHit>, StoreError> {
@@ -36,6 +57,7 @@ impl IndexStore {
         if tokens.is_empty() {
             return Ok(Vec::new());
         }
+        self.set_search_request_filter(req)?;
 
         let mut candidates = Vec::new();
         let mut push_unique = |rows: Vec<EntryRow>, via_fts: bool, via_content_fts: bool| {
@@ -190,7 +212,7 @@ impl IndexStore {
         self.rows_by(
             "SELECT id, root_id, parent_id, path, name, name_lower, ext, is_dir, is_app,
                     size, mtime, missing, thumbnail_path
-             FROM query_entries
+             FROM search_entries
              WHERE missing = 0 AND name_lower = ?1
              LIMIT 8",
             params![query_lower],
@@ -207,7 +229,7 @@ impl IndexStore {
         self.rows_by(
             "SELECT id, root_id, parent_id, path, name, name_lower, ext, is_dir, is_app,
                     size, mtime, missing, thumbnail_path
-             FROM query_entries
+             FROM search_entries
              WHERE missing = 0 AND name_lower >= ?1 AND name_lower < ?2
              LIMIT ?3",
             params![query_lower, end, CANDIDATE_CAP as i64],
@@ -226,10 +248,10 @@ impl IndexStore {
         self.rows_by(
             "SELECT id, root_id, parent_id, path, name, name_lower, ext, is_dir, is_app,
                     size, mtime, missing, thumbnail_path
-             FROM query_entries
+             FROM search_entries
              WHERE id IN (
                  SELECT rowid FROM entries_tri WHERE entries_tri MATCH ?1
-                 AND EXISTS (SELECT 1 FROM query_entries v WHERE v.id = entries_tri.rowid) LIMIT ?2
+                 AND EXISTS (SELECT 1 FROM search_entries v WHERE v.id = entries_tri.rowid) LIMIT ?2
              )",
             params![format!("\"{escaped}\""), CANDIDATE_CAP as i64],
         )
@@ -247,10 +269,10 @@ impl IndexStore {
         self.rows_by(
             "SELECT id, root_id, parent_id, path, name, name_lower, ext, is_dir, is_app,
                     size, mtime, missing, thumbnail_path
-             FROM query_entries
+             FROM search_entries
              WHERE id IN (
                  SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?1
-                 AND EXISTS (SELECT 1 FROM query_entries v WHERE v.id = entries_fts.rowid) LIMIT ?2
+                 AND EXISTS (SELECT 1 FROM search_entries v WHERE v.id = entries_fts.rowid) LIMIT ?2
              )",
             params![match_expr, CANDIDATE_CAP as i64],
         )
@@ -266,11 +288,12 @@ impl IndexStore {
         self.rows_by(
             "SELECT id, root_id, parent_id, path, name, name_lower, ext, is_dir, is_app,
                     size, mtime, missing, thumbnail_path
-             FROM query_entries
+             FROM search_entries
              WHERE id IN (
                  SELECT DISTINCT CAST(entry_id AS INTEGER) FROM content_fts
                  WHERE content_fts MATCH ?1
-                 AND EXISTS (SELECT 1 FROM query_content_rows v WHERE v.id = content_fts.rowid) LIMIT ?2
+                 AND EXISTS (SELECT 1 FROM query_content_rows v WHERE v.id = content_fts.rowid)
+                 AND EXISTS (SELECT 1 FROM search_entries e WHERE e.id = CAST(content_fts.entry_id AS INTEGER)) LIMIT ?2
              )",
             params![match_expr, CANDIDATE_CAP as i64],
         )
@@ -287,10 +310,10 @@ impl IndexStore {
         self.rows_by(
             "SELECT id, root_id, parent_id, path, name, name_lower, ext, is_dir, is_app,
                     size, mtime, missing, thumbnail_path
-             FROM query_entries
+             FROM search_entries
              WHERE missing = 0 AND id IN (
                  SELECT rowid FROM entries_path_tri WHERE entries_path_tri MATCH ?1
-                 AND EXISTS (SELECT 1 FROM query_entries v WHERE v.id = entries_path_tri.rowid) LIMIT ?2
+                 AND EXISTS (SELECT 1 FROM search_entries v WHERE v.id = entries_path_tri.rowid) LIMIT ?2
              )",
             params![escaped, CANDIDATE_CAP as i64],
         )
@@ -539,6 +562,72 @@ mod tests {
             })
             .unwrap();
         assert!(hits.iter().all(|h| h.kind == HitKind::Application));
+    }
+
+    fn assert_filter_precedes_every_candidate_cap(mut request:SearchRequest,wanted_app:bool) {
+        let mut store=IndexStore::open_in_memory().unwrap();
+        let root=store.ensure_root("C:\\data").unwrap();let generation=store.begin_generation(root).unwrap();
+        let mut records=(0..CANDIDATE_CAP+9).map(|index|rec(
+            &format!("C:\\data\\noise\\{index}\\needle.pdf"),"needle.pdf",!wanted_app)).collect::<Vec<_>>();
+        let wanted="C:\\data\\selected\\needle.pdf";
+        records.push(rec(wanted,"needle.pdf",wanted_app));
+        store.apply_batch(root,generation,&records).unwrap();
+        // Offline query fixtures admit virtual content; production source admission stays separate.
+        for record in &records {
+            let entry=store.find_by_path(&record.path).unwrap().unwrap();
+            store.conn().execute("INSERT INTO content_fts(entry_id,kind,text) VALUES(?1,'doc','contentneedle')",[entry.id]).unwrap();
+        }
+        request.text="needle".into();request.limit=1;
+        let hits=store.search(&request).unwrap();
+        assert_eq!(hits.len(),1,"excluded candidates cannot consume the scoped candidate budget");
+        assert_eq!(hits[0].path,wanted);
+        for (source,rows) in [
+            ("exact",store.exact_candidates("needle.pdf").unwrap()),
+            ("prefix",store.prefix_candidates("needle").unwrap()),
+            ("substring",store.substring_candidates("needle").unwrap()),
+            ("tokens",store.fts_candidates(&["needle".into()]).unwrap()),
+            ("content",store.content_fts_candidates(&["contentneedle".into()]).unwrap()),
+            ("path",store.path_candidates("needle").unwrap()),
+        ] {
+            assert_eq!(rows.len(),1,"{source} must filter before its own cap");
+            assert_eq!(rows[0].path,wanted,"{source}");
+        }
+        let rejected=store.find_by_path(&records[0].path).unwrap().unwrap();
+        assert!(store.entry_visible(rejected.id).unwrap(),"request scope cannot revoke general metadata admission");
+        let all=store.search(&SearchRequest {text:"needle".into(),limit:1,..Default::default()}).unwrap();
+        assert_eq!(all.len(),1);assert_ne!(all[0].path,wanted,"a new request must replace the previous scope");
+        store.set_query_source_guard(|path,_,_|!path.contains("selected")).unwrap();
+        assert!(store.search(&request).unwrap().is_empty(),"request filters cannot bypass source admission");
+    }
+
+    #[test]
+    fn files_mode_precedes_every_candidate_cap() {
+        assert_filter_precedes_every_candidate_cap(SearchRequest {files_only:true,..Default::default()},false);
+    }
+
+    #[test]
+    fn apps_mode_precedes_every_candidate_cap() {
+        assert_filter_precedes_every_candidate_cap(SearchRequest {apps_only:true,..Default::default()},true);
+    }
+
+    #[test]
+    fn category_filter_precedes_every_candidate_cap() {
+        assert_filter_precedes_every_candidate_cap(SearchRequest {kinds:vec![HitKind::Document],..Default::default()},false);
+    }
+
+    #[test]
+    fn extension_filter_precedes_candidate_caps_and_preserves_case_and_dot_compatibility() {
+        let mut store=IndexStore::open_in_memory().unwrap();let root=store.ensure_root("C:\\data").unwrap();
+        let generation=store.begin_generation(root).unwrap();
+        let mut records=(0..CANDIDATE_CAP+9).map(|index|rec(
+            &format!("C:\\data\\needle-{index:04}.png"),&format!("needle-{index:04}.png"),false)).collect::<Vec<_>>();
+        let wanted="C:\\data\\needlez.pdf";records.push(rec(wanted,"needlez.pdf",false));
+        store.apply_batch(root,generation,&records).unwrap();
+        for extensions in [vec!["pdf".into()],vec![".PDF".into()],vec!["txt".into(),"PDF".into()]] {
+            let hits=store.search(&SearchRequest {text:"needle".into(),extensions,limit:1,..Default::default()}).unwrap();
+            assert_eq!(hits.len(),1);assert_eq!(hits[0].path,wanted);
+        }
+        assert!(store.search(&SearchRequest {text:"needle".into(),extensions:vec!["txt".into()],limit:1,..Default::default()}).unwrap().is_empty());
     }
 
     #[test]

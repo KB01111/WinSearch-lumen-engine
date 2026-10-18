@@ -316,6 +316,7 @@ public sealed class SearchQuery
     public uint Limit { get; set; } = 20;
     public bool IncludeSemantic { get; set; }
     public List<ResultKind> Categories { get; set; } = new();
+    public List<string> Extensions { get; set; } = new();
 }
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]

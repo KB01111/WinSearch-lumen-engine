@@ -1,0 +1,15 @@
+failures:
+
+---- engine::tests::extension_filter_excludes_unselected_code_files stdout ----
+
+thread 'engine::tests::extension_filter_excludes_unselected_code_files' (122904) panicked at bins\winsearchd\src\engine.rs:1450:9:
+code filters must be applied before result limits
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    engine::tests::extension_filter_excludes_unselected_code_files
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 215 filtered out; finished in 0.19s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

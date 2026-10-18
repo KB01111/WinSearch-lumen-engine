@@ -968,6 +968,8 @@ COMMIT;
         let store=Self { conn };
         store.set_query_source_guard(|_,_,_|true)?;
         store.conn.execute_batch("CREATE TEMP VIEW IF NOT EXISTS query_entries AS SELECT * FROM visible_entries WHERE query_source_allowed(path,NULL,is_app); CREATE TEMP VIEW IF NOT EXISTS query_content_rows AS SELECT f.rowid AS id FROM content_fts f JOIN query_entries e ON e.id=CAST(f.entry_id AS INTEGER) LEFT JOIN content_chunks c ON c.id=f.rowid AND c.entry_id=e.id LEFT JOIN content_revisions r ON r.entry_id=e.id LEFT JOIN content_progress p ON p.entry_id=c.entry_id AND p.kind=c.job_kind AND p.revision=r.revision WHERE query_source_allowed(e.path,COALESCE(p.source,''),e.is_app);")?;
+        store.set_search_request_filter(&crate::model::SearchRequest::default())?;
+        store.conn.execute_batch("CREATE TEMP VIEW IF NOT EXISTS search_entries AS SELECT * FROM query_entries WHERE missing=0 AND search_request_allowed(path,ext,is_dir,is_app);")?;
         Ok(store)
     }
 
@@ -2386,6 +2388,15 @@ COMMIT;
         exclude_apps: bool,
         kinds: &[crate::model::HitKind],
     ) -> Result<Vec<i64>, StoreError> {
+        self.matching_entry_ids_with_extensions(apps_only,exclude_apps,kinds,&[])
+    }
+
+    pub fn matching_entry_ids_with_extensions(
+        &self,apps_only:bool,exclude_apps:bool,kinds:&[crate::model::HitKind],extensions:&[String],
+    )->Result<Vec<i64>,StoreError> {
+        if !ws_protocol::valid_search_extensions(extensions) {
+            return Err(StoreError::InvalidConfig("invalid search extension filter".into()));
+        }
         let mut sql = String::from(
             "SELECT id, path, ext, is_dir, is_app FROM visible_entries WHERE missing = 0",
         );
@@ -2408,6 +2419,7 @@ COMMIT;
         let mut ids = Vec::new();
         for r in rows {
             let (id, path, ext, is_dir, is_app) = r?;
+            if (!extensions.is_empty() && is_dir) || !ws_protocol::search_extension_allowed(extensions,&ext) {continue;}
             if !kinds.is_empty() {
                 let kind = if is_app {
                     crate::model::HitKind::Application

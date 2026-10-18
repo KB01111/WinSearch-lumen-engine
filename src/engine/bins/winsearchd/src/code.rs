@@ -131,18 +131,26 @@ impl CodeService {
             && stored.is_some()
             && snapshot(Path::new(&file.path)).as_deref() == stored
     }
-    pub fn exact(&self, text: &str, limit: usize) -> Vec<CodeSearchHit> {
+    #[cfg(test)]
+    pub fn exact(&self,text:&str,limit:usize)->Vec<CodeSearchHit> {self.exact_filtered(text,limit,&[])}
+
+    pub fn exact_filtered(&self, text: &str, limit: usize,extensions:&[String]) -> Vec<CodeSearchHit> {
         let store = self.store.lock().unwrap_or_else(|p| p.into_inner());
         store
             .search_exact(text, limit, |file| {
-                self.visible(
+                ws_protocol::search_extension_allowed(extensions,&file.ext) && self.visible(
                     file,
                     store.source_snapshot(file.id).ok().flatten().as_deref(),
                 )
             })
             .unwrap_or_default()
     }
-    pub fn semantic(&self, vector: &[f32], corroboration: &[f32], limit: usize) -> Vec<CodeSearchHit> {
+    #[cfg(test)]
+    pub fn semantic(&self,vector:&[f32],corroboration:&[f32],limit:usize)->Vec<CodeSearchHit> {
+        self.semantic_filtered(vector,corroboration,limit,&[])
+    }
+
+    pub fn semantic_filtered(&self, vector: &[f32], corroboration: &[f32], limit: usize,extensions:&[String]) -> Vec<CodeSearchHit> {
         let store = self.store.lock().unwrap_or_else(|p| p.into_inner());
         if store
             .meta_get("vector_fingerprint")
@@ -155,7 +163,7 @@ impl CodeService {
         }
         store
             .search_semantic(vector, corroboration, limit, |file| {
-                self.visible(
+                ws_protocol::search_extension_allowed(extensions,&file.ext) && self.visible(
                     file,
                     store.source_snapshot(file.id).ok().flatten().as_deref(),
                 )

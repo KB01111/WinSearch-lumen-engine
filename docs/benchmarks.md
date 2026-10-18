@@ -482,3 +482,38 @@ have retained functional failure evidence. This checkpoint received author revie
 independent ordinary provenance review did not run because workspace credits were
 exhausted. Broad final review/whole-workspace/installed acceptance remain open.
 [Evidence, failures, hashes and commands](validation/2026-10-18-ordinary-provenance/README.md).
+
+### Query scope/filter checkpoint, 2026-10-18
+
+The mode/category regression fixture places509 excluded entries before an allowed
+result and checks all six candidate sources. The semantic fixture uses fixed
+vectors on1,609 excluded real files and a lower-scoring allowed PDF, preserving
+the existing top-k/cosine gates. These are correctness tests, not model quality
+or calibrated scale-performance measurements. Filtered searches may inspect more
+rows; callback/inspection overhead remains to be measured at required sizes.
+
+Frozen native cases remain10 public/seven offline without a model and21 public/
+17 offline with managed CPU. Seven separate common extension cases, two additional
+CPU semantic cases, malformed raw-request rejection and four typed-client filter
+checks pass without changing quality denominators. Existing source hashes,
+locations, previews, cancellation/revocation and owned-job assertions remain.
+Final coherent no-model takes14.218s (index5.642s); managed CPU takes85.869s
+(index66.469s), with four real768-dimensional code vectors. Five earlier same-
+source no-model samples are retained separately. The native test target changed
+the extractor binary hash; the final package was rebuilt afterward, and both
+final native profiles use the reconciled executable set.
+Original CPU Recall@5 .90/MRR .85, expanded.9091/.8636, ten empty controls FP0,
+screenshot miss and audio rank2 remain unchanged. These uncontrolled whole-
+harness timings include added checks and establish no causal performance change.
+
+One earlier native empty document result immediately after pause/resume remains
+unconfirmed and is retained. Diagnostic logging and subsequent passing samples
+do not prove its cause or fix; explicit stale-query outcomes remain required.
+An earlier malformed-request test helper also rejected the expected error reply;
+that helper was corrected without changing the daemon's rejection.
+
+Final493 selected Rust,18 additional native extractor and89 .NET checks pass,
+zero failed/ignored/skipped; coherent CPU/x64 builds pass with seven existing
+daemon dead-code warnings and zero x64 warnings/errors. Author review only;
+full review, size/device/idle/installed and whole-workspace gates remain open.
+[Logs, native samples, failures, hashes and commands](validation/2026-10-18-query-filters/README.md).

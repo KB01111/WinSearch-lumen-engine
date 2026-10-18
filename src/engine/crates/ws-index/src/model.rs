@@ -366,6 +366,7 @@ impl MediaPlan {
 #[derive(Debug, Clone, Default)]
 pub struct SearchRequest {
     pub text: String,
+    pub extensions: Vec<String>,
     /// Restrict to applications (`Some(true)`) or to non-apps (`Some(false)`).
     pub apps_only: bool,
     pub files_only: bool,

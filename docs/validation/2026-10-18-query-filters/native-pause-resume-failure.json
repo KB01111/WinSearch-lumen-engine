@@ -1,0 +1,811 @@
+{
+  "scope": "Actual daemon/public CLI DTO parity, optionally including offline-ranker snapshots.\n\nDefault: native document/PDF/code extraction without a model. --real-model\nimports the pinned artifacts through ModelManager, requires real 768-dimensional\ncode vectors, and checks semantic code/image/audio/video on generated fixtures.\nBoth modes use an isolated data directory and a kill-on-close Windows job.\nThe snapshot option compares query code on the same native indexed vectors;\nfixture seeding and native extraction remain separately classified evidence.\n",
+  "real_model_requested": false,
+  "queries": [
+    {
+      "name": "code_disabled",
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 2,
+          "batch": [],
+          "done": true
+        }
+      ],
+      "cli": [],
+      "expect_empty": true
+    },
+    {
+      "name": "document_exact",
+      "query": {
+        "text": "amberparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 10,
+          "batch": [
+            {
+              "id": "e1",
+              "kind": "document",
+              "title": "item-a.txt",
+              "subtitle": "<fixture>",
+              "match_explanation": "Matches extracted content",
+              "score": 0.41,
+              "path": "<fixture>",
+              "location": {
+                "kind": "line",
+                "line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+              "matching_moments": [
+                {
+                  "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+                  "location": {
+                    "kind": "line",
+                    "line": 2
+                  },
+                  "thumbnail_path": null
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e1",
+                "source_revision": "<opaque native identity redacted>"
+              }
+            }
+          ],
+          "done": true
+        }
+      ],
+      "cli": [
+        {
+          "id": "e1",
+          "kind": "document",
+          "title": "item-a.txt",
+          "subtitle": "<fixture>",
+          "match_explanation": "Matches extracted content",
+          "score": 0.41,
+          "path": "<fixture>",
+          "location": {
+            "kind": "line",
+            "line": 2
+          },
+          "thumbnail_path": null,
+          "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+          "matching_moments": [
+            {
+              "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+              "location": {
+                "kind": "line",
+                "line": 2
+              },
+              "thumbnail_path": null
+            }
+          ],
+          "entry_reference": {
+            "result_id": "e1",
+            "source_revision": "<opaque native identity redacted>"
+          }
+        }
+      ],
+      "expect_empty": false,
+      "expected_name": "item-a.txt",
+      "expected_max_rank": 1,
+      "modality": "document",
+      "relevant_rank": 1
+    },
+    {
+      "name": "pdf_exact",
+      "query": {
+        "text": "pdfparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 11,
+          "batch": [
+            {
+              "id": "e2",
+              "kind": "document",
+              "title": "item-b.pdf",
+              "subtitle": "<fixture>",
+              "match_explanation": "Matches extracted content",
+              "score": 0.41,
+              "path": "<fixture>",
+              "location": {
+                "kind": "page",
+                "page": 2
+              },
+              "thumbnail_path": "<checkout>\\artifacts\\query-scope-native-final\\data\\cache\\thumbs\\extract-89756-1792339079178970800-3-0.png",
+              "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+              "matching_moments": [
+                {
+                  "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+                  "location": {
+                    "kind": "page",
+                    "page": 2
+                  },
+                  "thumbnail_path": "<checkout>\\artifacts\\query-scope-native-final\\data\\cache\\thumbs\\extract-89756-1792339079178970800-3-1.png"
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e2",
+                "source_revision": "<opaque native identity redacted>"
+              }
+            }
+          ],
+          "done": true
+        }
+      ],
+      "cli": [
+        {
+          "id": "e2",
+          "kind": "document",
+          "title": "item-b.pdf",
+          "subtitle": "<fixture>",
+          "match_explanation": "Matches extracted content",
+          "score": 0.41,
+          "path": "<fixture>",
+          "location": {
+            "kind": "page",
+            "page": 2
+          },
+          "thumbnail_path": "<checkout>\\artifacts\\query-scope-native-final\\data\\cache\\thumbs\\extract-89756-1792339079178970800-3-0.png",
+          "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+          "matching_moments": [
+            {
+              "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+              "location": {
+                "kind": "page",
+                "page": 2
+              },
+              "thumbnail_path": "<checkout>\\artifacts\\query-scope-native-final\\data\\cache\\thumbs\\extract-89756-1792339079178970800-3-1.png"
+            }
+          ],
+          "entry_reference": {
+            "result_id": "e2",
+            "source_revision": "<opaque native identity redacted>"
+          }
+        }
+      ],
+      "expect_empty": false,
+      "expected_name": "item-b.pdf",
+      "expected_max_rank": 1,
+      "modality": "document",
+      "relevant_rank": 1
+    },
+    {
+      "name": "code_definition_reference",
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 12,
+          "batch": [
+            {
+              "id": "code:2:1:true:parityneedle",
+              "kind": "code",
+              "title": "parityneedle",
+              "subtitle": "<fixture> code.rs",
+              "match_explanation": "function · line 1",
+              "score": 1.0,
+              "path": "<fixture> code.rs",
+              "location": {
+                "kind": "line",
+                "line": 1
+              },
+              "thumbnail_path": null,
+              "excerpt": "pub fn parityneedle() {}",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c2",
+                "source_revision": "<opaque native identity redacted>"
+              }
+            },
+            {
+              "id": "code:2:2:false:parityneedle",
+              "kind": "code",
+              "title": "parityneedle",
+              "subtitle": "<fixture> code.rs",
+              "match_explanation": "reference · line 2",
+              "score": 0.949999988079071,
+              "path": "<fixture> code.rs",
+              "location": {
+                "kind": "line",
+                "line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "parityneedle",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c2",
+                "source_revision": "<opaque native identity redacted>"
+              }
+            }
+          ],
+          "done": true
+        }
+      ],
+      "cli": [
+        {
+          "id": "code:2:1:true:parityneedle",
+          "kind": "code",
+          "title": "parityneedle",
+          "subtitle": "<fixture> code.rs",
+          "match_explanation": "function · line 1",
+          "score": 1.0,
+          "path": "<fixture> code.rs",
+          "location": {
+            "kind": "line",
+            "line": 1
+          },
+          "thumbnail_path": null,
+          "excerpt": "pub fn parityneedle() {}",
+          "matching_moments": [],
+          "entry_reference": {
+            "result_id": "c2",
+            "source_revision": "<opaque native identity redacted>"
+          }
+        },
+        {
+          "id": "code:2:2:false:parityneedle",
+          "kind": "code",
+          "title": "parityneedle",
+          "subtitle": "<fixture> code.rs",
+          "match_explanation": "reference · line 2",
+          "score": 0.949999988079071,
+          "path": "<fixture> code.rs",
+          "location": {
+            "kind": "line",
+            "line": 2
+          },
+          "thumbnail_path": null,
+          "excerpt": "parityneedle",
+          "matching_moments": [],
+          "entry_reference": {
+            "result_id": "c2",
+            "source_revision": "<opaque native identity redacted>"
+          }
+        }
+      ],
+      "expect_empty": false,
+      "expected_name": "源 code.rs",
+      "expected_max_rank": 1,
+      "modality": "code",
+      "relevant_rank": 1
+    },
+    {
+      "name": "notebook",
+      "query": {
+        "text": "notebookparity",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 13,
+          "batch": [
+            {
+              "id": "code:1:2:true:notebookparity",
+              "kind": "code",
+              "title": "notebookparity",
+              "subtitle": "<fixture>",
+              "match_explanation": "function · cell 2, line 1",
+              "score": 1.0,
+              "path": "<fixture>",
+              "location": {
+                "kind": "notebook",
+                "cell_ordinal": 1,
+                "line": 1,
+                "end_line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "def notebookparity():\n    return 1",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c1",
+                "source_revision": "<opaque native identity redacted>"
+              }
+            }
+          ],
+          "done": true
+        }
+      ],
+      "cli": [
+        {
+          "id": "code:1:2:true:notebookparity",
+          "kind": "code",
+          "title": "notebookparity",
+          "subtitle": "<fixture>",
+          "match_explanation": "function · cell 2, line 1",
+          "score": 1.0,
+          "path": "<fixture>",
+          "location": {
+            "kind": "notebook",
+            "cell_ordinal": 1,
+            "line": 1,
+            "end_line": 2
+          },
+          "thumbnail_path": null,
+          "excerpt": "def notebookparity():\n    return 1",
+          "matching_moments": [],
+          "entry_reference": {
+            "result_id": "c1",
+            "source_revision": "<opaque native identity redacted>"
+          }
+        }
+      ],
+      "expect_empty": false,
+      "expected_name": "cells.ipynb",
+      "expected_max_rank": 1,
+      "modality": "code",
+      "relevant_rank": 1
+    },
+    {
+      "name": "code_isolation",
+      "query": {
+        "text": "parityneedle",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 14,
+          "batch": [],
+          "done": true
+        }
+      ],
+      "cli": [],
+      "expect_empty": true
+    },
+    {
+      "name": "absent_exact",
+      "query": {
+        "text": "unfindableparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 15,
+          "batch": [],
+          "done": true
+        }
+      ],
+      "cli": [],
+      "expect_empty": true
+    },
+    {
+      "name": "code_absent_exact",
+      "query": {
+        "text": "unfindableparitytoken",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 16,
+          "batch": [],
+          "done": true
+        }
+      ],
+      "cli": [],
+      "expect_empty": true
+    }
+  ],
+  "checks": [
+    "native_ordinary_document_media_byte_sha256_and_resolved_metadata",
+    "native_extension_filters_before_results_and_invalid_request_rejection",
+    "native_indexed_entry_resolution_with_current_source_proof",
+    "native_code_and_notebook_exact_byte_sha256_provenance",
+    "native_extraction_exact_code_opt_in_and_payload_parity"
+  ],
+  "failures": [
+    "AssertionError(\"\\nthread 'main' (90076) panicked at crates\\\\ws-client\\\\examples\\\\native-client-smoke.rs:60:5:\\nactual document extraction must be ready\\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\\n\")"
+  ],
+  "quality_misses": [],
+  "owned_job_empty": true,
+  "harness_sha256": "4e4a80b13d4052b318195c21e863863c6154f9e18f0fc093e696427b8344de99",
+  "expected_pipeline_version": 2,
+  "expected_semantic_floor": 0.65,
+  "expected_code_query_policy": "code-and-search-task-corroboration-v1",
+  "binary_sha256": {
+    "winsearchd.exe": "ba9a7b3eb502d5b17e014bce5964749de7538c7fa1f280b20a793a68f954fef1",
+    "winsearch-cli.exe": "027d5e9b83f48ae681f09c28b3cf2945d924c964d0792698a5774e07a281e1cd",
+    "winsearch-embed.exe": "70305a0cb61e97844253cf3dfa3f85f4219ae3bfcad734d1762c438419971317",
+    "winsearch-extract.exe": "ce9fa7624e267457d2daca7f1bb1e22c8504dbd830c709864115ab709b758cd9"
+  },
+  "adjacent_native_dll_sha256": {
+    "ggml-base.dll": "f90aa4e0cfd7809b84f8866526e70d3dc0f5deecf59371e24ce57a6f4da54b89",
+    "ggml-cpu-alderlake.dll": "697a3d64209cd048941a52cc659bd721b843ec2460fefd015cf6c05851bc6998",
+    "ggml-cpu-cannonlake.dll": "d1a1703e870094b3ded18fbaa703cc6ba109a4ec17eae75933b5e37e97ec94c1",
+    "ggml-cpu-cascadelake.dll": "ab6bb30884c0bb91cb7ab35e3a5cf2e94817a5be02afa373db43fb43d912d3c2",
+    "ggml-cpu-haswell.dll": "ff1899b838915629b543eefaca2b59cbd697eb545ca3d053849e9720dcf93bf2",
+    "ggml-cpu-icelake.dll": "c37dd0d96c6d18cfcbe613415348989054bca4b813fc895c1e0ea5e2fa582f0f",
+    "ggml-cpu-sandybridge.dll": "a185ef2810f9b94b227cdc79cceecd73392964897383021cf549ae0a93f8ab1d",
+    "ggml-cpu-skylakex.dll": "f735470e98ac465bcaefa49c011e9a6312792ed8352447ca5b94e0d3ea959828",
+    "ggml-cpu-sse42.dll": "1cc60a342cfa4e3671d8248c331bfffbc75a16c29c889832fc78b736bbef2488",
+    "ggml-cpu-x64.dll": "9856ba92bbf4f17a643bf86e5da819f4ea2ecff86a3f76072d6fd0f6b489bec3",
+    "ggml.dll": "d9380866b1560cd58f129d5ead2ec2b3d36c4c25097efed504d7747959ae0513",
+    "llama.dll": "46209859b057ce876c8b1d320087cde3e0d7e21baef9dcadce309ca349906a7c",
+    "mtmd.dll": "384b412308a247a2404911e2bcc95c6d6470cb99626f29cdf141d4f47e863c69",
+    "pdfium.dll": "1f2aee4286b8cf0413ab4562b7121aa454f9cfd9afd6ca8609bcef80927b3f80"
+  },
+  "offline_comparator_sha256": "be71ecbc155b4df22b60e7bd8060cbcd057a1c05d175b09680840114db082c3e",
+  "headless_client_sha256": "e1719b2a878770997588ff502e9d32e790fef3e002bf3aee86cbbaf86bc0dc03",
+  "generated_source_sha256": {
+    "code\\cells.ipynb": "39ff523217cbec65301238ccb92d04677898eba2ebc5c860baad13c1c25061b9",
+    "code\\源 code.rs": "e91ca6326352f465dabbe4bc67d4271714e226c0a09cc36fdecc9f45c2e80bef",
+    "documents\\item-a.txt": "9fc1db8e72de0275279a18f08a76e43fbbeae6fbde7b9924c4d1f351eb4652d1",
+    "documents\\item-b.pdf": "028cfcb54c84c18f5351445f7edeb6d2651e9e4950714c61042cdd911870671e"
+  },
+  "index_seconds": 3.283,
+  "ordinary_provenance": [
+    {
+      "path": "<fixture>",
+      "revision": 1,
+      "hash_revision": 1,
+      "sha256": "9fc1db8e72de0275279a18f08a76e43fbbeae6fbde7b9924c4d1f351eb4652d1",
+      "resolved": {
+        "result_id": "e1",
+        "root_path": "<fixture>",
+        "path": "<fixture>",
+        "name": "item-a.txt",
+        "kind": "document",
+        "size_bytes": 85,
+        "modified_unix_seconds": 1792339076,
+        "index_revision": 1,
+        "source_revision": "<opaque native identity redacted>",
+        "content_sha256": "9fc1db8e72de0275279a18f08a76e43fbbeae6fbde7b9924c4d1f351eb4652d1"
+      }
+    },
+    {
+      "path": "<fixture>",
+      "revision": 1,
+      "hash_revision": 1,
+      "sha256": "028cfcb54c84c18f5351445f7edeb6d2651e9e4950714c61042cdd911870671e",
+      "resolved": {
+        "result_id": "e2",
+        "root_path": "<fixture>",
+        "path": "<fixture>",
+        "name": "item-b.pdf",
+        "kind": "document",
+        "size_bytes": 924,
+        "modified_unix_seconds": 1792339076,
+        "index_revision": 1,
+        "source_revision": "<opaque native identity redacted>",
+        "content_sha256": "028cfcb54c84c18f5351445f7edeb6d2651e9e4950714c61042cdd911870671e"
+      }
+    }
+  ],
+  "extension_filters": [
+    {
+      "query": {
+        "text": "pdfparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          ".PDF"
+        ]
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 3,
+          "batch": [
+            {
+              "id": "e2",
+              "kind": "document",
+              "title": "item-b.pdf",
+              "subtitle": "<fixture>",
+              "match_explanation": "Matches extracted content",
+              "score": 0.41,
+              "path": "<fixture>",
+              "location": {
+                "kind": "page",
+                "page": 2
+              },
+              "thumbnail_path": "<checkout>\\artifacts\\query-scope-native-final\\data\\cache\\thumbs\\extract-89756-1792339079178970800-3-0.png",
+              "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+              "matching_moments": [
+                {
+                  "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+                  "location": {
+                    "kind": "page",
+                    "page": 2
+                  },
+                  "thumbnail_path": "<checkout>\\artifacts\\query-scope-native-final\\data\\cache\\thumbs\\extract-89756-1792339079178970800-3-1.png"
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e2",
+                "source_revision": "<opaque native identity redacted>"
+              }
+            }
+          ],
+          "done": true
+        }
+      ],
+      "expected_name": "item-b.pdf"
+    },
+    {
+      "query": {
+        "text": "pdfparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "txt"
+        ]
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 4,
+          "batch": [],
+          "done": true
+        }
+      ],
+      "expected_name": null
+    },
+    {
+      "query": {
+        "text": "amberparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "txt"
+        ]
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 5,
+          "batch": [
+            {
+              "id": "e1",
+              "kind": "document",
+              "title": "item-a.txt",
+              "subtitle": "<fixture>",
+              "match_explanation": "Matches extracted content",
+              "score": 0.41,
+              "path": "<fixture>",
+              "location": {
+                "kind": "line",
+                "line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+              "matching_moments": [
+                {
+                  "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+                  "location": {
+                    "kind": "line",
+                    "line": 2
+                  },
+                  "thumbnail_path": null
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e1",
+                "source_revision": "<opaque native identity redacted>"
+              }
+            }
+          ],
+          "done": true
+        }
+      ],
+      "expected_name": "item-a.txt"
+    },
+    {
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "rs"
+        ]
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 6,
+          "batch": [
+            {
+              "id": "code:2:1:true:parityneedle",
+              "kind": "code",
+              "title": "parityneedle",
+              "subtitle": "<fixture> code.rs",
+              "match_explanation": "function · line 1",
+              "score": 1.0,
+              "path": "<fixture> code.rs",
+              "location": {
+                "kind": "line",
+                "line": 1
+              },
+              "thumbnail_path": null,
+              "excerpt": "pub fn parityneedle() {}",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c2",
+                "source_revision": "<opaque native identity redacted>"
+              }
+            },
+            {
+              "id": "code:2:2:false:parityneedle",
+              "kind": "code",
+              "title": "parityneedle",
+              "subtitle": "<fixture> code.rs",
+              "match_explanation": "reference · line 2",
+              "score": 0.949999988079071,
+              "path": "<fixture> code.rs",
+              "location": {
+                "kind": "line",
+                "line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "parityneedle",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c2",
+                "source_revision": "<opaque native identity redacted>"
+              }
+            }
+          ],
+          "done": true
+        }
+      ],
+      "expected_name": "源 code.rs"
+    },
+    {
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "py"
+        ]
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 7,
+          "batch": [],
+          "done": true
+        }
+      ],
+      "expected_name": null
+    },
+    {
+      "query": {
+        "text": "notebookparity",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "ipynb"
+        ]
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 8,
+          "batch": [
+            {
+              "id": "code:1:2:true:notebookparity",
+              "kind": "code",
+              "title": "notebookparity",
+              "subtitle": "<fixture>",
+              "match_explanation": "function · cell 2, line 1",
+              "score": 1.0,
+              "path": "<fixture>",
+              "location": {
+                "kind": "notebook",
+                "cell_ordinal": 1,
+                "line": 1,
+                "end_line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "def notebookparity():\n    return 1",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c1",
+                "source_revision": "<opaque native identity redacted>"
+              }
+            }
+          ],
+          "done": true
+        }
+      ],
+      "expected_name": "cells.ipynb"
+    },
+    {
+      "query": {
+        "text": "1+2",
+        "mode": "auto",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "txt"
+        ]
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 9,
+          "batch": [],
+          "done": true
+        }
+      ],
+      "expected_name": null
+    }
+  ],
+  "invalid_extension_filter": {
+    "type": "error",
+    "id": 2,
+    "code": "invalid_request",
+    "message": "invalid search extension filter"
+  },
+  "entry_resolution": {
+    "admitted": {
+      "type": "resolved_entry",
+      "id": 8,
+      "entry": {
+        "result_id": "e1",
+        "root_path": "<fixture>",
+        "path": "<fixture>",
+        "name": "item-a.txt",
+        "kind": "document",
+        "size_bytes": 85,
+        "modified_unix_seconds": 1792339076,
+        "index_revision": 1,
+        "source_revision": "<opaque native identity redacted>",
+        "content_sha256": "9fc1db8e72de0275279a18f08a76e43fbbeae6fbde7b9924c4d1f351eb4652d1"
+      }
+    }
+  },
+  "code_provenance": [
+    {
+      "path": "<fixture>",
+      "revision": 1,
+      "sha256": "39ff523217cbec65301238ccb92d04677898eba2ebc5c860baad13c1c25061b9"
+    },
+    {
+      "path": "<fixture> code.rs",
+      "revision": 1,
+      "sha256": "e91ca6326352f465dabbe4bc67d4271714e226c0a09cc36fdecc9f45c2e80bef"
+    }
+  ],
+  "pids": [],
+  "elapsed_seconds": 6.09
+}

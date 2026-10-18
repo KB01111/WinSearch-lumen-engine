@@ -14,15 +14,17 @@ async fn search(
     mode: SearchMode,
     include_semantic: bool,
 ) -> Result<Vec<SearchResult>> {
-    let mut stream = client
-        .search(SearchQuery {
+    search_query(client,SearchQuery {
             text: text.into(),
             mode,
             limit: 5,
             include_semantic,
             ..Default::default()
-        })
-        .await?;
+        }).await
+}
+
+async fn search_query(client:&Client,query:SearchQuery)->Result<Vec<SearchResult>> {
+    let mut stream=client.search(query).await?;
     let mut results = Vec::new();
     let mut terminal = false;
     while let Some(frame) = stream.next().await? {
@@ -35,7 +37,7 @@ async fn search(
 
 async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_json::Value> {
     let info = client.info().await?;
-    for feature in ["search.entry_references","entry.resolve.code","entry.preview.code"] {assert!(info.supports(feature));}
+    for feature in ["search.entry_references","entry.resolve.code","entry.preview.code","search.filters"] {assert!(info.supports(feature));}
     let status = client.status().await?;
     let model = client.model_status().await?;
     let engine_config = client.config().await?;
@@ -55,6 +57,11 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
     drop(events);
 
     let document = search(client, "amberparitytoken", SearchMode::Files, false).await?;
+    if document.is_empty() {
+        let status=client.status().await?;
+        let repeated=search(client,"amberparitytoken",SearchMode::Files,false).await?;
+        eprintln!("document admission diagnostic: {}",serde_json::json!({"status":status,"repeated":repeated}));
+    }
     assert!(
         !document.is_empty(),
         "actual document extraction must be ready"
@@ -64,6 +71,20 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
         code.iter().any(|hit| hit.location.is_some()),
         "actual code locations must survive IPC"
     );
+    let mut extension_filters=Vec::new();
+    for (text,mode,extension,expected) in [
+        ("pdfparitytoken",SearchMode::Files,".PDF",Some("item-b.pdf")),
+        ("pdfparitytoken",SearchMode::Files,"txt",None),
+        ("parityneedle",SearchMode::Code,"rs",Some("源 code.rs")),
+        ("parityneedle",SearchMode::Code,"py",None),
+    ] {
+        let hits=search_query(client,SearchQuery {text:text.into(),mode,limit:5,
+            extensions:vec![extension.into()],..Default::default()}).await?;
+        if let Some(name)=expected {assert!(hits.iter().any(|hit|hit.path.as_deref()
+            .is_some_and(|path|std::path::Path::new(path).file_name().unwrap()==name)));}
+        else {assert!(hits.is_empty());}
+        extension_filters.push(serde_json::json!({"query":text,"extension":extension,"results":hits}));
+    }
     let semantic_code = if engine_config.semantic_enabled {
         let query = "a function named parityneedle and its caller";
         assert!(search(client, query, SearchMode::Code, false).await?.is_empty());
@@ -185,6 +206,8 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
         "engine_version": info.engine_version, "features": info.features,
         "initial_status": status, "model_status": model, "engine_config": engine_config,
         "document": document, "code": code, "semantic_code": semantic_code,
+        "extension_filters":extension_filters,
+        "extension_checks":["pdf_extension_and_case", "excluded_document_extension", "code_extension", "excluded_code_extension"],
         "notebook":notebook,"code_entries":code_entries,
         "reference_checks":["bound_document_and_pdf_refs", "bound_code_and_notebook_refs",
             "resolved_code_hashes", "code_proof_stays_invalid_after_restore"],

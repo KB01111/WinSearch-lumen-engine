@@ -71,6 +71,7 @@ pub struct SearchStream {
     results: usize,
     frames: usize,
     mode: ws_protocol::SearchMode,
+    extensions: Vec<String>,
 }
 
 impl SearchStream {
@@ -98,6 +99,11 @@ impl SearchStream {
                     || (matches!(reference.indexed_id(),Some(ws_protocol::IndexedEntryId::Code(_)))
                         != (self.mode==ws_protocol::SearchMode::Code)))) {
                     return Err(Error::Protocol("search returned an invalid bound entry reference"));
+                }
+                if !self.extensions.is_empty() && batch.iter().any(|hit|
+                    hit.kind==ws_protocol::ResultKind::Folder || !hit.path.as_deref().is_some_and(|path|ws_protocol::search_extension_allowed(&self.extensions,
+                        std::path::Path::new(path).extension().and_then(|extension|extension.to_str()).unwrap_or("")))) {
+                    return Err(Error::Protocol("search returned a result outside the extension filter"));
                 }
                 return Ok(SearchBatch { batch, done });
             }
@@ -448,19 +454,22 @@ impl Client {
     }
 
     pub async fn search(&self, query: SearchQuery) -> Result<SearchStream, Error> {
-        if query.limit as usize > MAX_SEARCH_RESULTS || query.text.len() > 64 * 1024 {
+        if query.limit as usize > MAX_SEARCH_RESULTS || query.text.len() > 64 * 1024
+            || !ws_protocol::valid_search_extensions(&query.extensions) {
             return Err(Error::InvalidInput("search exceeds its request budget"));
         }
         let mut operation = self.open(false, Some("search.exact")).await?;
         for feature in [
             (query.include_semantic, "search.semantic"),
             (query.mode == ws_protocol::SearchMode::Code, "code"),
+            (!query.extensions.is_empty(), "search.filters"),
         ] {
             if feature.0 && !operation.session.info.supports(feature.1) {
                 return Err(Error::Unsupported(feature.1));
             }
         }
         let mode=query.mode;
+        let extensions=query.extensions.clone();
         operation
             .session
             .send(
@@ -476,6 +485,7 @@ impl Client {
             results: 0,
             frames: 0,
             mode,
+            extensions,
         })
     }
 
@@ -690,6 +700,50 @@ mod tests {
             }
         ));
         send_server(peer, &ack()).await;
+    }
+
+    #[tokio::test]
+    async fn extension_filter_requires_its_capability_before_sending_a_query() {
+        use tokio::io::AsyncReadExt;
+        let (client,mut peer)=fixture();
+        let task=tokio::spawn(async move {
+            hello(&mut peer).await;
+            assert_eq!(peer.read(&mut [0]).await.unwrap(),0,"legacy peer must never receive a filtered query");
+        });
+        let outcome=client.search(SearchQuery {extensions:vec!["pdf".into()],..Default::default()}).await;
+        assert!(matches!(outcome,Err(Error::Unsupported("search.filters"))));task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn extension_filter_rejects_a_peer_returning_unselected_results() {
+        for (path,kind,allowed) in [
+            (Some("C:/Docs/image.png".to_string()),ws_protocol::ResultKind::Image,false),
+            (None,ws_protocol::ResultKind::File,false),
+            (Some("C:/Docs/source.PDF".to_string()),ws_protocol::ResultKind::Document,true),
+            (Some("C:/Docs/folder.pdf".to_string()),ws_protocol::ResultKind::Folder,false),
+        ] {
+            let (client,mut peer)=fixture();
+            let task=tokio::spawn(async move {
+                peer.connect().await.unwrap();let _=read_client(&mut peer).await;
+                let mut response=ack();if let ServerMessage::HelloAck {features,..}=&mut response {features.push("search.filters".into());}
+                send_server(&mut peer,&response).await;
+                let ClientMessage::Search {id,..}=read_client(&mut peer).await else {panic!("expected filtered search");};
+                send_server(&mut peer,&ServerMessage::Results {id,batch:vec![SearchResult {id:"e1".into(),path,kind,..Default::default()}],done:true}).await;
+            });
+            let mut stream=client.search(SearchQuery {extensions:vec!["pdf".into()],..Default::default()}).await.unwrap();
+            let result=stream.next().await;
+            if allowed {assert!(matches!(result,Ok(Some(batch)) if batch.done && batch.batch.len()==1));}
+            else {assert!(matches!(result,Err(Error::Protocol(_))));}
+            task.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn extension_filter_rejects_invalid_input_before_connecting() {
+        let (client,_peer)=fixture();
+        for extensions in [vec!["../pdf".into()],vec!["pdf".into();65],vec!["a".repeat(33)]] {
+            assert!(matches!(client.search(SearchQuery {extensions,..Default::default()}).await,Err(Error::InvalidInput(_))));
+        }
     }
 
     #[test]

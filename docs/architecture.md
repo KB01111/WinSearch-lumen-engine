@@ -680,3 +680,22 @@ content. Full-byte provenance is distinct from extraction coverage and from the
 opaque root/policy/model/native metadata proof.
 See [ordinary provenance validation](validation/2026-10-18-ordinary-provenance/README.md)
 for actual native hashes, regressions and remaining review/performance limits.
+
+### Request scope before candidate limits
+
+Search mode/category/extension admission uses a connection-local request view,
+independent of the native source/root `query_entries` admission. Every ordinary
+exact/name/token/content/path candidate source filters before its existing cap;
+content FTS applies both source and request admission inside DISTINCT/LIMIT.
+The serialized store replaces request scope for each search. General metadata
+and preview admission remain independent. No persistent schema is added.
+
+The additive `search.filters` capability selects bounded source-file extensions.
+Ordinary semantic matching IDs and code admitted-file predicates enforce the
+same filters before their limits. Rust/C# check capability, input bounds and
+returned extensions; C# snapshots request lists before awaits. Empty filters
+preserve existing behavior. More selective filters may inspect additional indexed
+rows; final latency/scale measurements must quantify callback/inspection cost.
+Related, finer file-kind scopes and explicit outcomes remain unfinished. One
+native empty result after pause/resume is retained as an unconfirmed failure;
+later passing samples do not establish its cause or fix.

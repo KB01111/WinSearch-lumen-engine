@@ -1,0 +1,19 @@
+rtk : Traceback (most recent call last):
+At line:1 char:137
++ ... ython.exe"; rtk proxy $taskPython -X utf8 tools/test-search-parity.py ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+  File "<checkout>\tools\test-search-parity.py", line 517, in <module>
+    main()
+  File "<checkout>\tools\test-search-parity.py", line 360, in main
+    stdout, stderr = owned_command([str(binary/'examples/native-client-smoke.exe')], timeout=90)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<checkout>\tools\test-search-parity.py", line 169, in owned_command
+    assert process.returncode == 0, stderr.decode('utf-8', errors='replace')
+           ^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError:
+thread 'main' (90076) panicked at crates\ws-client\examples\native-client-smoke.rs:60:5:
+actual document extraction must be ready
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

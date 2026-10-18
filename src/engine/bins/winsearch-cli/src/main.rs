@@ -268,6 +268,7 @@ fn cmd_search(
         limit,
         include_semantic: semantic,
         categories: Vec::new(),
+        extensions: Vec::new(),
     })?;
 
     if json {
@@ -821,6 +822,7 @@ mod tests {
                 limit: 10,
                 include_semantic: true,
                 categories: Vec::new(),
+                extensions: Vec::new(),
             })
             .expect("search");
         assert_eq!(hits.len(), 2);

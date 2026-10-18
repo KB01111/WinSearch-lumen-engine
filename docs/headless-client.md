@@ -111,6 +111,15 @@ include notebook outputs, while preview text excludes them. Raster/media/uncache
 preview, larger-source/legacy provenance recovery, Related and expanded filters
 remain open.
 
+`SearchQuery.extensions` selects source-file extensions in ordinary/code exact
+and semantic searches. It accepts at most64 single ASCII components of1..32
+letters/digits/`+`/`-`/`_`, with an optional leading dot and case-insensitive
+matching. An empty list preserves existing behavior. Nonempty filters require
+`search.filters`; the client rejects unsupported peers before sending a query,
+malformed input, mismatched reply extensions and folder/null-path replies.
+Mode/category/extension filters precede engine candidate caps and semantic top-k.
+Finer file-kind scopes, Related and explicit source/semantic outcomes remain open.
+
 From `src/engine`, `cargo test -p ws-client --all-targets` runs framing and real
 Windows-pipe transport fixtures without models or a daemon. The
 `native-client-smoke` example is a separate assertion-based fixture for the

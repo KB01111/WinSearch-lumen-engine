@@ -22,8 +22,10 @@ define the full scope.
 
 ### Lumen integration and native contract
 
-- [ ] Complete the engine contracts for Related search, search scopes/filters,
-  and explicit semantic availability, outcomes and provenance.
+- [ ] Complete the engine contracts for Related search, remaining scopes/file-kind
+  filters, and explicit semantic availability, outcomes and provenance.
+- [ ] Distinguish superseded queries from genuine empty results and resolve the
+  transient native pause/resume result failure; preserve current source fences.
 - [ ] Implement the typed WinSearch adapter behind Lumen's existing SearchService.
   Keep secured IPC, filesystem grants and native actions in Lumen's Rust host.
 - [ ] Consolidate to one authoritative crawler, index and embedding lifecycle;

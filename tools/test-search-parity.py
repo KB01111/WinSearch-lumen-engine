@@ -155,6 +155,7 @@ def main():
         environment = {**os.environ, 'WINSEARCH_DATA_DIR': str(output/'data'),
             'WINSEARCH_INSTANCE_ID': instance, 'WS_PIPE': pipe_name,
             'WS_EMBED_STUB': '0', 'WS_EMBED_BACKEND': 'cpu',
+            'RUST_LOG':'winsearchd=warn,winsearchd::engine=debug,ws_platform=warn,ws_protocol=warn,ws_index=warn',
             'WS_EMBED_MODEL': str(output/'data/models'/model.name if options.real_model else generated/'missing.gguf'),
             'WINSEARCH_TEST_DECODER_DIR': str(ROOT/'artifacts/dependencies/ffmpeg-2026-09-30/ffmpeg-n9.0.2-17-g2a571b6068-win64-lgpl-shared-9.0/bin')}
 
@@ -166,6 +167,8 @@ def main():
                 creationflags=subprocess.CREATE_NO_WINDOW)
             owner.assign(process)
             stdout, stderr = process.communicate(input=b'1', timeout=timeout)
+            if process.returncode != 0:
+                (output/(Path(args[0]).stem+'-failure.log')).write_bytes(stdout+stderr)
             assert process.returncode == 0, stderr.decode('utf-8', errors='replace')
             return stdout, stderr
 
@@ -232,6 +235,16 @@ def main():
                 assert child.poll() is None and time.perf_counter() < deadline, 'index did not become ready'
                 time.sleep(.2)
 
+        def filtered(text, extension, mode='files', semantic=False, expected=None):
+            query={'text':text,'mode':mode,'limit':5,'include_semantic':semantic,'extensions':[extension]}
+            frames=client.search_frames(query)
+            hits=[hit for frame in frames for hit in frame['batch']]
+            assert all(hit['kind']!='folder' and hit.get('path') and
+                Path(hit['path']).suffix.lstrip('.').lower()==extension.lstrip('.').lower() for hit in hits),hits
+            if expected is None:assert not hits,hits
+            else:assert any(Path(hit['path']).name==expected for hit in hits),(query,hits)
+            summary.setdefault('extension_filters',[]).append({'query':query,'frames':frames,'expected_name':expected})
+
         try:
             with (output/'daemon.log').open('wb') as log:
                 child = subprocess.Popen([str(binary/'winsearchd.exe'), '--test-stdin-gate'],
@@ -297,6 +310,24 @@ def main():
                 assert resolved['type']=='resolved_entry' and resolved['entry']['content_sha256']==actual_hash,resolved
                 summary['ordinary_provenance'].append({'path':path,'revision':revision,'hash_revision':hash_revision,'sha256':actual_hash,'resolved':resolved['entry']})
             summary['checks'].append('native_ordinary_document_media_byte_sha256_and_resolved_metadata')
+            filtered('pdfparitytoken','.PDF',expected='item-b.pdf')
+            filtered('pdfparitytoken','txt')
+            filtered('amberparitytoken','txt',expected='item-a.txt')
+            filtered('parityneedle','rs',mode='code',expected=source.name)
+            filtered('parityneedle','py',mode='code')
+            filtered('notebookparity','ipynb',mode='code',expected='cells.ipynb')
+            filtered('1+2','txt',mode='auto')
+            malformed=Frames(pipe_name,child)
+            try:
+                malformed.sequence+=1
+                malformed.send({'type':'search','id':malformed.sequence,'query':{'text':'needle','extensions':['../pdf']}})
+                while True:
+                    rejected=malformed.read()
+                    if rejected.get('id')==malformed.sequence:break
+                assert rejected['type']=='error' and rejected['code']=='invalid_request',rejected
+                summary['invalid_extension_filter']=rejected
+            finally:malformed.stream.close()
+            summary['checks'].append('native_extension_filters_before_results_and_invalid_request_rejection')
             document_hits = compare('document_exact', 'amberparitytoken', expected='item-a.txt', location={'kind': 'line', 'line': 2})
             document_hit = next(hit for hit in document_hits if Path(hit['path']).name == 'item-a.txt')
             reference = {'result_id':document_hit['id'],'source_revision':None}
@@ -399,6 +430,8 @@ def main():
                     if name == 'audio_semantic':
                         assert not relevant.get('excerpt'), 'audio embeddings must not invent a transcript'
                 compare_offline()
+                filtered('baking a chocolate cake with flour butter eggs and sugar','txt',semantic=True,expected='item-a.txt')
+                filtered('a function named parityneedle and its caller','rs',mode='code',semantic=True,expected=source.name)
                 # A cold query first yields the exact-stage frame. Cancel while
                 # real CPU semantic inference remains outstanding, then require
                 # an empty terminal frame and a live public transport.
