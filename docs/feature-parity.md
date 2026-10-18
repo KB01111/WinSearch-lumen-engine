@@ -100,8 +100,8 @@ include Lumen integration and the final native/installed acceptance gates.
       twenty actual grammars plus TSX, bounded owned-child batches, syntax
       diagnostics, data-preserving schema4 migration, native scheduler and exact definition ranking verified
 - [~] Code byte provenance — exact admitted SHA256, durable content revision,
-      atomic replacement and legacy-hash recovery; public code references,
-      hash metadata and bounded code/notebook preview remain open
+      atomic replacement and legacy-hash recovery; public bound code references
+      and current hash metadata added; bounded code/notebook preview remains open
 - [~] Notebook cells without outputs, virtual/cell-local line preservation (Phase 5) —
       native child/store/reopen and actual named-pipe cell-local location verified;
       native preview/editor interaction remains

@@ -413,3 +413,24 @@ warnings. An intentionally interrupted CUDA rebuild, a CMake cache-source path
 failure and a media-helper fixture-path error are retained as separate records;
 they are not quality/GPU passes. Full GPU/scale/installed acceptance and independent
 review remain open. [Evidence, functional failures and reproduction](validation/2026-10-18-parser-code/README.md).
+
+### Bound-reference checkpoint, 2026-10-18
+
+The rebuilt CPU daemon/client retains full same-engine CLI/pipe DTO parity,
+including canonical source-bound references. No-model10 public/seven offline
+snapshot cases and eight client lifecycle/four preview/four reference checks pass
+in7.450s (index4.217s). Managed CPU21 public/17 offline cases and the same client
+checks plus three semantic checks pass in76.239s (index60.919s), with four native
+768-dimensional code vectors. Actual code/notebook hashes match independent
+source-byte digests; both owned jobs end empty.
+
+Original positives remain Recall@5 .90/MRR .85; expanded positives .9091/.8636,
+ten empty controls FP0, screenshot miss and audio rank2 retained. These uncontrolled
+whole-harness times include staging/hashing/indexing/inference/comparisons; the
+previous separate133.656s sample does not establish a causal speedup. No quality
+threshold, model or ranking policy changed. A first cross-policy semantic client
+comparison failed solely on its deliberately expired proof and is retained;
+the comparison now excludes only that proof, retaining reference IDs and all
+ranking/location/excerpt fields. Same-engine CLI/pipe equality is unchanged.
+Final1k/10k/50k/200k native latency/resource and CPU/GPU/installed gates remain open.
+[Logs, hashes, review scope and failures](validation/2026-10-18-bound-references/README.md).

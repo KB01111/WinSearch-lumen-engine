@@ -1,0 +1,29 @@
+rtk :    Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearchd
+)
+At <checkout>\artifacts\entry-reference-checks.ps1:12 char:15
++ ... code-red' { rtk proxy cargo test -p winsearchd code_entry_reference_  ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling wi...ins\winsearchd):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 38.36s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-a1af7bf73df4d90a.exe)
+
+running 1 test
+test engine::tests::code_entry_reference_resolves_current_native_hash_and_rejects_old_policy_and_source ... FAILED
+
+failures:
+
+---- engine::tests::code_entry_reference_resolves_current_native_hash_and_rejects_old_policy_and_source stdout ----
+
+thread 'engine::tests::code_entry_reference_resolves_current_native_hash_and_rejects_old_policy_and_source' (88604) panicked at bins\winsearchd\src\engine.rs:1467:59:
+code uses its actual code-file identity: InvalidRequest
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    engine::tests::code_entry_reference_resolves_current_native_hash_and_rejects_old_policy_and_source
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 205 filtered out; finished in 0.48s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

@@ -552,6 +552,11 @@ impl CodeStore {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    pub fn get_repo(&self,id:i64)->Result<Option<RepoRow>,CodeStoreError> {
+        Ok(self.conn.query_row("SELECT id,root_path,name,has_git,enabled,current_generation FROM repos WHERE id=?1",[id],
+            |r|Ok(RepoRow {id:r.get(0)?,root_path:r.get(1)?,name:r.get(2)?,has_git:r.get(3)?,enabled:r.get(4)?,current_generation:r.get(5)?})).optional()?)
+    }
+
     /// Increments `current_generation` for `repo_id` and returns the new generation.
     pub fn begin_generation(&mut self, repo_id: i64) -> Result<i64, CodeStoreError> {
         let gen: i64 = self.conn.query_row(

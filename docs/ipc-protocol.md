@@ -179,8 +179,11 @@ Additive fields use `#[serde(default)]` semantics and do not bump the version.
 
 Peers advertising `entry.resolve` support a metadata-only operation for native
 preview and action consumers. It resolves current ordinary filesystem IDs
-(`e<positive entry id>`); code-specific and catalog application resolution remain
-separate work. The caller supplies an indexed identity, never a source path:
+(`e<positive entry id>`). Peers additionally advertising `entry.resolve.code`
+resolve opted-in code-file IDs (`c<positive code-file id>`). IDs are canonical
+positive signed 64-bit decimals: no signs, leading zeros, paths or query-specific
+semantic/symbol IDs. Catalog application resolution remains separate work.
+The caller supplies an indexed identity, never a source path:
 
 ```json
 {"type":"resolve_entry","id":41,"reference":{"result_id":"e23","source_revision":null}}
@@ -188,15 +191,24 @@ separate work. The caller supplies an indexed identity, never a source path:
 
 `source_revision` is optional/nullable for initial resolution. Supplying a prior
 value requires an exact match to the current source, content revision, model
-generation and access-policy epoch. Source replacement or revoked/restored grants
-expire it. Unrelated vector-cache updates and unchanged policy saves do not.
+generation, engine incarnation and access-policy epoch. Source replacement,
+engine restart or revoked/restored grants expire it. A stored native file identity
+must still match the current source before inventory reconciliation. Unrelated
+vector-cache updates and unchanged policy saves do not. A supplied proof must be
+nonblank and at most 64KiB UTF-8. If an incarnation cannot be created, metadata is
+`not_ready`; exact name search remains available without bound references.
 Unknown fields inside `reference`, including a caller-supplied `path`, are refused.
 Malformed IDs produce `invalid_request`; unavailable, denied or changed sources
 produce `not_ready`, with a sanitized message and no entry payload.
 
 The correlated `resolved_entry` reply contains `entry`: `result_id`, `root_path`,
 `path`, `name`, `kind`, current `size_bytes`, nullable `modified_unix_seconds`,
-nullable `index_revision`, and opaque `source_revision`. Metadata-only entries
+nullable `index_revision`, opaque `source_revision` and optional `content_sha256`.
+The latter is a canonical lowercase SHA-256 of the complete admitted source bytes
+only when established by current extraction; it is currently available for code
+and notebook files. Notebook hashes include the complete original JSON bytes,
+while indexed text excludes outputs. Ordinary-file hashes remain unknown/omitted.
+Metadata-only entries
 have no `index_revision`; stale extracted content cannot supply one for a replaced
 source. A positive revision does not imply complete extraction or uncapped page
 coverage. **The source revision is a metadata/identity proof, not a content hash.**
@@ -211,12 +223,25 @@ the IPC and native paths out of a direct React transport.
 
 The C# client checks the capability before sending, snapshots mutable caller
 arguments, correlates replies and rejects foreign IDs/proofs, missing metadata
-and paths outside the returned local root. Those lexical checks complement the
+and paths outside the returned local root. It also validates hash format and
+requires a positive content revision for any hash. Code/file reference domains
+must match the entry kind. Those lexical checks complement the
 engine's native residency/reparse/current-policy checks; they do not replace them.
 The additive operation retains protocol version1. The
 [async Rust client](headless-client.md) performs equivalent reply checks and
-uses the same shared DTOs. The cached-text route below is additive; code identity
-mapping, actual content provenance and Lumen host integration remain open.
+uses the same shared DTOs. The cached-text route below is additive; code previews,
+ordinary-source provenance and Lumen host integration remain open.
+
+Peers advertising `search.entry_references` add optional `entry_reference` to
+ordinary and code search results, containing the canonical indexed ID and a
+nonempty current proof. `SearchResult.id` remains the query-specific selection ID:
+consumers must use the supplied reference instead of parsing semantic or symbol
+IDs. Synthesized/application results have no reference. References are bound and
+source-validated again after waiting for the response writer, with cancellation,
+request identity and query epochs checked before delivery. Clients accept absent
+fields from older peers but reject malformed/unbound references and code/file
+domains inconsistent with the result kind or requested search mode. The trusted
+host must still revalidate its grants and resolve again before source access.
 
 ## Cached text previews
 
@@ -262,7 +287,7 @@ local preview slots and leaves its UI/control connection independent.
 Both clients require the capability and validate identity/proof, local root,
 state, kinds, locations and reply budgets. Capability presence establishes cached
 text only. Raster/page thumbnails, media playback, uncached/on-demand rendering,
-code/notebook references, actual content hashes and the consumer UI remain open.
+code/notebook cached previews, ordinary content hashes and the consumer UI remain open.
 Protocol version remains1. See [validation](validation/2026-10-18-preview-text/README.md).
 
 ## Internal embed-worker protocol (P3.2)

@@ -1,0 +1,45 @@
+rtk :    Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-prot
+ocol)
+At line:1 char:61
++ ... src/engine; rtk proxy cargo test -p ws-client bound_references -- --t ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-client v0.1.0 (<checkout>\src\engine\crates\ws-client)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 19.95s
+     Running unittests src\lib.rs (target\debug\deps\ws_client-554fa414f259563f.exe)
+
+running 4 tests
+test client::tests::bound_references_reject_noncanonical_inputs_before_connecting ... FAILED
+test client::tests::bound_references_require_code_resolution_capability_before_request ... FAILED
+test client::tests::bound_references_resolve_code_with_actual_hash_and_current_proof ... ok
+test client::tests::bound_references_validate_stream_domains_and_keep_legacy_results ... FAILED
+
+failures:
+
+---- client::tests::bound_references_reject_noncanonical_inputs_before_connecting stdout ----
+
+thread 'client::tests::bound_references_reject_noncanonical_inputs_before_connecting' (76588) panicked at crates\ws-client\src\client.rs:1015:13:
+Err(Elapsed(()))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- client::tests::bound_references_require_code_resolution_capability_before_request stdout ----
+
+thread 'client::tests::bound_references_require_code_resolution_capability_before_request' (111852) panicked at crates\ws-client\src\client.rs:1036:9:
+Ok(ResolvedEntry { result_id: "c42", root_path: "C:\\approved", path: "c:\\approved\\report.txt", name: "report.txt", kind: Code, size_bytes: 7, modified_unix_seconds: Some(1), index_revision: Some(2), source_revision: "<proof redacted>", content_sha256: None })
+
+---- client::tests::bound_references_validate_stream_domains_and_keep_legacy_results stdout ----
+
+thread 'client::tests::bound_references_validate_stream_domains_and_keep_legacy_results' (31164) panicked at crates\ws-client\src\client.rs:1086:19:
+case 2: Ok(Some(SearchBatch { batch: [SearchResult { id: "query-specific-hit", kind: File, title: "", subtitle: "", match_explanation: "", score: 0.0, path: None, location: None, thumbnail_path: None, excerpt: None, matching_moments: [], entry_reference: Some(EntryReference { result_id: "e042", source_revision: Some("<proof redacted>") }) }], done: true }))
+
+
+failures:
+    client::tests::bound_references_reject_noncanonical_inputs_before_connecting
+    client::tests::bound_references_require_code_resolution_capability_before_request
+    client::tests::bound_references_validate_stream_domains_and_keep_legacy_results
+
+test result: FAILED. 1 passed; 3 failed; 0 ignored; 0 measured; 33 filtered out; finished in 0.32s
+
+error: test failed, to rerun pass `-p ws-client --lib`

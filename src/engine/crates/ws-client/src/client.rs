@@ -70,6 +70,7 @@ pub struct SearchStream {
     operation: Option<Operation>,
     results: usize,
     frames: usize,
+    mode: ws_protocol::SearchMode,
 }
 
 impl SearchStream {
@@ -91,6 +92,12 @@ impl SearchStream {
                 self.results = self.results.saturating_add(batch.len());
                 if self.frames > MAX_SEARCH_FRAMES || self.results > MAX_SEARCH_RESULTS {
                     return Err(Error::Protocol("search stream exceeded its result budget"));
+                }
+                if batch.iter().any(|hit|hit.entry_reference.as_ref().is_some_and(|reference|
+                    !reference.is_bound() || !reference_matches_kind(reference,hit.kind)
+                    || (matches!(reference.indexed_id(),Some(ws_protocol::IndexedEntryId::Code(_)))
+                        != (self.mode==ws_protocol::SearchMode::Code)))) {
+                    return Err(Error::Protocol("search returned an invalid bound entry reference"));
                 }
                 return Ok(SearchBatch { batch, done });
             }
@@ -402,10 +409,15 @@ impl Client {
         .await
     }
     pub async fn resolve_entry(&self, reference: EntryReference) -> Result<ResolvedEntry, Error> {
+        if !reference.is_valid() {return Err(Error::InvalidInput("invalid indexed entry reference"));}
+        let feature=match reference.indexed_id() {
+            Some(ws_protocol::IndexedEntryId::Code(_))=>"entry.resolve.code",
+            _=>"entry.resolve",
+        };
         let expected = reference.clone();
         self.unary(
             false,
-            Some("entry.resolve"),
+            Some(feature),
             |id| ClientMessage::ResolveEntry { id, reference },
             |message| match message {
                 ServerMessage::ResolvedEntry { entry, .. } if entry_matches(&entry, &expected) => {
@@ -420,7 +432,7 @@ impl Client {
     }
 
     pub async fn preview_text(&self,request:ws_protocol::PreviewRequest)->Result<ws_protocol::EntryPreview,Error> {
-        if request.reference.result_id.len()>32 || request.reference.source_revision.as_ref().is_some_and(|proof|proof.len()>64*1024)
+        if !request.reference.is_valid() || !matches!(request.reference.indexed_id(),Some(ws_protocol::IndexedEntryId::File(_)))
             || !ws_protocol::valid_preview_location(request.location) {
             return Err(Error::InvalidInput("preview exceeds its request budget"));
         }
@@ -444,6 +456,7 @@ impl Client {
                 return Err(Error::Unsupported(feature.1));
             }
         }
+        let mode=query.mode;
         operation
             .session
             .send(
@@ -458,6 +471,7 @@ impl Client {
             operation: Some(operation),
             results: 0,
             frames: 0,
+            mode,
         })
     }
 
@@ -487,9 +501,22 @@ fn model_reply(message: ServerMessage) -> Result<ModelStatus, Error> {
     }
 }
 
+fn reference_matches_kind(reference:&EntryReference,kind:ws_protocol::ResultKind)->bool {
+    use ws_protocol::{IndexedEntryId,ResultKind};
+    match reference.indexed_id() {
+        Some(IndexedEntryId::Code(_))=>kind==ResultKind::Code,
+        Some(IndexedEntryId::File(_))=>matches!(kind,ResultKind::File|ResultKind::Folder|ResultKind::Image
+            |ResultKind::Screenshot|ResultKind::Document|ResultKind::Audio|ResultKind::Video),
+        None=>false,
+    }
+}
+
 fn entry_matches(entry: &ResolvedEntry, expected: &EntryReference) -> bool {
     if entry.result_id != expected.result_id
+        || !expected.is_valid() || !reference_matches_kind(expected,entry.kind)
         || entry.source_revision.trim().is_empty()
+        || entry.source_revision.len()>64*1024
+        || entry.content_sha256.as_ref().is_some_and(|hash|entry.index_revision.is_none() || !ws_protocol::valid_content_sha256(hash))
         || entry.name.trim().is_empty()
         || entry.index_revision.is_some_and(|value| value <= 0)
         || expected
@@ -877,6 +904,7 @@ mod tests {
             modified_unix_seconds: Some(1),
             index_revision: Some(2),
             source_revision: "proof".into(),
+            content_sha256:None,
         }
     }
 
@@ -950,7 +978,7 @@ mod tests {
 
     #[tokio::test]
     async fn entry_resolution_checks_identity_proof_and_lexical_root_before_delivery() {
-        for case in 0..10 {
+        for case in 0..15 {
             let (client, mut peer) = fixture();
             let task = tokio::spawn(async move {
                 hello(&mut peer).await;
@@ -976,6 +1004,11 @@ mod tests {
                     7 => entry.index_revision = Some(0),
                     8 => entry.path = r"C:approved\report.txt".into(),
                     9 => entry.path = r"C:\approved-sibling\report.txt".into(),
+                    10 => entry.content_sha256=Some("a".repeat(63)),
+                    11 => {entry.content_sha256=Some("a".repeat(64));entry.index_revision=None;},
+                    12 => entry.content_sha256=Some("A".repeat(64)),
+                    13 => entry.kind=ws_protocol::ResultKind::Code,
+                    14 => entry.source_revision="🌿".repeat(17000),
                     _ => {}
                 }
                 send_server(&mut peer, &ServerMessage::ResolvedEntry { id, entry }).await;
@@ -994,6 +1027,90 @@ mod tests {
                     "case {case}: {value:?}"
                 );
             }
+            task.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn bound_references_reject_noncanonical_inputs_before_connecting() {
+        let (client,_peer)=fixture();
+        for reference in ["e0","e01","e+1","c-1","s42","code:42:1","e9223372036854775808"]
+            .into_iter().map(|result_id|EntryReference {result_id:result_id.into(),source_revision:None})
+            .chain([EntryReference {result_id:"c42".into(),source_revision:Some(" ".into())},
+                EntryReference {result_id:"e42".into(),source_revision:Some("🌿".repeat(17000))}]) {
+            let result=tokio::time::timeout(Duration::from_millis(300),client.resolve_entry(reference)).await;
+            assert!(matches!(result,Ok(Err(Error::InvalidInput(_)))),"{result:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn bound_references_require_code_resolution_capability_before_request() {
+        let (client,mut peer)=fixture();
+        let task=tokio::spawn(async move {
+            hello(&mut peer).await;
+            use tokio::io::AsyncReadExt;
+            let mut header=[0;4];
+            if peer.read(&mut header).await.unwrap()==0 {return false;}
+            let length=u32::from_le_bytes(header);
+            let mut bytes=vec![0;length as usize];peer.read_exact(&mut bytes).await.unwrap();
+            let ClientMessage::ResolveEntry {id,..}=serde_json::from_slice(&bytes).unwrap() else {panic!("resolve");};
+            let mut entry=resolved();entry.result_id="c42".into();entry.kind=ws_protocol::ResultKind::Code;
+            send_server(&mut peer,&ServerMessage::ResolvedEntry {id,entry}).await;
+            true
+        });
+        let result=client.resolve_entry(EntryReference {result_id:"c42".into(),source_revision:None}).await;
+        let sent=task.await.unwrap();
+        assert!(matches!(result,Err(Error::Unsupported("entry.resolve.code"))),"{result:?}");
+        assert!(!sent,"legacy peer received an unsupported code request");
+    }
+
+    #[tokio::test]
+    async fn bound_references_resolve_code_with_actual_hash_and_current_proof() {
+        let (client,mut peer)=fixture();
+        let task=tokio::spawn(async move {
+            peer.connect().await.unwrap();let _=read_client(&mut peer).await;
+            let mut info=ack();if let ServerMessage::HelloAck {features,..}=&mut info {features.push("entry.resolve.code".into());}
+            send_server(&mut peer,&info).await;
+            let ClientMessage::ResolveEntry {id,reference}=read_client(&mut peer).await else {panic!("resolve");};
+            assert_eq!(reference.result_id,"c42");
+            let mut entry=resolved();entry.result_id="c42".into();entry.kind=ws_protocol::ResultKind::Code;
+            entry.content_sha256=Some("a".repeat(64));
+            send_server(&mut peer,&ServerMessage::ResolvedEntry {id,entry}).await;
+        });
+        let entry=client.resolve_entry(EntryReference {result_id:"c42".into(),source_revision:Some("proof".into())}).await.unwrap();
+        assert_eq!(entry.content_sha256,Some("a".repeat(64)));task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn bound_references_validate_stream_domains_and_keep_legacy_results() {
+        use ws_protocol::{ResultKind,SearchMode};
+        for case in 0..11 {
+            let (client,mut peer)=fixture();
+            let task=tokio::spawn(async move {
+                peer.connect().await.unwrap();let _=read_client(&mut peer).await;
+                let mut info=ack();if let ServerMessage::HelloAck {features,..}=&mut info {features.extend(["code".into(),"search.entry_references".into()]);}
+                send_server(&mut peer,&info).await;
+                let ClientMessage::Search {id,..}=read_client(&mut peer).await else {panic!("search");};
+                let mut hit=SearchResult {id:"query-specific-hit".into(),kind:ResultKind::File,
+                    entry_reference:Some(EntryReference {result_id:"e42".into(),source_revision:Some("proof".into())}),..Default::default()};
+                match case {
+                    0=>hit.entry_reference=None,
+                    2=>hit.entry_reference.as_mut().unwrap().result_id="e042".into(),
+                    3=>hit.entry_reference.as_mut().unwrap().source_revision=None,
+                    4=>hit.entry_reference.as_mut().unwrap().source_revision=Some(" ".into()),
+                    5=>hit.entry_reference.as_mut().unwrap().source_revision=Some("🌿".repeat(17000)),
+                    6=>hit.entry_reference.as_mut().unwrap().result_id="c42".into(),
+                    7=>hit.kind=ResultKind::Application,
+                    8|9=>{hit.kind=ResultKind::Code;hit.entry_reference.as_mut().unwrap().result_id="c42".into();},
+                    10=>hit.kind=ResultKind::Code,
+                    _=>{},
+                }
+                send_server(&mut peer,&ServerMessage::Results {id,batch:vec![hit],done:true}).await;
+            });
+            let mut stream=client.search(SearchQuery {mode:if case>=9 {SearchMode::Code}else{SearchMode::Auto},..Default::default()}).await.unwrap();
+            let result=stream.next().await;
+            if matches!(case,0|1|9) {assert_eq!(result.unwrap().unwrap().batch[0].id,"query-specific-hit");}
+            else {assert!(matches!(result,Err(Error::Protocol(_))),"case {case}: {result:?}");assert!(stream.next().await.unwrap().is_none());}
             task.await.unwrap();
         }
     }

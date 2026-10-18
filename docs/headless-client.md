@@ -76,18 +76,24 @@ and partial writes close their owned connection instead of reusing partial bytes
 
 Exact search requires `search.exact`; semantic requests also require
 `search.semantic`, code mode requires `code`, and entry resolution requires
-`entry.resolve`; cached text preview requires `entry.preview.text`.
+`entry.resolve` for ordinary `e` IDs or `entry.resolve.code` for code-file `c` IDs;
+cached ordinary text preview requires `entry.preview.text`.
 Capability presence is not semantic/model readiness. Existing
 `EngineStatus.model_loaded` and `ModelStatus` are returned unchanged; the richer
 semantic outcome/provenance contract remains part of the unfinished Lumen work.
 
 `resolve_entry` checks the requested identity/source proof, nonempty metadata,
-positive optional index revision and lexical local-disk root containment before
+positive optional index revision, canonical optional SHA-256 and lexical local-disk root containment before
 returning a reply. The [source proof](ipc-protocol.md#indexed-entry-resolution)
 is opaque metadata/policy identity, **not a file hash or permission to open a
 file**. Native consumers must revalidate their own currently authorized roots,
-source identity and residency before preview/open/read. Ordinary indexed `e…`
-identities are supported today. `preview_text(PreviewRequest)` returns bounded
+source identity and residency before preview/open/read. Search results from peers
+advertising `search.entry_references` carry a separate canonical bound
+`entry_reference`; pass that reference to the resolver/preview rather than parsing
+the query-specific hit ID. Present references are validated against the kind and
+requested search mode; older peers may omit them. Code/notebook `c` metadata
+includes its current complete-source byte hash when established by native parsing;
+ordinary hashes remain unknown. `preview_text(PreviewRequest)` returns bounded
 cached text and actual locations through the same owned read lane. Dropping the
 future closes that connection; identity/proof, local root, state, kinds, aggregate
 64KiB/64part and eight extraction-kind bounds are checked before delivery.

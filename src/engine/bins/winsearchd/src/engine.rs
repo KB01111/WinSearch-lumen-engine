@@ -71,6 +71,7 @@ impl ClientHandle {
 }
 
 pub struct EngineService {
+    reference_incarnation: Option<windows::core::GUID>,
     code: Mutex<Option<Arc<crate::code::CodeService>>>,
     power:Mutex<Option<crate::policy::PowerNotifications>>,
     status: Mutex<EngineStatus>,
@@ -103,6 +104,13 @@ pub type SharedEngine = Arc<EngineService>;
 
 #[derive(Clone,Copy)]
 struct SearchRevision {source:u64,code:Option<u64>}
+
+struct SearchDelivery<'a> {
+    query:&'a SearchQuery,
+    revision:SearchRevision,
+    cancel:&'a Arc<AtomicBool>,
+    sources:&'a HashMap<String,ResultSource>,
+}
 
 struct PreviewWork {
     engine:SharedEngine,
@@ -156,6 +164,7 @@ impl EngineService {
             embed.set_preferred_backend(cfg.preferred_backend.as_str());
         }
         Arc::new(Self {
+            reference_incarnation: unsafe {windows::Win32::System::Com::CoCreateGuid()}.ok(),
             code:Mutex::new(None),
             power:Mutex::new(None),
             status: Mutex::new(EngineStatus {
@@ -328,12 +337,13 @@ impl EngineService {
     // ---- model management (P3.3) ----
 
     pub fn resolve_entry(&self, client: &ClientHandle, id: RequestId, reference: ws_protocol::EntryReference) {
+        let mut stream=client.stream.lock().unwrap_or_else(|p|p.into_inner());
         let response = match self.resolve_entry_snapshot(&reference) {
             Ok(entry) => ServerMessage::ResolvedEntry { id, entry },
             Err(code) => ServerMessage::Error { id: Some(id), code,
                 message: "entry is unavailable or changed".into() },
         };
-        let _ = client.send(&response);
+        let _ = write_message(&mut *stream,&response);
     }
 
     pub fn preview_entry(self:&Arc<Self>,client:&ClientHandle,id:RequestId,request:ws_protocol::PreviewRequest) {
@@ -403,14 +413,17 @@ impl EngineService {
     pub(crate) fn resolve_entry_snapshot(&self, reference: &ws_protocol::EntryReference)
         -> Result<ws_protocol::ResolvedEntry, ErrorCode> {
         let invalid = ErrorCode::InvalidRequest;
-        if reference.result_id.len() > 32 || reference.source_revision.as_ref().is_some_and(|s| s.len() > 64 * 1024) {
+        if !reference.is_valid() {
             return Err(invalid);
         }
-        let entry_id = reference.result_id.strip_prefix('e').and_then(|s| s.parse::<i64>().ok())
-            .filter(|id| *id > 0 && reference.result_id == format!("e{id}"))
-            .ok_or(invalid)?;
+        let incarnation=self.reference_incarnation.ok_or(ErrorCode::NotReady)?;
+        let entry_id=match reference.indexed_id().ok_or(invalid)? {
+            ws_protocol::IndexedEntryId::File(id)=>id,
+            ws_protocol::IndexedEntryId::Code(id)=>return self.code_service().ok_or(ErrorCode::NotReady)?
+                .resolve_metadata(id,reference,incarnation),
+        };
         let policy_epoch = self.indexer.policy_epoch();
-        let (entry, root_path, revision, generation, indexed) = {
+        let (entry, root_path, revision, generation, indexed,identity) = {
             let store = self.indexer.store_lock();
             if !store.entry_visible(entry_id).map_err(|_| ErrorCode::Internal)? { return Err(ErrorCode::NotReady); }
             let entry = store.get_entry(entry_id).map_err(|_| ErrorCode::Internal)?.ok_or(ErrorCode::NotReady)?;
@@ -420,41 +433,39 @@ impl EngineService {
             let revision = store.content_revision(entry_id).map_err(|_| ErrorCode::Internal)?;
             let generation = store.model_generation().map_err(|_| ErrorCode::Internal)?;
             let indexed = store.entry_content_allowed(entry_id).map_err(|_| ErrorCode::Internal)?;
-            (entry, root.path, revision, generation, indexed)
+            let identity=store.entry_identity(entry_id).map_err(|_|ErrorCode::Internal)?.ok_or(ErrorCode::NotReady)?;
+            (entry, root.path, revision, generation, indexed,identity)
         };
         let path = std::path::Path::new(&entry.path);
-        if !self.indexer.content_path_allowed(path) || ws_platform::identity::file_identity(path).is_none() {
+        if !self.indexer.content_path_allowed(path) || ws_platform::identity::file_identity(path)!=Some(identity) {
             return Err(ErrorCode::NotReady);
         }
         let snapshot = crate::extract::source_snapshot(path);
         if snapshot.is_empty() { return Err(ErrorCode::NotReady); }
         let metadata = std::fs::metadata(path).map_err(|_| ErrorCode::NotReady)?;
-        let proof = format!("{policy_epoch}:{generation}:{revision}:{snapshot}");
+        let proof = format!("{incarnation:?}:{policy_epoch}:{generation}:{revision}:{snapshot}");
+        if proof.len()>64*1024 {return Err(ErrorCode::NotReady);}
         if reference.source_revision.as_ref().is_some_and(|expected| expected != &proof) {
             return Err(ErrorCode::NotReady);
         }
-        let modified = metadata.modified().ok().and_then(|time| match time.duration_since(std::time::UNIX_EPOCH) {
-            Ok(duration) => i64::try_from(duration.as_secs()).ok(),
-            Err(error) => {
-                let duration = error.duration();
-                duration.as_secs().checked_add(u64::from(duration.subsec_nanos() > 0))
-                    .and_then(|seconds| i64::try_from(seconds).ok()).and_then(i64::checked_neg)
-            }
-        });
+        let modified = metadata.modified().ok().and_then(ws_platform::identity::unix_seconds);
         {
             let store = self.indexer.store_lock();
             if self.indexer.policy_epoch() != policy_epoch
                 || store.model_generation().map_err(|_| ErrorCode::Internal)? != generation
                 || store.content_revision(entry_id).map_err(|_| ErrorCode::Internal)? != revision
+                || store.entry_identity(entry_id).map_err(|_|ErrorCode::Internal)?!=Some(identity)
                 || !store.entry_visible(entry_id).map_err(|_| ErrorCode::Internal)?
-                || !self.indexer.content_path_allowed(path) || crate::extract::source_snapshot(path) != snapshot {
+                || !self.indexer.content_path_allowed(path) || ws_platform::identity::file_identity(path)!=Some(identity)
+                || crate::extract::source_snapshot(path) != snapshot {
                 return Err(ErrorCode::NotReady);
             }
         }
         Ok(ws_protocol::ResolvedEntry { result_id: reference.result_id.clone(), root_path,
             path: entry.path.clone(), name: entry.name.clone(), kind: to_result_kind(entry_hit_kind(&entry)),
             size_bytes: metadata.len(), modified_unix_seconds: modified,
-            index_revision: (indexed && revision > 0).then_some(revision), source_revision: proof })
+            index_revision: (indexed && revision > 0).then_some(revision), source_revision: proof,
+            content_sha256:None })
     }
 
     fn answer_model_status(&self, client: &ClientHandle, id: RequestId) {
@@ -847,6 +858,7 @@ impl EngineService {
                 thumbnail_path,
                 excerpt,
                 matching_moments:moments,
+                entry_reference:None,
             });
         }
         out.sort_by(|a, b| {
@@ -898,14 +910,12 @@ impl EngineService {
         let mut sources=HashMap::new();
         let results = self.plan_results_with_sources(&query,&mut sources);
         let results=results.into_iter().filter(|r|r.kind!=ResultKind::Code || r.path.as_deref().is_some_and(|p|self.code_service().is_some_and(|c|code_epoch.is_some_and(|e|c.result_allowed(p,e))))).collect::<Vec<_>>();
+        let delivery=SearchDelivery {query:&query,revision,cancel:&cancel,sources:&sources};
 
         if cancel.load(Ordering::Relaxed) {
+            let outcome=self.send_results(client,id,Vec::new(),true,&delivery).map(|_|());
             self.end_request_for_client(client.id(), id, &cancel);
-            return client.send(&ServerMessage::Results {
-                id,
-                batch: Vec::new(),
-                done: true,
-            });
+            return outcome;
         }
 
         // Whether a semantic stage will follow: when it will, the exact
@@ -916,29 +926,14 @@ impl EngineService {
         // overflow streams after so typing stays responsive.
         let limit = (query.limit.max(1) as usize).min(results.len());
         let (first, rest) = results.split_at(limit);
-        let first=self.validate_delivery(first.to_vec(),&sources);
-        let mut exact_ids=exact_entry_ids(&first);
-        client.send(&ServerMessage::Results {
-            id,
-            batch: if self.query_current(&query,revision) {first} else {Vec::new()},
-            done: rest.is_empty() && !semantic,
-        })?;
+        let mut exact_ids=self.send_results(client,id,first.to_vec(),rest.is_empty() && !semantic,&delivery)?;
         if !rest.is_empty() {
             if cancel.load(Ordering::Relaxed) {
+                let outcome=self.send_results(client,id,Vec::new(),true,&delivery).map(|_|());
                 self.end_request_for_client(client.id(), id, &cancel);
-                return client.send(&ServerMessage::Results {
-                    id,
-                    batch: Vec::new(),
-                    done: true,
-                });
+                return outcome;
             }
-            let rest=self.validate_delivery(rest.to_vec(),&sources);
-            exact_ids.extend(exact_entry_ids(&rest));
-            client.send(&ServerMessage::Results {
-                id,
-                batch: if self.query_current(&query,revision) {rest} else {Vec::new()},
-                done: !semantic,
-            })?;
+            exact_ids.extend(self.send_results(client,id,rest.to_vec(),!semantic,&delivery)?);
         }
         if !semantic {
             self.end_request_for_client(client.id(), id, &cancel);
@@ -988,43 +983,47 @@ impl EngineService {
         } else {self.indexer.search_epoch()==revision.source}
     }
 
+    fn send_results(&self,client:&ClientHandle,id:RequestId,batch:Vec<SearchResult>,done:bool,delivery:&SearchDelivery<'_>)
+        ->Result<HashSet<i64>,FrameError> {
+        let mut stream=client.stream.lock().unwrap_or_else(|p|p.into_inner());
+        let current=||self.cancels.lock().unwrap_or_else(|p|p.into_inner()).get(&(client.id(),id))
+            .is_some_and(|token|Arc::ptr_eq(token,delivery.cancel));
+        if !current() {return Ok(HashSet::new());}
+        let mut batch=if delivery.cancel.load(Ordering::Acquire) || !self.query_current(delivery.query,delivery.revision) {
+            Vec::new()
+        } else {self.validate_delivery(batch,delivery.sources)};
+        if !current() {return Ok(HashSet::new());}
+        if delivery.cancel.load(Ordering::Acquire) || !self.query_current(delivery.query,delivery.revision) {batch.clear();}
+        let sent=exact_entry_ids(&batch);
+        write_message(&mut *stream,&ServerMessage::Results {id,batch,done})?;
+        Ok(sent)
+    }
+
     fn run_semantic_stage(
         &self,
         client: &ClientHandle,
         id: RequestId,
         query: &SearchQuery,
         exact_ids: &HashSet<i64>,
-        cancel: &AtomicBool,
+        cancel: &Arc<AtomicBool>,
         revision:SearchRevision,
     ) -> Result<(), FrameError> {
         if cancel.load(Ordering::Relaxed) {
-            return client.send(&ServerMessage::Results {
-                id,
-                batch: Vec::new(),
-                done: true,
-            });
+            return self.send_results(client,id,Vec::new(),true,&SearchDelivery {
+                query,revision,cancel,sources:&HashMap::new()}).map(|_|());
         }
         let generation = self.indexer.store_lock().model_generation().ok();
         let mut sources=HashMap::new();
         let mut hits = self.plan_semantic_with_sources(query, exact_ids,&mut sources);
         hits.retain(|r|r.kind!=ResultKind::Code || r.path.as_deref().is_some_and(|p|self.code_service().is_some_and(|c|revision.code.is_some_and(|e|c.result_allowed(p,e)))));
-        hits=self.validate_delivery(hits,&sources);
         if generation.is_none() || self.indexer.store_lock().model_generation().ok() != generation
             || !self.semantic_allowed(query) || !self.query_current(query,revision) {
             hits.clear();
         }
         if cancel.load(Ordering::Relaxed) {
-            return client.send(&ServerMessage::Results {
-                id,
-                batch: Vec::new(),
-                done: true,
-            });
+            hits.clear();
         }
-        client.send(&ServerMessage::Results {
-            id,
-            batch: hits,
-            done: true,
-        })
+        self.send_results(client,id,hits,true,&SearchDelivery {query,revision,cancel,sources:&sources}).map(|_|())
     }
 
     /// Computes the ranked result list for one query (no IPC). Split from
@@ -1052,6 +1051,31 @@ impl EngineService {
                 result.location=None;
                 result.thumbnail_path=None;
                 result.matching_moments.clear();
+            }
+            true
+        });
+        drop(store);
+        let mut metadata=HashMap::new();
+        results.retain_mut(|result| {
+            let source=sources.get(&result.id);
+            let candidate=source.map(|source|ws_protocol::EntryReference {result_id:format!("e{}",source.entry_id),source_revision:None})
+                .or_else(||result.entry_reference.take());
+            result.entry_reference=None;
+            if result.kind==ResultKind::Code && !result.path.as_deref().is_some_and(|path|
+                self.code_service().is_some_and(|code|code.result_allowed(path,code.query_epoch()))) {return false;}
+            let Some(candidate)=candidate else {return true;};
+            let entry=metadata.entry(candidate.result_id.clone()).or_insert_with(||self.resolve_entry_snapshot(&candidate).ok());
+            if let Some(entry)=entry {
+                if result.path.as_deref()!=Some(entry.path.as_str()) {return false;}
+                if entry.index_revision.is_none() {
+                    if source.is_some_and(|source|source.content_only) || result.kind==ResultKind::Code {return false;}
+                    result.excerpt=None;result.location=None;result.thumbnail_path=None;result.matching_moments.clear();
+                }
+                result.entry_reference=Some(ws_protocol::EntryReference {
+                    result_id:entry.result_id.clone(),source_revision:Some(entry.source_revision.clone())});
+            } else if self.reference_incarnation.is_some() {
+                if source.is_some_and(|source|source.content_only) || result.kind==ResultKind::Code {return false;}
+                result.excerpt=None;result.location=None;result.thumbnail_path=None;result.matching_moments.clear();
             }
             true
         });
@@ -1159,6 +1183,7 @@ impl EngineService {
                             })
                             .collect();
                         results.push(SearchResult {
+                            entry_reference:None,
                             id: format!("e{}", hit.entry_id),
                             kind: to_result_kind(hit.kind),
                             title: hit.name,
@@ -1232,7 +1257,8 @@ fn entry_hit_kind(row: &EntryRow) -> HitKind {
 fn code_result(hit:ws_code::model::CodeSearchHit)->SearchResult {
     let location=hit.notebook.map(|n|MatchLocation::Notebook {cell_ordinal:n.cell_ordinal,line:n.start_line,end_line:n.end_line}).unwrap_or(MatchLocation::Line {line:hit.start_line});
     let explanation=if let Some(n)=hit.notebook {format!("{} · cell {}, line {}",hit.symbol_kind,n.cell_ordinal+1,n.start_line)} else {format!("{} · line {}",hit.symbol_kind,hit.start_line)};
-    SearchResult { id:format!("code:{}:{}:{}:{}",hit.file.id,hit.start_line,hit.is_definition,hit.symbol_name),kind:ResultKind::Code,title:if hit.symbol_name.is_empty(){hit.file.name.clone()}else{hit.symbol_name},subtitle:hit.file.path.clone(),match_explanation:explanation,score:hit.score as f64,path:Some(hit.file.path),location:Some(location),excerpt:Some(hit.excerpt),..Default::default() }
+    SearchResult { entry_reference:Some(ws_protocol::EntryReference {result_id:format!("c{}",hit.file.id),source_revision:None}),
+        id:format!("code:{}:{}:{}:{}",hit.file.id,hit.start_line,hit.is_definition,hit.symbol_name),kind:ResultKind::Code,title:if hit.symbol_name.is_empty(){hit.file.name.clone()}else{hit.symbol_name},subtitle:hit.file.path.clone(),match_explanation:explanation,score:hit.score as f64,path:Some(hit.file.path),location:Some(location),excerpt:Some(hit.excerpt),..Default::default() }
 }
 
 fn exact_entry_ids(results: &[SearchResult]) -> HashSet<i64> {
@@ -1402,6 +1428,186 @@ mod tests {
         engine.end_request_for_client(7,9,&old);
         engine.cancel_for_client(7,9);
         assert!(current.load(Ordering::Acquire),"an old completion cannot remove a newer cancellation token");
+    }
+
+    #[test]
+    fn entry_reference_proof_cannot_revive_in_another_engine_with_the_same_store_and_models() {
+        let tree=TempTree::new();let engine=service_with(&tree,&["current.txt"]);
+        let file=tree.0.join("current.txt");
+        let id=engine.indexer.store_lock().find_by_path(&file.to_string_lossy()).unwrap().unwrap().id;
+        let initial=ws_protocol::EntryReference {result_id:format!("e{id}"),source_revision:None};
+        let before=engine.resolve_entry_snapshot(&initial).unwrap();
+        let bound=ws_protocol::EntryReference {result_id:initial.result_id.clone(),source_revision:Some(before.source_revision.clone())};
+        let restarted=EngineService::new_with_models(engine.indexer.clone(),engine.models.clone(),EmbedSupervisor::new());
+        let after=restarted.resolve_entry_snapshot(&initial).unwrap();
+        assert_ne!(before.source_revision,after.source_revision,"engine incarnation must be part of the metadata proof");
+        assert_eq!(restarted.resolve_entry_snapshot(&bound).unwrap_err(),ErrorCode::NotReady);
+    }
+
+    #[test]
+    fn entry_reference_unavailable_incarnation_keeps_exact_name_search_available() {
+        let tree=TempTree::new();let mut engine=service_with(&tree,&["fallback.txt"]);
+        Arc::get_mut(&mut engine).unwrap().reference_incarnation=None;
+        let mut sources=HashMap::new();
+        let results=engine.plan_results_with_sources(&query("fallback"),&mut sources);
+        assert_eq!(results.len(),1);
+        let request=ws_protocol::EntryReference {result_id:results[0].id.clone(),source_revision:None};
+        assert_eq!(engine.resolve_entry_snapshot(&request).unwrap_err(),ErrorCode::NotReady);
+        let delivered=engine.validate_delivery(results,&sources);
+        assert_eq!(delivered.len(),1);assert!(delivered[0].entry_reference.is_none());
+    }
+
+    #[test]
+    fn entry_reference_rejects_a_replaced_file_before_native_inventory_reconciles() {
+        let tree=TempTree::new();let engine=service_with(&tree,&["replace.txt"]);
+        let path=tree.0.join("replace.txt");
+        let old=engine.indexer.store_lock().find_by_path(&path.to_string_lossy()).unwrap().unwrap();
+        let identity=ws_platform::identity::file_identity(&path);
+        std::fs::rename(&path,tree.0.join("held-original.txt")).unwrap();
+        std::fs::write(&path,b"different generated file").unwrap();
+        assert_ne!(ws_platform::identity::file_identity(&path),identity);
+        let reference=ws_protocol::EntryReference {result_id:format!("e{}",old.id),source_revision:None};
+        assert_eq!(engine.resolve_entry_snapshot(&reference).unwrap_err(),ErrorCode::NotReady,
+            "an old indexed ID must not be rebound to a different native file at the same path");
+    }
+
+    #[test]
+    fn entry_reference_delivery_binds_exact_and_semantic_files_without_rewriting_hit_ids() {
+        let (engine,_tree)=semantic_service();
+        let mut sources=HashMap::new();
+        let results=engine.plan_results_with_sources(&query("meeting"),&mut sources);
+        let delivered=engine.validate_delivery(results,&sources);
+        assert!(!delivered.is_empty());
+        let exact=delivered.iter().find(|r|r.id.starts_with('e')).unwrap();
+        let reference=exact.entry_reference.as_ref().expect("exact file hits need a bound native reference");
+        assert!(reference.is_bound());assert_eq!(reference.result_id,exact.id);
+        assert_eq!(engine.resolve_entry_snapshot(reference).unwrap().path,exact.path.clone().unwrap());
+        let mut sources=HashMap::new();
+        let semantic=engine.plan_semantic_with_sources(&semantic_query("meeting"),&HashSet::new(),&mut sources);
+        let delivered=engine.validate_delivery(semantic,&sources);
+        let hit=delivered.iter().find(|r|r.id.starts_with('s')).expect("fixture must return a semantic file hit");
+        let reference=hit.entry_reference.as_ref().expect("semantic hit IDs must map to canonical indexed IDs");
+        assert!(reference.is_bound());assert_eq!(reference.result_id,format!("e{}",&hit.id[1..]));
+        assert_eq!(engine.resolve_entry_snapshot(reference).unwrap().path,hit.path.clone().unwrap());
+    }
+
+    #[test]
+    fn entry_reference_delivery_withholds_prepared_content_after_source_change_or_request_reuse() {
+        for change in ["source","policy","reuse"] {
+            let reused=change=="reuse";
+            let tree=TempTree::new();let path=tree.0.join("report.txt");
+            fs::write(&path,b"cached_delivery_secret").unwrap();
+            let engine=service_with(&tree,&[]);
+            engine.indexer.extract_once_with(&crate::extract::ExtractorRegistry::default(),|_|Err("no model".into())).unwrap();
+            let request=query("cached_delivery_secret");let mut sources=HashMap::new();
+            let planned=engine.plan_results_with_sources(&request,&mut sources);
+            let prepared=engine.validate_delivery(planned,&sources);
+            assert!(prepared.iter().any(|hit|hit.excerpt.as_deref().is_some_and(|text|text.contains("cached_delivery_secret"))));
+            let pipe=unique_pipe();let serving=pipe.clone();let (send,receive)=std::sync::mpsc::channel();
+            std::thread::spawn(move || {let _=ws_platform::pipe::serve(&serving,move |stream| {
+                let _=send.send(Arc::new(Mutex::new(stream)));
+            });});
+            let mut peer=connect_retry(&pipe);
+            let stream=receive.recv_timeout(Duration::from_secs(30)).unwrap();
+            let client=engine.register_client(stream);
+            let cancel=engine.begin_request_for_client(client.id(),71);
+            let revision=SearchRevision {source:engine.indexer.search_epoch(),code:None};
+            std::thread::scope(|scope| {
+                let writer=client.stream.lock().unwrap();
+                let (started,waiting)=std::sync::mpsc::channel();
+                let (finished,completion)=std::sync::mpsc::channel();
+                let delivery=SearchDelivery {query:&request,revision,cancel:&cancel,sources:&sources};
+                let sending_engine=&engine;let sending_client=&client;
+                let sender=scope.spawn(move || {
+                    started.send(()).unwrap();
+                    let result=sending_engine.send_results(sending_client,71,prepared,true,&delivery);
+                    let _=finished.send(());result
+                });
+                waiting.recv_timeout(Duration::from_secs(5)).unwrap();
+                let blocked=completion.recv_timeout(Duration::from_millis(150));
+                let current=if reused {Some(engine.begin_request_for_client(client.id(),71))} else {
+                    if change=="source" {fs::write(&path,b"replacement bytes without the original marker").unwrap();}
+                    else {let mut policy=engine.indexer.get_indexing_config().unwrap();policy.roots.clear();engine.indexer.set_indexing_config(&policy).unwrap();}
+                    None
+                };
+                drop(writer);
+                let sent=sender.join().unwrap().unwrap();
+                assert!(matches!(blocked,Err(std::sync::mpsc::RecvTimeoutError::Timeout)),"delivery must wait for the held writer");
+                assert!(sent.is_empty(),"only actually delivered exact IDs may suppress semantic hits");
+                if let Some(current)=current {engine.end_request_for_client(client.id(),71,&current);}
+            });
+            if reused {
+                assert_eq!(peer.peek_available().unwrap(),Some(0),"old work cannot terminate the newer request");
+            } else {
+                let (hits,done)=read_one(&mut peer);assert!(hits.is_empty() && done);
+                engine.end_request_for_client(client.id(),71,&cancel);
+            }
+            engine.unregister_client(&client);
+        }
+    }
+
+    #[test]
+    fn code_entry_reference_delivery_binds_real_exact_and_semantic_hits_and_rejects_replacement() {
+        let (engine,code,root)=code_search_service();
+        let mut request=query("needle");request.mode=SearchMode::Code;
+        let mut sources=HashMap::new();
+        let planned=engine.plan_results_with_sources(&request,&mut sources);
+        assert!(!planned.is_empty());
+        let ids=planned.iter().map(|hit|hit.id.clone()).collect::<Vec<_>>();
+        let exact=engine.validate_delivery(planned,&sources);
+        assert_eq!(exact.iter().map(|hit|hit.id.clone()).collect::<Vec<_>>(),ids);
+        for hit in &exact {
+            let reference=hit.entry_reference.as_ref().expect("code hit must carry its code-file reference");
+            assert!(reference.is_bound() && reference.result_id.starts_with('c'));
+            assert!(engine.resolve_entry_snapshot(reference).unwrap().content_sha256.is_some());
+        }
+        let mut semantic_request=semantic_query("indirect code description");semantic_request.mode=SearchMode::Code;
+        let semantic=engine.plan_semantic_with_sources(&semantic_request,&HashSet::new(),&mut sources);
+        assert!(!semantic.is_empty(),"fixture must exercise actual code vector retrieval");
+        let semantic=engine.validate_delivery(semantic,&sources);
+        assert!(!semantic.is_empty());assert!(semantic.iter().all(|hit|hit.entry_reference.as_ref().is_some_and(|r|r.is_bound())));
+        let source=root.join("lib.rs");
+        assert!(semantic.iter().any(|hit|hit.path.as_deref()==Some(source.to_string_lossy().as_ref())),"semantic fixture must include the source being replaced");
+        let unaffected=semantic.iter().filter(|hit|hit.path.as_deref()!=Some(source.to_string_lossy().as_ref())).map(|hit|hit.id.clone()).collect::<Vec<_>>();
+        fs::rename(&source,root.join("held-original.rs")).unwrap();
+        fs::write(&source,b"fn needle() {}\n").unwrap();
+        assert!(engine.validate_delivery(exact,&sources).is_empty(),"stale code identity cannot be rebound to a replacement at the same path");
+        assert_eq!(engine.validate_delivery(semantic,&sources).into_iter().map(|hit|hit.id).collect::<Vec<_>>(),unaffected,
+            "replacement removes only the affected source's semantic hits");
+        drop(engine);drop(code);std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn code_entry_reference_resolves_current_native_hash_and_rejects_old_policy_and_source() {
+        let (engine,code,root)=code_search_service();
+        let path=root.join("lib.rs");
+        let id=code.store.lock().unwrap().find_file_by_path(&path.to_string_lossy()).unwrap().unwrap().id;
+        let initial=ws_protocol::EntryReference {result_id:format!("c{id}"),source_revision:None};
+        let entry=engine.resolve_entry_snapshot(&initial).expect("code uses its actual code-file identity");
+        assert_eq!(entry.kind,ResultKind::Code);assert_eq!(entry.path,path.to_string_lossy());
+        assert_eq!(entry.root_path,root.to_string_lossy());assert!(entry.index_revision.is_some_and(|n|n>0));
+        assert_eq!(entry.content_sha256.as_deref(),Some("36bc22784d3cd4b5e6ae27ab2702f579957349879a55fed91582bb0861a43f9f"));
+        let bound=ws_protocol::EntryReference {result_id:initial.result_id.clone(),source_revision:Some(entry.source_revision)};
+        let selected=engine.indexer.get_indexing_config().unwrap();
+        let mut denied=selected.clone();denied.code_enabled=false;
+        engine.indexer.set_indexing_config(&denied).unwrap();
+        assert_eq!(engine.resolve_entry_snapshot(&bound).unwrap_err(),ErrorCode::NotReady);
+        engine.indexer.set_indexing_config(&selected).unwrap();
+        assert_eq!(engine.resolve_entry_snapshot(&bound).unwrap_err(),ErrorCode::NotReady);
+        let current=engine.resolve_entry_snapshot(&initial).unwrap();
+        let bound=ws_protocol::EntryReference {result_id:initial.result_id.clone(),source_revision:Some(current.source_revision)};
+        std::fs::write(&path,b"fn replacement_with_different_bytes() {}\n").unwrap();
+        assert_eq!(engine.resolve_entry_snapshot(&bound).unwrap_err(),ErrorCode::NotReady);
+        let deadline=std::time::Instant::now()+Duration::from_secs(5);
+        let current=loop {
+            match engine.resolve_entry_snapshot(&initial) {
+                Ok(entry)=>break entry,
+                Err(ErrorCode::NotReady) if std::time::Instant::now()<deadline=>std::thread::sleep(Duration::from_millis(2)),
+                response=>panic!("fresh code metadata did not settle: {response:?}"),
+            }
+        };
+        assert_eq!(current.index_revision,None);assert_eq!(current.content_sha256,None,"old byte hashes cannot describe changed source");
+        drop(engine);drop(code);std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
     }
 
     #[test]

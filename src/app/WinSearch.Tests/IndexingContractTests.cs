@@ -7,6 +7,24 @@ namespace WinSearch.Tests;
 public class IndexingContractTests
 {
     [Fact]
+    public void BoundReferencesAndSourceHashesRoundTripWithoutChangingHitIds()
+    {
+        const string hitJson = """{"id":"code:42:1:true:needle","kind":"code","entry_reference":{"result_id":"c42","source_revision":"proof"}}""";
+        var hit = JsonSerializer.Deserialize<SearchResult>(hitJson, ProtocolJson.Options)!;
+        using var encodedHit = JsonDocument.Parse(JsonSerializer.Serialize(hit, ProtocolJson.Options));
+        Assert.Equal("code:42:1:true:needle", encodedHit.RootElement.GetProperty("id").GetString());
+        Assert.Equal("c42", encodedHit.RootElement.GetProperty("entry_reference").GetProperty("result_id").GetString());
+        const string metadataJson = """{"result_id":"c42","kind":"code","index_revision":7,"source_revision":"proof","content_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}""";
+        var entry = JsonSerializer.Deserialize<ResolvedEntry>(metadataJson, ProtocolJson.Options)!;
+        using var encodedEntry = JsonDocument.Parse(JsonSerializer.Serialize(entry, ProtocolJson.Options));
+        Assert.Equal(new string('a', 64), encodedEntry.RootElement.GetProperty("content_sha256").GetString());
+        using var legacyHit = JsonDocument.Parse(JsonSerializer.Serialize(new SearchResult(), ProtocolJson.Options));
+        using var legacyEntry = JsonDocument.Parse(JsonSerializer.Serialize(new ResolvedEntry(), ProtocolJson.Options));
+        Assert.False(legacyHit.RootElement.TryGetProperty("entry_reference", out _));
+        Assert.False(legacyEntry.RootElement.TryGetProperty("content_sha256", out _));
+    }
+
+    [Fact]
     public void PreviewCodecPreservesSourceLocationAndUnknownFullCoverage()
     {
         const string json = """

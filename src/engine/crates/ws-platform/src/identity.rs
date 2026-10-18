@@ -29,6 +29,18 @@ pub fn current_user_sid() -> Result<String, IdentityError> {
     Ok(sid)
 }
 
+/// Unix seconds rounded toward the earlier instant, including pre-1970 metadata.
+pub fn unix_seconds(time:std::time::SystemTime)->Option<i64> {
+    match time.duration_since(std::time::UNIX_EPOCH) {
+        Ok(duration)=>i64::try_from(duration.as_secs()).ok(),
+        Err(error)=>{
+            let duration=error.duration();
+            duration.as_secs().checked_add(u64::from(duration.subsec_nanos()>0))
+                .and_then(|value|i64::try_from(value).ok()).and_then(i64::checked_neg)
+        }
+    }
+}
+
 fn read_token_sid() -> Result<String, IdentityError> {
     unsafe {
         let mut token = HANDLE::default();
@@ -176,6 +188,17 @@ pub fn file_identity(path: &std::path::Path) -> Option<(u32, u64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn file_metadata_seconds_preserve_negative_fractional_instants() {
+        use std::time::{Duration,UNIX_EPOCH};
+        assert_eq!(unix_seconds(UNIX_EPOCH),Some(0));
+        // Windows SystemTime represents 100ns ticks; 1ns arithmetic rounds away.
+        let before=UNIX_EPOCH-Duration::new(0,100);
+        assert_eq!(before.duration_since(UNIX_EPOCH).unwrap_err().duration(),Duration::from_nanos(100));
+        assert_eq!(unix_seconds(UNIX_EPOCH+Duration::new(1,100)),Some(1));
+        assert_eq!(unix_seconds(before),Some(-1));
+        assert_eq!(unix_seconds(UNIX_EPOCH-Duration::new(1,100)),Some(-2));
+    }
     #[test]
     fn instance_id_validation() {
         for value in ["", "a/b", "a b", "å", &"a".repeat(49)] {

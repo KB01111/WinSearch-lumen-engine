@@ -321,10 +321,18 @@ def main():
                 stdout, stderr = owned_command([str(binary/'examples/native-client-smoke.exe')], timeout=90)
                 (output/'headless-client.log').write_bytes(stdout+stderr)
                 native_client = json.loads(stdout)
-                assert native_client['document'] == document_hits, ('client document DTO parity', native_client)
+                # The client intentionally changes policy; bound proofs must change with that policy.
+                def ranking(hits):
+                    return [{key:({k:v for k,v in value.items() if k!='source_revision'} if key=='entry_reference' and value else value)
+                        for key,value in hit.items()} for hit in hits]
+                assert ranking(native_client['document']) == ranking(document_hits), ('client document ranking parity', native_client)
                 expected_code = next(record['cli'] for record in summary['queries']
                     if record['name'] == 'code_definition_reference')
-                assert native_client['code'] == expected_code, ('client code DTO parity', native_client)
+                assert ranking(native_client['code']) == ranking(expected_code), ('client code ranking parity', native_client)
+                assert len(native_client['reference_checks'])==4,native_client
+                for entry in native_client['code_entries']:
+                    assert entry['content_sha256']==digest(Path(entry['path'])),entry
+                summary['checks'].append('typed_client_bound_code_notebook_refs_and_actual_sha256')
                 assert len(native_client['semantic_checks']) == (3 if options.real_model else 0), native_client
                 assert len(native_client['preview_checks']) == 4, native_client
                 summary['headless_client'] = native_client
@@ -357,7 +365,7 @@ def main():
                     returned_lines.add(match['line'])
                 assert returned_lines == {1,2}, ('semantic query requested both function and caller', code_hits)
                 if options.compare_client:
-                    assert summary['headless_client']['semantic_code'] == code_hits, 'typed semantic-only code DTO parity'
+                    assert ranking(summary['headless_client']['semantic_code']) == ranking(code_hits), 'typed semantic-only code ranking/reference identity parity'
                 compare('code_semantic_negative', 'asteroid orbital mechanics and interstellar propulsion',
                     mode='code', semantic=True, empty=True)
                 summary['checks'].append('native_semantic_only_code_function_and_caller_source_lines')

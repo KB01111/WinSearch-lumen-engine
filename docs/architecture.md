@@ -613,3 +613,18 @@ retrieval. Native parsing, actual managed-model code vectors, public streaming
 parity and installed consumer behavior remain separate checks. A worker model
 path override alone does not initialize the model manager or prove the native
 code pipeline created vectors.
+
+### Native result references
+
+Search results retain their existing selection IDs and carry an optional separate
+bound indexed reference. The daemon resolves ordinary `e` and code-file `c` IDs
+through current native identity, root/source policy, model generation and content
+revision. A native per-engine GUID prevents an old proof from reviving after
+restart. Results and metadata are revalidated after acquiring the response writer;
+request replacement/cancellation cannot reuse an earlier delivery decision.
+
+Code metadata exposes its current complete-source SHA-256 from the atomic parser
+provenance record. Ordinary files do not yet expose byte hashes. Rust/C# clients
+validate canonical identities, proof budgets, result domains, hash format and local
+root confinement. These checks do not grant the Lumen webview filesystem access;
+the trusted native host must enforce its own current grants before content/actions.

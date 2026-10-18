@@ -10,7 +10,7 @@ pub mod framing;
 pub mod messages;
 pub mod preview;
 
-pub use entry::{EntryReference, ResolvedEntry};
+pub use entry::{EntryReference, ResolvedEntry, IndexedEntryId, valid_content_sha256};
 pub use framing::{read_message, write_message, FrameError, MAX_FRAME_BYTES};
 pub use messages::*;
 pub use preview::*;

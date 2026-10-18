@@ -1,0 +1,29 @@
+rtk :    Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearchd
+)
+At line:1 char:224
++ ... src/engine; rtk proxy cargo test -p winsearchd preview_pipe_bounds -- ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling wi...ins\winsearchd):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.12s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-a1af7bf73df4d90a.exe)
+
+running 1 test
+test server::tests::preview_pipe_bounds_work_accepts_in_band_cancel_and_revalidates_roots_and_sources ... FAILED
+
+failures:
+
+---- server::tests::preview_pipe_bounds_work_accepts_in_band_cancel_and_revalidates_roots_and_sources stdout ----
+
+thread 'server::tests::preview_pipe_bounds_work_accepts_in_band_cancel_and_revalidates_roots_and_sources' (109424) panicked at bins\winsearchd\src\server.rs:242:9:
+assertion failed: features.iter().any(|feature| feature == "entry.resolve.code")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    server::tests::preview_pipe_bounds_work_accepts_in_band_cancel_and_revalidates_roots_and_sources
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 208 filtered out; finished in 0.08s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

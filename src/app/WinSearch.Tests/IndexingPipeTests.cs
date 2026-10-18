@@ -11,6 +11,115 @@ namespace WinSearch.Tests;
 public class IndexingPipeTests
 {
     [Fact]
+    public async Task BoundReferencesRejectInvalidInputsWithoutConnecting()
+    {
+        await using var client = new EngineClient("unused-" + Guid.NewGuid());
+        foreach (var reference in new[] { "e0", "e01", "e+1", "c-1", "s42", "code:42:1", "e9223372036854775808" }
+            .Select(id => new EntryReference { ResultId = id }).Concat([
+                new() { ResultId = "c42", SourceRevision = " " },
+                new() { ResultId = "e42", SourceRevision = string.Concat(Enumerable.Repeat("🌿", 17000)) }]))
+        {
+            var error = await Assert.ThrowsAsync<EngineException>(() => client.ResolveEntryAsync(reference));
+            Assert.Equal(ErrorCode.InvalidRequest, error.Code);
+        }
+    }
+
+    [Fact]
+    public async Task BoundReferencesRequireCodeCapabilityAndKeepControlTrafficUsable()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10)); var token = timeout.Token;
+        var pipe = "winsearch-code-legacy-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        async Task Serve()
+        {
+            await server.WaitForConnectionAsync(token); await ReadAsync(server, token);
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1, Features = ["entry.resolve"] }, token);
+            var request = await ReadAsync(server, token);
+            if (request is ResolveEntryMessage unexpected)
+            {
+                await WriteAsync(server, new ResolvedEntryMessage { Id = unexpected.Id, Entry = new() {
+                    ResultId = "c42", Kind = ResultKind.Code, Name = "code.rs", RootPath = @"C:\repo",
+                    Path = @"C:\repo\code.rs", SourceRevision = "proof" } }, token);
+                request = await ReadAsync(server, token);
+            }
+            var status = Assert.IsType<GetStatusMessage>(request);
+            await WriteAsync(server, new StatusMessage { Id = status.Id, Status = new() }, token);
+        }
+        var serving = Serve(); await using var client = new EngineClient(pipe); await client.ConnectAsync(token);
+        var error = await Record.ExceptionAsync(() => client.ResolveEntryAsync(new() { ResultId = "c42" }, token));
+        await client.GetStatusAsync(token); await serving;
+        Assert.Equal(ErrorCode.Unsupported, Assert.IsType<EngineException>(error).Code);
+        Assert.Equal(0, Pending(client, "_unary"));
+    }
+
+    [Theory]
+    [InlineData(0)] [InlineData(1)] [InlineData(2)] [InlineData(3)] [InlineData(4)] [InlineData(5)]
+    public async Task BoundReferencesValidateCodeMetadataHashAndDomain(int scenario)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10)); var token = timeout.Token;
+        var pipe = "winsearch-code-metadata-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        async Task Serve()
+        {
+            await server.WaitForConnectionAsync(token); await ReadAsync(server, token);
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1, Features = ["entry.resolve", "entry.resolve.code"] }, token);
+            var request = Assert.IsType<ResolveEntryMessage>(await ReadAsync(server, token));
+            var entry = new { result_id = "c42", kind = scenario == 3 ? "file" : "code", name = "code.rs",
+                root_path = @"C:\repo", path = @"C:\repo\code.rs", size_bytes = 7,
+                source_revision = scenario == 4 ? new string('x', 65537) : "proof",
+                index_revision = scenario == 2 ? (long?)null : 7,
+                content_sha256 = scenario == 1 ? new string('A', 64) : scenario == 5 ? "incorrect" : new string('a', 64) };
+            await WriteRawAsync(server, new { type = "resolved_entry", id = request.Id, entry }, token);
+        }
+        var serving = Serve(); await using var client = new EngineClient(pipe); await client.ConnectAsync(token);
+        var result = client.ResolveEntryAsync(new() { ResultId = "c42", SourceRevision = scenario == 4 ? null : "proof" }, token);
+        if (scenario == 0)
+        {
+            var entry = await result;
+            using var json = JsonDocument.Parse(JsonSerializer.Serialize(entry, ProtocolJson.Options));
+            Assert.Equal(new string('a', 64), json.RootElement.GetProperty("content_sha256").GetString());
+        }
+        else Assert.Equal(ErrorCode.InvalidRequest, (await Assert.ThrowsAsync<EngineException>(() => result)).Code);
+        await serving;
+    }
+
+    [Theory]
+    [InlineData(0)] [InlineData(1)] [InlineData(2)] [InlineData(3)] [InlineData(4)]
+    [InlineData(5)] [InlineData(6)] [InlineData(7)] [InlineData(8)] [InlineData(9)] [InlineData(10)]
+    public async Task BoundReferencesValidateStreamDomainsAndKeepLegacyResults(int scenario)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10)); var token = timeout.Token;
+        var pipe = "winsearch-bound-stream-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        async Task Serve()
+        {
+            await server.WaitForConnectionAsync(token); await ReadAsync(server, token);
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1, Features = ["search.entry_references"] }, token);
+            var request = Assert.IsType<SearchMessage>(await ReadAsync(server, token));
+            object? reference = scenario == 0 ? null : new { result_id = scenario == 2 ? "e042" : scenario is 6 or 8 or 9 ? "c42" : "e42",
+                source_revision = scenario == 3 ? null : scenario == 4 ? " " : scenario == 5 ? new string('x', 65537) : "proof" };
+            var hit = new { id = "query-specific-hit", kind = scenario == 7 ? "application" : scenario >= 8 ? "code" : "file", entry_reference = reference };
+            await WriteRawAsync(server, new { type = "results", id = request.Id, batch = new[] { hit }, done = true }, token);
+        }
+        var serving = Serve(); await using var client = new EngineClient(pipe); await client.ConnectAsync(token);
+        async Task<SearchBatch> ReadBatch()
+        {
+            await foreach (var batch in client.SearchAsync(new() { Mode = scenario >= 9 ? SearchMode.Code : SearchMode.Auto }, token)) return batch;
+            throw new Xunit.Sdk.XunitException("missing batch");
+        }
+        if (scenario is 0 or 1 or 9) Assert.Equal("query-specific-hit", Assert.Single((await ReadBatch()).Results).Id);
+        else Assert.Equal(ErrorCode.InvalidRequest, (await Assert.ThrowsAsync<EngineException>(ReadBatch)).Code);
+        Assert.Equal(0, Pending(client, "_streams")); await serving;
+    }
+
+    private static async Task WriteRawAsync(Stream stream, object message, CancellationToken token)
+    {
+        var payload = JsonSerializer.SerializeToUtf8Bytes(message);
+        await stream.WriteAsync(BitConverter.GetBytes(payload.Length), token);
+        await stream.WriteAsync(payload, token); await stream.FlushAsync(token);
+    }
+
+    [Fact]
     public async Task PreviewRequiresCapabilityBeforeSendingAndClosesTheLegacyConnection()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));

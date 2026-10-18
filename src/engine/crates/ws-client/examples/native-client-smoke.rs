@@ -2,7 +2,7 @@
 //! This fixture changes that instance's root policy and restores it before exit.
 use std::{error::Error, time::Duration};
 use ws_client::{
-    protocol::{EntryReference, ErrorCode, IndexingConfig, SearchMode, SearchQuery, SearchResult},
+    protocol::{ErrorCode, IndexingConfig, SearchMode, SearchQuery, SearchResult},
     Client, EngineEvent,
 };
 
@@ -35,6 +35,7 @@ async fn search(
 
 async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_json::Value> {
     let info = client.info().await?;
+    for feature in ["search.entry_references","entry.resolve.code"] {assert!(info.supports(feature));}
     let status = client.status().await?;
     let model = client.model_status().await?;
     let engine_config = client.config().await?;
@@ -81,18 +82,24 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
     } else {
         None
     };
-    let entry = client
-        .resolve_entry(EntryReference {
-            result_id: document[0].id.clone(),
-            source_revision: None,
-        })
-        .await?;
+    let reference=document[0].entry_reference.clone().expect("use the engine's bound document reference");
+    assert!(reference.is_bound());
+    let entry = client.resolve_entry(reference.clone()).await?;
     assert!(entry.index_revision.is_some_and(|revision| revision > 0));
-    let reference = EntryReference {
-        result_id: entry.result_id.clone(),
-        source_revision: Some(entry.source_revision.clone()),
-    };
     assert_eq!(client.resolve_entry(reference.clone()).await?, entry);
+    let notebook=search(client,"notebookparity",SearchMode::Code,false).await?;
+    assert!(!notebook.is_empty());
+    let mut code_entries=Vec::new();
+    for hit in code.iter().chain(notebook.iter()).chain(semantic_code.iter().flatten()) {
+        let reference=hit.entry_reference.clone().expect("query-specific code IDs must not be parsed by consumers");
+        assert!(reference.is_bound() && reference.result_id.starts_with('c'));
+        let resolved=client.resolve_entry(reference).await?;
+        assert_eq!(resolved.path,hit.path.clone().unwrap());
+        assert!(resolved.index_revision.is_some_and(|n|n>0));
+        assert!(resolved.content_sha256.as_deref().is_some_and(ws_client::protocol::valid_content_sha256));
+        code_entries.push(resolved);
+    }
+    let code_reference=code[0].entry_reference.clone().unwrap();
     let document_preview = client.preview_text(ws_client::protocol::PreviewRequest {
         reference: reference.clone(),
         location: Some(ws_client::protocol::MatchLocation::Line { line: 2 }),
@@ -101,7 +108,7 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
     assert!(document_preview.extraction.iter().all(|progress| progress.source_units.is_none() && progress.capped.is_none()));
     let pdf = search(client, "pdfparitytoken", SearchMode::Files, false).await?;
     let pdf_preview = client.preview_text(ws_client::protocol::PreviewRequest {
-        reference: EntryReference { result_id: pdf[0].id.clone(), source_revision: None },
+        reference: pdf[0].entry_reference.clone().expect("use the engine's PDF reference"),
         location: Some(ws_client::protocol::MatchLocation::Page { page: 2 }),
     }).await?;
     assert!(pdf_preview.parts.iter().any(|part| part.text.contains("pdfparitytoken")
@@ -122,6 +129,7 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
 
     let mut revoked = original.clone();
     revoked.roots.clear();
+    revoked.code_enabled=false;
     client.set_indexing_config(revoked).await?;
     assert!(matches!(client.preview_text(ws_client::protocol::PreviewRequest {
         reference: reference.clone(), location: None,
@@ -137,6 +145,8 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
         .await?
         .is_empty());
     client.set_indexing_config(original.clone()).await?;
+    assert!(matches!(client.resolve_entry(code_reference).await,
+        Err(ws_client::Error::Remote {code:ErrorCode::NotReady,..})));
     assert!(matches!(client.preview_text(ws_client::protocol::PreviewRequest {
         reference: reference.clone(), location: None,
     }).await, Err(ws_client::Error::Remote { code: ErrorCode::NotReady, .. })));
@@ -147,12 +157,8 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
             ..
         })
     ));
-    let fresh = client
-        .resolve_entry(EntryReference {
-            result_id: entry.result_id,
-            source_revision: None,
-        })
-        .await?;
+    let fresh_hits=search(client,"amberparitytoken",SearchMode::Files,false).await?;
+    let fresh=client.resolve_entry(fresh_hits[0].entry_reference.clone().unwrap()).await?;
     assert_ne!(
         fresh.source_revision, entry.source_revision,
         "revoked references must not revive"
@@ -161,6 +167,9 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
         "engine_version": info.engine_version, "features": info.features,
         "initial_status": status, "model_status": model, "engine_config": engine_config,
         "document": document, "code": code, "semantic_code": semantic_code,
+        "notebook":notebook,"code_entries":code_entries,
+        "reference_checks":["bound_document_and_pdf_refs", "bound_code_and_notebook_refs",
+            "resolved_code_hashes", "code_proof_stays_invalid_after_restore"],
         "document_preview": document_preview, "pdf_preview": pdf_preview,
         "preview_checks": ["current_metadata_bound_document_text", "actual_pdf_page_two",
             "preview_rejects_revoked_root", "preview_proof_stays_invalid_after_restore"],

@@ -1,0 +1,31 @@
+rtk :    Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearchd
+)
+At <checkout>\artifacts\entry-reference-checks.ps1:10 char:17
++ ... gine-red' { rtk proxy cargo test -p winsearchd entry_reference_proof_ ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling wi...ins\winsearchd):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.16s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-a1af7bf73df4d90a.exe)
+
+running 1 test
+test engine::tests::entry_reference_proof_cannot_revive_in_another_engine_with_the_same_store_and_models ... FAILED
+
+failures:
+
+---- engine::tests::entry_reference_proof_cannot_revive_in_another_engine_with_the_same_store_and_models stdout ----
+
+thread 'engine::tests::entry_reference_proof_cannot_revive_in_another_engine_with_the_same_store_and_models' (112620) panicked at bins\winsearchd\src\engine.rs:1417:9:
+assertion `left != right` failed: engine incarnation must be part of the metadata proof
+  left: "<comparison proof redacted>"
+ right: "<comparison proof redacted>"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    engine::tests::entry_reference_proof_cannot_revive_in_another_engine_with_the_same_store_and_models
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 202 filtered out; finished in 0.04s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

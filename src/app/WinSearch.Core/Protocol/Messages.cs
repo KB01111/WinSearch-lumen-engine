@@ -102,6 +102,7 @@ public sealed class ResolvedEntry
     public long? IndexRevision { get; set; }
     /// <summary>Opaque metadata/identity and policy proof, never a content hash.</summary>
     public string SourceRevision { get; set; } = "";
+    public string? ContentSha256 { get; set; }
 }
 
 public sealed class SearchMessage : ClientMessage
@@ -349,6 +350,7 @@ public sealed class NotebookLocation : MatchLocation
 
 public sealed class SearchResult
 {
+    public EntryReference? EntryReference { get; set; }
     public string Id { get; set; } = "";
     public ResultKind Kind { get; set; }
     public string Title { get; set; } = "";

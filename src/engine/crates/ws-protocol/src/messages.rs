@@ -323,6 +323,9 @@ pub struct SearchResult {
     pub thumbnail_path: Option<String>,
     pub excerpt: Option<String>,
     pub matching_moments: Vec<MatchingMoment>,
+    /// Current native file identity; independent of the query-specific hit ID.
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub entry_reference: Option<crate::EntryReference>,
 }
 
 impl Default for SearchResult {
@@ -339,6 +342,7 @@ impl Default for SearchResult {
             thumbnail_path: None,
             excerpt: None,
             matching_moments: Vec::new(),
+            entry_reference: None,
         }
     }
 }
@@ -397,6 +401,7 @@ mod tests {
         let msg = ServerMessage::Results {
             id: 7,
             batch: vec![SearchResult {
+                entry_reference:None,
                 id: "r1".into(),
                 kind: ResultKind::Document,
                 title: "rental-agreement.pdf".into(),

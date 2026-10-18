@@ -186,7 +186,10 @@ public sealed class EngineClient : IEngineClient
 
     public Task<ResolvedEntry> ResolveEntryAsync(EntryReference reference, CancellationToken cancellationToken = default)
     {
-        if (IsConnected && !_features.Contains("entry.resolve", StringComparer.Ordinal))
+        if (!ReferenceValid(reference))
+            return Task.FromException<ResolvedEntry>(new EngineException(ErrorCode.InvalidRequest, "invalid indexed entry reference"));
+        var feature = reference.ResultId[0] == 'c' ? "entry.resolve.code" : "entry.resolve";
+        if (IsConnected && !_features.Contains(feature, StringComparer.Ordinal))
             return Task.FromException<ResolvedEntry>(new EngineException(ErrorCode.Unsupported, "engine does not support entry resolution"));
         var resultId = reference.ResultId;
         var sourceRevision = reference.SourceRevision;
@@ -199,9 +202,7 @@ public sealed class EngineClient : IEngineClient
     public async Task<EntryPreview> PreviewTextAsync(PreviewRequest request, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
-        if (request?.Reference is null || string.IsNullOrWhiteSpace(request.Reference.ResultId)
-            || Encoding.UTF8.GetByteCount(request.Reference.ResultId) > 32
-            || (request.Reference.SourceRevision is { } proof && Encoding.UTF8.GetByteCount(proof) > 65536)
+        if (request?.Reference is null || !ReferenceValid(request.Reference) || request.Reference.ResultId[0] != 'e'
             || !PreviewLocationValid(request.Location))
             throw new EngineException(ErrorCode.InvalidRequest, "invalid preview request");
         var snapshot = new PreviewRequest { Reference = new() { ResultId = request.Reference.ResultId, SourceRevision = request.Reference.SourceRevision },
@@ -267,10 +268,30 @@ public sealed class EngineClient : IEngineClient
             && !(item.IndexedUnits is { } indexed && item.SourceUnits is { } source && indexed > source));
     }
 
+    private static bool ReferenceValid(EntryReference? reference, bool bound = false)
+    {
+        if (reference is null || string.IsNullOrEmpty(reference.ResultId) || reference.ResultId[0] is not ('e' or 'c')
+            || !long.TryParse(reference.ResultId.AsSpan(1), System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var id) || id <= 0
+            || reference.ResultId[1..] != id.ToString(System.Globalization.CultureInfo.InvariantCulture)) return false;
+        return reference.SourceRevision is { } proof
+            ? !string.IsNullOrWhiteSpace(proof) && Encoding.UTF8.GetByteCount(proof) <= 65536 : !bound;
+    }
+
+    private static bool ReferenceKindMatches(EntryReference reference, ResultKind kind) => reference.ResultId[0] == 'c'
+        ? kind == ResultKind.Code
+        : kind is ResultKind.File or ResultKind.Folder or ResultKind.Image or ResultKind.Screenshot
+            or ResultKind.Document or ResultKind.Audio or ResultKind.Video;
+
     private static bool ResolvedEntryMatches(ResolvedEntry? entry, string resultId, string? sourceRevision)
     {
+        var reference = new EntryReference { ResultId = resultId, SourceRevision = sourceRevision };
         if (entry is null || entry.RootPath is null || entry.Path is null
+            || !ReferenceValid(reference) || !ReferenceKindMatches(reference, entry.Kind)
             || entry.ResultId != resultId || string.IsNullOrWhiteSpace(entry.SourceRevision)
+            || Encoding.UTF8.GetByteCount(entry.SourceRevision) > 65536
+            || (entry.ContentSha256 is { } hash && (entry.IndexRevision is null || hash.Length != 64
+                || hash.Any(c => !(c is >= '0' and <= '9' or >= 'a' and <= 'f'))))
             || string.IsNullOrWhiteSpace(entry.Name) || entry.IndexRevision is <= 0
             || (sourceRevision is not null && entry.SourceRevision != sourceRevision)
             || !Enum.IsDefined(entry.Kind))
@@ -281,7 +302,7 @@ public sealed class EngineClient : IEngineClient
         {
             if (path.StartsWith(@"\\?\", StringComparison.Ordinal)) path = path[4..];
             return path.Length >= 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && path[2] == '\\'
-                && !path.AsSpan(2).Contains(':');
+                && !path.AsSpan(2).Contains(':') && !path.Contains('\0');
         }
         if (!LocalDisk(root) || !LocalDisk(path)) return false;
         try
@@ -334,6 +355,7 @@ public sealed class EngineClient : IEngineClient
     {
         ThrowIfDisposed();
         var id = NextRequestId();
+        var mode = query.Mode;
         var channel = Channel.CreateUnbounded<SearchBatch>(new UnboundedChannelOptions
         {
             SingleReader = true,
@@ -352,6 +374,10 @@ public sealed class EngineClient : IEngineClient
             await WriteAsync(new SearchMessage { Id = id, Query = query }, cancellationToken);
             await foreach (var batch in channel.Reader.ReadAllAsync(cancellationToken))
             {
+                if (batch.Results is null || batch.Results.Any(hit => hit is null || (hit.EntryReference is { } reference
+                    && (!ReferenceValid(reference, bound: true) || !ReferenceKindMatches(reference, hit.Kind)
+                        || ((reference.ResultId[0] == 'c') != (mode == SearchMode.Code))))))
+                    throw new EngineException(ErrorCode.InvalidRequest, "search returned an invalid bound entry reference");
                 yield return batch;
             }
         }

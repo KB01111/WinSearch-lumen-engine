@@ -1,0 +1,97 @@
+[
+  {
+    "file": "rust-tests.txt",
+    "local_raw_sha256": "1b285280eb2ee9eeb1fd0c2b648ccbe25072d48fb763f5487a8a0e836f8686b4",
+    "published_sha256": "7dac8f050977ee7e997a44a177bbc6d720cea833ab6f4a8d736cd473873da0ac"
+  },
+  {
+    "file": "coherent-build.txt",
+    "local_raw_sha256": "d3b03a171e3c6965e706e430e46ab2bfc2aa34a7b62cdf5f6c31457d2e2a4619",
+    "published_sha256": "b6920c7527e43b62304556e8db79fdc2c100ae6de3bef8c7bde5a02931948411"
+  },
+  {
+    "file": "dotnet-tests.txt",
+    "local_raw_sha256": "1618644605d70f179b15d63911f785a94a115a7a071830917e2e34ad3b2c005e",
+    "published_sha256": "001c1894255b1e2b5dbbdeddf95127e49ec690f44fc0aa900eb7fc89bc47c08f"
+  },
+  {
+    "file": "x64-build.txt",
+    "local_raw_sha256": "2f25d0663fc16827377370c0eb087d5804194026c4aa6ccb823d04ab60d92022",
+    "published_sha256": "e4fd4645ebab7eeda840537e462dc3a8c120844d70c69807f0ba3be16452c21b"
+  },
+  {
+    "file": "protocol-red.txt",
+    "local_raw_sha256": "0b681b2923469a61c7de401e57aa99ca2b276e2bf0f80106e7e7128ed2545424",
+    "published_sha256": "4d637441a5132603d49bc53c9e1dfedb01a4a0508717b7fa5b035d145b2aa960"
+  },
+  {
+    "file": "incarnation-red.txt",
+    "local_raw_sha256": "c1908dfdac0826df3d2ff19423bb1926507798a1b55c8370f8a07903be7d0b0c",
+    "published_sha256": "cd10b6650fea8e92545c4d6126731bc6125f8f29cc41d7f31909d907ee379877"
+  },
+  {
+    "file": "identity-delivery-red.txt",
+    "local_raw_sha256": "3225812b2c1e8a301566834690df0f3308245302c20a8ef7f03b194de9b80246",
+    "published_sha256": "6c95932f20d46c08f4b49978388b8c573c211b5f9d191a8fd111c156a303cb3e"
+  },
+  {
+    "file": "code-metadata-red.txt",
+    "local_raw_sha256": "0b7c4b7ff9e4336a0d8122d38669dcd1a9edd307b076ee713e49528b349ab141",
+    "published_sha256": "72e949ac4c715cca0db3ebb318c88dcaac7d474528d56f6946bee0a7402687f2"
+  },
+  {
+    "file": "path-policy-red.txt",
+    "local_raw_sha256": "24d2be4a3af0a59cc55cd734cd75e565461bf1ef66dbfcfe53d18eff542efb65",
+    "published_sha256": "1eead0aff91c4ae92ca4aa9377948875a0397b1105c928f6a94f02a136f0da63"
+  },
+  {
+    "file": "writer-order-red.txt",
+    "local_raw_sha256": "ab613fc7d20c3c65a930f2064cd72211b46d4cc01bc346deeff20958e40a7dd4",
+    "published_sha256": "0be931cac18b1f5cacb057d6fe1dc2e1c3ebdfc29e3af18db661f605bbf5d1e8"
+  },
+  {
+    "file": "rust-client-red.txt",
+    "local_raw_sha256": "ef920a9a451982c534e76d96edb8e330c2a75c83e6b4b768fa2325009d98bd5a",
+    "published_sha256": "97559b9144a362c1e5ae0d30bcb406aa9d276d1683784054c182948ab57850a4"
+  },
+  {
+    "file": "dotnet-red.txt",
+    "local_raw_sha256": "61508bfcfb4b615e51529be2868e7a6fe1eece9f1df0f0b875ba1649d2c6e6af",
+    "published_sha256": "522b9bab35287137aee3cbcd2a8f5d19d1217b7237f2b2e11bfd6f46ddadf75c"
+  },
+  {
+    "file": "capability-red.txt",
+    "local_raw_sha256": "fb75230539247e36334ae7e8ad240ac11789164e3276980e20a9fe7ebbdd285e",
+    "published_sha256": "3c324d5affab6a69e618dfa478d562aa8c3cd1152f2ec2f5b45d124c640ab5f0"
+  },
+  {
+    "file": "semantic-fixture-failure.txt",
+    "local_raw_sha256": "623f7764559fb4cafe10bafcea1f82cef4eba432ff87b36a5151cd9dd710a4e7",
+    "published_sha256": "cf017c2b88806e714057eeab64c08142bc38490400a9f5113fb34acbf73bad5b"
+  },
+  {
+    "file": "time-fixture-failure.txt",
+    "local_raw_sha256": "57a2ddb1eb06aa36c83dc244f657ce8b15ea30ce8d87518caf86ce9809282fa9",
+    "published_sha256": "33a7bf232583a55b6fd241195738d43fca25b8ddd40193edcedb6585ff3a7e86"
+  },
+  {
+    "file": "native-no-model.json",
+    "local_raw_sha256": "ae75c7000cb0948291abe4377534b1a2f3b099a91a61525dbee3c14219fd05d8",
+    "published_sha256": "6ab1f4606b1e85bdacd1094e04e6cc3fd3261bafade59cde41403623949d8a9d"
+  },
+  {
+    "file": "native-managed-cpu.json",
+    "local_raw_sha256": "39ed4b8766fb730f34c555941c54b26b08a36754b0a1c7d08251bb8d23d9e033",
+    "published_sha256": "33087ead94cc871fcd625933624b621e010fd7a122bf6a24539e8f887174c2c1"
+  },
+  {
+    "file": "native-policy-proof-comparison-failure.json",
+    "local_raw_sha256": "f201c93a98939ed9981bd34cbe068dd99030c7136dce0a44b4dde97109ae3614",
+    "published_sha256": "91a59acfb8e33b3927dc4c4361e455dbbe42a4dfdf5307161979ac069073e9db"
+  },
+  {
+    "file": "host.json",
+    "local_raw_sha256": "805f9cb81838c737dac3dfd06987a5f6759cf6d184c111ff27f61b62815081cf",
+    "published_sha256": "07508ebeb657b220d7204fc4f6e3906868276f8978c7066daa98b15df6a35d99"
+  }
+]

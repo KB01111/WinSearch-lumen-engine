@@ -174,6 +174,62 @@ impl CodeService {
                 })
             && self.query_epoch() == epoch
     }
+
+    pub fn resolve_metadata(&self,file_id:i64,reference:&ws_protocol::EntryReference,incarnation:windows::core::GUID)
+        ->Result<ws_protocol::ResolvedEntry,ws_protocol::ErrorCode> {
+        use ws_protocol::ErrorCode;
+        let policy_epoch=self.indexer.policy_epoch();
+        let generation=self.indexer.store_lock().model_generation().map_err(|_|ErrorCode::Internal)?;
+        let policy=self.policy();
+        let (file,repo,state)={
+            let store=self.store.lock().unwrap_or_else(|p|p.into_inner());
+            let file=store.get_file(file_id).map_err(|_|ErrorCode::Internal)?.ok_or(ErrorCode::NotReady)?;
+            let repo=store.get_repo(file.repo_id).map_err(|_|ErrorCode::Internal)?.ok_or(ErrorCode::NotReady)?;
+            let state=store.source_provenance(file_id).map_err(|_|ErrorCode::Internal)?;
+            (file,repo,state)
+        };
+        let path=Path::new(&file.path);
+        if !repo.enabled || !crate::policy::contains(&repo.root_path,&file.path) || !self.allowed(path)
+            || ws_code::parse::guard_source_path(path).is_err() {
+            return Err(ErrorCode::NotReady);
+        }
+        let root_path=policy.code_roots.iter().filter(|root|crate::policy::contains(root,&file.path))
+            .max_by_key(|root|root.len()).cloned().ok_or(ErrorCode::NotReady)?;
+        if ws_platform::identity::file_identity(path)!=Some((file.volume_serial,file.file_id)) {
+            return Err(ErrorCode::NotReady);
+        }
+        let source=snapshot(path).ok_or(ErrorCode::NotReady)?;
+        let metadata=std::fs::metadata(path).map_err(|_|ErrorCode::NotReady)?;
+        let revision=state.as_ref().map_or(0,|state|state.revision);
+        let indexed=state.as_ref().is_some_and(|state|state.snapshot==source);
+        let proof=format!("{incarnation:?}:code:{policy_epoch}:{generation}:{revision}:{source}:{}",file.path);
+        if proof.len()>65536 || reference.source_revision.as_ref().is_some_and(|expected|expected!=&proof) {
+            return Err(ErrorCode::NotReady);
+        }
+        if self.indexer.policy_epoch()!=policy_epoch
+            || self.indexer.store_lock().model_generation().map_err(|_|ErrorCode::Internal)?!=generation
+            || self.policy()!=policy {return Err(ErrorCode::NotReady);}
+        {
+            let store=self.store.lock().unwrap_or_else(|p|p.into_inner());
+            if store.get_file(file_id).map_err(|_|ErrorCode::Internal)?.as_ref()!=Some(&file)
+                || store.get_repo(file.repo_id).map_err(|_|ErrorCode::Internal)?.as_ref()!=Some(&repo)
+                || store.source_provenance(file_id).map_err(|_|ErrorCode::Internal)?!=state
+                || !self.allowed(path) || ws_code::parse::guard_source_path(path).is_err()
+                || ws_platform::identity::file_identity(path)!=Some((file.volume_serial,file.file_id))
+                || snapshot(path).as_deref()!=Some(source.as_str()) {
+                return Err(ErrorCode::NotReady);
+            }
+        }
+        if self.indexer.policy_epoch()!=policy_epoch
+            || self.indexer.store_lock().model_generation().map_err(|_|ErrorCode::Internal)?!=generation {
+            return Err(ErrorCode::NotReady);
+        }
+        Ok(ws_protocol::ResolvedEntry {result_id:reference.result_id.clone(),root_path,
+            path:file.path.clone(),name:file.name.clone(),kind:ws_protocol::ResultKind::Code,
+            size_bytes:metadata.len(),modified_unix_seconds:metadata.modified().ok().and_then(ws_platform::identity::unix_seconds),
+            index_revision:indexed.then_some(revision),source_revision:proof,
+            content_sha256:state.filter(|_|indexed).and_then(|state|state.sha256)})
+    }
     fn fingerprint(&self) -> Option<String> {
         let generation = self.indexer.store_lock().model_generation().ok()?;
         let compat = self

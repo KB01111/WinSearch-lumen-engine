@@ -2317,6 +2317,11 @@ COMMIT;
             .map_err(Into::into)
     }
 
+    pub fn entry_identity(&self,id:i64)->Result<Option<(u32,u64)>,StoreError> {
+        Ok(self.conn.query_row("SELECT volume_serial,file_id FROM entries WHERE id=?1",[id],
+            |r|Ok((r.get::<_,i64>(0)? as u32,r.get::<_,i64>(1)? as u64))).optional()?)
+    }
+
     /// Persists or clears the cached `thumbnail_path` for `entry_id`.
     pub fn set_entry_thumbnail_path(
         &mut self,
