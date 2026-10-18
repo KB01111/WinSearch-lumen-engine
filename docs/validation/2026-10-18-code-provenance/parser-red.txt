@@ -1,0 +1,33 @@
+rtk :    Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-prot
+ocol)
+At <checkout>\artifacts\code-provenance-checks.ps1:8 char:18
++ ... rser-red' { rtk proxy cargo test -p ws-code code_provenance_hashes_ex ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-platform v0.1.0 (<checkout>\src\engine\crates\ws-platform)
+   Compiling ws-code v0.1.0 (<checkout>\src\engine\crates\ws-code)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.28s
+     Running unittests src\lib.rs (target\debug\deps\ws_code-8ccc3683428baa11.exe)
+
+running 1 test
+test parse::tests::code_provenance_hashes_exact_admitted_bytes_including_bom_crlf_and_notebook_outputs ... FAILED
+
+failures:
+
+---- parse::tests::code_provenance_hashes_exact_admitted_bytes_including_bom_crlf_and_notebook_outputs stdout ----
+
+thread 'parse::tests::code_provenance_hashes_exact_admitted_bytes_including_bom_crlf_and_notebook_outputs' (111636) panicked at crates\ws-code\src\parse.rs:343:13:
+assertion `left == right` failed: hash must describe exact file bytes, not extracted cells or normalized text
+  left: ""
+ right: "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    parse::tests::code_provenance_hashes_exact_admitted_bytes_including_bom_crlf_and_notebook_outputs
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p ws-code --lib`

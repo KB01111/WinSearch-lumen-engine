@@ -98,7 +98,10 @@ include Lumen integration and the final native/installed acceptance gates.
 - [x] Repository detection, .gitignore, language detection (Phase 5)
 - [~] Tree-sitter chunking + symbols, definitions over references (Phase 5) —
       twenty actual grammars plus TSX, bounded owned-child batches, syntax
-      diagnostics, schema3 migration, native scheduler and exact definition ranking verified
+      diagnostics, data-preserving schema4 migration, native scheduler and exact definition ranking verified
+- [~] Code byte provenance — exact admitted SHA256, durable content revision,
+      atomic replacement and legacy-hash recovery; public code references,
+      hash metadata and bounded code/notebook preview remain open
 - [~] Notebook cells without outputs, virtual/cell-local line preservation (Phase 5) —
       native child/store/reopen and actual named-pipe cell-local location verified;
       native preview/editor interaction remains

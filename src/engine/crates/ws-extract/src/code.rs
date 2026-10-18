@@ -12,6 +12,7 @@ pub const MAX_CODE_BATCH_BYTES: usize = 2 * 1024 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeBatch {
     pub language: String,
+    pub source_sha256: String,
     pub units: Vec<CodeUnit>,
 }
 
@@ -41,17 +42,17 @@ pub fn extract_code_batch(
     budget: &ExtractBudget,
 ) -> Result<ExtractResponse, ExtractError> {
     budget.check_deadline()?;
-    let parsed = ws_code::parse_file(&request.path)?;
+    let (parsed,source_sha256) = ws_code::parse_file_with_sha256(&request.path)?;
     budget.check_deadline()?;
     let total = (parsed.chunks.len() + parsed.symbols.len()) as u64;
     if request.cursor > total || request.max_units == 0 {
         return Err(ExtractError::Decode("invalid code cursor/budget".into()));
     }
-    let mut units = Vec::new();
-    let mut bytes = 128;
+    let mut batch=CodeBatch {language:parsed.language,source_sha256,units:Vec::new()};
+    let mut bytes = serde_json::to_vec(&batch).map_err(|e| ExtractError::Decode(e.to_string()))?.len();
     for ordinal in request.cursor..total {
         budget.check_deadline()?;
-        if units.len() >= request.max_units as usize {
+        if batch.units.len() >= request.max_units as usize {
             break;
         }
         let unit = if ordinal < parsed.chunks.len() as u64 {
@@ -70,14 +71,14 @@ pub fn extract_code_batch(
             break;
         }
         bytes += encoded.len() + 1;
-        units.push(unit);
+        batch.units.push(unit);
     }
-    if units.is_empty() && request.cursor < total {
+    if batch.units.is_empty() && request.cursor < total {
         return Err(ExtractError::Decode(
             "code unit exceeds response budget".into(),
         ));
     }
-    let end = request.cursor + units.len() as u64;
+    let end = request.cursor + batch.units.len() as u64;
     Ok(ExtractResponse {
         output: ExtractOutput::extracted(Vec::new()),
         next_cursor: (end < total).then_some(end),
@@ -90,10 +91,7 @@ pub fn extract_code_batch(
             .collect(),
         media: None,
         video_selection: None,
-        code: Some(CodeBatch {
-            language: parsed.language,
-            units,
-        }),
+        code: Some(batch),
     })
 }
 
@@ -136,6 +134,9 @@ pub(crate) fn validate_batch(
         return Ok(());
     }
     let code = response.code.as_ref().ok_or("typed code batch missing")?;
+    if code.source_sha256.len()!=64 || !code.source_sha256.bytes().all(|b|b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return Err("invalid code source SHA256".into());
+    }
     if code.language.is_empty()
         || code.language.len() > 64
         || code.units.len() > request.max_units as usize
@@ -188,6 +189,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn code_provenance_batch_carries_exact_source_hash_in_every_continuation() {
+        let path=std::env::temp_dir().join(format!("winsearch-code-provenance-batch-{}.rs",std::process::id()));
+        std::fs::write(&path,b"\xef\xbb\xbfpub fn a() {}\r\npub fn b() {}\r\n").unwrap();
+        let mut request=ExtractRequest {path:path.clone(),kind:"code".into(),scratch_dir:std::env::temp_dir(),
+            cursor:0,max_units:1,media_plan:None,video_selection:None};
+        let mut batches=0;
+        loop {
+            let response=extract_code_batch(&request,&ExtractBudget::default()).unwrap();
+            crate::worker::validate_response(&request,&response).unwrap();
+            assert_eq!(response.code.unwrap().source_sha256,"59f56ce02354434d0d9ace1fe5f8ca17f222ea026adedda751014489ec367db9");
+            batches+=1;
+            if let Some(next)=response.next_cursor {request.cursor=next;} else {break;}
+        }
+        std::fs::remove_file(path).unwrap();
+        assert!(batches>1,"fixture must exercise real continued batches");
+    }
+
+    #[test]
     fn parent_rejects_skipped_ordinals_and_forged_locations_or_payloads() {
         let request = ExtractRequest {
             path: "C:/source.rs".into(),
@@ -207,6 +226,7 @@ mod tests {
             video_selection: None,
             code: Some(CodeBatch {
                 language: "rust".into(),
+                source_sha256: "0".repeat(64),
                 units: vec![CodeUnit::Chunk {
                     ordinal: 0,
                     chunk: ParsedCodeUnit {
@@ -221,7 +241,7 @@ mod tests {
             }),
         };
         crate::worker::validate_response(&request, &valid).unwrap();
-        for case in 0..8 {
+        for case in 0..12 {
             let mut invalid = valid.clone();
             match case {
                 0 => invalid.next_cursor = Some(2),
@@ -271,6 +291,10 @@ mod tests {
                         end_line: local,
                     });
                 }
+                8 => invalid.code.as_mut().unwrap().source_sha256.clear(),
+                9 => invalid.code.as_mut().unwrap().source_sha256="g".repeat(64),
+                10 => invalid.code.as_mut().unwrap().source_sha256="a".repeat(65),
+                11 => invalid.code.as_mut().unwrap().source_sha256="A".repeat(64),
                 _ => unreachable!(),
             }
             assert!(

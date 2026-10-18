@@ -3,7 +3,15 @@
 use serde::{Deserialize, Serialize};
 
 /// Schema version recorded in `code.db`'s `meta` table.
-pub const CODE_SCHEMA_VERSION: &str = "3";
+pub const CODE_SCHEMA_VERSION: &str = "4";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeSourceState {
+    pub snapshot: String,
+    pub revision: i64,
+    /// Unknown for legacy parsed content until a real source read establishes it.
+    pub sha256: Option<String>,
+}
 
 /// Expected production embedding width (EmbeddingGemma 2 unified space).
 pub const EMBEDDING_DIM: usize = 768;

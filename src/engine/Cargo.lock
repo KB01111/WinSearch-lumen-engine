@@ -1589,10 +1589,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "half",
+ "hex",
  "ignore",
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
  "tracing",
  "tree-sitter",

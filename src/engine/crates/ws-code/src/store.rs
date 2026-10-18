@@ -61,7 +61,8 @@ CREATE TABLE IF NOT EXISTS code_jobs (
 );
 CREATE TABLE IF NOT EXISTS code_source_state (
     file_id INTEGER PRIMARY KEY REFERENCES code_files(id) ON DELETE CASCADE,
-    snapshot TEXT NOT NULL
+    snapshot TEXT NOT NULL,
+    sha256 TEXT
 );
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
@@ -92,7 +93,8 @@ CREATE TABLE IF NOT EXISTS code_files (
     file_id         INTEGER NOT NULL DEFAULT 0,
     scan_generation INTEGER NOT NULL DEFAULT 0,
     parse_version INTEGER NOT NULL DEFAULT 0,
-    parse_diagnostics TEXT NOT NULL DEFAULT '[]'
+    parse_diagnostics TEXT NOT NULL DEFAULT '[]',
+    content_revision INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_code_files_repo     ON code_files(repo_id, scan_generation);
 CREATE INDEX IF NOT EXISTS idx_code_files_identity ON code_files(volume_serial, file_id);
@@ -292,8 +294,34 @@ impl CodeStore {
     pub fn source_snapshot(&self,file:i64)->Result<Option<String>,CodeStoreError> {
         Ok(self.conn.query_row("SELECT snapshot FROM code_source_state WHERE file_id=?1",[file],|r|r.get(0)).optional()?)
     }
+    pub fn source_provenance(&self,file:i64)->Result<Option<crate::model::CodeSourceState>,CodeStoreError> {
+        let state=self.conn.query_row("SELECT substr(s.snapshot,1,65537),f.content_revision,substr(s.sha256,1,65) FROM code_source_state s JOIN code_files f ON f.id=s.file_id WHERE s.file_id=?1 AND f.parse_version=?2 AND f.content_revision>0",
+            params![file,crate::model::CODE_PARSE_VERSION],|r|Ok(crate::model::CodeSourceState {snapshot:r.get(0)?,revision:r.get(1)?,sha256:r.get(2)?})).optional()?;
+        if state.as_ref().is_some_and(|s|s.snapshot.is_empty() || s.snapshot.len()>65536
+            || s.sha256.as_ref().is_some_and(|hash|!valid_source_sha256(hash))) {
+            return Err(CodeStoreError::InvalidChunk("invalid code source provenance".into()));
+        }
+        Ok(state)
+    }
+    /// Publish parsed content and its byte provenance in the same transaction.
+    pub fn commit_parsed_source(&mut self,file:i64,parsed:&crate::ParsedCodeFile,snapshot:&str,sha256:&str)->Result<Vec<i64>,CodeStoreError> {
+        if snapshot.is_empty() || snapshot.len()>65536 || !valid_source_sha256(sha256) {
+            return Err(CodeStoreError::InvalidChunk("invalid code source provenance".into()));
+        }
+        self.conn.execute_batch("SAVEPOINT parsed_source")?;
+        let result=(|| {
+            let ids=self.commit_parsed_file(file,parsed)?;
+            self.set_source_snapshot(file,snapshot)?;
+            self.conn.execute("UPDATE code_source_state SET sha256=?2 WHERE file_id=?1",params![file,sha256])?;
+            Ok(ids)
+        })();
+        match result {
+            Ok(ids)=>{self.conn.execute_batch("RELEASE parsed_source")?;Ok(ids)}
+            Err(error)=>{self.conn.execute_batch("ROLLBACK TO parsed_source; RELEASE parsed_source")?;Err(error)}
+        }
+    }
     pub fn set_source_snapshot(&mut self,file:i64,snapshot:&str)->Result<(),CodeStoreError> {
-        self.conn.execute("INSERT INTO code_source_state(file_id,snapshot) VALUES(?1,?2) ON CONFLICT(file_id) DO UPDATE SET snapshot=excluded.snapshot",params![file,snapshot])?; Ok(())
+        self.conn.execute("INSERT INTO code_source_state(file_id,snapshot) VALUES(?1,?2) ON CONFLICT(file_id) DO UPDATE SET snapshot=excluded.snapshot,sha256=NULL",params![file,snapshot])?; Ok(())
     }
     pub fn invalidate_vectors(&mut self,fingerprint:&str)->Result<(),CodeStoreError> {
         if self.meta_get("vector_fingerprint")?.as_deref()!=Some(fingerprint) {
@@ -373,7 +401,7 @@ impl CodeStore {
         Self::init(Connection::open_in_memory()?)
     }
 
-    fn init(conn: Connection) -> Result<Self, CodeStoreError> {
+    fn init(mut conn: Connection) -> Result<Self, CodeStoreError> {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
@@ -395,6 +423,7 @@ impl CodeStore {
                 )?;
             }
             Some(CODE_SCHEMA_VERSION) => {}
+            Some("3")=>{}
             Some("2")=>{conn.execute("UPDATE meta SET value='3' WHERE key='schema_version'",[])?;}
             Some("1") => {
                 conn.execute_batch("BEGIN IMMEDIATE;
@@ -417,6 +446,20 @@ impl CodeStore {
                 return Err(CodeStoreError::UnsupportedSchemaVersion(other.to_string()));
             }
         }
+        let has_revision:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('code_files') WHERE name='content_revision')",[],|r|r.get(0))?;
+        let has_hash:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('code_source_state') WHERE name='sha256')",[],|r|r.get(0))?;
+        if !has_revision || !has_hash {
+            let tx=conn.transaction()?;
+            if !has_revision {
+                tx.execute("ALTER TABLE code_files ADD COLUMN content_revision INTEGER NOT NULL DEFAULT 0",[])?;
+                tx.execute("UPDATE code_files SET content_revision=1 WHERE parse_version=?1",[crate::model::CODE_PARSE_VERSION])?;
+            }
+            if !has_hash {tx.execute("ALTER TABLE code_source_state ADD COLUMN sha256 TEXT",[])?;}
+            tx.execute("UPDATE meta SET value=?1 WHERE key='schema_version'",[CODE_SCHEMA_VERSION])?;
+            tx.commit()?;
+        } else if matches!(version.as_deref(),Some("1"|"2"|"3")) {
+            conn.execute("UPDATE meta SET value=?1 WHERE key='schema_version'",[CODE_SCHEMA_VERSION])?;
+        }
         Ok(Self { conn })
     }
 
@@ -432,6 +475,7 @@ impl CodeStore {
     pub fn mark_parse_pending(&mut self, file: i64) -> Result<(), CodeStoreError> {
         self.conn
             .execute("UPDATE code_files SET parse_version=0 WHERE id=?1", [file])?;
+        self.conn.execute("UPDATE code_source_state SET sha256=NULL WHERE file_id=?1",[file])?;
         Ok(())
     }
 
@@ -445,7 +489,7 @@ impl CodeStore {
         let encoded = serde_json::to_string(diagnostics)
             .map_err(|e| CodeStoreError::InvalidChunk(e.to_string()))?;
         self.conn.execute(
-            "UPDATE code_files SET parse_version=?2,parse_diagnostics=?3 WHERE id=?1",
+            "UPDATE code_files SET parse_version=?2,parse_diagnostics=?3,content_revision=content_revision+1 WHERE id=?1",
             params![file, crate::model::CODE_PARSE_VERSION, encoded],
         )?;
         Ok(())
@@ -1200,6 +1244,10 @@ impl CodeStore {
     }
 }
 
+fn valid_source_sha256(value:&str)->bool {
+    value.len()==64 && value.bytes().all(|b|b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 fn delete_fts_for_file(
     tx: &rusqlite::Connection,
     file_id: i64,
@@ -1330,6 +1378,69 @@ pub fn dot_fp16_row_vs_normalized(stored_fp16: &[u8], normed_query: &[f32]) -> f
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn code_provenance_commits_hash_revision_and_chunks_atomically_and_survives_reopen() {
+        let dir=TempDir::new("source-provenance");
+        let db=dir.0.join("code.db");
+        let mut store=CodeStore::open(&db).unwrap();
+        let repo=store.ensure_repo(&DetectedRepo {root_path:"C:/code".into(),name:"code".into(),has_git:false}).unwrap();
+        let record=CodeFileRecord {path:"C:/code/a.rs".into(),rel_path:"a.rs".into(),name:"a.rs".into(),
+            ext:"rs".into(),language:"rust".into(),size:16,mtime:1,volume_serial:7,file_id:9};
+        let file=store.apply_file_batch(repo,1,&[record]).unwrap()[0].file_id();
+        assert!(store.source_provenance(file).unwrap().is_none());
+        let first=crate::parse_source("fn alpha() {}","rust");
+        let ids=store.commit_parsed_source(file,&first,"actual-source-a",&"a".repeat(64)).unwrap();
+        store.set_chunk_vector(ids[0],&[1.0,0.0]).unwrap();
+        let saved=store.list_chunks_for_file(file).unwrap();
+        let state=store.source_provenance(file).unwrap().expect("committed native content needs provenance");
+        assert_eq!(state,crate::model::CodeSourceState {snapshot:"actual-source-a".into(),revision:1,sha256:Some("a".repeat(64))});
+        let second=crate::parse_source("fn beta() {}","rust");
+        store.conn.execute_batch("CREATE TRIGGER reject_provenance BEFORE UPDATE OF sha256 ON code_source_state WHEN NEW.sha256 LIKE 'b%' BEGIN SELECT RAISE(ABORT,'fixture durable metadata failure'); END;").unwrap();
+        assert!(store.commit_parsed_source(file,&second,"actual-source-b",&"b".repeat(64)).is_err());
+        assert_eq!(store.list_chunks_for_file(file).unwrap(),saved,"metadata failure must retain old chunks, vectors and IDs");
+        assert_eq!(store.source_provenance(file).unwrap(),Some(state));
+        store.conn.execute_batch("DROP TRIGGER reject_provenance").unwrap();
+        store.commit_parsed_source(file,&second,"actual-source-b",&"b".repeat(64)).unwrap();
+        let state=store.source_provenance(file).unwrap().unwrap();
+        assert_eq!(state.revision,2);assert_eq!(state.sha256,Some("b".repeat(64)));
+        drop(store);
+        let mut store=CodeStore::open(&db).unwrap();
+        assert_eq!(store.source_provenance(file).unwrap(),Some(state));
+        store.commit_parsed_file(file,&first).unwrap();
+        let state=store.source_provenance(file).unwrap().unwrap();
+        assert_eq!(state.revision,3);assert_eq!(state.sha256,None,"a parse without byte provenance cannot keep an earlier hash");
+    }
+
+    #[test]
+    fn code_provenance_schema3_migration_preserves_data_and_keeps_legacy_hash_unknown() {
+        let dir=TempDir::new("source-provenance-migration");
+        let db=dir.0.join("code.db");
+        let mut store=CodeStore::open(&db).unwrap();
+        let repo=store.ensure_repo(&DetectedRepo {root_path:"C:/code".into(),name:"code".into(),has_git:false}).unwrap();
+        let record=CodeFileRecord {path:"C:/code/a.rs".into(),rel_path:"a.rs".into(),name:"a.rs".into(),
+            ext:"rs".into(),language:"rust".into(),size:16,mtime:1,volume_serial:7,file_id:9};
+        let file=store.apply_file_batch(repo,1,&[record]).unwrap()[0].file_id();
+        let ids=store.commit_parsed_file(file,&crate::parse_source("fn migration_token() {}","rust")).unwrap();
+        store.set_source_snapshot(file,"legacy-source").unwrap();
+        store.set_chunk_vector(ids[0],&[1.0,0.0]).unwrap();
+        store.enqueue_file_job("C:/code/a.rs","C:/code",1,10).unwrap();
+        let saved=store.list_chunks_for_file(file).unwrap();
+        for (table,column) in [("code_files","content_revision"),("code_source_state","sha256")] {
+            let exists:bool=store.conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name=?2)",params![table,column],|r|r.get(0)).unwrap();
+            if exists {store.conn.execute_batch(&format!("ALTER TABLE {table} DROP COLUMN {column}")).unwrap();}
+        }
+        store.conn.execute("UPDATE meta SET value='3' WHERE key='schema_version'",[]).unwrap();
+        drop(store);
+        let mut store=CodeStore::open(&db).unwrap();
+        assert_eq!(store.schema_version().unwrap(),"4");
+        assert_eq!(store.list_chunks_for_file(file).unwrap(),saved);
+        assert_eq!(store.get_file(file).unwrap().unwrap().file_id,9);
+        assert_eq!(store.search_exact("migration_token",5,|_|true).unwrap().len(),1);
+        assert!(store.claim_job(10).unwrap().is_some(),"migration must preserve durable jobs");
+        assert_eq!(store.source_provenance(file).unwrap(),Some(crate::model::CodeSourceState {
+            snapshot:"legacy-source".into(),revision:1,sha256:None}));
+    }
 
     #[test]
     fn pending_vector_pages_bound_hidden_prefix_and_skip_completed_index() {
@@ -1615,7 +1726,7 @@ mod tests {
             INSERT INTO code_symbols_tri(rowid,name) VALUES(13,'fake');").unwrap();
         drop(connection);
         let store = CodeStore::open(&db).unwrap();
-        assert_eq!(store.schema_version().unwrap(), "3");
+        assert_eq!(store.schema_version().unwrap(), CODE_SCHEMA_VERSION);
         let file = store.get_file(7).unwrap().unwrap();
         assert_eq!((file.id, file.volume_serial, file.file_id), (7, 42, 12345));
         let chunks = store.list_chunks_for_file(7).unwrap();

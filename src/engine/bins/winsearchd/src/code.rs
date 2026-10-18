@@ -473,6 +473,7 @@ impl CodeService {
         for (record, outcome) in records.iter().zip(outcomes) {
             let stored = store.source_snapshot(outcome.file_id())?;
             if stored.is_none() || stored.as_deref() != snapshot(Path::new(&record.path)).as_deref()
+                || store.source_provenance(outcome.file_id())?.is_none_or(|state|state.sha256.is_none())
             {
                 store.enqueue_file_job(&record.path, &active.root, record.mtime, now())?;
             }
@@ -496,6 +497,7 @@ impl CodeService {
         };
         let mut request = self.extract.request(path.clone(), "code", 256);
         let mut expected_total = None;
+        let mut source_sha256: Option<String> = None;
         let mut bytes = 0usize;
         let mut symbols_started = false;
         let mut cell_offsets = std::collections::HashMap::new();
@@ -515,6 +517,9 @@ impl CodeService {
             let batch = response
                 .code
                 .ok_or_else(|| anyhow::anyhow!("missing typed code batch"))?;
+            anyhow::ensure!(source_sha256.as_ref().is_none_or(|expected|expected==&batch.source_sha256),
+                "source bytes changed between code batches");
+            source_sha256=Some(batch.source_sha256);
             anyhow::ensure!(
                 parsed.language.is_empty() || parsed.language == batch.language,
                 "code language changed"
@@ -572,8 +577,8 @@ impl CodeService {
         let file = store
             .find_file_by_path(&job.path)?
             .ok_or_else(|| anyhow::anyhow!("code file disappeared"))?;
-        store.commit_parsed_file(file.id, &parsed)?;
-        store.set_source_snapshot(file.id, &before)?;
+        store.commit_parsed_source(file.id,&parsed,&before,
+            source_sha256.as_deref().ok_or_else(||anyhow::anyhow!("missing code source hash"))?)?;
         self.epoch.fetch_add(1, Ordering::AcqRel);
         Ok(())
     }
@@ -1060,6 +1065,49 @@ pub(crate) mod tests {
         }
         let indexer = Arc::clone(&code.indexer);
         (code, indexer, root)
+    }
+
+    #[test]
+    fn code_provenance_native_parser_commits_actual_hash_and_advances_durable_content_revision() {
+        let (code,root)=fixture();
+        let path=root.join("lib.rs");
+        std::fs::write(&path,b"fn needle() {}\n").unwrap();
+        code.configure().unwrap();
+        for _ in 0..16 {if !code.turn().unwrap() {break;}}
+        let (file,initial)={
+            let store=code.store.lock().unwrap();
+            let file=store.find_file_by_path(&path.to_string_lossy()).unwrap().unwrap();
+            let state=store.source_provenance(file.id).unwrap().expect("real parser must persist source provenance");
+            assert_eq!(state.sha256.as_deref(),Some("36bc22784d3cd4b5e6ae27ab2702f579957349879a55fed91582bb0861a43f9f"));
+            assert_eq!(state.snapshot,snapshot(&path).unwrap());
+            assert_eq!(state.revision,1);
+            (file,state)
+        };
+        code.store.lock().unwrap().enqueue_file_job(&file.path,&root.to_string_lossy(),0,now()).unwrap();
+        assert!(code.turn().unwrap());
+        {
+            let store=code.store.lock().unwrap();
+            let state=store.source_provenance(file.id).unwrap().unwrap();
+            assert_eq!(state.sha256,initial.sha256);
+            assert_eq!(state.snapshot,initial.snapshot);
+            assert_eq!(state.revision,initial.revision+1);
+            assert!(store.search_exact("needle",2,|_|true).unwrap().iter().any(|hit|hit.file.id==file.id));
+        }
+        // Legacy caches have a current metadata snapshot but no byte digest.
+        code.store.lock().unwrap().set_source_snapshot(file.id,&initial.snapshot).unwrap();
+        drop(code);
+        let (code,reopened_root)=fixture();
+        assert_eq!(reopened_root,root);
+        code.configure().unwrap();
+        for _ in 0..16 {if !code.turn().unwrap() {break;}}
+        {
+            let store=code.store.lock().unwrap();
+            let recovered=store.source_provenance(file.id).unwrap().unwrap();
+            assert_eq!(recovered.sha256,initial.sha256,"restart must establish unknown legacy hash from a real source parse");
+            assert_eq!(recovered.revision,initial.revision+2);
+        }
+        drop(code);
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
     }
 
     #[test]

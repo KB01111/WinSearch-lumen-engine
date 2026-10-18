@@ -55,8 +55,10 @@ mod syntax_regressions {
         f.set_len(crate::MAX_CODE_FILE_BYTES + 1).unwrap();
         drop(f);
         let rejected = parse_file(&path).is_err();
+        let provenance_rejected = parse_file_with_sha256(&path).is_err();
         std::fs::remove_file(path).unwrap();
         assert!(rejected);
+        assert!(provenance_rejected);
     }
 }
 
@@ -240,7 +242,14 @@ pub fn read_source(path: &Path) -> std::io::Result<String> {
 /// Parses a file on disk (auto-detecting language from filename/extension or
 /// `.ipynb` notebook format).
 pub fn parse_file(path: &Path) -> std::io::Result<ParsedCodeFile> {
+    parse_file_with_sha256(path).map(|(parsed, _)| parsed)
+}
+
+/// Digest the exact admitted file bytes used by this parse, without another read.
+pub fn parse_file_with_sha256(path: &Path) -> std::io::Result<(ParsedCodeFile, String)> {
+    use sha2::{Digest, Sha256};
     let raw = read_source(path)?;
+    let sha256 = hex::encode(Sha256::digest(raw.as_bytes()));
     let name = path
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
@@ -250,7 +259,7 @@ pub fn parse_file(path: &Path) -> std::io::Result<ParsedCodeFile> {
         .map(|s| s.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
     let lang = file_parse_language(path, language_for_file(&name, &ext));
-    Ok(parse_source(&raw, lang))
+    Ok((parse_source(&raw, lang), sha256))
 }
 
 /// TSX has a separate grammar while its stored language remains TypeScript.
@@ -321,6 +330,29 @@ pub(crate) fn persist_parsed_rows(
 mod tests {
     use super::*;
     use crate::model::{CodeFileRecord, DetectedRepo};
+
+    #[test]
+    fn code_provenance_hashes_exact_admitted_bytes_including_bom_crlf_and_notebook_outputs() {
+        let notebook = concat!(r#"{"cells":[{"cell_type":"code","metadata":{},"source":["print(7)\n"],"outputs":[{"text":["SECRET_OUTPUT"]}]}],"metadata":{"language_info":{"name":"python"}},"nbformat":4,"nbformat_minor":5}"#, "\r\n");
+        for (extension, bytes, expected) in [
+            ("txt", b"hello world".as_slice(), "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"),
+            ("txt", b"\xef\xbb\xbfhello world\r\n".as_slice(), "6600cce3a93121e79f93ad2175251d6d4c9b2a1241fbc1a8a45058e94e16ecd2"),
+            ("rs", b"".as_slice(), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+            ("ipynb", notebook.as_bytes(), "777135e70bd3b7b683b827b5d7ac5576941c543e19e037f9f707887138a3dca1"),
+        ] {
+            let path=std::env::temp_dir().join(format!("winsearch-code-provenance-{}.{}",std::process::id(),extension));
+            fs::write(&path,bytes).unwrap();
+            let result=parse_file_with_sha256(&path);
+            fs::remove_file(&path).unwrap();
+            let (parsed,sha256)=result.unwrap();
+            assert_eq!(sha256,expected,"hash must describe exact file bytes, not extracted cells or normalized text");
+            assert!(!parsed.chunks.iter().any(|chunk|chunk.text.contains("SECRET_OUTPUT")));
+            if extension=="ipynb" {
+                assert!(parsed.chunks.iter().any(|chunk|chunk.text.contains("print(7)")));
+                assert!(parsed.chunks.iter().all(|chunk|chunk.notebook.is_some()));
+            }
+        }
+    }
 
     #[test]
     fn high_level_index_helper_preserves_tsx_grammar_and_stored_expression_symbols() {

@@ -305,6 +305,14 @@ def main():
             assert [hit['id'].split(':',4)[3] for hit in hits]==['true','false'],hits
             compare('notebook', 'notebookparity', mode='code', expected='cells.ipynb',
                 location={'kind': 'notebook', 'cell_ordinal': 1, 'line': 1, 'end_line': 2})
+            with sqlite3.connect((output/'data/db/code.db').as_uri()+'?mode=ro', uri=True) as connection:
+                provenance = connection.execute('SELECT f.path,f.content_revision,s.sha256 FROM code_files f JOIN code_source_state s ON s.file_id=f.id ORDER BY f.path').fetchall()
+                assert connection.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0]=='4'
+            assert len(provenance)==2,provenance
+            for path, revision, actual_hash in provenance:
+                assert revision > 0 and actual_hash == digest(Path(path)),('code byte provenance mismatch',path,revision,actual_hash)
+            summary['code_provenance']=[{'path':path,'revision':revision,'sha256':actual_hash} for path,revision,actual_hash in provenance]
+            summary['checks'].append('native_code_and_notebook_exact_byte_sha256_provenance')
             compare('code_isolation', 'parityneedle', empty=True)
             compare('absent_exact', 'unfindableparitytoken', empty=True)
             compare('code_absent_exact', 'unfindableparitytoken', mode='code', empty=True)

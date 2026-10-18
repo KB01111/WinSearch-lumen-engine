@@ -396,12 +396,30 @@ reconstruct300definitions plus300references over multiple batches without losing
 source text. The opt-in code scheduler uses this transport; normal queries have
 no code results and there is no active in-process fallback.
 
-`code.db` schema3 stores zero-based notebook cell ordinal and one-based local
+`code.db` schema4 stores zero-based notebook cell ordinal and one-based local
 lines alongside virtual source lines for chunks/symbols. Notebook source cells,
 including language magics, are retained; outputs/attachments/raw JSON are excluded.
-Migration preserves repo/file identity and exact text, clears stale heuristic
-symbols/vectors and marks files for native reparse. Successful persistence records
-the native parse revision and diagnostics; metadata changes reset that revision.
+The earlier schema1 migration preserves repo/file identity and exact text, clears
+stale heuristic symbols/vectors and marks files for native reparse. Parser
+compatibility (`parse_version`) and diagnostics remain separate from the durable,
+monotonic per-file `content_revision`; metadata changes invalidate compatibility
+without resetting that content counter.
+
+The parser computes SHA256 from the exact admitted UTF8 file bytes already read
+under its2MiB/source guards. BOM/CRLF and full notebook JSON contribute to the
+digest; notebook outputs still never enter chunks. Every internal code batch
+must carry a canonical64-character lowercase digest, stable across continuation.
+The daemon atomically publishes parsed chunks/symbols, source snapshot, byte hash
+and content revision. A failed metadata write rolls back the entire replacement.
+Schema3 migration retains IDs/FTS/vectors/jobs and initializes a current legacy
+parse's content revision at1 with an unknown hash. Reconciliation reparses missing
+hashes from current admitted sources; no metadata/path/chunk-text digest is used
+as a substitute. A non-provenance parse clears any older hash.
+
+These hashes are persisted internal provenance, not yet the public code-reference
+or preview contract. Canonical code references, bounded notebook/code previews,
+public hash metadata and ordinary document/media provenance remain open. See
+[current verification](validation/2026-10-18-code-provenance/README.md).
 
 The code coordinator persists source snapshots, revisioned claims and scan
 staging in `code.db`. Initial selected roots reconcile immediately; watcher

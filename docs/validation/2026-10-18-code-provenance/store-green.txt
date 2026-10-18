@@ -1,0 +1,16 @@
+rtk :    Compiling ws-code v0.1.0 (<checkout>\src\engine\crates\ws-code)
+At <checkout>\artifacts\code-provenance-checks.ps1:15 char:19
++ ... re-green' { rtk proxy cargo test -p ws-code code_provenance_ -- --tes ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...crates\ws-code):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.32s
+     Running unittests src\lib.rs (target\debug\deps\ws_code-4fc208959b0a087f.exe)
+
+running 3 tests
+test parse::tests::code_provenance_hashes_exact_admitted_bytes_including_bom_crlf_and_notebook_outputs ... ok
+test store::tests::code_provenance_commits_hash_revision_and_chunks_atomically_and_survives_reopen ... ok
+test store::tests::code_provenance_schema3_migration_preserves_data_and_keeps_legacy_hash_unknown ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.13s

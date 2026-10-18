@@ -1,0 +1,31 @@
+rtk :    Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearchd
+)
+At <checkout>\artifacts\code-provenance-checks.ps1:17 char:18
++ ... tive-red' { rtk proxy cargo test -p winsearchd code_provenance_native ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling wi...ins\winsearchd):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 18.88s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-a1af7bf73df4d90a.exe)
+
+running 1 test
+test code::tests::code_provenance_native_parser_commits_actual_hash_and_advances_durable_content_revision ... FAILED
+
+failures:
+
+---- code::tests::code_provenance_native_parser_commits_actual_hash_and_advances_durable_content_revision stdout ----
+
+thread 'code::tests::code_provenance_native_parser_commits_actual_hash_and_advances_durable_content_revision' (76580) panicked at bins\winsearchd\src\code.rs:1076:13:
+assertion `left == right` failed
+  left: None
+ right: Some("36bc22784d3cd4b5e6ae27ab2702f579957349879a55fed91582bb0861a43f9f")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    code::tests::code_provenance_native_parser_commits_actual_hash_and_advances_durable_content_revision
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 201 filtered out; finished in 0.76s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`
