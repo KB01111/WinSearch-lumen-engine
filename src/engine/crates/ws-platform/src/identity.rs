@@ -146,12 +146,10 @@ pub fn isolated_object_name(base: &str) -> Result<String, IdentityError> {
 /// Captures `(volume_serial, file_id)` for `path` via `GetFileInformationByHandleEx`
 /// without reading file contents (`FILE_READ_ATTRIBUTES` only).
 pub fn file_identity(path: &std::path::Path) -> Option<(u32, u64)> {
-    use std::ffi::c_void;
-    use std::mem::size_of;
     use windows::core::PCWSTR;
     use windows::Win32::Storage::FileSystem::{
-        CreateFileW, FileIdInfo, GetFileInformationByHandleEx, FILE_FLAGS_AND_ATTRIBUTES,
-        FILE_ID_INFO, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        CreateFileW, FILE_FLAGS_AND_ATTRIBUTES,
+        FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
         OPEN_EXISTING,
     };
 
@@ -171,15 +169,38 @@ pub fn file_identity(path: &std::path::Path) -> Option<(u32, u64)> {
             None,
         )
         .ok()?;
-        let mut info: FILE_ID_INFO = std::mem::zeroed();
-        let result = GetFileInformationByHandleEx(
-            handle,
-            FileIdInfo,
-            &mut info as *mut FILE_ID_INFO as *mut c_void,
-            size_of::<FILE_ID_INFO>() as u32,
-        );
+        let result = identity_for_handle(handle);
         let _ = CloseHandle(handle);
-        result.ok()?;
+        result
+    }
+}
+
+/// Identity of the already-opened source, without reopening a possibly replaced path.
+pub fn opened_file_identity(file: &std::fs::File) -> Option<(u32, u64)> {
+    use std::os::windows::io::AsRawHandle;
+    identity_for_handle(HANDLE(file.as_raw_handle()))
+}
+
+/// Native change time also observes edits whose last-write time was restored.
+pub fn opened_file_change_time(file: &std::fs::File) -> Option<i64> {
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Storage::FileSystem::{FileBasicInfo, GetFileInformationByHandleEx, FILE_BASIC_INFO};
+    unsafe {
+        let mut info:FILE_BASIC_INFO=std::mem::zeroed();
+        GetFileInformationByHandleEx(HANDLE(file.as_raw_handle()),FileBasicInfo,
+            &mut info as *mut FILE_BASIC_INFO as *mut std::ffi::c_void,
+            std::mem::size_of::<FILE_BASIC_INFO>() as u32).ok()?;
+        (info.ChangeTime>0).then_some(info.ChangeTime)
+    }
+}
+
+fn identity_for_handle(handle: HANDLE) -> Option<(u32, u64)> {
+    use windows::Win32::Storage::FileSystem::{FileIdInfo, GetFileInformationByHandleEx, FILE_ID_INFO};
+    unsafe {
+        let mut info: FILE_ID_INFO = std::mem::zeroed();
+        GetFileInformationByHandleEx(handle, FileIdInfo,
+            &mut info as *mut FILE_ID_INFO as *mut std::ffi::c_void,
+            std::mem::size_of::<FILE_ID_INFO>() as u32).ok()?;
         let file_id = u64::from_le_bytes(info.FileId.Identifier[..8].try_into().unwrap_or([0; 8]));
         Some((info.VolumeSerialNumber as u32, file_id))
     }
@@ -188,6 +209,24 @@ pub fn file_identity(path: &std::path::Path) -> Option<(u32, u64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn opened_file_identity_retains_the_actual_handle_across_path_replacement() {
+        let directory=std::env::temp_dir().join(format!("winsearch-opened-source-id-{}",std::process::id()));
+        std::fs::create_dir(&directory).unwrap();
+        let path=directory.join("source.bin");
+        std::fs::write(&path,b"old bytes").unwrap();
+        let old=file_identity(&path).unwrap();
+        let file=std::fs::File::open(&path).unwrap();
+        let first=opened_file_identity(&file);
+        std::fs::rename(&path,directory.join("previous.bin")).unwrap();
+        std::fs::write(&path,b"new bytes").unwrap();
+        let replacement=file_identity(&path).unwrap();
+        let retained=opened_file_identity(&file);
+        let still_open=file.metadata().unwrap().len();
+        drop(file);std::fs::remove_dir_all(directory).unwrap();
+        assert_ne!(old,replacement,"replacement must have a different native identity");
+        assert_eq!(first,Some(old));assert_eq!(retained,Some(old));assert_eq!(still_open,9);
+    }
     #[test]
     fn file_metadata_seconds_preserve_negative_fractional_instants() {
         use std::time::{Duration,UNIX_EPOCH};

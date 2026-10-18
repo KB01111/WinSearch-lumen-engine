@@ -118,6 +118,15 @@ impl IndexStore {
             .unwrap_or(0))
     }
 
+    pub fn content_sha256(&self, entry: i64) -> Result<Option<String>, StoreError> {
+        let mut statement=self.conn.prepare("SELECT DISTINCT p.source_sha256 FROM content_progress p JOIN content_revisions r ON r.entry_id=p.entry_id AND r.revision=p.revision JOIN query_entries e ON e.id=p.entry_id WHERE p.entry_id=?1 AND p.source_sha256_revision=p.revision AND p.source_sha256 IS NOT NULL AND query_source_allowed(e.path,p.source,e.is_app) LIMIT 2")?;
+        let hashes=statement.query_map([entry],|row|row.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+        Ok(match hashes.as_slice() {
+            [hash] if ws_protocol::valid_content_sha256(hash)=>Some(hash.clone()),
+            _=>None,
+        })
+    }
+
     /// Watch events invalidate even when coarse entry metadata is unchanged.
     pub fn invalidate_content_source(&mut self, entry: i64) -> Result<(), StoreError> {
         let tx = self.conn.transaction()?;
@@ -162,8 +171,9 @@ impl IndexStore {
         entry: i64,
         kind: &str,
     ) -> Result<Option<crate::model::ContentProgress>, StoreError> {
-        Ok(self.conn.query_row("SELECT cursor,complete,revision,source,model_generation,media_plan,video_selection FROM content_progress WHERE entry_id=?1 AND kind=?2", params![entry,kind], |r| Ok(crate::model::ContentProgress {
+        Ok(self.conn.query_row("SELECT cursor,complete,revision,source,model_generation,media_plan,video_selection,CASE WHEN source_sha256_revision=revision THEN source_sha256 ELSE NULL END FROM content_progress WHERE entry_id=?1 AND kind=?2", params![entry,kind], |r| Ok(crate::model::ContentProgress {
             cursor:r.get::<_,i64>(0)? as u64, complete:r.get(1)?, revision:r.get(2)?, source:r.get(3)?, model_generation:r.get(4)?,
+            source_sha256:r.get(7)?,
             media_plan:r.get::<_,Option<String>>(5)?.map(|s| serde_json::from_str(&s))
                 .transpose().map_err(|e| rusqlite::Error::FromSqlConversionFailure(5,rusqlite::types::Type::Text,Box::new(e)))?,
             video_selection:r.get::<_,Option<String>>(6)?.map(|s| serde_json::from_str(&s))
@@ -191,7 +201,7 @@ impl IndexStore {
         }
         self.conn.execute("INSERT INTO content_revisions(entry_id,revision) VALUES(?1,1) ON CONFLICT(entry_id) DO UPDATE SET revision=revision+1",[entry])?;
         let revision = self.content_revision(entry)?;
-        self.conn.execute("INSERT INTO content_progress(entry_id,kind,revision,source,model_generation) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(entry_id,kind) DO UPDATE SET cursor=0,complete=0,revision=excluded.revision,source=excluded.source,model_generation=excluded.model_generation,media_plan=NULL,video_selection=NULL",params![entry,kind,revision,source,generation])?;
+        self.conn.execute("INSERT INTO content_progress(entry_id,kind,revision,source,model_generation) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(entry_id,kind) DO UPDATE SET cursor=0,complete=0,revision=excluded.revision,source=excluded.source,model_generation=excluded.model_generation,media_plan=NULL,video_selection=NULL,source_sha256=NULL,source_sha256_revision=NULL",params![entry,kind,revision,source,generation])?;
         Ok(self
             .content_progress(entry, kind)?
             .expect("inserted progress"))
@@ -219,6 +229,24 @@ impl IndexStore {
         media: Option<&crate::model::MediaPlan>,
         selection: Option<&crate::model::VideoSelection>,
     ) -> Result<bool, StoreError> {
+        self.commit_content_batch_with_source(job,progress,chunks,next,media,selection,None)
+    }
+
+    pub fn commit_content_batch_with_source(
+        &mut self, job: &ExtractJob, progress: &crate::model::ContentProgress,
+        chunks: &[crate::model::ContentChunk], next: Option<u64>,
+        media: Option<&crate::model::MediaPlan>, selection: Option<&crate::model::VideoSelection>,
+        source_sha256: Option<&str>,
+    ) -> Result<bool, StoreError> {
+        if source_sha256.is_some_and(|hash|!ws_protocol::valid_content_sha256(hash)) {
+            return Err(StoreError::InvalidConfig("invalid complete-source SHA256".into()));
+        }
+        if progress.source_sha256.as_deref().is_some_and(|hash|Some(hash)!=source_sha256) {
+            return Ok(false);
+        }
+        // A resumed legacy parse has no byte attestation for its earlier chunks or media plan.
+        let source_sha256=source_sha256.filter(|_|progress.source_sha256.is_some()
+            || (progress.cursor==0 && progress.media_plan.is_none() && progress.video_selection.is_none()));
         if self.content_revision(job.entry_id)? != progress.revision
             || self.model_generation()? != progress.model_generation
         {
@@ -311,13 +339,13 @@ impl IndexStore {
             }
         }
         tx.execute(
-            "UPDATE content_progress SET cursor=?3,complete=?4,media_plan=COALESCE(?5,media_plan),video_selection=?6 WHERE entry_id=?1 AND kind=?2",
+            "UPDATE content_progress SET cursor=?3,complete=?4,media_plan=COALESCE(?5,media_plan),video_selection=?6,source_sha256=?7,source_sha256_revision=CASE WHEN ?7 IS NULL THEN NULL ELSE ?8 END WHERE entry_id=?1 AND kind=?2",
             params![
                 job.entry_id,
                 job.kind,
                 next.unwrap_or(progress.cursor + chunks.iter().filter(|c|!c.visual).count() as u64) as i64,
                 next.is_none(),
-                media_json, selection_json
+                media_json, selection_json, source_sha256, progress.revision
             ],
         )?;
         if next.is_some() {
@@ -859,6 +887,12 @@ UPDATE content_chunks SET embed_state='pending' WHERE embed_state='claimed';
                 "ALTER TABLE content_progress ADD COLUMN video_selection TEXT",
                 [],
             )?;
+        }
+        if !progress_columns.iter().any(|c| c == "source_sha256") {
+            conn.execute("ALTER TABLE content_progress ADD COLUMN source_sha256 TEXT", [])?;
+        }
+        if !progress_columns.iter().any(|c| c == "source_sha256_revision") {
+            conn.execute("ALTER TABLE content_progress ADD COLUMN source_sha256_revision INTEGER", [])?;
         }
         let chunk_columns = conn.prepare("PRAGMA table_info(content_chunks)")?
             .query_map([], |r| r.get::<_, String>(1))?
@@ -2995,6 +3029,108 @@ mod tests {
         assert!(store.commit_content_batch(&resumed, &saved, &[], None).unwrap());
         assert!(store.content_progress(job.entry_id, "audio").unwrap().unwrap().complete);
         assert!(store.claim_content_vectors(Some(job.entry_id)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn ordinary_source_hash_commits_with_chunks_and_survives_only_current_source_and_model_reset() {
+        let (mut store,job,progress)=batch_fixture();
+        let hash="a".repeat(64);
+        assert_eq!(store.content_sha256(job.entry_id).unwrap(),None,"legacy progress has no invented byte hash");
+        let chunk=content_chunk(&job,0,"current bytes");
+        assert!(store.commit_content_batch_with_source(&job,&progress,&[chunk],Some(1),None,None,Some(&hash)).unwrap());
+        assert_eq!(store.content_sha256(job.entry_id).unwrap().as_deref(),Some(hash.as_str()));
+        store.reset_content_vectors().unwrap();
+        assert_eq!(store.content_sha256(job.entry_id).unwrap().as_deref(),Some(hash.as_str()));
+        store.set_query_source_guard(|_,_,_|false).unwrap();
+        assert_eq!(store.content_sha256(job.entry_id).unwrap(),None);
+        store.set_query_source_guard(|_,_,_|true).unwrap();
+        store.invalidate_content_source(job.entry_id).unwrap();
+        assert_eq!(store.content_sha256(job.entry_id).unwrap(),None);
+    }
+
+    #[test]
+    fn ordinary_source_hash_rejects_malformed_and_changed_or_missing_continuation_without_advancing() {
+        for invalid in [String::new(),"a".repeat(63),"A".repeat(64),"g".repeat(64)] {
+            let (mut store,job,progress)=batch_fixture();
+            assert!(store.commit_content_batch_with_source(&job,&progress,&[content_chunk(&job,0,"uncommitted")],None,None,None,Some(&invalid)).is_err());
+            assert_eq!(store.content_progress(job.entry_id,"doc").unwrap(),Some(progress));
+            assert!(store.list_content_chunks(job.entry_id).unwrap().is_empty());
+        }
+        for next_hash in [Some("b".repeat(64)),None] {
+            let (mut store,job,progress)=batch_fixture();
+            let hash="a".repeat(64);
+            assert!(store.commit_content_batch_with_source(&job,&progress,&[content_chunk(&job,0,"first")],Some(1),None,None,Some(&hash)).unwrap());
+            let next_job=store.claim_content_extract_job().unwrap().unwrap();
+            let saved=store.content_progress(job.entry_id,"doc").unwrap().unwrap();
+            assert!(!store.commit_content_batch_with_source(&next_job,&saved,&[content_chunk(&job,1,"different source")],None,None,None,next_hash.as_deref()).unwrap());
+            assert_eq!(store.content_progress(job.entry_id,"doc").unwrap(),Some(saved));
+            assert_eq!(store.list_content_chunks(job.entry_id).unwrap().len(),1);
+            assert_eq!(store.content_sha256(job.entry_id).unwrap().as_deref(),Some(hash.as_str()));
+        }
+    }
+
+    #[test]
+    fn ordinary_source_hash_from_an_older_writer_cannot_bind_to_a_later_content_revision() {
+        let (mut store,job,progress)=batch_fixture();let hash="a".repeat(64);
+        assert!(store.commit_content_batch_with_source(&job,&progress,&[content_chunk(&job,0,"first")],Some(1),None,None,Some(&hash)).unwrap());
+        // An older binary changes only the columns it knows and leaves new columns untouched.
+        store.conn.execute("UPDATE content_revisions SET revision=revision+1 WHERE entry_id=?1",[job.entry_id]).unwrap();
+        store.conn.execute("UPDATE content_progress SET revision=revision+1,source='new source snapshot' WHERE entry_id=?1",[job.entry_id]).unwrap();
+        assert_eq!(store.content_sha256(job.entry_id).unwrap(),None,"a retained old digest is not provenance for the new revision");
+        assert_eq!(store.content_progress(job.entry_id,"doc").unwrap().unwrap().source_sha256,None);
+    }
+
+    #[test]
+    fn ordinary_source_hash_cannot_attest_earlier_chunks_of_a_resumed_legacy_parse() {
+        let (mut store,job,progress)=batch_fixture();let hash="a".repeat(64);
+        assert!(store.commit_content_batch_with_source(&job,&progress,&[content_chunk(&job,0,"legacy chunk")],Some(1),None,None,None).unwrap());
+        let resumed=store.claim_content_extract_job().unwrap().unwrap();
+        let saved=store.content_progress(job.entry_id,"doc").unwrap().unwrap();
+        assert!(store.commit_content_batch_with_source(&resumed,&saved,&[content_chunk(&job,1,"newly hashed chunk")],None,None,None,Some(&hash)).unwrap());
+        assert_eq!(store.list_content_chunks(job.entry_id).unwrap().len(),2);
+        assert_eq!(store.content_progress(job.entry_id,"doc").unwrap().unwrap().source_sha256,None,
+            "new continuation bytes cannot attest the earlier legacy chunks");
+        assert_eq!(store.content_sha256(job.entry_id).unwrap(),None);
+        store.enqueue_extract_job(job.entry_id,"doc").unwrap();
+        let fresh_job=store.claim_content_extract_job().unwrap().unwrap();
+        let fresh=store.begin_content_batch(job.entry_id,"doc",&progress.source).unwrap();
+        assert!(fresh.revision>saved.revision);
+        assert!(store.commit_content_batch_with_source(&fresh_job,&fresh,&[content_chunk(&job,0,"fresh full parse")],None,None,None,Some(&hash)).unwrap());
+        assert_eq!(store.content_sha256(job.entry_id).unwrap().as_deref(),Some(hash.as_str()));
+        assert_eq!(store.list_content_chunks(job.entry_id).unwrap().len(),1);
+    }
+
+    #[test]
+    fn ordinary_source_hash_and_cursor_roll_back_with_chunk_transaction() {
+        let (mut store,job,progress)=batch_fixture();
+        let hash="a".repeat(64);
+        store.conn.execute_batch("CREATE TRIGGER fail_source_hash_fixture BEFORE UPDATE ON content_progress BEGIN SELECT RAISE(ABORT,'source hash fixture failure'); END;").unwrap();
+        let chunk=content_chunk(&job,0,"must roll back");
+        assert!(store.commit_content_batch_with_source(&job,&progress,&[chunk.clone()],Some(1),None,None,Some(&hash)).is_err());
+        assert_eq!(store.content_progress(job.entry_id,"doc").unwrap(),Some(progress.clone()));
+        assert_eq!(store.content_sha256(job.entry_id).unwrap(),None);
+        assert!(store.list_content_chunks(job.entry_id).unwrap().is_empty());
+        store.conn.execute_batch("DROP TRIGGER fail_source_hash_fixture").unwrap();
+        assert!(store.commit_content_batch_with_source(&job,&progress,&[chunk],None,None,None,Some(&hash)).unwrap());
+        assert_eq!(store.content_sha256(job.entry_id).unwrap().as_deref(),Some(hash.as_str()));
+    }
+
+    #[test]
+    fn ordinary_source_hash_restart_and_legacy_migration_preserve_existing_content_and_jobs() {
+        let (mut store,job,progress)=batch_fixture();let hash="a".repeat(64);
+        assert!(store.commit_content_batch_with_source(&job,&progress,&[content_chunk(&job,0,"preservedprovenanceneedle")],Some(1),None,None,Some(&hash)).unwrap());
+        let id=store.list_content_chunks(job.entry_id).unwrap()[0].id;
+        let reopened=IndexStore::init(store.conn).unwrap();
+        assert_eq!(reopened.content_sha256(job.entry_id).unwrap().as_deref(),Some(hash.as_str()));
+        assert_eq!(reopened.list_content_chunks(job.entry_id).unwrap()[0].id,id);
+        reopened.conn.execute_batch("ALTER TABLE content_progress DROP COLUMN source_sha256").unwrap();
+        let mut legacy=IndexStore::init(reopened.conn).unwrap();
+        assert_eq!(legacy.content_sha256(job.entry_id).unwrap(),None,"old databases never invent a digest");
+        let saved=legacy.content_progress(job.entry_id,"doc").unwrap().unwrap();
+        assert_eq!((saved.cursor,saved.revision,saved.source),(1,progress.revision,progress.source));
+        assert_eq!(legacy.list_content_chunks(job.entry_id).unwrap()[0].id,id);
+        assert_eq!(legacy.search(&crate::model::SearchRequest {text:"preservedprovenanceneedle".into(),limit:5,..Default::default()}).unwrap().len(),1);
+        assert_eq!(legacy.claim_content_extract_job().unwrap().unwrap().entry_id,job.entry_id);
     }
 
     #[test]

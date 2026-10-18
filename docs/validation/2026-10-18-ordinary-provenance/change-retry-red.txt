@@ -1,0 +1,21 @@
+failures:
+
+---- extract::tests::ordinary_source_hash_changed_report_requeues_without_poisoning stdout ----
+
+thread 'extract::tests::ordinary_source_hash_changed_report_requeues_without_poisoning' (11432) panicked at bins\winsearchd\src\extract.rs:2472:9:
+assertion failed: result.requeued && !result.poisoned && !result.failed
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- extract::tests::ordinary_source_hash_mismatch_discards_partial_chunks_and_restarts_current_native_parse stdout ----
+
+thread 'extract::tests::ordinary_source_hash_mismatch_discards_partial_chunks_and_restarts_current_native_parse' (79664) panicked at bins\winsearchd\src\extract.rs:2504:9:
+assertion failed: indexer.store_lock().list_content_chunks(entry).unwrap().is_empty()
+
+
+failures:
+    extract::tests::ordinary_source_hash_changed_report_requeues_without_poisoning
+    extract::tests::ordinary_source_hash_mismatch_discards_partial_chunks_and_restarts_current_native_parse
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 210 filtered out; finished in 0.43s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

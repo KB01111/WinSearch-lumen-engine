@@ -437,7 +437,7 @@ impl EngineService {
                 .resolve_metadata(id,reference,incarnation),
         };
         let policy_epoch = self.indexer.policy_epoch();
-        let (entry, root_path, revision, generation, indexed,identity) = {
+        let (entry, root_path, revision, generation, indexed,identity,content_sha256) = {
             let store = self.indexer.store_lock();
             if !store.entry_visible(entry_id).map_err(|_| ErrorCode::Internal)? { return Err(ErrorCode::NotReady); }
             let entry = store.get_entry(entry_id).map_err(|_| ErrorCode::Internal)?.ok_or(ErrorCode::NotReady)?;
@@ -448,7 +448,8 @@ impl EngineService {
             let generation = store.model_generation().map_err(|_| ErrorCode::Internal)?;
             let indexed = store.entry_content_allowed(entry_id).map_err(|_| ErrorCode::Internal)?;
             let identity=store.entry_identity(entry_id).map_err(|_|ErrorCode::Internal)?.ok_or(ErrorCode::NotReady)?;
-            (entry, root.path, revision, generation, indexed,identity)
+            let content_sha256=store.content_sha256(entry_id).map_err(|_|ErrorCode::Internal)?;
+            (entry, root.path, revision, generation, indexed,identity,content_sha256)
         };
         let path = std::path::Path::new(&entry.path);
         if !self.indexer.content_path_allowed(path) || ws_platform::identity::file_identity(path)!=Some(identity) {
@@ -468,6 +469,7 @@ impl EngineService {
             if self.indexer.policy_epoch() != policy_epoch
                 || store.model_generation().map_err(|_| ErrorCode::Internal)? != generation
                 || store.content_revision(entry_id).map_err(|_| ErrorCode::Internal)? != revision
+                || store.content_sha256(entry_id).map_err(|_|ErrorCode::Internal)?!=content_sha256
                 || store.entry_identity(entry_id).map_err(|_|ErrorCode::Internal)?!=Some(identity)
                 || !store.entry_visible(entry_id).map_err(|_| ErrorCode::Internal)?
                 || !self.indexer.content_path_allowed(path) || ws_platform::identity::file_identity(path)!=Some(identity)
@@ -479,7 +481,7 @@ impl EngineService {
             path: entry.path.clone(), name: entry.name.clone(), kind: to_result_kind(entry_hit_kind(&entry)),
             size_bytes: metadata.len(), modified_unix_seconds: modified,
             index_revision: (indexed && revision > 0).then_some(revision), source_revision: proof,
-            content_sha256:None })
+            content_sha256:(indexed && revision>0).then_some(content_sha256).flatten() })
     }
 
     fn answer_model_status(&self, client: &ClientHandle, id: RequestId) {
@@ -1563,6 +1565,8 @@ mod tests {
     #[test]
     fn code_entry_reference_delivery_binds_real_exact_and_semantic_hits_and_rejects_replacement() {
         let (engine,code,root)=code_search_service();
+        // Assert native identity before watcher reconciliation; live epoch races have separate coverage.
+        crate::code::tests::stop_fixture_watchers(&code);
         let mut request=query("needle");request.mode=SearchMode::Code;
         let mut sources=HashMap::new();
         let planned=engine.plan_results_with_sources(&request,&mut sources);

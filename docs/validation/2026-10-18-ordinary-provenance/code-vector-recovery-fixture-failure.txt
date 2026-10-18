@@ -1,0 +1,15 @@
+failures:
+
+---- code::tests::background_vector_failure_retains_a_wake_and_recovers_without_signal stdout ----
+
+thread 'code::tests::background_vector_failure_retains_a_wake_and_recovers_without_signal' (77624) panicked at bins\winsearchd\src\code.rs:993:9:
+assertion failed: recovered
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    code::tests::background_vector_failure_retains_a_wake_and_recovers_without_signal
+
+test result: FAILED. 212 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 175.30s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

@@ -1273,6 +1273,8 @@ pub(crate) mod tests {
         let client = real_client(&tree);
         let request = client.request(path.clone(), "doc", 256);
         let response = client.extract(&request, Duration::from_secs(10)).unwrap();
+        assert_eq!(response.source_sha256.as_deref(),Some("831a561524ffc04c9d0c0773e6c34f4dc9bd90fb63864d13970efe9a89d63fbc"),
+            "actual ordinary worker must attest complete source bytes");
         assert_eq!(
             response.output.segments[0].text,
             "actual generated fixture text\nsecond line"
@@ -1292,6 +1294,7 @@ pub(crate) mod tests {
         assert!(completed.output.segments.is_empty());
         assert_eq!(completed.next_cursor, None);
         assert_eq!(completed.total_units, Some(1));
+        assert_eq!(completed.source_sha256,response.source_sha256);
         std::fs::write(
             tree.0.join("actual.txt"),
             "generated chunk words ".repeat(200),

@@ -36,8 +36,8 @@ define the full scope.
 
 ### Previews, documents, media and code
 
-- [ ] Persist actual complete-source byte provenance for ordinary documents/media
-  and expose accurate extraction totals and cap states where available.
+- [ ] Complete source-byte hashes for larger files and existing indexes, and
+  report accurate extraction totals and limits.
 - [ ] Complete confined raster/image/PDF-page thumbnails, rich previews,
   uncached rendering and cache maintenance within existing host resource bounds.
 - [ ] Wire PDF page, source line and notebook-cell navigation into consumer

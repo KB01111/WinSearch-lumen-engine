@@ -164,7 +164,7 @@ pub fn extract_video_batch(
     } else {
         None
     };
-    Ok(ExtractResponse { code: None,
+    Ok(ExtractResponse { source_sha256: None, code: None,
         output: ExtractOutput::extracted(segments),
         next_cursor,
         total_units: Some(total_units(&plan)),
@@ -258,6 +258,7 @@ fn select_batch(
     if end < info.duration_ms {
         state.validate().map_err(decoder::decode)?;
         return Ok(ExtractResponse {
+            source_sha256: None,
             code: None,
             output: ExtractOutput::extracted(Vec::new()),
             next_cursor: Some(selection_cursor(end)),
@@ -293,6 +294,7 @@ fn select_batch(
     };
     plan.validate().map_err(decoder::decode)?;
     Ok(ExtractResponse {
+        source_sha256: None,
         code: None,
         output: ExtractOutput::extracted(Vec::new()),
         next_cursor: Some(0),

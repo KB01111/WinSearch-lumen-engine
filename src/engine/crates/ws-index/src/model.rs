@@ -203,6 +203,7 @@ pub struct ContentProgress {
     pub complete: bool,
     pub revision: i64,
     pub source: String,
+    pub source_sha256: Option<String>,
     pub model_generation: i64,
     pub media_plan: Option<MediaPlan>,
     pub video_selection: Option<VideoSelection>,

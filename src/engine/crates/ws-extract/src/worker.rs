@@ -24,6 +24,8 @@ pub struct ExtractRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtractResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_sha256: Option<String>,
     pub output: ExtractOutput,
     pub next_cursor: Option<u64>,
     pub total_units: Option<u64>,
@@ -101,6 +103,11 @@ pub fn validate_response(
     if response.diagnostics.len() > 8 || response.diagnostics.iter().any(|s| s.len() > 1024) {
         return Err("worker diagnostics exceed bounds".into());
     }
+    if response.source_sha256.as_deref().is_some_and(|hash|request.kind=="code"
+        || !ws_protocol::valid_content_sha256(hash)
+        || !matches!(response.output.status,ExtractionStatus::Extracted|ExtractionStatus::ExactOnly)) {
+        return Err("invalid ordinary complete-source byte provenance".into());
+    }
     if request.kind == "code" {
         return crate::code::validate_batch(request, response);
     }
@@ -118,7 +125,7 @@ pub fn validate_response(
     }
     if matches!(
         response.output.status,
-        ExtractionStatus::Unsupported | ExtractionStatus::Failed(_)
+        ExtractionStatus::Unsupported | ExtractionStatus::Failed(_) | ExtractionStatus::SourceChanged
     ) && !segments.is_empty()
     {
         return Err("failed/unsupported response contains drafts".into());
@@ -531,7 +538,7 @@ mod tests {
         };
         let mut ocr=SegmentDraft::text("ocr","real screen text");
         ocr.start_ms=Some(0); ocr.end_ms=Some(0); ocr.thumbnail_hint=image.thumbnail_hint.clone();
-        let mut response=ExtractResponse { code: None, output:ExtractOutput::extracted(vec![image.clone(),ocr.clone()]),
+        let mut response=ExtractResponse { source_sha256: None, code: None, output:ExtractOutput::extracted(vec![image.clone(),ocr.clone()]),
             next_cursor: Some(crate::video::frame_cursor(1, 0)),
             total_units: Some(4),
             diagnostics: vec![],
@@ -574,7 +581,7 @@ mod tests {
             path: "C:/scratch/frame.png".into(),
             token_budget: 70,
         };
-        let mut response=ExtractResponse { code: None, output:ExtractOutput::extracted(vec![image]),
+        let mut response=ExtractResponse { source_sha256: None, code: None, output:ExtractOutput::extracted(vec![image]),
             next_cursor: Some(crate::video::frame_cursor(1, 0)),
             total_units: Some(2),
             diagnostics: vec![],
@@ -624,6 +631,7 @@ mod tests {
             ..previous
         };
         let response = ExtractResponse {
+            source_sha256: None,
             code: None,
             output: ExtractOutput::extracted(vec![]),
             next_cursor: Some(0),
@@ -666,6 +674,7 @@ mod tests {
         next.next_periodic_ms = 30_000;
         next.sample_count = 30;
         let mut response = ExtractResponse {
+            source_sha256: None,
             code: None,
             output: ExtractOutput::extracted(vec![]),
             next_cursor: Some(crate::video::selection_cursor(30_000)),
@@ -730,6 +739,7 @@ mod tests {
         initial.kind = "video".into();
         initial.max_units = 1;
         let skipped = ExtractResponse {
+            source_sha256: None,
             code: None,
             output: ExtractOutput::extracted(vec![]),
             next_cursor: Some(crate::video::frame_cursor(1, 0)),
@@ -753,7 +763,7 @@ mod tests {
         let mut req = request();
         req.kind = "audio".into();
         req.max_units = 30;
-        let mut response = ExtractResponse { code: None,
+        let mut response = ExtractResponse { source_sha256: None, code: None,
             output: ExtractOutput::extracted(vec![]),
             next_cursor: Some(30), total_units: Some(48), diagnostics: vec![],
             media: Some(MediaBatch {
@@ -795,7 +805,7 @@ mod tests {
     fn protocol_roundtrip_preserves_text_and_line_metadata() {
         let mut segment = SegmentDraft::text("doc", "actual text\nsecond line");
         segment.line = Some(1);
-        let response = ExtractResponse { code: None,
+        let response = ExtractResponse { source_sha256: None, code: None,
             output: ExtractOutput::extracted(vec![segment]),
             next_cursor: None,
             total_units: Some(1),
@@ -816,7 +826,7 @@ mod tests {
     fn code_response_requires_typed_forward_units() {
         let mut req=request();
         req.kind="code".into();
-        let response=ExtractResponse { code: None, output:ExtractOutput::extracted(vec![]),next_cursor:Some(1),
+        let response=ExtractResponse { source_sha256: None, code: None, output:ExtractOutput::extracted(vec![]),next_cursor:Some(1),
             total_units: Some(2),
             diagnostics: vec![],
             media: None,
@@ -836,7 +846,7 @@ mod tests {
         let mut ocr = text.clone();
         ocr.kind = "ocr".into();
         ocr.line = Some(6);
-        let mut response = ExtractResponse { code: None,
+        let mut response = ExtractResponse { source_sha256: None, code: None,
             output: ExtractOutput::extracted(vec![text.clone(), ocr]),
             next_cursor: Some(1 << 32),
             total_units: Some(2),
@@ -872,7 +882,7 @@ mod tests {
         let mut b = a.clone();
         b.page = Some(2);
         b.line = Some(1);
-        let mut response = ExtractResponse { code: None,
+        let mut response = ExtractResponse { source_sha256: None, code: None,
             output: ExtractOutput::extracted(vec![a.clone(), b]),
             next_cursor: None,
             total_units: Some(2),
@@ -898,7 +908,7 @@ mod tests {
         req.cursor = 8191;
         let mut draft = SegmentDraft::text("pdf", "last valid draft");
         draft.page = Some(1);
-        let mut response = ExtractResponse { code: None,
+        let mut response = ExtractResponse { source_sha256: None, code: None,
             output: ExtractOutput::extracted(vec![draft.clone()]),
             next_cursor: None,
             total_units: Some(1),
@@ -924,7 +934,7 @@ mod tests {
 
     #[test]
     fn text_batches_reject_empty_progress_and_false_completion() {
-        let mut response = ExtractResponse { code: None,
+        let mut response = ExtractResponse { source_sha256: None, code: None,
             output: ExtractOutput::extracted(vec![SegmentDraft::text("doc", "one")]),
             next_cursor: None,
             total_units: Some(75),
@@ -948,7 +958,7 @@ mod tests {
         let mut req = request();
         req.path = PathBuf::from("界".repeat(100_000));
         assert!(encode_request(&req).is_err());
-        let mut response = ExtractResponse { code: None,
+        let mut response = ExtractResponse { source_sha256: None, code: None,
             output: ExtractOutput::extracted(vec![SegmentDraft::text("doc", "x"); 257]),
             next_cursor: None,
             total_units: None,
@@ -970,7 +980,7 @@ mod tests {
 
     #[test]
     fn response_rejects_reversed_metadata_and_foreign_kinds() {
-        let mut response = ExtractResponse { code: None,
+        let mut response = ExtractResponse { source_sha256: None, code: None,
             output: ExtractOutput::extracted(vec![
                 SegmentDraft::text("doc", "one"),
                 SegmentDraft::text("doc", "two"),

@@ -1,0 +1,15 @@
+failures:
+
+---- source::tests::ordinary_source_hash_rejects_parse_time_change_and_restore_with_original_mtime stdout ----
+
+thread 'source::tests::ordinary_source_hash_rejects_parse_time_change_and_restore_with_original_mtime' (85496) panicked at crates\ws-extract\src\source.rs:286:9:
+parsed transient bytes must not inherit the restored file's digest: Ok(ExtractResponse { source_sha256: Some("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"), output: ExtractOutput { status: Extracted, segments: [SegmentDraft { kind: "doc", text: "abd", page: None, start_ms: None, end_ms: None, line: None, thumbnail_hint: None, embed: true, embedding_input: Text }] }, next_cursor: None, total_units: Some(0), diagnostics: [], media: None, video_selection: None, code: None })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    source::tests::ordinary_source_hash_rejects_parse_time_change_and_restore_with_original_mtime
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 52 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p ws-extract --lib`

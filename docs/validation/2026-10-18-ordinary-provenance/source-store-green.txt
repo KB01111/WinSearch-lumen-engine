@@ -1,0 +1,19 @@
+rtk :    Compiling ws-index v0.1.0 (<checkout>\src\engine\crates\ws-index)
+At line:1 char:39
++ ... src/engine; rtk proxy cargo test -p ws-index ordinary_source_hash_ -- ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...rates\ws-index):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.32s
+     Running unittests src\lib.rs (target\debug\deps\ws_index-70ff3159c871f712.exe)
+
+running 6 tests
+test store::tests::ordinary_source_hash_and_cursor_roll_back_with_chunk_transaction ... ok
+test store::tests::ordinary_source_hash_cannot_attest_earlier_chunks_of_a_resumed_legacy_parse ... ok
+test store::tests::ordinary_source_hash_commits_with_chunks_and_survives_only_current_source_and_model_reset ... ok
+test store::tests::ordinary_source_hash_from_an_older_writer_cannot_bind_to_a_later_content_revision ... ok
+test store::tests::ordinary_source_hash_rejects_malformed_and_changed_or_missing_continuation_without_advancing ... ok
+test store::tests::ordinary_source_hash_restart_and_legacy_migration_preserve_existing_content_and_jobs ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 86 filtered out; finished in 0.11s

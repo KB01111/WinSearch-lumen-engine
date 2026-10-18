@@ -287,6 +287,16 @@ def main():
                 wait_for(code_vectors_ready)
                 summary['checks'].append('native_code_index_has_complete_768d_vectors')
             summary['index_seconds'] = round(time.perf_counter()-start, 3)
+            with sqlite3.connect(db.as_uri()+'?mode=ro',uri=True) as connection:
+                ordinary=connection.execute('SELECT e.id,e.path,p.revision,p.source_sha256,p.source_sha256_revision FROM entries e JOIN content_progress p ON p.entry_id=e.id ORDER BY e.path').fetchall()
+            assert len(ordinary)==(5 if options.real_model else 2),ordinary
+            summary['ordinary_provenance']=[]
+            for entry_id,path,revision,actual_hash,hash_revision in ordinary:
+                assert revision==hash_revision and revision>0 and actual_hash==digest(Path(path)),('ordinary byte provenance mismatch',path,actual_hash,hash_revision)
+                resolved=control.request('resolve_entry',reference={'result_id':f'e{entry_id}','source_revision':None})
+                assert resolved['type']=='resolved_entry' and resolved['entry']['content_sha256']==actual_hash,resolved
+                summary['ordinary_provenance'].append({'path':path,'revision':revision,'hash_revision':hash_revision,'sha256':actual_hash,'resolved':resolved['entry']})
+            summary['checks'].append('native_ordinary_document_media_byte_sha256_and_resolved_metadata')
             document_hits = compare('document_exact', 'amberparitytoken', expected='item-a.txt', location={'kind': 'line', 'line': 2})
             document_hit = next(hit for hit in document_hits if Path(hit['path']).name == 'item-a.txt')
             reference = {'result_id':document_hit['id'],'source_revision':None}
@@ -331,7 +341,7 @@ def main():
                     if record['name'] == 'code_definition_reference')
                 assert ranking(native_client['code']) == ranking(expected_code), ('client code ranking parity', native_client)
                 assert len(native_client['reference_checks'])==4,native_client
-                for entry in native_client['code_entries']:
+                for entry in [*native_client['code_entries'],native_client['document_preview']['entry'],native_client['pdf_preview']['entry']]:
                     assert entry['content_sha256']==digest(Path(entry['path'])),entry
                 summary['checks'].append('typed_client_bound_code_notebook_refs_and_actual_sha256')
                 assert len(native_client['semantic_checks']) == (3 if options.real_model else 0), native_client

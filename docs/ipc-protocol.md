@@ -207,7 +207,11 @@ nullable `index_revision`, opaque `source_revision` and optional `content_sha256
 The latter is a canonical lowercase SHA-256 of the complete admitted source bytes
 only when established by current extraction; it is currently available for code
 and notebook files. Notebook hashes include the complete original JSON bytes,
-while indexed text excludes outputs. Ordinary-file hashes remain unknown/omitted.
+while indexed text excludes outputs. Ordinary extraction can also establish a
+complete-source byte hash within its64MiB hash budget. Existing32MiB document/
+image/PDF admission remains unchanged; larger streaming media and legacy rows
+without established provenance retain an unknown/omitted hash. A byte hash does
+not imply that every page/window/chunk was extracted.
 Metadata-only entries
 have no `index_revision`; stale extracted content cannot supply one for a replaced
 source. A positive revision does not imply complete extraction or uncapped page
@@ -230,7 +234,7 @@ engine's native residency/reparse/current-policy checks; they do not replace the
 The additive operation retains protocol version1. The
 [async Rust client](headless-client.md) performs equivalent reply checks and
 uses the same shared DTOs. The cached-text routes below are additive;
-ordinary-source provenance and Lumen host integration remain open.
+larger-source/legacy provenance recovery and Lumen host integration remain open.
 
 Peers advertising `search.entry_references` add optional `entry_reference` to
 ordinary and code search results, containing the canonical indexed ID and a
@@ -289,7 +293,7 @@ local preview slots and leaves its UI/control connection independent.
 Both clients require the capability and validate identity/proof, local root,
 state, kinds, locations and reply budgets. Capability presence establishes cached
 text only. Raster/page thumbnails, media playback, uncached/on-demand rendering,
-ordinary content hashes and the consumer UI remain open.
+larger-source/legacy hashes and the consumer UI remain open.
 Protocol version remains1. See [ordinary-text validation](validation/2026-10-18-preview-text/README.md).
 
 Peers advertising `entry.preview.code` accept canonical code-file `c` references
@@ -318,6 +322,22 @@ Current indexed code reports completion within parser limits; full source totals
 and cap state remain null. Rust/C# require the separate capability, validate code
 parts and actual ranges, and refuse legacy peers before sending a preview request.
 See [code-preview validation](validation/2026-10-18-code-preview/README.md).
+
+Ordinary source hashing runs within the existing owned extraction child, using
+64KiB buffers, the same deadline and resident/reparse/native-identity checks.
+Supported sources are hashed before and after parsing. Opened-handle native
+identity and change time also bind those reads; normal changes restored to the
+original bytes/mtime are rejected. Missing native identity/change time leaves the
+hash unknown. Changed sources return the internal `SourceChanged` outcome.
+The daemon discards/requeues that work without
+charging a poison attempt. Hashes are committed with chunks/cursor and explicitly
+bound to the parsed content revision, so a retained hash from an older writer
+cannot describe a later revision. Different or missing established hashes across
+continuations invalidate old derived content. Media cache restoration also checks
+the established digest before replacing an artifact. Model-only vector resets
+preserve valid byte provenance. Resolution/preview still read metadata and cached
+content only; they do not rehash source bytes. The trusted host must keep its own
+current grants and content-access freshness checks.
 
 ## Internal embed-worker protocol (P3.2)
 

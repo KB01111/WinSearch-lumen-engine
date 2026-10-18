@@ -1,0 +1,17 @@
+failures:
+
+---- identity::tests::opened_file_identity_retains_the_actual_handle_across_path_replacement stdout ----
+
+thread 'identity::tests::opened_file_identity_retains_the_actual_handle_across_path_replacement' (100780) panicked at crates\ws-platform\src\identity.rs:210:9:
+assertion `left == right` failed
+  left: None
+ right: Some((<native identity redacted>))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    identity::tests::opened_file_identity_retains_the_actual_handle_across_path_replacement
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `-p ws-platform --lib`

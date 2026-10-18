@@ -10,6 +10,7 @@ pub mod docs;
 pub mod image;
 pub mod ocr;
 pub mod pdf;
+pub mod source;
 pub mod video;
 pub mod worker;
 
@@ -45,6 +46,8 @@ pub enum ExtractionStatus {
     /// Content is exact-only (indexed in FTS, no semantic vectors emitted —
     /// e.g. numeric-dominated tables or unsupported binary formats).
     ExactOnly,
+    /// The admitted source changed during extraction; discard and retry without poisoning it.
+    SourceChanged,
     /// File format is not supported by this extractor; keep name-only indexing.
     Unsupported,
     /// Extraction failed; caller records diagnostics and falls back to name-only.
@@ -123,6 +126,8 @@ pub enum ExtractError {
     Io(#[from] std::io::Error),
     #[error("extraction deadline exceeded")]
     DeadlineExceeded,
+    #[error("source bytes changed during extraction")]
+    SourceChanged,
     #[error("file size {size} exceeds budget {max_bytes} bytes")]
     FileTooLarge { size: u64, max_bytes: u64 },
     #[error("segment count {count} exceeds budget {max_segments}")]
@@ -164,7 +169,7 @@ pub trait Extractor: Send + Sync {
             output.status,
             ExtractionStatus::Extracted | ExtractionStatus::ExactOnly
         );
-        Ok(worker::ExtractResponse { code: None,
+        Ok(worker::ExtractResponse { source_sha256: None, code: None,
             output,
             next_cursor: (successful && (end as u64) < total).then_some(end as u64),
             total_units: successful.then_some(total),

@@ -452,3 +452,33 @@ sample. No model, ranking or acceptance threshold changed. Final source passes46
 selected Rust checks,76 .NET tests, coherent CPU binaries/examples and the x64
 WinUI build. These are scoped local checks; required scale/installed/final gates
 remain open. [Logs, failures, hashes and review scope](validation/2026-10-18-code-preview/README.md).
+
+### Ordinary source-hash checkpoint, 2026-10-18
+
+The rebuilt daemon independently matches complete-source Python digests against
+SQLite content/hash revisions and resolved metadata for document/PDF sources
+without a model, and all five ordinary modalities with the real CPU model.
+Typed document/PDF/code/notebook preview hashes also match actual source bytes.
+No-model10 public/seven offline cases pass in8.194s (index3.578s); managed CPU
+21 public/17 offline pass in83.146s (index64.291s), with four actual768-dimensional
+code vectors and a ready ModelManager. Both retain eight client lifecycle,
+four ordinary-preview, four reference and four code-preview checks. CPU retains
+three semantic checks; both owned jobs end empty.
+
+Original CPU positives remain Recall@5 .90/MRR .85; expanded positives
+.9091/.8636 and ten empty controls FP0. Screenshot miss/audio rank2 remain visible.
+The existing owned child adds up to two bounded complete-source reads per parser
+batch, including continuations. The64MiB hash cap leaves larger streaming files
+unknown without changing32MiB document/image/PDF or64GiB media admission.
+These uncontrolled whole-harness samples include staging/hashing/indexing/
+inference/comparisons and establish no causal performance change from the prior
+78.381s sample. Required scale, idle, device/power and installed measurements remain.
+
+Final selected source passes481 Rust checks and18 additional actual extractor
+tests, zero failed/ignored.76 .NET tests and the coherent CPU/x64 builds pass;
+seven existing daemon dead-code warnings remain. Old-writer revision binding,
+unattested legacy continuation, native change/restore and media-cache regressions
+have retained functional failure evidence. This checkpoint received author review;
+independent ordinary provenance review did not run because workspace credits were
+exhausted. Broad final review/whole-workspace/installed acceptance remain open.
+[Evidence, failures, hashes and commands](validation/2026-10-18-ordinary-provenance/README.md).

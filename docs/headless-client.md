@@ -94,7 +94,9 @@ advertising `search.entry_references` carry a separate canonical bound
 the query-specific hit ID. Present references are validated against the kind and
 requested search mode; older peers may omit them. Code/notebook `c` metadata
 includes its current complete-source byte hash when established by native parsing;
-ordinary hashes remain unknown. `preview_text(PreviewRequest)` returns bounded
+ordinary hashes are available when established by current extraction within the
+64MiB hash budget; legacy/larger-source hashes remain unknown.
+`preview_text(PreviewRequest)` returns bounded
 cached text and actual locations through the same owned read lane. Dropping the
 future closes that connection; identity/proof, local root, state, kinds, aggregate
 64KiB/64part and eight extraction-kind bounds are checked before delivery.
@@ -106,7 +108,8 @@ entries reject notebook locations; code entries reject page/timestamp locations.
 Code parts require real locations and notebook ranges cannot exceed returned text.
 A trailing line terminator does not expose a following line. Full-byte code hashes
 include notebook outputs, while preview text excludes them. Raster/media/uncached
-preview, ordinary byte provenance, Related and expanded filters remain open.
+preview, larger-source/legacy provenance recovery, Related and expanded filters
+remain open.
 
 From `src/engine`, `cargo test -p ws-client --all-targets` runs framing and real
 Windows-pipe transport fixtures without models or a daemon. The

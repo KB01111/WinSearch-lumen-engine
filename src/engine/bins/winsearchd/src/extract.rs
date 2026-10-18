@@ -310,6 +310,7 @@ impl Indexer {
                 }
                 Err(ExtractClientError::Unsupported(_)) => {
                     Ok(ws_extract::worker::ExtractResponse {
+                        source_sha256: None,
                         code: None,
                         video_selection: None,
                         output: ExtractOutput::unsupported(),
@@ -414,8 +415,21 @@ impl Indexer {
         let next_cursor = response.next_cursor;
         let media_plan = response.media.clone();
         let video_selection = response.video_selection.clone();
+        let source_sha256 = response.source_sha256;
         let output = response.output;
         let mut artifacts = registry.worker.as_ref().map(|_| ArtifactLease::for_output(&output));
+
+        let provenance_changed=matches!(output.status,ExtractionStatus::Extracted|ExtractionStatus::ExactOnly)
+            && progress.source_sha256.as_deref().is_some_and(|hash|Some(hash)!=source_sha256.as_deref());
+        if output.status==ExtractionStatus::SourceChanged || provenance_changed {
+            let mut store=self.store_lock();
+            if store.content_progress(job.entry_id,&job.kind)?.as_ref()==Some(&progress) {
+                store.invalidate_content_source(job.entry_id)?;
+            }
+            store.requeue_extract_job(job.id)?;
+            drop(store);self.invalidate_vector_cache();
+            return Ok(ExtractStepOutcome {claimed:true,requeued:true,status:Some(ExtractionStatus::SourceChanged),..Default::default()});
+        }
 
         if matches!(
             output.status,
@@ -543,13 +557,14 @@ impl Indexer {
                 attempts: 0,
             });
         }
-        if !store.commit_content_batch_with_video_selection(
+        if !store.commit_content_batch_with_source(
             &job,
             &progress,
             &chunks,
             next_cursor,
             media_plan.as_ref(),
             video_selection.as_ref(),
+            source_sha256.as_deref(),
         )? {
             store.requeue_extract_job(job.id)?;
             return Ok(ExtractStepOutcome {
@@ -774,6 +789,18 @@ impl Indexer {
                 && self.store_lock().content_revision(chunk.entry_id).ok() == Some(progress.revision)
         }).map_err(|e| EmbedError::InputUnavailable(e.to_string()))?;
         let mut lease = ArtifactLease::for_output(&response.output);
+        let changed=response.output.status==ExtractionStatus::SourceChanged
+            || (matches!(response.output.status,ExtractionStatus::Extracted|ExtractionStatus::ExactOnly)
+                && progress.source_sha256.as_deref().is_some_and(|hash|Some(hash)!=response.source_sha256.as_deref()));
+        if changed {
+            let mut store=self.store_lock();
+            if store.content_progress(chunk.entry_id,&chunk.job_kind).map_err(|e|EmbedError::Protocol(e.to_string()))?.as_ref()==Some(progress) {
+                store.invalidate_content_source(chunk.entry_id).map_err(|e|EmbedError::Protocol(e.to_string()))?;
+                store.enqueue_extract_job(chunk.entry_id,&chunk.job_kind).map_err(|e|EmbedError::Protocol(e.to_string()))?;
+            }
+            drop(store);self.invalidate_vector_cache();
+            return Err(EmbedError::InputUnavailable("source bytes changed during artifact restoration".into()));
+        }
         let draft = response.output.segments.iter().find(|s| {
             s.kind == chunk.kind && s.start_ms == chunk.location.start_ms && s.end_ms == chunk.location.end_ms
                 && std::mem::discriminant(&s.embedding_input)==std::mem::discriminant(&chunk.embedding_input)
@@ -1258,6 +1285,7 @@ mod tests {
             }
             let progress = indexer.store_lock().content_progress(entry.id, kind).unwrap().unwrap();
             assert!(progress.complete);
+            assert!(progress.source_sha256.is_some());
             assert!(indexer.store_lock().claim_content_vectors(Some(entry.id)).unwrap().is_empty());
             let before = indexer.store_lock().list_content_chunks(entry.id).unwrap();
             let vectors = indexer.store_lock().list_segments_for_entry(entry.id).unwrap();
@@ -1268,6 +1296,11 @@ mod tests {
                 _ => panic!("media fixture missing derived input"),
             };
             fs::remove_file(&old).unwrap();
+            let mut forged=progress.clone();forged.source_sha256=Some("b".repeat(64));
+            assert_ne!(forged.source_sha256,progress.source_sha256);
+            let mut refused=chunk.clone();
+            assert!(matches!(indexer.restore_media_artifact(&registry,&mut refused,&source,&forged,progress.model_generation),
+                Err(EmbedError::InputUnavailable(_))),"cached media cannot be repaired under a different source digest");
             indexer.restore_media_artifact(&registry, &mut chunk, &source, &progress, progress.model_generation)
                 .expect("a completed vector's evicted preview must regenerate without re-embedding");
             let restored = match &chunk.embedding_input {
@@ -2423,7 +2456,121 @@ mod tests {
         assert_eq!(result.segments_stored, 1);
         let hits = indexer.search(&SearchRequest { text: "uniqueworkerfixture".into(), limit: 10, ..Default::default() }).unwrap();
         assert_eq!(hits.len(), 1);
+        let expected="86736913c35847cb9184f0176224f100ebe68a5b918c17cd0ac9dd8b736e5085";
+        let entry=hits[0].entry_id;
+        assert_eq!(indexer.store_lock().content_sha256(entry).unwrap().as_deref(),Some(expected));
+        let engine=crate::engine::EngineService::new_with_model_dir(Arc::clone(&indexer),cache.0.join("models"));
+        let reference=ws_protocol::EntryReference {result_id:format!("e{entry}"),source_revision:None};
+        let metadata=engine.resolve_entry_snapshot(&reference).unwrap();
+        assert_eq!(metadata.content_sha256.as_deref(),Some(expected));
+        let bound=ws_protocol::EntryReference {source_revision:Some(metadata.source_revision),..reference.clone()};
+        fs::write(tree.0.join("actual.txt"),b"changed source without the previous text").unwrap();
+        assert_eq!(engine.resolve_entry_snapshot(&bound).unwrap_err(),ws_protocol::ErrorCode::NotReady);
+        let fresh=engine.resolve_entry_snapshot(&reference).unwrap();
+        assert_eq!(fresh.content_sha256,None);assert_eq!(fresh.index_revision,None);
         assert!(fs::read_dir(cache.0.join("extract")).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn ordinary_source_hash_media_cache_mismatch_invalidates_and_requeues_current_durable_source() {
+        let tree=TempTree::new();let cache=TempTree::new();
+        let source=tree.0.join("recording.wav");
+        fs::copy(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../artifacts/spoken-fixtures/two-passages-65s.wav"),&source).unwrap();
+        let indexer=seeded_indexer(&tree);let registry=process_registry(&cache);
+        let entry=indexer.store_lock().find_by_path(&source.to_string_lossy()).unwrap().unwrap().id;
+        for _ in 0..8 {
+            indexer.extract_once_inputs(&registry,|texts|Ok(texts.iter().map(|_|vec![1.0,0.0]).collect()),|_|Ok(vec![0.0,1.0])).unwrap();
+            if indexer.store_lock().content_progress(entry,"audio").unwrap().is_some_and(|p|p.complete) {break;}
+        }
+        let original=indexer.store_lock().content_progress(entry,"audio").unwrap().unwrap();
+        assert!(original.complete && original.source_sha256.is_some());
+        {
+            let mut store=indexer.store_lock();let chunks=store.list_content_chunks(entry).unwrap();
+            store.enqueue_extract_job(entry,"audio").unwrap();
+            let job=store.claim_content_extract_job().unwrap().unwrap();
+            let progress=store.begin_content_batch(entry,"audio",&original.source).unwrap();
+            assert!(store.commit_content_batch_with_source(&job,&progress,&chunks,None,original.media_plan.as_ref(),None,Some(&"b".repeat(64))).unwrap());
+            let chunks=store.claim_content_vectors(Some(entry)).unwrap();assert!(!chunks.is_empty());
+            assert!(store.commit_content_vectors(&chunks,&vec![vec![0.0,1.0];chunks.len()],progress.revision,progress.model_generation).unwrap());
+            assert!(!store.list_segments_for_entry(entry).unwrap().is_empty());
+        }
+        let mut chunk=indexer.store_lock().list_content_chunks(entry).unwrap().into_iter().find(|c|c.kind=="audio").unwrap();
+        let ws_extract::DraftEmbeddingInput::Audio {path}=&chunk.embedding_input else {panic!("expected actual native audio artifact");};
+        fs::remove_file(path).unwrap();
+        let previous=indexer.store_lock().content_progress(entry,"audio").unwrap().unwrap();
+        assert_ne!(previous.source_sha256,original.source_sha256);
+        assert!(matches!(indexer.restore_media_artifact(&registry,&mut chunk,&source,&previous,previous.model_generation),Err(EmbedError::InputUnavailable(_))));
+        {let store=indexer.store_lock();
+            assert_eq!(store.content_progress(entry,"audio").unwrap(),None);
+            assert_eq!(store.content_sha256(entry).unwrap(),None);
+            assert!(store.list_content_chunks(entry).unwrap().is_empty());
+            assert!(store.list_segments_for_entry(entry).unwrap().iter().all(|segment|segment.kind=="name"));
+            let job=store.find_extract_job(entry,"audio").unwrap().unwrap();assert_eq!(job.state,"pending");assert_eq!(job.attempts,0);}
+        indexer.extract_once_inputs(&registry,|texts|Ok(texts.iter().map(|_|vec![1.0,0.0]).collect()),|_|Ok(vec![0.0,1.0])).unwrap();
+        assert_eq!(indexer.store_lock().content_sha256(entry).unwrap(),original.source_sha256);
+    }
+
+    #[test]
+    fn ordinary_source_hash_changed_report_requeues_without_poisoning() {
+        struct Changed;
+        impl Extractor for Changed {
+            fn extract(&self,_:&Path,_:&ExtractBudget)->Result<ExtractOutput,ExtractError> {
+                Ok(ExtractOutput {status:ExtractionStatus::SourceChanged,segments:vec![]})
+            }
+        }
+        let tree=TempTree::new();let cache=TempTree::new();
+        fs::write(tree.0.join("actual.txt"),"ordinaryprovenanceneedle").unwrap();
+        let indexer=seeded_indexer(&tree);let native=process_registry(&cache);
+        indexer.extract_once_with(&native,fake_embed).unwrap();
+        let entry=indexer.store_lock().find_by_path(&tree.0.join("actual.txt").to_string_lossy()).unwrap().unwrap().id;
+        indexer.store_lock().enqueue_extract_job(entry,"doc").unwrap();
+        let mut fixture=ExtractorRegistry::default();fixture.register("doc",Arc::new(Changed));
+        let result=indexer.extract_once_with(&fixture,fake_embed).unwrap();
+        assert!(result.requeued && !result.poisoned && !result.failed);
+        {let store=indexer.store_lock();
+            assert!(store.list_content_chunks(entry).unwrap().is_empty());
+            assert_eq!(store.content_sha256(entry).unwrap(),None);
+            assert_eq!(store.content_progress(entry,"doc").unwrap(),None);
+            let job=store.find_extract_job(entry,"doc").unwrap().unwrap();
+            assert_eq!(job.attempts,0);assert_eq!(job.state,"pending");}
+        assert_eq!(indexer.extract_once_with(&native,fake_embed).unwrap().status,Some(ExtractionStatus::Extracted));
+        assert!(indexer.store_lock().content_sha256(entry).unwrap().is_some());
+    }
+
+    #[test]
+    fn ordinary_source_hash_mismatch_discards_partial_chunks_and_restarts_current_native_parse() {
+        struct Different;
+        impl Extractor for Different {
+            fn extract(&self,_:&Path,_:&ExtractBudget)->Result<ExtractOutput,ExtractError> {unreachable!()}
+            fn extract_batch(&self,_:&Path,_:&ExtractBudget,cursor:u64)->Result<ws_extract::worker::ExtractResponse,ExtractError> {
+                Ok(ws_extract::worker::ExtractResponse {source_sha256:Some("b".repeat(64)),
+                    output:ExtractOutput::extracted(vec![ws_extract::SegmentDraft::text("doc","mustnevercommit")]),
+                    next_cursor:None,total_units:Some(cursor+1),diagnostics:vec![],media:None,video_selection:None,code:None})
+            }
+        }
+        let tree=TempTree::new();let cache=TempTree::new();
+        fs::write(tree.0.join("actual.txt"),format!("{} ordinaryprovenancetail","a readable generated source paragraph ".repeat(4000))).unwrap();
+        let indexer=seeded_indexer(&tree);let native=process_registry(&cache);
+        indexer.extract_once_with(&native,fake_embed).unwrap();
+        let entry=indexer.store_lock().find_by_path(&tree.0.join("actual.txt").to_string_lossy()).unwrap().unwrap().id;
+        let before=indexer.store_lock().content_progress(entry,"doc").unwrap().unwrap();
+        assert_eq!(before.cursor,30);assert!(before.source_sha256.is_some());
+        let mut fixture=ExtractorRegistry::default();fixture.register("doc",Arc::new(Different));
+        let result=indexer.extract_once_with(&fixture,fake_embed).unwrap();
+        assert!(result.requeued && !result.poisoned && !result.failed);
+        assert!(indexer.store_lock().list_content_chunks(entry).unwrap().is_empty());
+        assert_eq!(indexer.store_lock().content_sha256(entry).unwrap(),None);
+        assert!(indexer.store_lock().content_revision(entry).unwrap()>before.revision);
+        for _ in 0..20 {
+            if indexer.content_extract_queue_depth().unwrap()==0 {break;}
+            let result=indexer.extract_once_with(&native,fake_embed).unwrap();
+            assert!(!result.poisoned && !result.failed);
+        }
+        assert_eq!(indexer.content_extract_queue_depth().unwrap(),0);
+        let current=indexer.store_lock().content_progress(entry,"doc").unwrap().unwrap();
+        assert!(current.complete);assert_eq!(current.source_sha256,before.source_sha256);
+        assert_eq!(indexer.search(&SearchRequest {text:"ordinaryprovenancetail".into(),limit:5,..Default::default()}).unwrap().len(),1);
+        assert!(indexer.search(&SearchRequest {text:"mustnevercommit".into(),limit:5,..Default::default()}).unwrap().is_empty());
     }
 
     fn retained_cleanup_preserves_unrelated_jobs(after_claim: bool) {

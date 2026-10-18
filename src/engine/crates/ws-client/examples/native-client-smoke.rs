@@ -105,6 +105,7 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
         location: Some(ws_client::protocol::MatchLocation::Line { line: 2 }),
     }).await?;
     assert!(document_preview.parts.iter().any(|part| part.text.contains("amberparitytoken")));
+    assert!(document_preview.entry.content_sha256.as_deref().is_some_and(ws_client::protocol::valid_content_sha256));
     assert!(document_preview.extraction.iter().all(|progress| progress.source_units.is_none() && progress.capped.is_none()));
     let pdf = search(client, "pdfparitytoken", SearchMode::Files, false).await?;
     let pdf_preview = client.preview_text(ws_client::protocol::PreviewRequest {
@@ -113,6 +114,7 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
     }).await?;
     assert!(pdf_preview.parts.iter().any(|part| part.text.contains("pdfparitytoken")
         && part.location == Some(ws_client::protocol::MatchLocation::Page { page: 2 })));
+    assert!(pdf_preview.entry.content_sha256.as_deref().is_some_and(ws_client::protocol::valid_content_sha256));
     let code_preview=client.preview_text(ws_client::protocol::PreviewRequest {
         reference:code_reference.clone(),location:code[0].location,
     }).await?;

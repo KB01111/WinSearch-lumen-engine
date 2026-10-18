@@ -957,7 +957,10 @@ pub(crate) mod tests {
     #[test]
     fn background_vector_failure_retains_a_wake_and_recovers_without_signal() {
         let (code, root) = vector_fixture(0, true);
+        stop_fixture_watchers(&code);
+        assert!(!code.exact("needle",1).is_empty(),"recovery fixture must have current parsed text before failing inference");
         assert!(!code.embed_turn().unwrap());
+        assert!(code.vectors.lock().unwrap().failures>0,"the first attempt must actually fail on the missing worker");
         let due = code.next_work_due();
         let worker = code.embed.worker_bin().clone();
         std::fs::copy(
@@ -971,8 +974,13 @@ pub(crate) mod tests {
             // Exercise the same condition-variable deadline as the coordinator;
             // there is deliberately no watcher/model/policy signal after failure.
             *code.wake.0.lock().unwrap() = false;
-            code.wait_for_work();
-            code.turn().unwrap()
+            let deadline=due+5_000;
+            loop {
+                if code.next_work_due().is_none_or(|next|next>deadline) {break false;}
+                code.wait_for_work();
+                if code.turn().unwrap() {break true;}
+                if now()>=deadline {break false;}
+            }
         } else {
             false
         };
@@ -1136,6 +1144,10 @@ pub(crate) mod tests {
 
     pub(crate) fn unindexed_fixture() -> (Arc<CodeService>,Arc<Indexer>,PathBuf) {
         let (code,root)=fixture();let indexer=Arc::clone(&code.indexer);(code,indexer,root)
+    }
+
+    pub(crate) fn stop_fixture_watchers(code:&CodeService) {
+        code.watchers.lock().unwrap().clear();
     }
 
     #[test]

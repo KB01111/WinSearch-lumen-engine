@@ -1,0 +1,23 @@
+rtk :    Compiling ws-platform v0.1.0 (<checkout>\src\engine\crates\ws-plat
+form)
+At line:1 char:102
++ ... /source.rs; rtk proxy cargo test -p ws-extract ordinary_source_hash - ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-platform):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-code v0.1.0 (<checkout>\src\engine\crates\ws-code)
+   Compiling ws-extract v0.1.0 (<checkout>\src\engine\crates\ws-extract)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.88s
+     Running unittests src\lib.rs (target\debug\deps\ws_extract-4a3c48791ef4962f.exe)
+
+running 7 tests
+test source::tests::ordinary_source_hash_attests_successful_parse_and_rejects_source_bytes_changed_by_parser ... ok
+test source::tests::ordinary_source_hash_changes_for_same_length_binary_bytes ... ok
+test source::tests::ordinary_source_hash_is_actual_complete_bytes_including_bom_and_crlf ... ok
+test source::tests::ordinary_source_hash_large_streaming_media_remains_unknown_without_relaxing_budget ... ok
+test source::tests::ordinary_source_hash_preserves_input_deadline_and_path_admission ... ok
+test source::tests::ordinary_source_hash_rejects_noncanonical_failed_and_code_worker_claims ... ok
+test source::tests::ordinary_source_hash_rejects_parse_time_change_and_restore_with_original_mtime ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 46 filtered out; finished in 0.07s

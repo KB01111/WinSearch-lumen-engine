@@ -48,6 +48,9 @@ include Lumen integration and the final native/installed acceptance gates.
       claim queue, idempotent upserts, verified crash/resume
 - [x] Disconnected-drive preservation + reconnect reconciliation (Phase 2) —
       verified end-to-end with a mapped drive (subst)
+- [~] Ordinary source-byte provenance — bounded native SHA256, revision binding,
+      atomic chunks/cursor commit and source/cache mismatch rejection implemented;
+      larger-source/legacy recovery and complete extraction coverage remain open
 
 ## Semantic search (EmbeddingGemma 2)
 

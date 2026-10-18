@@ -80,6 +80,7 @@ pub fn extract_code_batch(
     }
     let end = request.cursor + batch.units.len() as u64;
     Ok(ExtractResponse {
+        source_sha256: None,
         output: ExtractOutput::extracted(Vec::new()),
         next_cursor: (end < total).then_some(end),
         total_units: Some(total),
@@ -218,6 +219,7 @@ mod tests {
             video_selection: None,
         };
         let valid = ExtractResponse {
+            source_sha256: None,
             output: ExtractOutput::extracted(vec![]),
             next_cursor: Some(1),
             total_units: Some(2),
@@ -241,7 +243,7 @@ mod tests {
             }),
         };
         crate::worker::validate_response(&request, &valid).unwrap();
-        for case in 0..12 {
+        for case in 0..13 {
             let mut invalid = valid.clone();
             match case {
                 0 => invalid.next_cursor = Some(2),
@@ -295,6 +297,7 @@ mod tests {
                 9 => invalid.code.as_mut().unwrap().source_sha256="g".repeat(64),
                 10 => invalid.code.as_mut().unwrap().source_sha256="a".repeat(65),
                 11 => invalid.code.as_mut().unwrap().source_sha256="A".repeat(64),
+                12 => invalid.source_sha256=Some("a".repeat(64)),
                 _ => unreachable!(),
             }
             assert!(

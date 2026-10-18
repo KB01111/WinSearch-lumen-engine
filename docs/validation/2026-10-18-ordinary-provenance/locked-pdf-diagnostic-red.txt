@@ -1,0 +1,15 @@
+failures:
+
+---- pdf_native_unreadable_and_numeric_exact_only_are_explicit stdout ----
+
+thread 'pdf_native_unreadable_and_numeric_exact_only_are_explicit' (95704) panicked at bins\winsearch-extract\tests\pdf_native.rs:187:5:
+Failed("io: Det går inte att komma åt filen eftersom den\r\nanvänds av en annan process. (os error 32)")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    pdf_native_unreadable_and_numeric_exact_only_are_explicit
+
+test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.17s
+
+error: test failed, to rerun pass `-p winsearch-extract --test pdf_native`

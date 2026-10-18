@@ -418,7 +418,8 @@ as a substitute. A non-provenance parse clears any older hash.
 
 Canonical code references and current public hash metadata use this persisted
 provenance; bounded cached code/notebook previews also require the current parsed
-revision/snapshot/hash. Ordinary document/media byte provenance remains open. See
+revision/snapshot/hash. Ordinary documents/media now also have bounded source-byte
+provenance; larger-source/legacy recovery remains open. See
 [provenance verification](validation/2026-10-18-code-provenance/README.md) and
 [cached code-preview verification](validation/2026-10-18-code-preview/README.md).
 
@@ -625,7 +626,8 @@ restart. Results and metadata are revalidated after acquiring the response write
 request replacement/cancellation cannot reuse an earlier delivery decision.
 
 Code metadata exposes its current complete-source SHA-256 from the atomic parser
-provenance record. Ordinary files do not yet expose byte hashes. Rust/C# clients
+provenance record. Ordinary extraction also exposes current byte hashes within
+its64MiB hash budget; larger/legacy sources retain unknown hashes. Rust/C# clients
 validate canonical identities, proof budgets, result domains, hash format and local
 root confinement. These checks do not grant the Lumen webview filesystem access;
 the trusted native host must enforce its own current grants before content/actions.
@@ -643,3 +645,38 @@ Notebook outputs never enter preview text. Returned ranges reflect actual return
 lines, including truncation at a line terminator. Clients negotiate the code
 capability separately, reject foreign coordinate domains and validate real ranges.
 Raster/media/uncached previews and Lumen consumer wiring remain unfinished.
+
+### Ordinary source-byte provenance
+
+The existing extraction child hashes admitted source bytes before and after an
+ordinary parse using64KiB buffers. The64MiB hash cap does not change32MiB
+document/image/PDF or64GiB streaming-media extraction admission. Metadata/residency,
+precise modification time, native identity and native change time are checked
+around reads and parsing. Identity/change time come from the actual opened
+handle. The native change-time check rejects normal edits followed by restoring
+the original bytes and modification time; these checks do not create an immutable
+parser snapshot. Sources without a usable native identity/change time retain an
+unknown digest. Hash opens use the Win32
+[no-recall and open-reparse-point flags](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew).
+These flags complement the residency guards; they do not establish all-provider
+cloud/remote-filesystem acceptance.
+
+The internal response carries an optional canonical SHA256. Successful parsed
+content/cursor/hash and its matching content-revision tag commit atomically. A
+retained hash from an older writer is unavailable after that revision changes.
+Source changes or continuation digest mismatches invalidate/requeue without
+poisoning the file. Cached media regeneration checks the same established digest
+before publishing replacement artifacts. Existing model-only resets retain valid
+source hashes. Additive nullable columns preserve legacy IDs,FTS,vectors,jobs and
+media plans; missing legacy hashes remain unknown until admitted re-extraction.
+Resuming a legacy partial parse cannot attach a newly observed digest to earlier
+unattested chunks or a persisted media plan; a fresh parse must establish it.
+Automatic legacy recovery and larger-source hashing remain unfinished.
+
+This deliberately adds bounded hash I/O around ordinary parser batches, including
+continuations. Performance acceptance must measure that cost. Metadata resolution
+and cached previews only read the persisted current digest; neither opens source
+content. Full-byte provenance is distinct from extraction coverage and from the
+opaque root/policy/model/native metadata proof.
+See [ordinary provenance validation](validation/2026-10-18-ordinary-provenance/README.md)
+for actual native hashes, regressions and remaining review/performance limits.

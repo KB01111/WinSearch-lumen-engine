@@ -1,0 +1,17 @@
+failures:
+
+---- engine::tests::code_entry_reference_delivery_binds_real_exact_and_semantic_hits_and_rejects_replacement stdout ----
+
+thread 'engine::tests::code_entry_reference_delivery_binds_real_exact_and_semantic_hits_and_rejects_replacement' (108580) panicked at bins\winsearchd\src\engine.rs:1591:9:
+assertion `left == right` failed: replacement removes only the affected source's semantic hits
+  left: []
+ right: ["code:1:1:false:resolve_record"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    engine::tests::code_entry_reference_delivery_binds_real_exact_and_semantic_hits_and_rejects_replacement
+
+test result: FAILED. 211 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 175.36s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

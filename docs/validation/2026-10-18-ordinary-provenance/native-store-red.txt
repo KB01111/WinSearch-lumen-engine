@@ -1,0 +1,17 @@
+failures:
+
+---- extract::tests::real_worker_production_registry_indexes_generated_text_without_inline_provider stdout ----
+
+thread 'extract::tests::real_worker_production_registry_indexes_generated_text_without_inline_provider' (94108) panicked at bins\winsearchd\src\extract.rs:2429:9:
+assertion `left == right` failed
+  left: None
+ right: Some("86736913c35847cb9184f0176224f100ebe68a5b918c17cd0ac9dd8b736e5085")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    extract::tests::real_worker_production_registry_indexes_generated_text_without_inline_provider
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 209 filtered out; finished in 0.16s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

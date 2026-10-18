@@ -1,0 +1,17 @@
+failures:
+
+---- store::tests::ordinary_source_hash_from_an_older_writer_cannot_bind_to_a_later_content_revision stdout ----
+
+thread 'store::tests::ordinary_source_hash_from_an_older_writer_cannot_bind_to_a_later_content_revision' (105168) panicked at crates\ws-index\src\store.rs:3073:9:
+assertion `left == right` failed: a retained old digest is not provenance for the new revision
+  left: Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+ right: None
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    store::tests::ordinary_source_hash_from_an_older_writer_cannot_bind_to_a_later_content_revision
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 90 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p ws-index --lib`
