@@ -367,3 +367,49 @@ worker readiness race; both failure records are retained. The setup now complete
 selection before testing the same six source/pause/root revocation cases. The
 unchanged selected tests passed serialized. Final whole-workspace, independent
 review, completed-vector preview/maintenance, UI, Lumen and installed gates remain.
+
+## Shared parser admission and code quality, 2026-10-18
+
+Process-wide two-slot parser admission now covers code and ordinary extraction,
+including retained child/pipe/scratch cleanup. A denied code job preserves its
+durable revision and poison attempts. Five owned-worker/Windows file-lock/queue
+regressions exercise actual admission and cancellation. The engine shares one
+extractor registry with background workers; pending consumer previews must reuse it.
+
+The stronger native harness imports the actual pinned artifacts through the model
+manager and waits for real code vectors. Earlier worker-only overrides left the
+code pipeline unavailable, so those earlier runs do not establish semantic code
+acceptance. The managed pipeline exposed an unrelated astronomy query returning
+code hits. Both supported query tasks now corroborate a code candidate at the
+unchanged .65 floor before candidate limits; code-task cosine and hybrid ranking
+remain unchanged. Document vectors/model/dimension are unchanged.
+
+Sixteen generated source snippets and independent development/held-out splits
+(eight positives/eight negatives each) were frozen before measurement. The chosen
+policy was locked before held-out evaluation. Actual native CPU diagnostic scores
+and the final production CLI/store/ranker each report Recall@5/MRR1 and negative
+FP0 on both splits. Code-only diagnostic admission returns FP1; a normalized-mean
+alternative fails held-out FP.625 and was not selected or retuned. CLI harness
+times are 3.807/3.820 s; these small fixture measurements are not code-index scale
+or installed latency evidence. Existing suite labels and thresholds are unchanged.
+
+The current rebuilt managed CPU daemon has four of four native code vectors at
+768 dimensions. Twenty-one CLI/pipe and seventeen offline snapshot cases agree,
+including actual semantic-only function/caller lines/excerpts and an empty
+astronomy control. The typed Rust client adds three matching semantic checks to
+its eight lifecycle/policy checks. Original positive cases separately preserve
+Recall.90/MRR.85; the expanded group is .9091/.8636. The screenshot miss and audio
+rank2 remain visible; all ten empty controls pass. Native index readiness is
+62.495 s and total harness time74.867 s, including model staging/hashing and all
+comparisons. This differs in scope from earlier worker-only timings and is not
+a causal performance comparison. No-model native parity passes ten public/seven
+offline/eight client checks in6.507 s with no code vectors. Owned jobs finish empty.
+
+CPU verification executes518 Rust checks, including one API doctest, the explicitly
+run normally ignored worker test and nine native text/media/reference cases.
+The media worker separately retains four reference agreements>=.999 (minimum
+.999698). The coherent CPU build passes with seven existing daemon dead-code
+warnings. An intentionally interrupted CUDA rebuild, a CMake cache-source path
+failure and a media-helper fixture-path error are retained as separate records;
+they are not quality/GPU passes. Full GPU/scale/installed acceptance and independent
+review remain open. [Evidence, functional failures and reproduction](validation/2026-10-18-parser-code/README.md).

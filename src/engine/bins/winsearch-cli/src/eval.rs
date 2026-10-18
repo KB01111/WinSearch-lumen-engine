@@ -821,16 +821,16 @@ pub fn execute_code_query(
     let exact = store.search_exact(text, limit, |_| true)?;
     let mut semantic = Vec::new();
     if include_semantic {
-        let mut vectors = embedder.embed_texts(&[ws_modelmgr::recipe::code_query(text)])?;
-        anyhow::ensure!(vectors.len() == 1, "code query embedding count mismatch");
-        let vector = vectors.remove(0);
+        let vectors = embedder.embed_texts(&[
+            ws_modelmgr::recipe::code_query(text), ws_modelmgr::recipe::search_query(text),
+        ])?;
+        anyhow::ensure!(vectors.len() == 2, "code query embedding count mismatch");
         for hit in
-            store.search_semantic(&vector, SEMANTIC_TOP_K.max(limit).saturating_mul(8), |_| {
+            store.search_semantic(&vectors[0], &vectors[1], SEMANTIC_TOP_K.max(limit).saturating_mul(8), |_| {
                 true
-            })?
+            }, |score|semantic_admitted("code",score))?
         {
-            if !semantic_admitted("code", hit.score)
-                || exact.iter().any(|e| {
+            if exact.iter().any(|e| {
                     e.file.id == hit.file.id
                         && e.start_line >= hit.start_line
                         && e.start_line <= hit.end_line
@@ -1670,6 +1670,33 @@ mod tests {
     }
 
     #[test]
+    fn code_semantic_rejects_task_affinity_without_losing_corroborated_results() {
+        struct TaskVectors;
+        impl EvalEmbedder for TaskVectors {
+            fn label(&self) -> &str { "task-affinity regression fixture" }
+            fn embed_texts(&self, texts: &[String]) -> anyhow::Result<Vec<Vec<f32>>> {
+                Ok(texts.iter().map(|text| {
+                    let mut vector=vec![0.0;768];
+                    vector[usize::from(text=="task: search result | query: ocean wildlife photographs")]=1.0;
+                    vector
+                }).collect())
+            }
+        }
+        let suite: EvalSuite=serde_json::from_value(serde_json::json!({
+            "name":"code-task-affinity",
+            "thresholds":{"min_recall_at_5":1.0,"min_mrr":1.0,"max_false_positive_rate":0.0},
+            "entries":[{"path":"C:/Eval/cache.rs","name":"cache.rs","segments":[
+                {"kind":"code","line":1,"text":"pub fn evict_oldest() {}"}]}],
+            "queries":[
+                {"query":"release stale cached values","mode":"code","expected_any":["cache.rs"]},
+                {"query":"ocean wildlife photographs","mode":"code","expect_empty":true}
+            ]
+        })).unwrap();
+        let report=run_eval_suite_with(&suite,&TaskVectors).unwrap();
+        assert!(report.passed(),"{:#?}",report.outcomes);
+    }
+
+    #[test]
     fn code_fixture_uses_shared_store_and_code_recipe_without_ordinary_name_vectors() {
         struct Recorder(Mutex<Vec<String>>);
         impl EvalEmbedder for Recorder {
@@ -1700,7 +1727,8 @@ mod tests {
             *embedder.0.lock().unwrap(),
             [
                 "title: cache.rs | text: pub fn evict_oldest() {}",
-                "task: code retrieval | query: remove the oldest memory entry"
+                "task: code retrieval | query: remove the oldest memory entry",
+                "task: search result | query: remove the oldest memory entry"
             ]
         );
     }

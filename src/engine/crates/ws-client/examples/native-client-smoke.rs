@@ -8,12 +8,18 @@ use ws_client::{
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-async fn search(client: &Client, text: &str, mode: SearchMode) -> Result<Vec<SearchResult>> {
+async fn search(
+    client: &Client,
+    text: &str,
+    mode: SearchMode,
+    include_semantic: bool,
+) -> Result<Vec<SearchResult>> {
     let mut stream = client
         .search(SearchQuery {
             text: text.into(),
             mode,
             limit: 5,
+            include_semantic,
             ..Default::default()
         })
         .await?;
@@ -47,16 +53,34 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
     client.set_indexing_config(original.clone()).await?;
     drop(events);
 
-    let document = search(client, "amberparitytoken", SearchMode::Files).await?;
+    let document = search(client, "amberparitytoken", SearchMode::Files, false).await?;
     assert!(
         !document.is_empty(),
         "actual document extraction must be ready"
     );
-    let code = search(client, "parityneedle", SearchMode::Code).await?;
+    let code = search(client, "parityneedle", SearchMode::Code, false).await?;
     assert!(
         code.iter().any(|hit| hit.location.is_some()),
         "actual code locations must survive IPC"
     );
+    let semantic_code = if engine_config.semantic_enabled {
+        let query = "a function named parityneedle and its caller";
+        assert!(search(client, query, SearchMode::Code, false).await?.is_empty());
+        let hits = search(client, query, SearchMode::Code, true).await?;
+        assert!(
+            !hits.is_empty(),
+            "semantic-only code must work through the typed client"
+        );
+        assert!(search(
+            client,
+            "asteroid orbital mechanics and interstellar propulsion",
+            SearchMode::Code,
+            true,
+        ).await?.is_empty());
+        Some(hits)
+    } else {
+        None
+    };
     let entry = client
         .resolve_entry(EntryReference {
             result_id: document[0].id.clone(),
@@ -93,7 +117,7 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
             ..
         })
     ));
-    assert!(search(client, "amberparitytoken", SearchMode::Files)
+    assert!(search(client, "amberparitytoken", SearchMode::Files, false)
         .await?
         .is_empty());
     client.set_indexing_config(original.clone()).await?;
@@ -117,7 +141,8 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
     Ok(serde_json::json!({
         "engine_version": info.engine_version, "features": info.features,
         "initial_status": status, "model_status": model, "engine_config": engine_config,
-        "document": document, "code": code,
+        "document": document, "code": code, "semantic_code": semantic_code,
+        "semantic_checks": if semantic_code.is_some() { vec!["exact_only_control_empty", "semantic_only_code", "semantic_negative_empty"] } else { vec![] },
         "entry_size_bytes": fresh.size_bytes, "entry_index_revision": fresh.index_revision,
         "checks": ["typed_status_and_configuration", "paused_policy_pushed_subscription",
             "native_document_and_code_locations", "current_entry_source_proof",

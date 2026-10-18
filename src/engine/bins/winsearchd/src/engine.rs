@@ -79,6 +79,7 @@ pub struct EngineService {
     cancels: Mutex<HashMap<(u64, RequestId), Arc<AtomicBool>>>,
     next_client_id: std::sync::atomic::AtomicU64,
     indexer: Arc<Indexer>,
+    extractors: Arc<crate::extract::ExtractorRegistry>,
     models: Arc<ModelService>,
     /// Embed worker supervisor (lazy: spawns on first embed request).
     /// `winsearchd` links no native inference code; all embeddings flow
@@ -152,6 +153,7 @@ impl EngineService {
             cancels: Mutex::new(HashMap::new()),
             next_client_id: std::sync::atomic::AtomicU64::new(1),
             indexer,
+            extractors: Arc::new(crate::extract::ExtractorRegistry::production()),
             models,
             embed: Arc::new(embed),
             query_cache: Mutex::new(QueryEmbeddingCache::new(QUERY_CACHE_CAP)),
@@ -176,6 +178,10 @@ impl EngineService {
 
     pub fn embed_supervisor(&self) -> Arc<EmbedSupervisor> {
         Arc::clone(&self.embed)
+    }
+
+    pub(crate) fn extraction_registry(&self) -> Arc<crate::extract::ExtractorRegistry> {
+        Arc::clone(&self.extractors)
     }
 
     pub fn start_code_scheduler(&self)->anyhow::Result<()> {
@@ -576,43 +582,35 @@ impl EngineService {
     }
 
     fn embed_query_input(&self,input:String)->Result<Vec<f32>,String> {
+        self.embed_query_inputs(&[input])?.pop().ok_or_else(||"missing query vector".into())
+    }
+
+    fn embed_query_inputs(&self,inputs:&[String])->Result<Vec<Vec<f32>>,String> {
         let generation = self.indexer.store_lock().model_generation().map_err(|e| e.to_string())?;
-        let key = format!("{generation}:{input}");
-        if let Some(hit) = self
-            .query_cache
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .get(&key)
-        {
-            if self.indexer.store_lock().model_generation().map_err(|e| e.to_string())? != generation {
-                return Err("model generation changed during query lookup".into());
-            }
-            return Ok(hit);
-        }
-        let vec = if let Some(hook) = self
-            .query_embed_hook
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone()
-        {
-            hook(&input)?
-        } else {
-            let vecs = self
-                .embed
-                .embed_texts_bounded(std::slice::from_ref(&input), QUERY_EMBED_TIMEOUT)
-                .map_err(|e| e.to_string())?;
-            vecs.into_iter().next().ok_or_else(|| {
-                "embed worker returned no vectors for the query".to_string()
-            })?
+        let keys=inputs.iter().map(|input|format!("{generation}:{input}")).collect::<Vec<_>>();
+        let mut vectors={
+            let mut cache=self.query_cache.lock().unwrap_or_else(|p|p.into_inner());
+            keys.iter().map(|key|cache.get(key)).collect::<Vec<_>>()
         };
+        let missing=vectors.iter().enumerate().filter_map(|(index,vector)|vector.is_none().then_some(index)).collect::<Vec<_>>();
+        if !missing.is_empty() {
+            let pending=missing.iter().map(|index|inputs[*index].clone()).collect::<Vec<_>>();
+            let hook=self.query_embed_hook.lock().unwrap_or_else(|p|p.into_inner()).clone();
+            let fresh=if let Some(hook)=hook {
+                pending.iter().map(|input|hook(input)).collect::<Result<Vec<_>,_>>()?
+            } else {
+                self.embed.embed_texts_bounded(&pending,QUERY_EMBED_TIMEOUT).map_err(|e|e.to_string())?
+            };
+            if fresh.len()!=missing.len() {return Err("query embedding count mismatch".into());}
+            for (index,vector) in missing.into_iter().zip(fresh) {vectors[index]=Some(vector);}
+        }
         if self.indexer.store_lock().model_generation().map_err(|e| e.to_string())? != generation {
             return Err("model generation changed during query embedding".into());
         }
-        self.query_cache
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .put(key, vec.clone());
-        Ok(vec)
+        let vectors=vectors.into_iter().collect::<Option<Vec<_>>>().ok_or("missing query vector")?;
+        let mut cache=self.query_cache.lock().unwrap_or_else(|p|p.into_inner());
+        for (key,vector) in keys.into_iter().zip(&vectors) {cache.put(key,vector.clone());}
+        Ok(vectors)
     }
 
     /// Computes the appended semantic hits for one query (no IPC). Empty when
@@ -630,11 +628,14 @@ impl EngineService {
         if query.mode==SearchMode::Code {
             let Some(code)=self.code_service() else {return Vec::new();};
             let epoch=code.query_epoch();
-            let Ok(vector)=self.embed_query_input(ws_modelmgr::recipe::code_query(&query.text)) else {return Vec::new();};
+            let Ok(vectors)=self.embed_query_inputs(&[
+                ws_modelmgr::recipe::code_query(&query.text),
+                ws_modelmgr::recipe::search_query(&query.text),
+            ]) else {return Vec::new();};
             if code.query_epoch()!=epoch {return Vec::new();}
             let exact=code.exact(&query.text,query.limit.max(1) as usize);
             let candidates=(query.limit as usize).max(SEMANTIC_TOP_K).saturating_mul(8);
-            let mut hits=code.semantic(&vector,candidates).into_iter().filter(|h|semantic_admitted("code",h.score) && !exact.iter().any(|e|e.file.id==h.file.id && e.start_line>=h.start_line && e.start_line<=h.end_line)).map(|h|{let score=hybrid_score(h.score,&query.text,&h.file.name_lower,h.file.mtime,crate::code::now()/1000);let mut r=code_result(h);r.score=score;r}).collect::<Vec<_>>();
+            let mut hits=code.semantic(&vectors[0],&vectors[1],candidates).into_iter().filter(|h|!exact.iter().any(|e|e.file.id==h.file.id && e.start_line>=h.start_line && e.start_line<=h.end_line)).map(|h|{let score=hybrid_score(h.score,&query.text,&h.file.name_lower,h.file.mtime,crate::code::now()/1000);let mut r=code_result(h);r.score=score;r}).collect::<Vec<_>>();
             hits.sort_by(|a,b|b.score.total_cmp(&a.score));hits.truncate(query.limit.max(1) as usize);
             if code.query_epoch()!=epoch {return Vec::new();}
             return hits;
@@ -2089,6 +2090,48 @@ mod tests {
     }
 
     #[test]
+    fn code_semantic_rejects_uncorroborated_task_affinity() {
+        let (engine,code,root)=code_search_service();
+        engine.set_query_embed_hook(Arc::new(|input| {
+            Ok(if input.starts_with("task: code retrieval | query: ") {vec![1.0,0.0,0.0]} else {vec![0.0,1.0,0.0]})
+        }));
+        let mut query=semantic_query("unrelated topic");query.mode=SearchMode::Code;
+        assert!(engine.plan_results(&query).is_empty());
+        assert!(engine.plan_semantic(&query,&HashSet::new()).is_empty(),
+            "code-task affinity alone cannot admit an unrelated source");
+        drop(engine);drop(code);fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn code_semantic_query_views_cache_separately_and_keep_the_model_fence() {
+        let (engine,code,root)=code_search_service();
+        let inputs=Arc::new(Mutex::new(Vec::new()));
+        let observed=Arc::clone(&inputs);
+        engine.set_query_embed_hook(Arc::new(move |input| {
+            observed.lock().unwrap().push(input.to_owned());
+            Ok(vec![1.0,0.0,0.0])
+        }));
+        let mut query=semantic_query("indirect code description");query.mode=SearchMode::Code;
+        assert!(!engine.plan_semantic(&query,&HashSet::new()).is_empty());
+        assert!(!engine.plan_semantic(&query,&HashSet::new()).is_empty());
+        assert_eq!(*inputs.lock().unwrap(),[
+            "task: code retrieval | query: indirect code description",
+            "task: search result | query: indirect code description",
+        ]);
+        let indexer=Arc::clone(&engine.indexer);
+        engine.set_query_embed_hook(Arc::new(move |input| {
+            if input.starts_with("task: search result | query: ") {
+                indexer.store_lock().reset_content_vectors().unwrap();
+            }
+            Ok(vec![1.0,0.0,0.0])
+        }));
+        query.text="changed code topic".into();
+        assert!(engine.plan_semantic(&query,&HashSet::new()).is_empty(),
+            "a model change during corroboration invalidates both task views");
+        drop(engine);drop(code);fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[test]
     fn code_zero_limit_uses_same_effective_limit_for_duplicate_suppression() {
         let (engine,code,root)=code_search_service();
         {
@@ -2156,8 +2199,11 @@ mod tests {
         let (entered_tx,entered_rx)=std::sync::mpsc::channel();
         let (proceed_tx,proceed_rx)=std::sync::mpsc::channel();
         let proceed_rx=Mutex::new(proceed_rx);
+        let first=std::sync::atomic::AtomicBool::new(true);
         engine.set_query_embed_hook(Arc::new(move |_| {
-            entered_tx.send(()).unwrap();proceed_rx.lock().unwrap().recv().unwrap();
+            if first.swap(false,Ordering::SeqCst) {
+                entered_tx.send(()).unwrap();proceed_rx.lock().unwrap().recv().unwrap();
+            }
             Ok(vec![1.0,0.0,0.0])
         }));
         let mut q=semantic_query("needle");q.mode=SearchMode::Code;

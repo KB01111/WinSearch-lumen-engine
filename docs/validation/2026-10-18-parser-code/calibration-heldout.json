@@ -1,0 +1,1230 @@
+{
+  "scope": "Native model diagnostic over frozen code labels, with an unopened held-out split.",
+  "split": "heldout",
+  "fixture_sha256": "db7020b7318353407dbaad8a160a098ef878f531f541160c3cc5b40420430dba",
+  "model_sha256": "2188ac1deca4b77dffefd603c2776a9d76d9d74ec01841392982ebb840b09135",
+  "worker_sha256": "90c998ba28f1ebbb522fbb1cbe5b78d6d433131461221027ce5df937cef3a698",
+  "gates": {
+    "minimum_recall_at_5": 0.9,
+    "minimum_mrr": 0.85,
+    "maximum_negative_fp_rate": 0,
+    "cosine_floor": 0.65
+  },
+  "methods": {
+    "code_only": {
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "negative_fp_rate": 1.0,
+      "passed": false,
+      "queries": [
+        {
+          "name": "contained_path",
+          "query": "Determine whether a file belongs inside a selected directory",
+          "expected": "path",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "path",
+              "score": 0.757427725601651,
+              "code_cosine": 0.757427725601651,
+              "search_cosine": 0.7263047574884985,
+              "admitted": true
+            },
+            {
+              "id": "old_logs",
+              "score": 0.7279527245022999,
+              "code_cosine": 0.7279527245022999,
+              "search_cosine": 0.7126107852296011,
+              "admitted": true
+            },
+            {
+              "id": "checksum",
+              "score": 0.674549702974631,
+              "code_cosine": 0.674549702974631,
+              "search_cosine": 0.6499524067930127,
+              "admitted": true
+            },
+            {
+              "id": "sort",
+              "score": 0.6742702796242577,
+              "code_cosine": 0.6742702796242577,
+              "search_cosine": 0.6367864070304016,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.66124255585348,
+              "code_cosine": 0.66124255585348,
+              "search_cosine": 0.6238390818725646,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "partition",
+          "query": "Split a sequence into consecutive fixed size groups",
+          "expected": "batches",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "batches",
+              "score": 0.7477012007569172,
+              "code_cosine": 0.7477012007569172,
+              "search_cosine": 0.7081457780390454,
+              "admitted": true
+            },
+            {
+              "id": "sort",
+              "score": 0.691060706769019,
+              "code_cosine": 0.691060706769019,
+              "search_cosine": 0.646797737336751,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.6726362923406346,
+              "code_cosine": 0.6726362923406346,
+              "search_cosine": 0.6275841690182677,
+              "admitted": true
+            },
+            {
+              "id": "retry",
+              "score": 0.6709311909153594,
+              "code_cosine": 0.6709311909153594,
+              "search_cosine": 0.6247571764707189,
+              "admitted": true
+            },
+            {
+              "id": "gzip",
+              "score": 0.6689969217213683,
+              "code_cosine": 0.6689969217213683,
+              "search_cosine": 0.6258917053812514,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "typing",
+          "query": "Delay a callback until typing has stopped",
+          "expected": "debounce",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "debounce",
+              "score": 0.780105582506982,
+              "code_cosine": 0.780105582506982,
+              "search_cosine": 0.7600229556973752,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.6908155481039858,
+              "code_cosine": 0.6908155481039858,
+              "search_cosine": 0.6622833302227626,
+              "admitted": true
+            },
+            {
+              "id": "retry",
+              "score": 0.6881429642605503,
+              "code_cosine": 0.6881429642605503,
+              "search_cosine": 0.6449843032625261,
+              "admitted": true
+            },
+            {
+              "id": "sort",
+              "score": 0.6766740320071654,
+              "code_cosine": 0.6766740320071654,
+              "search_cosine": 0.6238665349644991,
+              "admitted": true
+            },
+            {
+              "id": "path",
+              "score": 0.6646677357106281,
+              "code_cosine": 0.6646677357106281,
+              "search_cosine": 0.6160553298135739,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "abort_io",
+          "query": "Stop copying a stream when cancellation is requested",
+          "expected": "cancel",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "cancel",
+              "score": 0.8121801094457993,
+              "code_cosine": 0.8121801094457993,
+              "search_cosine": 0.7824082735680417,
+              "admitted": true
+            },
+            {
+              "id": "old_logs",
+              "score": 0.686971197057498,
+              "code_cosine": 0.686971197057498,
+              "search_cosine": 0.6588265087164024,
+              "admitted": true
+            },
+            {
+              "id": "path",
+              "score": 0.6809244569455049,
+              "code_cosine": 0.6809244569455049,
+              "search_cosine": 0.6310608056430317,
+              "admitted": true
+            },
+            {
+              "id": "debounce",
+              "score": 0.6779291699981587,
+              "code_cosine": 0.6779291699981587,
+              "search_cosine": 0.6265213368807037,
+              "admitted": true
+            },
+            {
+              "id": "retry",
+              "score": 0.6624650280714787,
+              "code_cosine": 0.6624650280714787,
+              "search_cosine": 0.6006430041384314,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "parse_data",
+          "query": "Deserialize encoded JSON into a native structure",
+          "expected": "json",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "json",
+              "score": 0.7596761400984331,
+              "code_cosine": 0.7596761400984331,
+              "search_cosine": 0.7372242647684305,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "compress_data",
+          "query": "Compress bytes into the GZIP format",
+          "expected": "gzip",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "gzip",
+              "score": 0.8175124746357025,
+              "code_cosine": 0.8175124746357025,
+              "search_cosine": 0.803264044068805,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.6960791091567374,
+              "code_cosine": 0.6960791091567374,
+              "search_cosine": 0.644269332319144,
+              "admitted": true
+            },
+            {
+              "id": "checksum",
+              "score": 0.689119691818334,
+              "code_cosine": 0.689119691818334,
+              "search_cosine": 0.6679694925363947,
+              "admitted": true
+            },
+            {
+              "id": "debounce",
+              "score": 0.6688855698604487,
+              "code_cosine": 0.6688855698604487,
+              "search_cosine": 0.615915089290573,
+              "admitted": true
+            },
+            {
+              "id": "batches",
+              "score": 0.6672807381729028,
+              "code_cosine": 0.6672807381729028,
+              "search_cosine": 0.6198918819325052,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "last_event",
+          "query": "Find the most recent event for every customer",
+          "expected": "latest",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "latest",
+              "score": 0.8434682656275765,
+              "code_cosine": 0.8434682656275765,
+              "search_cosine": 0.8196507744352165,
+              "admitted": true
+            },
+            {
+              "id": "group",
+              "score": 0.7427287139029519,
+              "code_cosine": 0.7427287139029519,
+              "search_cosine": 0.6878033182919147,
+              "admitted": true
+            },
+            {
+              "id": "old_logs",
+              "score": 0.6977434773933698,
+              "code_cosine": 0.6977434773933698,
+              "search_cosine": 0.6457852161077201,
+              "admitted": true
+            },
+            {
+              "id": "sort",
+              "score": 0.6731628309774507,
+              "code_cosine": 0.6731628309774507,
+              "search_cosine": 0.6054588681657948,
+              "admitted": true
+            },
+            {
+              "id": "http",
+              "score": 0.6588595403146611,
+              "code_cosine": 0.6588595403146611,
+              "search_cosine": 0.5808681165372879,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "traverse",
+          "query": "Visit a graph breadth first without repeating vertices",
+          "expected": "graph",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "graph",
+              "score": 0.8272699011384029,
+              "code_cosine": 0.8272699011384029,
+              "search_cosine": 0.8010604927514822,
+              "admitted": true
+            },
+            {
+              "id": "path",
+              "score": 0.6914077003032674,
+              "code_cosine": 0.6914077003032674,
+              "search_cosine": 0.6287211101500139,
+              "admitted": true
+            },
+            {
+              "id": "sort",
+              "score": 0.6738946082947228,
+              "code_cosine": 0.6738946082947228,
+              "search_cosine": 0.612575860393284,
+              "admitted": true
+            },
+            {
+              "id": "debounce",
+              "score": 0.6516023494407592,
+              "code_cosine": 0.6516023494407592,
+              "search_cosine": 0.5885161689376945,
+              "admitted": true
+            },
+            {
+              "id": "batches",
+              "score": 0.6515985871736719,
+              "code_cosine": 0.6515985871736719,
+              "search_cosine": 0.5974867800441619,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "vegetables",
+          "query": "Roasted vegetables with herbs and olive oil",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": [
+            {
+              "id": "lines",
+              "score": 0.6788314318852198,
+              "code_cosine": 0.6788314318852198,
+              "search_cosine": 0.5625923883107321,
+              "admitted": true
+            },
+            {
+              "id": "gzip",
+              "score": 0.6775323380675101,
+              "code_cosine": 0.6775323380675101,
+              "search_cosine": 0.5646401052173923,
+              "admitted": true
+            },
+            {
+              "id": "path",
+              "score": 0.6625484335766172,
+              "code_cosine": 0.6625484335766172,
+              "search_cosine": 0.5546757513780508,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.6616485601716798,
+              "code_cosine": 0.6616485601716798,
+              "search_cosine": 0.5409736473580077,
+              "admitted": true
+            },
+            {
+              "id": "batches",
+              "score": 0.660824645266339,
+              "code_cosine": 0.660824645266339,
+              "search_cosine": 0.5656805268556392,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "football",
+          "query": "Professional football league match scores and stadium crowds",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": [
+            {
+              "id": "latest",
+              "score": 0.6893092173399367,
+              "code_cosine": 0.6893092173399367,
+              "search_cosine": 0.6133724353106483,
+              "admitted": true
+            },
+            {
+              "id": "sort",
+              "score": 0.6783139152135449,
+              "code_cosine": 0.6783139152135449,
+              "search_cosine": 0.5578557386154119,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.6612311387970764,
+              "code_cosine": 0.6612311387970764,
+              "search_cosine": 0.5543793424229253,
+              "admitted": true
+            },
+            {
+              "id": "lines",
+              "score": 0.6586557337777563,
+              "code_cosine": 0.6586557337777563,
+              "search_cosine": 0.542348206621656,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "climbing",
+          "query": "Mountain climbing routes and summit conditions",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": [
+            {
+              "id": "sort",
+              "score": 0.7082485577770644,
+              "code_cosine": 0.7082485577770644,
+              "search_cosine": 0.6138379737963539,
+              "admitted": true
+            },
+            {
+              "id": "path",
+              "score": 0.6764352101873906,
+              "code_cosine": 0.6764352101873906,
+              "search_cosine": 0.6003740932626568,
+              "admitted": true
+            },
+            {
+              "id": "latest",
+              "score": 0.6726166573764313,
+              "code_cosine": 0.6726166573764313,
+              "search_cosine": 0.6034731843430499,
+              "admitted": true
+            },
+            {
+              "id": "lines",
+              "score": 0.6701081655011661,
+              "code_cosine": 0.6701081655011661,
+              "search_cosine": 0.5763012258737054,
+              "admitted": true
+            },
+            {
+              "id": "retry",
+              "score": 0.6517009382970351,
+              "code_cosine": 0.6517009382970351,
+              "search_cosine": 0.5660368165082262,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "wildflowers",
+          "query": "Identify wildflower plants from petals and leaves",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": [
+            {
+              "id": "path",
+              "score": 0.6716591635219724,
+              "code_cosine": 0.6716591635219724,
+              "search_cosine": 0.5946345962663332,
+              "admitted": true
+            },
+            {
+              "id": "sort",
+              "score": 0.665965474654999,
+              "code_cosine": 0.665965474654999,
+              "search_cosine": 0.5820221377135327,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "elections",
+          "query": "National election results and parliamentary coalitions",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": [
+            {
+              "id": "sort",
+              "score": 0.6953865331746805,
+              "code_cosine": 0.6953865331746805,
+              "search_cosine": 0.612048363123898,
+              "admitted": true
+            },
+            {
+              "id": "path",
+              "score": 0.6648084437185454,
+              "code_cosine": 0.6648084437185454,
+              "search_cosine": 0.5927721661734664,
+              "admitted": true
+            },
+            {
+              "id": "latest",
+              "score": 0.6518017410340875,
+              "code_cosine": 0.6518017410340875,
+              "search_cosine": 0.597776703929835,
+              "admitted": true
+            },
+            {
+              "id": "lines",
+              "score": 0.6507999314142167,
+              "code_cosine": 0.6507999314142167,
+              "search_cosine": 0.5713089981387836,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "sea_life",
+          "query": "Coral reef fish and underwater marine ecosystems",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": [
+            {
+              "id": "sort",
+              "score": 0.6808226673472735,
+              "code_cosine": 0.6808226673472735,
+              "search_cosine": 0.553965259432408,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.6751039981960835,
+              "code_cosine": 0.6751039981960835,
+              "search_cosine": 0.5581673175478495,
+              "admitted": true
+            },
+            {
+              "id": "lines",
+              "score": 0.6700801017233954,
+              "code_cosine": 0.6700801017233954,
+              "search_cosine": 0.552762688032425,
+              "admitted": true
+            },
+            {
+              "id": "path",
+              "score": 0.6634406483004179,
+              "code_cosine": 0.6634406483004179,
+              "search_cosine": 0.5461026966096207,
+              "admitted": true
+            },
+            {
+              "id": "checksum",
+              "score": 0.6599162914378511,
+              "code_cosine": 0.6599162914378511,
+              "search_cosine": 0.5615723510719981,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "furniture",
+          "query": "Choose a comfortable sofa for a living room",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": [
+            {
+              "id": "latest",
+              "score": 0.6854149877205166,
+              "code_cosine": 0.6854149877205166,
+              "search_cosine": 0.6101578855773484,
+              "admitted": true
+            },
+            {
+              "id": "path",
+              "score": 0.6568549806545945,
+              "code_cosine": 0.6568549806545945,
+              "search_cosine": 0.5713384501673205,
+              "admitted": true
+            },
+            {
+              "id": "http",
+              "score": 0.6500978663006879,
+              "code_cosine": 0.6500978663006879,
+              "search_cosine": 0.560792180155696,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "poetry",
+          "query": "Romantic poetry and literary imagery",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": [
+            {
+              "id": "path",
+              "score": 0.6980008259840846,
+              "code_cosine": 0.6980008259840846,
+              "search_cosine": 0.6212845516715304,
+              "admitted": true
+            },
+            {
+              "id": "sort",
+              "score": 0.6903379020181553,
+              "code_cosine": 0.6903379020181553,
+              "search_cosine": 0.5937008203806063,
+              "admitted": true
+            },
+            {
+              "id": "lines",
+              "score": 0.6757854021651138,
+              "code_cosine": 0.6757854021651138,
+              "search_cosine": 0.588775230168078,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.6697431116962296,
+              "code_cosine": 0.6697431116962296,
+              "search_cosine": 0.5806064618271084,
+              "admitted": true
+            },
+            {
+              "id": "http",
+              "score": 0.6658896676183838,
+              "code_cosine": 0.6658896676183838,
+              "search_cosine": 0.5901574025020827,
+              "admitted": true
+            }
+          ]
+        }
+      ]
+    },
+    "both_tasks": {
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "negative_fp_rate": 0.0,
+      "passed": true,
+      "queries": [
+        {
+          "name": "contained_path",
+          "query": "Determine whether a file belongs inside a selected directory",
+          "expected": "path",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "path",
+              "score": 0.757427725601651,
+              "code_cosine": 0.757427725601651,
+              "search_cosine": 0.7263047574884985,
+              "admitted": true
+            },
+            {
+              "id": "old_logs",
+              "score": 0.7279527245022999,
+              "code_cosine": 0.7279527245022999,
+              "search_cosine": 0.7126107852296011,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "partition",
+          "query": "Split a sequence into consecutive fixed size groups",
+          "expected": "batches",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "batches",
+              "score": 0.7477012007569172,
+              "code_cosine": 0.7477012007569172,
+              "search_cosine": 0.7081457780390454,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "typing",
+          "query": "Delay a callback until typing has stopped",
+          "expected": "debounce",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "debounce",
+              "score": 0.780105582506982,
+              "code_cosine": 0.780105582506982,
+              "search_cosine": 0.7600229556973752,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.6908155481039858,
+              "code_cosine": 0.6908155481039858,
+              "search_cosine": 0.6622833302227626,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "abort_io",
+          "query": "Stop copying a stream when cancellation is requested",
+          "expected": "cancel",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "cancel",
+              "score": 0.8121801094457993,
+              "code_cosine": 0.8121801094457993,
+              "search_cosine": 0.7824082735680417,
+              "admitted": true
+            },
+            {
+              "id": "old_logs",
+              "score": 0.686971197057498,
+              "code_cosine": 0.686971197057498,
+              "search_cosine": 0.6588265087164024,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "parse_data",
+          "query": "Deserialize encoded JSON into a native structure",
+          "expected": "json",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "json",
+              "score": 0.7596761400984331,
+              "code_cosine": 0.7596761400984331,
+              "search_cosine": 0.7372242647684305,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "compress_data",
+          "query": "Compress bytes into the GZIP format",
+          "expected": "gzip",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "gzip",
+              "score": 0.8175124746357025,
+              "code_cosine": 0.8175124746357025,
+              "search_cosine": 0.803264044068805,
+              "admitted": true
+            },
+            {
+              "id": "checksum",
+              "score": 0.689119691818334,
+              "code_cosine": 0.689119691818334,
+              "search_cosine": 0.6679694925363947,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "last_event",
+          "query": "Find the most recent event for every customer",
+          "expected": "latest",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "latest",
+              "score": 0.8434682656275765,
+              "code_cosine": 0.8434682656275765,
+              "search_cosine": 0.8196507744352165,
+              "admitted": true
+            },
+            {
+              "id": "group",
+              "score": 0.7427287139029519,
+              "code_cosine": 0.7427287139029519,
+              "search_cosine": 0.6878033182919147,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "traverse",
+          "query": "Visit a graph breadth first without repeating vertices",
+          "expected": "graph",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "graph",
+              "score": 0.8272699011384029,
+              "code_cosine": 0.8272699011384029,
+              "search_cosine": 0.8010604927514822,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "vegetables",
+          "query": "Roasted vegetables with herbs and olive oil",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "football",
+          "query": "Professional football league match scores and stadium crowds",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "climbing",
+          "query": "Mountain climbing routes and summit conditions",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "wildflowers",
+          "query": "Identify wildflower plants from petals and leaves",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "elections",
+          "query": "National election results and parliamentary coalitions",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "sea_life",
+          "query": "Coral reef fish and underwater marine ecosystems",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "furniture",
+          "query": "Choose a comfortable sofa for a living room",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "poetry",
+          "query": "Romantic poetry and literary imagery",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        }
+      ]
+    },
+    "normalized_mean": {
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "negative_fp_rate": 0.625,
+      "passed": false,
+      "queries": [
+        {
+          "name": "contained_path",
+          "query": "Determine whether a file belongs inside a selected directory",
+          "expected": "path",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "path",
+              "score": 0.7474038519529477,
+              "code_cosine": 0.757427725601651,
+              "search_cosine": 0.7263047574884985,
+              "admitted": true
+            },
+            {
+              "id": "old_logs",
+              "score": 0.725658249332176,
+              "code_cosine": 0.7279527245022999,
+              "search_cosine": 0.7126107852296011,
+              "admitted": true
+            },
+            {
+              "id": "checksum",
+              "score": 0.6671943831130612,
+              "code_cosine": 0.674549702974631,
+              "search_cosine": 0.6499524067930127,
+              "admitted": true
+            },
+            {
+              "id": "sort",
+              "score": 0.6604214903306288,
+              "code_cosine": 0.6742702796242577,
+              "search_cosine": 0.6367864070304016,
+              "admitted": true
+            },
+            {
+              "id": "latest",
+              "score": 0.6529884446103726,
+              "code_cosine": 0.6567955768974273,
+              "search_cosine": 0.639505163083127,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "partition",
+          "query": "Split a sequence into consecutive fixed size groups",
+          "expected": "batches",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "batches",
+              "score": 0.7319209277077309,
+              "code_cosine": 0.7477012007569172,
+              "search_cosine": 0.7081457780390454,
+              "admitted": true
+            },
+            {
+              "id": "sort",
+              "score": 0.6726026895775512,
+              "code_cosine": 0.691060706769019,
+              "search_cosine": 0.646797737336751,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.6536803525116611,
+              "code_cosine": 0.6726362923406346,
+              "search_cosine": 0.6275841690182677,
+              "admitted": true
+            },
+            {
+              "id": "retry",
+              "score": 0.6514018613835678,
+              "code_cosine": 0.6709311909153594,
+              "search_cosine": 0.6247571764707189,
+              "admitted": true
+            },
+            {
+              "id": "gzip",
+              "score": 0.6509997953294291,
+              "code_cosine": 0.6689969217213683,
+              "search_cosine": 0.6258917053812514,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "typing",
+          "query": "Delay a callback until typing has stopped",
+          "expected": "debounce",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "debounce",
+              "score": 0.7746451585173741,
+              "code_cosine": 0.780105582506982,
+              "search_cosine": 0.7600229556973752,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.6805740359263603,
+              "code_cosine": 0.6908155481039858,
+              "search_cosine": 0.6622833302227626,
+              "admitted": true
+            },
+            {
+              "id": "retry",
+              "score": 0.6705288278589251,
+              "code_cosine": 0.6881429642605503,
+              "search_cosine": 0.6449843032625261,
+              "admitted": true
+            },
+            {
+              "id": "sort",
+              "score": 0.6541385531591017,
+              "code_cosine": 0.6766740320071654,
+              "search_cosine": 0.6238665349644991,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "abort_io",
+          "query": "Stop copying a stream when cancellation is requested",
+          "expected": "cancel",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "cancel",
+              "score": 0.8040167822009598,
+              "code_cosine": 0.8121801094457993,
+              "search_cosine": 0.7824082735680417,
+              "admitted": true
+            },
+            {
+              "id": "old_logs",
+              "score": 0.6785725723428736,
+              "code_cosine": 0.686971197057498,
+              "search_cosine": 0.6588265087164024,
+              "admitted": true
+            },
+            {
+              "id": "path",
+              "score": 0.6615238016018836,
+              "code_cosine": 0.6809244569455049,
+              "search_cosine": 0.6310608056430317,
+              "admitted": true
+            },
+            {
+              "id": "debounce",
+              "score": 0.6577246581333275,
+              "code_cosine": 0.6779291699981587,
+              "search_cosine": 0.6265213368807037,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "parse_data",
+          "query": "Deserialize encoded JSON into a native structure",
+          "expected": "json",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "json",
+              "score": 0.7538006241508929,
+              "code_cosine": 0.7596761400984331,
+              "search_cosine": 0.7372242647684305,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "compress_data",
+          "query": "Compress bytes into the GZIP format",
+          "expected": "gzip",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "gzip",
+              "score": 0.8169088772221582,
+              "code_cosine": 0.8175124746357025,
+              "search_cosine": 0.803264044068805,
+              "admitted": true
+            },
+            {
+              "id": "checksum",
+              "score": 0.6840043578418069,
+              "code_cosine": 0.689119691818334,
+              "search_cosine": 0.6679694925363947,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.6755666359775027,
+              "code_cosine": 0.6960791091567374,
+              "search_cosine": 0.644269332319144,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "last_event",
+          "query": "Find the most recent event for every customer",
+          "expected": "latest",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "latest",
+              "score": 0.843555004900692,
+              "code_cosine": 0.8434682656275765,
+              "search_cosine": 0.8196507744352165,
+              "admitted": true
+            },
+            {
+              "id": "group",
+              "score": 0.7255839337773297,
+              "code_cosine": 0.7427287139029519,
+              "search_cosine": 0.6878033182919147,
+              "admitted": true
+            },
+            {
+              "id": "old_logs",
+              "score": 0.6814547403580573,
+              "code_cosine": 0.6977434773933698,
+              "search_cosine": 0.6457852161077201,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "traverse",
+          "query": "Visit a graph breadth first without repeating vertices",
+          "expected": "graph",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "graph",
+              "score": 0.8227499093945615,
+              "code_cosine": 0.8272699011384029,
+              "search_cosine": 0.8010604927514822,
+              "admitted": true
+            },
+            {
+              "id": "path",
+              "score": 0.6670242496640622,
+              "code_cosine": 0.6914077003032674,
+              "search_cosine": 0.6287211101500139,
+              "admitted": true
+            },
+            {
+              "id": "sort",
+              "score": 0.6500176288077156,
+              "code_cosine": 0.6738946082947228,
+              "search_cosine": 0.612575860393284,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "vegetables",
+          "query": "Roasted vegetables with herbs and olive oil",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "football",
+          "query": "Professional football league match scores and stadium crowds",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": [
+            {
+              "id": "latest",
+              "score": 0.6639753641510643,
+              "code_cosine": 0.6893092173399367,
+              "search_cosine": 0.6133724353106483,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "climbing",
+          "query": "Mountain climbing routes and summit conditions",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": [
+            {
+              "id": "sort",
+              "score": 0.6696792934743024,
+              "code_cosine": 0.7082485577770644,
+              "search_cosine": 0.6138379737963539,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "wildflowers",
+          "query": "Identify wildflower plants from petals and leaves",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "elections",
+          "query": "National election results and parliamentary coalitions",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": [
+            {
+              "id": "sort",
+              "score": 0.6629864110038117,
+              "code_cosine": 0.6953865331746805,
+              "search_cosine": 0.612048363123898,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "sea_life",
+          "query": "Coral reef fish and underwater marine ecosystems",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "furniture",
+          "query": "Choose a comfortable sofa for a living room",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": [
+            {
+              "id": "latest",
+              "score": 0.6555747054261546,
+              "code_cosine": 0.6854149877205166,
+              "search_cosine": 0.6101578855773484,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "poetry",
+          "query": "Romantic poetry and literary imagery",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": [
+            {
+              "id": "path",
+              "score": 0.6664772846373359,
+              "code_cosine": 0.6980008259840846,
+              "search_cosine": 0.6212845516715304,
+              "admitted": true
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "failures": [],
+  "owned_job_empty": true,
+  "worker": {
+    "type": "worker_status",
+    "id": 5,
+    "model_loaded": true,
+    "backend": "cpu",
+    "stub": false,
+    "dim": 768,
+    "uptime_secs": 3,
+    "jobs_served": 3
+  },
+  "elapsed_seconds": 3.581
+}

@@ -331,11 +331,13 @@ impl CodeStore {
         Ok(hits)
     }
 
-    /// Returns raw cosine scores; callers apply the common frozen admission floor once.
-    pub fn search_semantic(&self,query:&[f32],limit:usize,allowed:impl Fn(&CodeFileRow)->bool)->Result<Vec<crate::model::CodeSearchHit>,CodeStoreError> {
+    /// Corroborate code-task affinity with general retrieval before truncation;
+    /// callers supply the same application admission rule for both raw cosines.
+    pub fn search_semantic(&self,query:&[f32],corroboration:&[f32],limit:usize,allowed:impl Fn(&CodeFileRow)->bool,admitted:impl Fn(f32)->bool)->Result<Vec<crate::model::CodeSearchHit>,CodeStoreError> {
         use crate::model::CodeSearchHit;
         let (q,norm)=normalize_vector(query);
-        if norm==0.0 || limit==0 {return Ok(Vec::new());}
+        let (confirmation,confirmation_norm)=normalize_vector(corroboration);
+        if norm==0.0 || confirmation_norm==0.0 || confirmation.len()!=q.len() || limit==0 {return Ok(Vec::new());}
         let mut hits=Vec::new();
         let mut stmt=self.conn.prepare("SELECT id,file_id,chunk_index,start_line,end_line,symbol_name,symbol_kind,text,vector,norm,notebook_cell,cell_start_line,cell_end_line FROM code_chunks WHERE norm>0")?;
         for chunk in stmt.query_map([],map_code_chunk_row)? {
@@ -343,6 +345,7 @@ impl CodeStore {
             let Some(file)=self.get_file(c.file_id)?.filter(&allowed) else {continue};
             if c.vector.len()!=q.len() {continue;}
             let score=c.vector.iter().zip(&q).map(|(a,b)|a*b).sum();
+            if !admitted(score) || !admitted(c.vector.iter().zip(&confirmation).map(|(a,b)|a*b).sum()) {continue;}
             hits.push(CodeSearchHit { file,excerpt:c.text,symbol_name:c.symbol_name,symbol_kind:c.symbol_kind,is_definition:false,start_line:c.start_line,end_line:c.end_line,notebook:c.notebook,score });
         }
         hits.sort_by(|a,b|b.score.total_cmp(&a.score).then_with(||a.file.id.cmp(&b.file.id)).then_with(||a.start_line.cmp(&b.start_line)));
@@ -1447,9 +1450,31 @@ mod tests {
         assert_eq!(exact.len(),2);
         assert!(exact[0].is_definition);
         assert!(!exact[1].is_definition);
-        let semantic=s.search_semantic(&[1.0,0.0],1,|f|f.name=="visible.rs").unwrap();
+        let semantic=s.search_semantic(&[1.0,0.0],&[1.0,0.0],1,|f|f.name=="visible.rs",|score|score>=0.65).unwrap();
         assert_eq!(semantic.len(),1);
         assert_eq!(semantic[0].file.name,"visible.rs");
+    }
+
+    #[test]
+    fn code_corroboration_filters_before_limit_and_rejects_invalid_query_views() {
+        let mut store=CodeStore::open_in_memory().unwrap();
+        let repo=store.ensure_repo(&DetectedRepo {root_path:"C:/r".into(),name:"r".into(),has_git:false}).unwrap();
+        for (name,vector) in [("affinity.rs",[1.0,0.0]),("relevant.rs",[0.7,0.71414286])] {
+            let file=CodeFileRecord {path:format!("C:/r/{name}"),rel_path:name.into(),name:name.into(),ext:"rs".into(),language:"rust".into(),size:14,mtime:1,volume_serial:0,file_id:0};
+            let id=store.apply_file_batch(repo,1,&[file]).unwrap()[0].file_id();
+            crate::persist_parsed_file(&mut store,id,&crate::parse_source("fn source() {}","rust")).unwrap();
+            for chunk in store.list_chunks_for_file(id).unwrap() {store.set_chunk_vector(chunk.id,&vector).unwrap();}
+        }
+        let admitted=|score:f32|score.is_finite() && (0.65..=1.001).contains(&score);
+        let hits=store.search_semantic(&[1.0,0.0],&[0.0,1.0],1,|_|true,admitted).unwrap();
+        assert_eq!(hits.len(),1);
+        assert_eq!(hits[0].file.name,"relevant.rs","a stronger uncorroborated hit cannot crowd out a relevant candidate");
+        assert!((hits[0].score-0.7).abs()<0.001,"ranking retains the original code-task score");
+        for invalid in [vec![],vec![1.0],vec![0.0,0.0],vec![f32::NAN,0.0],vec![f32::INFINITY,0.0]] {
+            assert!(store.search_semantic(&[1.0,0.0],&invalid,1,|_|true,admitted).unwrap().is_empty());
+            assert!(store.search_semantic(&invalid,&[0.0,1.0],1,|_|true,admitted).unwrap().is_empty());
+        }
+        assert!(store.search_semantic(&[1.0,0.0],&[0.0,1.0],1,|file|file.name=="affinity.rs",admitted).unwrap().is_empty());
     }
 
     #[test]

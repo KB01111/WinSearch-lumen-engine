@@ -1,0 +1,47 @@
+{
+  "suite": "retrieval-held-out",
+  "suite_sha256": "4fba3a5dee353621501bba66a9ae785ce55e4d0f1a016abe450831545e2a58bd",
+  "cli_sha256": "ea103d7918a6dd78f3b9dc3420cd028146195b8a89ea700b7467c2450aad87f3",
+  "model_sha256": "2188ac1deca4b77dffefd603c2776a9d76d9d74ec01841392982ebb840b09135",
+  "projector_sha256": "c4a8a52691ecef40618438928bdf9e68379b854e24166f292592353db0aab64f",
+  "backend_requested": "cpu",
+  "worker_sha256": "48b986e7b526d52299b8724b27265d09c8af79bb736f2d3cca5eee7a55dab735",
+  "generated_asset_sha256": {
+    "artifacts/retrieval-fixtures/held-out/frame.png": "6308879ea0d22c005c84395df4d8c4aaeeec26f81ebaa889dc4c58497a45754a",
+    "artifacts/retrieval-fixtures/held-out/receipt.png": "2225b7b27cc1db4d1e7a0f045b6e8376664546ef386ba2218bebd405c727c5e4",
+    "artifacts/retrieval-fixtures/held-out/screen.png": "d44b2e254fa2aa1c20f4541fbb69ce9dc292b687f4dcc8337df338ca3454e833",
+    "artifacts/retrieval-fixtures/held-out/soundtrack.wav": "9398ab8141ab272f5d757ed97f9ea90d9133304d5f5840980434697c4cbebb72",
+    "artifacts/retrieval-fixtures/held-out/speech.wav": "22712fd35299e06e7897ba2844b29926816c436e71c35233325b540f38c315be"
+  },
+  "recipe_frozen_commit": "4173543b8e434d9bef912623935cdc8b53aeeee6",
+  "expected_pipeline_version": 2,
+  "expected_minimum_semantic_cosine": 0.65,
+  "expected_code_query_policy": "code-and-search-task-corroboration-v1",
+  "input_scope": "declared fixture chunks and actual generated media, not native extraction proof",
+  "workspace_files_at_invocation_not_build_manifest": {
+    "src/engine/crates/ws-modelmgr/src/recipe.rs": "20f19620090e97c471909d43398af5e50031c5358c35bb81ad89f8cd84d92157",
+    "src/engine/crates/ws-index/src/retrieval.rs": "764f629b2422d4d48626f3cd8952b4393815b851ff2a0bf5ddb69d8c8c2bc334",
+    "src/engine/bins/winsearch-cli/src/eval.rs": "39096cb42335d09a0f0715f75376a1f13f63c718c02eb26c58d610110eeed241",
+    "src/engine/crates/ws-code/src/store.rs": "6bcb0f3e38f6be26850748a00e8f5b7e7ba22f3a0d870d2520f7c004ec32661d"
+  },
+  "exit_code": 0,
+  "timed_out": false,
+  "owned_job_empty": true,
+  "elapsed_seconds": 15.494,
+  "pids": [
+    23736,
+    40276,
+    64612,
+    112672
+  ],
+  "Recall@5": 0.938,
+  "MRR": 0.906,
+  "Negative FP rate": 0.0,
+  "failures": [
+    "[MISS] [application] \"edit a sound recording\" -> not found (RR=0.00) | top1: voice-102.wav (0.79, semantic name match · similarity 0.7057)"
+  ],
+  "real_worker_verified": true,
+  "actual_pipeline_version": 2,
+  "actual_minimum_semantic_cosine": 0.65,
+  "passed": true
+}

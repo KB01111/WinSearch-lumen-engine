@@ -1,0 +1,47 @@
+{
+  "backend": "cpu",
+  "stub": false,
+  "references": {
+    "screen-280": 0.9999420467524335,
+    "photo-140": 0.9998148075830819,
+    "frame-70": 0.9996982675196524,
+    "speech": 0.999750500695376
+  },
+  "retrieval": [
+    {
+      "query": "a computer application screenshot with a red warning and a blue button",
+      "expected": 0,
+      "scores": [
+        0.6436432766475132,
+        0.5363543207245405
+      ]
+    },
+    {
+      "query": "a landscape with a tree and green hills under a blue sky",
+      "expected": 1,
+      "scores": [
+        0.5778621252715366,
+        0.7589841728360176
+      ]
+    },
+    {
+      "query": "a train to Stockholm leaves the railway station from platform five",
+      "expected": 0,
+      "scores": [
+        0.8444276691966782,
+        0.5048316051466761
+      ]
+    },
+    {
+      "query": "baking a chocolate cake in the kitchen with flour butter eggs and sugar",
+      "expected": 1,
+      "scores": [
+        0.5019086504886976,
+        0.8135445491469359
+      ]
+    }
+  ],
+  "image_pair_cosine": 0.6926908050929034,
+  "worker_exit": 0,
+  "elapsed_seconds": 10.422
+}

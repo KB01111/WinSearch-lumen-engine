@@ -1,0 +1,118 @@
+---- eval::tests::code_semantic_rejects_task_affinity_without_losing_corroborated_results stdout ----
+
+thread 'eval::tests::code_semantic_rejects_task_affinity_without_losing_corroborated_results' (97888) panicked at bins\winsearch-cli\src\eval.rs:1696:9:
+[
+    QueryEvalOutcome {
+        query: "release stale cached values",
+        category: "",
+        expect_empty: false,
+        expected_any: [
+            "cache.rs",
+        ],
+        top_hits: [
+            (
+                "cache.rs",
+                0.92,
+                "semantic code match · similarity 1.0000",
+            ),
+        ],
+        ranked_hits: [
+            RankedEvalHit {
+                entry_id: 1,
+                path: "C:/Eval/cache.rs",
+                name: "cache.rs",
+                score: 0.92,
+                explanation: "semantic code match · similarity 1.0000",
+                matches: [
+                    ContentMatch {
+                        excerpt: "pub fn evict_oldest() {}",
+                        match_byte: None,
+                        page: None,
+                        start_ms: None,
+                        end_ms: None,
+                        line: Some(
+                            1,
+                        ),
+                        thumbnail_path: None,
+                    },
+                ],
+                code: Some(
+                    CodeEvalLocation {
+                        symbol: "",
+                        kind: "declared-snippet",
+                        is_definition: false,
+                        start_line: 1,
+                        end_line: 1,
+                        notebook: None,
+                    },
+                ),
+            },
+        ],
+        first_relevant_rank: Some(
+            1,
+        ),
+        hit_in_top_5: true,
+        reciprocal_rank: 1.0,
+        false_positive: false,
+    },
+    QueryEvalOutcome {
+        query: "ocean wildlife photographs",
+        category: "",
+        expect_empty: true,
+        expected_any: [],
+        top_hits: [
+            (
+                "cache.rs",
+                0.92,
+                "semantic code match · similarity 1.0000",
+            ),
+        ],
+        ranked_hits: [
+            RankedEvalHit {
+                entry_id: 1,
+                path: "C:/Eval/cache.rs",
+                name: "cache.rs",
+                score: 0.92,
+                explanation: "semantic code match · similarity 1.0000",
+                matches: [
+                    ContentMatch {
+                        excerpt: "pub fn evict_oldest() {}",
+                        match_byte: None,
+                        page: None,
+                        start_ms: None,
+                        end_ms: None,
+                        line: Some(
+                            1,
+                        ),
+                        thumbnail_path: None,
+                    },
+                ],
+                code: Some(
+                    CodeEvalLocation {
+                        symbol: "",
+                        kind: "declared-snippet",
+                        is_definition: false,
+                        start_line: 1,
+                        end_line: 1,
+                        notebook: None,
+                    },
+                ),
+            },
+        ],
+        first_relevant_rank: None,
+        hit_in_top_5: false,
+        reciprocal_rank: 0.0,
+        false_positive: true,
+    },
+]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+rtk : test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 15 filtered out; finished in 0.02s
+At line:1 char:201
++ ... STEXITCODE; rtk cargo test -p winsearch-cli code_semantic_rejects --  ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (test result: FA...nished in 0.02s:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+[full output: ~/AppData\Local\rtk\tee\1792296786_cargo_test.log]

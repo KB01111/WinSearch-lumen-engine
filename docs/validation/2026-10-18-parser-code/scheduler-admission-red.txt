@@ -1,0 +1,43 @@
+cargo :    Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearc
+hd)
+At line:1 char:27
++ ... src/engine; cargo test -p winsearchd --bin winsearchd parser_capacity ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling wi...ins\winsearchd):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.91s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-ea492ede1f9fd55e.exe)
+
+running 3 tests
+test code::tests::parser_capacity_preserves_due_code_jobs_and_waits_without_a_busy_loop ... FAILED
+test code::tests::parser_capacity_race_after_claim_requeues_without_charging_poison_attempts ... FAILED
+test extract_client::tests::scratch_cleanup_failure_retains_parser_capacity_until_the_owned_cache_is_clean ... FAILED
+
+failures:
+
+---- code::tests::parser_capacity_preserves_due_code_jobs_and_waits_without_a_busy_loop stdout ----
+
+thread 'code::tests::parser_capacity_preserves_due_code_jobs_and_waits_without_a_busy_loop' (84968) panicked at bins\winsearchd\src\code.rs:721:9:
+resource denial must precede claims: worked=true, due=Some(1792294504395), attempts=1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- code::tests::parser_capacity_race_after_claim_requeues_without_charging_poison_attempts stdout ----
+
+thread 'code::tests::parser_capacity_race_after_claim_requeues_without_charging_poison_attempts' (88052) panicked at bins\winsearchd\src\code.rs:749:48:
+called `Result::unwrap()` on an `Err` value: parse completion admission handling is not implemented
+
+---- extract_client::tests::scratch_cleanup_failure_retains_parser_capacity_until_the_owned_cache_is_clean stdout ----
+
+thread 'extract_client::tests::scratch_cleanup_failure_retains_parser_capacity_until_the_owned_cache_is_clean' (103488) panicked at bins\winsearchd\src\extract_client.rs:1234:9:
+Err(Worker("Det går inte att komma åt filen eftersom den\r\nanvänds av en annan process. (os error 32)"))
+
+
+failures:
+    code::tests::parser_capacity_preserves_due_code_jobs_and_waits_without_a_busy_loop
+    code::tests::parser_capacity_race_after_claim_requeues_without_charging_poison_attempts
+    extract_client::tests::scratch_cleanup_failure_retains_parser_capacity_until_the_owned_cache_is_clean
+
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 192 filtered out; finished in 5.99s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

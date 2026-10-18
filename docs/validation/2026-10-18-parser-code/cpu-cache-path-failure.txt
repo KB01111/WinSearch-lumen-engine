@@ -1,0 +1,37 @@
+rtk :    Compiling ws-embed v0.1.0 (<checkout>\src\engine\crates\ws-embed)
+At line:1 char:57
++ ... VULKAN="1"; rtk proxy cargo test --workspace --exclude ws-embed -- -- ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...rates\ws-embed):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearchd)
+warning: ws-embed@0.1.0: ws-embed: CUDA backend skipped (SDK not found)
+warning: ws-embed@0.1.0: ws-embed: Vulkan backend skipped (SDK not found)
+error: failed to run custom build command for `ws-embed v0.1.0 (<checkout>\
+src\engine\crates\ws-embed)`
+
+Caused by:
+  process didn't exit successfully: `<checkout>\src\engine\target\debug\bui
+ld\ws-embed-fbf593c881e2a745\build-script-build` (exit code: 101)
+  --- stdout
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-changed=shim/ws_embed_shim.cpp
+  cargo:rerun-if-env-changed=LLAMA_CPP_DIR
+  cargo:rerun-if-env-changed=WS_EMBED_SKIP_NATIVE
+  cargo:rerun-if-env-changed=VULKAN_SDK
+  cargo:rerun-if-env-changed=CUDA_PATH
+  cargo:rerun-if-env-changed=WS_EMBED_NO_CUDA
+  cargo:rerun-if-env-changed=WS_EMBED_NO_VULKAN
+  cargo:warning=ws-embed: CUDA backend skipped (SDK not found)
+  cargo:warning=ws-embed: Vulkan backend skipped (SDK not found)
+
+  --- stderr
+  CMake Error: The source "<checkout>/src/engine/target/ws-embed-llama/llam
+a.cpp-4fbc76de/CMakeLists.txt" does not match the source "<original-checkout>/src/engine/target/ws-embed-l
+lama/llama.cpp-4fbc76de/CMakeLists.txt" used to generate cache.  Re-run cmake with a different source directory.
+
+  thread 'main' (36828) panicked at crates\ws-embed\build.rs:228:5:
+  cmake configure failed with exit code: 1
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+warning: build failed, waiting for other jobs to finish...

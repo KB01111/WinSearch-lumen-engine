@@ -1,0 +1,1113 @@
+{
+  "scope": "Native model diagnostic over frozen code labels, with an unopened held-out split.",
+  "split": "development",
+  "fixture_sha256": "db7020b7318353407dbaad8a160a098ef878f531f541160c3cc5b40420430dba",
+  "model_sha256": "2188ac1deca4b77dffefd603c2776a9d76d9d74ec01841392982ebb840b09135",
+  "worker_sha256": "90c998ba28f1ebbb522fbb1cbe5b78d6d433131461221027ce5df937cef3a698",
+  "gates": {
+    "minimum_recall_at_5": 0.9,
+    "minimum_mrr": 0.85,
+    "maximum_negative_fp_rate": 0,
+    "cosine_floor": 0.65
+  },
+  "methods": {
+    "code_only": {
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "negative_fp_rate": 1.0,
+      "passed": false,
+      "queries": [
+        {
+          "name": "alphabetical",
+          "query": "Arrange a list of names in alphabetical order",
+          "expected": "sort",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "sort",
+              "score": 0.8341056223546394,
+              "code_cosine": 0.8341056223546394,
+              "search_cosine": 0.791262032953405,
+              "admitted": true
+            },
+            {
+              "id": "unique",
+              "score": 0.6810632989829433,
+              "code_cosine": 0.6810632989829433,
+              "search_cosine": 0.6324397178161619,
+              "admitted": true
+            },
+            {
+              "id": "latest",
+              "score": 0.6705632989562724,
+              "code_cosine": 0.6705632989562724,
+              "search_cosine": 0.6493936497775222,
+              "admitted": true
+            },
+            {
+              "id": "lines",
+              "score": 0.6703054831999026,
+              "code_cosine": 0.6703054831999026,
+              "search_cosine": 0.6081045919869169,
+              "admitted": true
+            },
+            {
+              "id": "path",
+              "score": 0.668405130216497,
+              "code_cosine": 0.668405130216497,
+              "search_cosine": 0.5981171136612242,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "deduplicate",
+          "query": "Remove repeated values while keeping their first occurrence",
+          "expected": "unique",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "unique",
+              "score": 0.7516899288850436,
+              "code_cosine": 0.7516899288850436,
+              "search_cosine": 0.7247919861097124,
+              "admitted": true
+            },
+            {
+              "id": "sort",
+              "score": 0.724002705434159,
+              "code_cosine": 0.724002705434159,
+              "search_cosine": 0.6940657381093156,
+              "admitted": true
+            },
+            {
+              "id": "latest",
+              "score": 0.7038273064987657,
+              "code_cosine": 0.7038273064987657,
+              "search_cosine": 0.6917844814251612,
+              "admitted": true
+            },
+            {
+              "id": "path",
+              "score": 0.6903672387368656,
+              "code_cosine": 0.6903672387368656,
+              "search_cosine": 0.6513810359499196,
+              "admitted": true
+            },
+            {
+              "id": "debounce",
+              "score": 0.6890785217040197,
+              "code_cosine": 0.6890785217040197,
+              "search_cosine": 0.6616900163898632,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "http_profile",
+          "query": "Request person details from an HTTP API",
+          "expected": "http",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "http",
+              "score": 0.7737558277805339,
+              "code_cosine": 0.7737558277805339,
+              "search_cosine": 0.7564590529712066,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.6638660240563476,
+              "code_cosine": 0.6638660240563476,
+              "search_cosine": 0.6039669553711331,
+              "admitted": true
+            },
+            {
+              "id": "lines",
+              "score": 0.6616154017511672,
+              "code_cosine": 0.6616154017511672,
+              "search_cosine": 0.6196089307904641,
+              "admitted": true
+            },
+            {
+              "id": "retry",
+              "score": 0.6508068821232058,
+              "code_cosine": 0.6508068821232058,
+              "search_cosine": 0.5717608055299095,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "read_file",
+          "query": "Load the lines of a text file into a string array",
+          "expected": "lines",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "lines",
+              "score": 0.8302750324381014,
+              "code_cosine": 0.8302750324381014,
+              "search_cosine": 0.8103367483644685,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.6717177591097683,
+              "code_cosine": 0.6717177591097683,
+              "search_cosine": 0.6255940666646507,
+              "admitted": true
+            },
+            {
+              "id": "http",
+              "score": 0.6564069064815514,
+              "code_cosine": 0.6564069064815514,
+              "search_cosine": 0.6189670228013248,
+              "admitted": true
+            },
+            {
+              "id": "sort",
+              "score": 0.6549379318647981,
+              "code_cosine": 0.6549379318647981,
+              "search_cosine": 0.610920159066865,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "hash",
+          "query": "Compute a SHA-256 digest of bytes",
+          "expected": "checksum",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "checksum",
+              "score": 0.7784005399497816,
+              "code_cosine": 0.7784005399497816,
+              "search_cosine": 0.757612014358828,
+              "admitted": true
+            },
+            {
+              "id": "gzip",
+              "score": 0.7098894871281771,
+              "code_cosine": 0.7098894871281771,
+              "search_cosine": 0.6631533190087013,
+              "admitted": true
+            },
+            {
+              "id": "path",
+              "score": 0.6885731961791575,
+              "code_cosine": 0.6885731961791575,
+              "search_cosine": 0.6243587661740472,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.6840871286886603,
+              "code_cosine": 0.6840871286886603,
+              "search_cosine": 0.6277488975319606,
+              "admitted": true
+            },
+            {
+              "id": "sort",
+              "score": 0.6650078277425816,
+              "code_cosine": 0.6650078277425816,
+              "search_cosine": 0.5945470364843136,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "retry_errors",
+          "query": "Try an operation again when it fails",
+          "expected": "retry",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "retry",
+              "score": 0.8092565164745527,
+              "code_cosine": 0.8092565164745527,
+              "search_cosine": 0.8047516993474051,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.6878587112217736,
+              "code_cosine": 0.6878587112217736,
+              "search_cosine": 0.658562111259349,
+              "admitted": true
+            },
+            {
+              "id": "debounce",
+              "score": 0.6803361011140846,
+              "code_cosine": 0.6803361011140846,
+              "search_cosine": 0.6385837615802713,
+              "admitted": true
+            },
+            {
+              "id": "gzip",
+              "score": 0.6727985502993973,
+              "code_cosine": 0.6727985502993973,
+              "search_cosine": 0.6472281455994553,
+              "admitted": true
+            },
+            {
+              "id": "sort",
+              "score": 0.6692321581513497,
+              "code_cosine": 0.6692321581513497,
+              "search_cosine": 0.6359970973741215,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "customer_totals",
+          "query": "Total the order amounts for each customer",
+          "expected": "group",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "group",
+              "score": 0.8413838983381194,
+              "code_cosine": 0.8413838983381194,
+              "search_cosine": 0.8427861596280124,
+              "admitted": true
+            },
+            {
+              "id": "latest",
+              "score": 0.7092373665977472,
+              "code_cosine": 0.7092373665977472,
+              "search_cosine": 0.6835997347689045,
+              "admitted": true
+            },
+            {
+              "id": "batches",
+              "score": 0.6515839085136259,
+              "code_cosine": 0.6515839085136259,
+              "search_cosine": 0.5989737423789372,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "expire_logs",
+          "query": "Delete log files older than thirty days",
+          "expected": "old_logs",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "old_logs",
+              "score": 0.8270657983740032,
+              "code_cosine": 0.8270657983740032,
+              "search_cosine": 0.8274987137810345,
+              "admitted": true
+            },
+            {
+              "id": "sort",
+              "score": 0.6820479569016131,
+              "code_cosine": 0.6820479569016131,
+              "search_cosine": 0.6387326836153716,
+              "admitted": true
+            },
+            {
+              "id": "latest",
+              "score": 0.6670316954374481,
+              "code_cosine": 0.6670316954374481,
+              "search_cosine": 0.6361516573275353,
+              "admitted": true
+            },
+            {
+              "id": "path",
+              "score": 0.651977013947147,
+              "code_cosine": 0.651977013947147,
+              "search_cosine": 0.6055919832077563,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "astronomy",
+          "query": "Asteroid orbital mechanics and interstellar propulsion",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": [
+            {
+              "id": "sort",
+              "score": 0.6821717186950756,
+              "code_cosine": 0.6821717186950756,
+              "search_cosine": 0.5847970120923589,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.6634787618118652,
+              "code_cosine": 0.6634787618118652,
+              "search_cosine": 0.57271040273126,
+              "admitted": true
+            },
+            {
+              "id": "path",
+              "score": 0.6621088390372396,
+              "code_cosine": 0.6621088390372396,
+              "search_cosine": 0.5657485454879049,
+              "admitted": true
+            },
+            {
+              "id": "retry",
+              "score": 0.6519198236528194,
+              "code_cosine": 0.6519198236528194,
+              "search_cosine": 0.5662707750125119,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "recipe",
+          "query": "Bake a chocolate cake with flour butter eggs and sugar",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": [
+            {
+              "id": "cancel",
+              "score": 0.664900429253992,
+              "code_cosine": 0.664900429253992,
+              "search_cosine": 0.5789330023135364,
+              "admitted": true
+            },
+            {
+              "id": "json",
+              "score": 0.6522019567294857,
+              "code_cosine": 0.6522019567294857,
+              "search_cosine": 0.5741705356469581,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "animal_photo",
+          "query": "A photograph of a puppy running on a beach",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": [
+            {
+              "id": "cancel",
+              "score": 0.6701507124179436,
+              "code_cosine": 0.6701507124179436,
+              "search_cosine": 0.5945880442116963,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "travel",
+          "query": "Hotel room reservations and airline boarding passes",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": [
+            {
+              "id": "cancel",
+              "score": 0.6767899435397955,
+              "code_cosine": 0.6767899435397955,
+              "search_cosine": 0.5818165324906803,
+              "admitted": true
+            },
+            {
+              "id": "http",
+              "score": 0.6728612285418808,
+              "code_cosine": 0.6728612285418808,
+              "search_cosine": 0.5815609146638967,
+              "admitted": true
+            },
+            {
+              "id": "gzip",
+              "score": 0.6701855455360989,
+              "code_cosine": 0.6701855455360989,
+              "search_cosine": 0.5760510653612624,
+              "admitted": true
+            },
+            {
+              "id": "retry",
+              "score": 0.6665899804011022,
+              "code_cosine": 0.6665899804011022,
+              "search_cosine": 0.5778207127265744,
+              "admitted": true
+            },
+            {
+              "id": "lines",
+              "score": 0.6580413073789302,
+              "code_cosine": 0.6580413073789302,
+              "search_cosine": 0.5707313429653195,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "history",
+          "query": "Medieval castle architecture and royal dynasties",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": [
+            {
+              "id": "sort",
+              "score": 0.6847043772362342,
+              "code_cosine": 0.6847043772362342,
+              "search_cosine": 0.5740352495237016,
+              "admitted": true
+            },
+            {
+              "id": "path",
+              "score": 0.6656679439631217,
+              "code_cosine": 0.6656679439631217,
+              "search_cosine": 0.5583383522780075,
+              "admitted": true
+            },
+            {
+              "id": "lines",
+              "score": 0.6509819470230928,
+              "code_cosine": 0.6509819470230928,
+              "search_cosine": 0.5268520628537346,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "music",
+          "query": "Beethoven symphonies and orchestral harmony",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": [
+            {
+              "id": "sort",
+              "score": 0.6868556270649498,
+              "code_cosine": 0.6868556270649498,
+              "search_cosine": 0.5740237260153143,
+              "admitted": true
+            },
+            {
+              "id": "lines",
+              "score": 0.6719430452486791,
+              "code_cosine": 0.6719430452486791,
+              "search_cosine": 0.5567009022487236,
+              "admitted": true
+            },
+            {
+              "id": "path",
+              "score": 0.6696917899172506,
+              "code_cosine": 0.6696917899172506,
+              "search_cosine": 0.5606754112710634,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.6655397090401513,
+              "code_cosine": 0.6655397090401513,
+              "search_cosine": 0.5499427120772723,
+              "admitted": true
+            },
+            {
+              "id": "batches",
+              "score": 0.657232786266091,
+              "code_cosine": 0.657232786266091,
+              "search_cosine": 0.5713883681877217,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "wedding",
+          "query": "Wedding photography poses for a bride and groom",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": [
+            {
+              "id": "sort",
+              "score": 0.6629351140079951,
+              "code_cosine": 0.6629351140079951,
+              "search_cosine": 0.553865072508524,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.6551581213820473,
+              "code_cosine": 0.6551581213820473,
+              "search_cosine": 0.5499715380750282,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "cosmetics",
+          "query": "Moisturizing skincare products for sensitive skin",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": [
+            {
+              "id": "sort",
+              "score": 0.6602289158979185,
+              "code_cosine": 0.6602289158979185,
+              "search_cosine": 0.5635583989181981,
+              "admitted": true
+            }
+          ]
+        }
+      ]
+    },
+    "both_tasks": {
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "negative_fp_rate": 0.0,
+      "passed": true,
+      "queries": [
+        {
+          "name": "alphabetical",
+          "query": "Arrange a list of names in alphabetical order",
+          "expected": "sort",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "sort",
+              "score": 0.8341056223546394,
+              "code_cosine": 0.8341056223546394,
+              "search_cosine": 0.791262032953405,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "deduplicate",
+          "query": "Remove repeated values while keeping their first occurrence",
+          "expected": "unique",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "unique",
+              "score": 0.7516899288850436,
+              "code_cosine": 0.7516899288850436,
+              "search_cosine": 0.7247919861097124,
+              "admitted": true
+            },
+            {
+              "id": "sort",
+              "score": 0.724002705434159,
+              "code_cosine": 0.724002705434159,
+              "search_cosine": 0.6940657381093156,
+              "admitted": true
+            },
+            {
+              "id": "latest",
+              "score": 0.7038273064987657,
+              "code_cosine": 0.7038273064987657,
+              "search_cosine": 0.6917844814251612,
+              "admitted": true
+            },
+            {
+              "id": "path",
+              "score": 0.6903672387368656,
+              "code_cosine": 0.6903672387368656,
+              "search_cosine": 0.6513810359499196,
+              "admitted": true
+            },
+            {
+              "id": "debounce",
+              "score": 0.6890785217040197,
+              "code_cosine": 0.6890785217040197,
+              "search_cosine": 0.6616900163898632,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "http_profile",
+          "query": "Request person details from an HTTP API",
+          "expected": "http",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "http",
+              "score": 0.7737558277805339,
+              "code_cosine": 0.7737558277805339,
+              "search_cosine": 0.7564590529712066,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "read_file",
+          "query": "Load the lines of a text file into a string array",
+          "expected": "lines",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "lines",
+              "score": 0.8302750324381014,
+              "code_cosine": 0.8302750324381014,
+              "search_cosine": 0.8103367483644685,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "hash",
+          "query": "Compute a SHA-256 digest of bytes",
+          "expected": "checksum",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "checksum",
+              "score": 0.7784005399497816,
+              "code_cosine": 0.7784005399497816,
+              "search_cosine": 0.757612014358828,
+              "admitted": true
+            },
+            {
+              "id": "gzip",
+              "score": 0.7098894871281771,
+              "code_cosine": 0.7098894871281771,
+              "search_cosine": 0.6631533190087013,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "retry_errors",
+          "query": "Try an operation again when it fails",
+          "expected": "retry",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "retry",
+              "score": 0.8092565164745527,
+              "code_cosine": 0.8092565164745527,
+              "search_cosine": 0.8047516993474051,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.6878587112217736,
+              "code_cosine": 0.6878587112217736,
+              "search_cosine": 0.658562111259349,
+              "admitted": true
+            },
+            {
+              "id": "latest",
+              "score": 0.6660156979992706,
+              "code_cosine": 0.6660156979992706,
+              "search_cosine": 0.6529660008795523,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "customer_totals",
+          "query": "Total the order amounts for each customer",
+          "expected": "group",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "group",
+              "score": 0.8413838983381194,
+              "code_cosine": 0.8413838983381194,
+              "search_cosine": 0.8427861596280124,
+              "admitted": true
+            },
+            {
+              "id": "latest",
+              "score": 0.7092373665977472,
+              "code_cosine": 0.7092373665977472,
+              "search_cosine": 0.6835997347689045,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "expire_logs",
+          "query": "Delete log files older than thirty days",
+          "expected": "old_logs",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "old_logs",
+              "score": 0.8270657983740032,
+              "code_cosine": 0.8270657983740032,
+              "search_cosine": 0.8274987137810345,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "astronomy",
+          "query": "Asteroid orbital mechanics and interstellar propulsion",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "recipe",
+          "query": "Bake a chocolate cake with flour butter eggs and sugar",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "animal_photo",
+          "query": "A photograph of a puppy running on a beach",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "travel",
+          "query": "Hotel room reservations and airline boarding passes",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "history",
+          "query": "Medieval castle architecture and royal dynasties",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "music",
+          "query": "Beethoven symphonies and orchestral harmony",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "wedding",
+          "query": "Wedding photography poses for a bride and groom",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "cosmetics",
+          "query": "Moisturizing skincare products for sensitive skin",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        }
+      ]
+    },
+    "normalized_mean": {
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "negative_fp_rate": 0.0,
+      "passed": true,
+      "queries": [
+        {
+          "name": "alphabetical",
+          "query": "Arrange a list of names in alphabetical order",
+          "expected": "sort",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "sort",
+              "score": 0.8214636251974957,
+              "code_cosine": 0.8341056223546394,
+              "search_cosine": 0.791262032953405,
+              "admitted": true
+            },
+            {
+              "id": "latest",
+              "score": 0.6671085256744506,
+              "code_cosine": 0.6705632989562724,
+              "search_cosine": 0.6493936497775222,
+              "admitted": true
+            },
+            {
+              "id": "unique",
+              "score": 0.6638466973080904,
+              "code_cosine": 0.6810632989829433,
+              "search_cosine": 0.6324397178161619,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "deduplicate",
+          "query": "Remove repeated values while keeping their first occurrence",
+          "expected": "unique",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "unique",
+              "score": 0.743834680592646,
+              "code_cosine": 0.7516899288850436,
+              "search_cosine": 0.7247919861097124,
+              "admitted": true
+            },
+            {
+              "id": "sort",
+              "score": 0.7144066426072123,
+              "code_cosine": 0.724002705434159,
+              "search_cosine": 0.6940657381093156,
+              "admitted": true
+            },
+            {
+              "id": "latest",
+              "score": 0.7030932366722641,
+              "code_cosine": 0.7038273064987657,
+              "search_cosine": 0.6917844814251612,
+              "admitted": true
+            },
+            {
+              "id": "old_logs",
+              "score": 0.6915171439666113,
+              "code_cosine": 0.6883839588190673,
+              "search_cosine": 0.6842497508138862,
+              "admitted": true
+            },
+            {
+              "id": "debounce",
+              "score": 0.6805017209379279,
+              "code_cosine": 0.6890785217040197,
+              "search_cosine": 0.6616900163898632,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "http_profile",
+          "query": "Request person details from an HTTP API",
+          "expected": "http",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "http",
+              "score": 0.7719143789542426,
+              "code_cosine": 0.7737558277805339,
+              "search_cosine": 0.7564590529712066,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "read_file",
+          "query": "Load the lines of a text file into a string array",
+          "expected": "lines",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "lines",
+              "score": 0.8242007785378117,
+              "code_cosine": 0.8302750324381014,
+              "search_cosine": 0.8103367483644685,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.6517357910757672,
+              "code_cosine": 0.6717177591097683,
+              "search_cosine": 0.6255940666646507,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "hash",
+          "query": "Compute a SHA-256 digest of bytes",
+          "expected": "checksum",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "checksum",
+              "score": 0.774664276083102,
+              "code_cosine": 0.7784005399497816,
+              "search_cosine": 0.757612014358828,
+              "admitted": true
+            },
+            {
+              "id": "gzip",
+              "score": 0.6924729934423649,
+              "code_cosine": 0.7098894871281771,
+              "search_cosine": 0.6631533190087013,
+              "admitted": true
+            },
+            {
+              "id": "path",
+              "score": 0.6621570151296847,
+              "code_cosine": 0.6885731961791575,
+              "search_cosine": 0.6243587661740472,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.6616042966194097,
+              "code_cosine": 0.6840871286886603,
+              "search_cosine": 0.6277488975319606,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "retry_errors",
+          "query": "Try an operation again when it fails",
+          "expected": "retry",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "retry",
+              "score": 0.8163196004673408,
+              "code_cosine": 0.8092565164745527,
+              "search_cosine": 0.8047516993474051,
+              "admitted": true
+            },
+            {
+              "id": "cancel",
+              "score": 0.680981482680347,
+              "code_cosine": 0.6878587112217736,
+              "search_cosine": 0.658562111259349,
+              "admitted": true
+            },
+            {
+              "id": "gzip",
+              "score": 0.6676320816952036,
+              "code_cosine": 0.6727985502993973,
+              "search_cosine": 0.6472281455994553,
+              "admitted": true
+            },
+            {
+              "id": "latest",
+              "score": 0.6671035518268189,
+              "code_cosine": 0.6660156979992706,
+              "search_cosine": 0.6529660008795523,
+              "admitted": true
+            },
+            {
+              "id": "debounce",
+              "score": 0.6670722768376933,
+              "code_cosine": 0.6803361011140846,
+              "search_cosine": 0.6385837615802713,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "customer_totals",
+          "query": "Total the order amounts for each customer",
+          "expected": "group",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "group",
+              "score": 0.849770680436945,
+              "code_cosine": 0.8413838983381194,
+              "search_cosine": 0.8427861596280124,
+              "admitted": true
+            },
+            {
+              "id": "latest",
+              "score": 0.7027747143275501,
+              "code_cosine": 0.7092373665977472,
+              "search_cosine": 0.6835997347689045,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "expire_logs",
+          "query": "Delete log files older than thirty days",
+          "expected": "old_logs",
+          "rank_at_5": 1,
+          "hits": [
+            {
+              "id": "old_logs",
+              "score": 0.8310363493933839,
+              "code_cosine": 0.8270657983740032,
+              "search_cosine": 0.8274987137810345,
+              "admitted": true
+            },
+            {
+              "id": "sort",
+              "score": 0.6633870808791047,
+              "code_cosine": 0.6820479569016131,
+              "search_cosine": 0.6387326836153716,
+              "admitted": true
+            },
+            {
+              "id": "latest",
+              "score": 0.654548509964997,
+              "code_cosine": 0.6670316954374481,
+              "search_cosine": 0.6361516573275353,
+              "admitted": true
+            }
+          ]
+        },
+        {
+          "name": "astronomy",
+          "query": "Asteroid orbital mechanics and interstellar propulsion",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "recipe",
+          "query": "Bake a chocolate cake with flour butter eggs and sugar",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "animal_photo",
+          "query": "A photograph of a puppy running on a beach",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "travel",
+          "query": "Hotel room reservations and airline boarding passes",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "history",
+          "query": "Medieval castle architecture and royal dynasties",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "music",
+          "query": "Beethoven symphonies and orchestral harmony",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "wedding",
+          "query": "Wedding photography poses for a bride and groom",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        },
+        {
+          "name": "cosmetics",
+          "query": "Moisturizing skincare products for sensitive skin",
+          "expected": null,
+          "rank_at_5": null,
+          "hits": []
+        }
+      ]
+    }
+  },
+  "failures": [],
+  "owned_job_empty": true,
+  "worker": {
+    "type": "worker_status",
+    "id": 5,
+    "model_loaded": true,
+    "backend": "cpu",
+    "stub": false,
+    "dim": 768,
+    "uptime_secs": 5,
+    "jobs_served": 3
+  },
+  "elapsed_seconds": 5.593
+}

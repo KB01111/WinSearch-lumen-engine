@@ -24,7 +24,7 @@ use ws_platform::child_job::ChildJob;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExtractClientError {
-    #[error("extraction admission unavailable while previous cleanup is pending")]
+    #[error("extraction admission unavailable while parser slots or cleanup are busy")]
     AdmissionUnavailable,
     #[error("extraction batch timed out")]
     Timeout,
@@ -44,6 +44,35 @@ impl ExtractClientError {
     }
 }
 
+const MAX_EXTRACTION_JOBS: usize = 2;
+
+struct ExtractionSlots {
+    active: Mutex<usize>,
+    ready: Condvar,
+}
+
+fn extraction_slots() -> &'static ExtractionSlots {
+    static SLOTS: OnceLock<ExtractionSlots> = OnceLock::new();
+    SLOTS.get_or_init(|| ExtractionSlots { active: Mutex::new(0), ready: Condvar::new() })
+}
+
+struct ExtractionPermit;
+impl ExtractionPermit {
+    fn try_acquire() -> Option<Self> {
+        let mut active = extraction_slots().active.lock().unwrap_or_else(|p| p.into_inner());
+        if *active >= MAX_EXTRACTION_JOBS { return None; }
+        *active += 1;
+        Some(Self)
+    }
+}
+impl Drop for ExtractionPermit {
+    fn drop(&mut self) {
+        let mut active = extraction_slots().active.lock().unwrap_or_else(|p| p.into_inner());
+        *active -= 1;
+        extraction_slots().ready.notify_all();
+    }
+}
+
 pub struct ExtractClient {
     worker_bin: PathBuf,
     cache_dir: PathBuf,
@@ -57,6 +86,15 @@ pub struct ExtractClient {
 impl ExtractClient {
     pub fn admission_available(&self) -> bool {
         self.cleanup_pending.load(Ordering::Acquire) == 0
+            && *extraction_slots().active.lock().unwrap_or_else(|p| p.into_inner()) < MAX_EXTRACTION_JOBS
+    }
+
+    pub(crate) fn wait_for_admission(&self, timeout: Duration) {
+        let slots = extraction_slots();
+        let active = slots.active.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = slots.ready.wait_timeout_while(active, timeout, |active| {
+            *active >= MAX_EXTRACTION_JOBS || self.cleanup_pending.load(Ordering::Acquire) != 0
+        }).unwrap_or_else(|p| p.into_inner());
     }
 
     pub fn new(worker_bin: PathBuf, cache_dir: PathBuf) -> Self {
@@ -117,6 +155,7 @@ impl ExtractClient {
         if !self.admission_available() {
             return Err(ExtractClientError::AdmissionUnavailable);
         }
+        let permit = Arc::new(ExtractionPermit::try_acquire().ok_or(ExtractClientError::AdmissionUnavailable)?);
         let deadline = Instant::now() + timeout;
         let frame = encode_request(request).map_err(ExtractClientError::Malformed)?;
         if !allowed() {
@@ -140,9 +179,9 @@ impl ExtractClient {
         }
         std::fs::create_dir(&request.scratch_dir).map_err(ExtractClientError::worker)?;
         let mut scratch = Scratch(Some(request.scratch_dir.clone()));
-        let anchor = ScratchAnchor::capture(&request.scratch_dir)?;
         let mut promoted = ArtifactLease::default();
         let result = (|| {
+            let anchor = ScratchAnchor::capture(&request.scratch_dir)?;
             let mut command = Command::new(&self.worker_bin);
             command
                 .stdin(Stdio::piped())
@@ -193,6 +232,7 @@ impl ExtractClient {
                 writer: Some(writer),
                 reader: Some(reader),
                 closed: false,
+                _permit: Some(Arc::clone(&permit)),
             };
             let outcome = (|| {
                 let (mut written, mut response) = (false, None);
@@ -269,7 +309,13 @@ impl ExtractClient {
             }
             Ok(response)
         })();
-        scratch.clean().map_err(ExtractClientError::worker)?;
+        if scratch.clean().is_err() {
+            self.retain_cleanup(Exchange {
+                job: None, writer: None, reader: None, closed: true,
+                _permit: Some(Arc::clone(&permit)),
+            }, Scratch(scratch.0.take()));
+            return Err(ExtractClientError::AdmissionUnavailable);
+        }
         let response = result?;
         promoted.keep();
         Ok(response)
@@ -482,6 +528,8 @@ struct Exchange {
     writer: Option<JoinHandle<()>>,
     reader: Option<JoinHandle<()>>,
     closed: bool,
+    // The outer request and exceptional cleanup share one admission lifetime.
+    _permit: Option<Arc<ExtractionPermit>>,
 }
 impl Exchange {
     fn close(&mut self) -> Result<(), ExtractClientError> {
@@ -542,6 +590,7 @@ impl Exchange {
             writer: self.writer.take(),
             reader: self.reader.take(),
             closed: false,
+            _permit: self._permit.take(),
         }
     }
 }
@@ -599,7 +648,9 @@ fn retain_cleanup(cleanup: RetainedCleanup) {
                     let counter = cleanup.pending.take();
                     drop(cleanup);
                     if let Some(counter) = counter {
+                        let _active = extraction_slots().active.lock().unwrap_or_else(|p| p.into_inner());
                         counter.fetch_sub(1, Ordering::AcqRel);
+                        extraction_slots().ready.notify_all();
                     }
                 } else {
                     pending.push(cleanup);
@@ -867,6 +918,7 @@ pub(crate) mod tests {
         let pending = Arc::clone(&client.cleanup_pending);
         let binary = fixture();
         move || {
+            let permit = Arc::new(ExtractionPermit::try_acquire().expect("fixture parser admission"));
             let mut command = Command::new(&binary);
             command
                 .arg("never-read")
@@ -886,6 +938,7 @@ pub(crate) mod tests {
                 writer: Some(task),
                 reader: None,
                 closed: false,
+                _permit: Some(permit),
             };
             assert!(exchange.close().is_err());
             let scratch = root.join("retained-cleanup-scratch");
@@ -967,6 +1020,7 @@ pub(crate) mod tests {
     #[test]
     fn native_cleanup_failure_retains_live_thread_and_pipe_ownership() {
         let tree = Tree::new();
+        let permit = Arc::new(ExtractionPermit::try_acquire().expect("fixture parser admission"));
         let mut command = Command::new(fixture());
         command
             .arg("never-read")
@@ -988,6 +1042,7 @@ pub(crate) mod tests {
             writer: Some(task),
             reader: None,
             closed: false,
+            _permit: Some(permit),
         };
         let started = Instant::now();
         let result = exchange.close();
@@ -1081,6 +1136,123 @@ pub(crate) mod tests {
         dead(&pid);
         dead(&descendant);
         assert!(!request.scratch_dir.exists());
+    }
+
+    struct RunningExtractions {
+        allowed: Arc<std::sync::atomic::AtomicBool>,
+        tasks: Vec<JoinHandle<Result<ExtractResponse, ExtractClientError>>>,
+    }
+    impl RunningExtractions {
+        fn stop(&mut self) -> Vec<Result<ExtractResponse, ExtractClientError>> {
+            self.allowed.store(false, Ordering::Release);
+            self.tasks.drain(..).map(|task| task.join().unwrap()).collect()
+        }
+    }
+    impl Drop for RunningExtractions {
+        fn drop(&mut self) { let _ = self.stop(); }
+    }
+
+    #[test]
+    fn process_wide_parser_slots_block_fresh_clients_until_owned_children_finish() {
+        let tree = Tree::new();
+        let allowed = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let mut running = RunningExtractions { allowed: allowed.clone(), tasks: vec![] };
+        let mut pids = Vec::new();
+        for number in 0..2 {
+            let pid = tree.0.join(format!("pid-{number}"));
+            pids.push(pid.clone());
+            let mut client = ExtractClient::new(fixture(), tree.0.join(format!("cache-{number}")));
+            client.worker_args = vec!["never-read".into(), pid.to_string_lossy().into()];
+            let request = client.request(tree.0.join("fixture.txt"), "doc", 1);
+            let allowed = allowed.clone();
+            running.tasks.push(thread::spawn(move || client.extract_while(&request,
+                Duration::from_secs(10), || allowed.load(Ordering::Acquire))));
+        }
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while pids.iter().any(|pid| !pid.exists()) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(pids.iter().all(|pid| pid.exists()), "both owned parsers must actually start");
+        let mut third = ExtractClient::new(fixture(), tree.0.join("third-cache"));
+        let third_pid = tree.0.join("third.pid");
+        third.worker_args = vec!["oversized".into(), third_pid.to_string_lossy().into()];
+        let denied = third.request(tree.0.join("fixture.txt"), "doc", 1);
+        let result = third.extract(&denied, Duration::from_secs(1));
+        assert!(matches!(result, Err(ExtractClientError::AdmissionUnavailable)), "{result:?}");
+        assert!(!denied.scratch_dir.exists() && !third_pid.exists(),
+            "capacity denial must precede scratch creation and process startup");
+        let started = Instant::now();
+        for result in running.stop() {
+            assert!(matches!(result, Err(ExtractClientError::Cancelled)), "{result:?}");
+        }
+        assert!(started.elapsed() < Duration::from_millis(500));
+        for pid in pids { dead(&pid); }
+        let admitted = third.request(tree.0.join("fixture.txt"), "doc", 1);
+        assert!(matches!(third.extract(&admitted, Duration::from_secs(2)),
+            Err(ExtractClientError::Malformed(_))), "a freed slot must admit another owned parser");
+        dead(&third_pid);
+        assert!(!admitted.scratch_dir.exists());
+    }
+
+    #[test]
+    fn retained_parser_slots_cannot_be_bypassed_with_a_new_client() {
+        let first_tree = Tree::new();
+        let second_tree = Tree::new();
+        let third_tree = Tree::new();
+        let first = ExtractClient::new(fixture(), first_tree.0.join("cache"));
+        let second = ExtractClient::new(fixture(), second_tree.0.join("cache"));
+        let first_cleanup = cleanup_trigger(&first, first_tree.0.clone())();
+        let second_cleanup = cleanup_trigger(&second, second_tree.0.clone())();
+        let fresh = ExtractClient::new(third_tree.0.join("missing.exe"), third_tree.0.join("cache"));
+        let request = fresh.request(third_tree.0.join("source.txt"), "doc", 1);
+        let result = fresh.extract(&request, Duration::from_secs(1));
+        assert!(matches!(result, Err(ExtractClientError::AdmissionUnavailable)), "{result:?}");
+        assert!(!request.scratch_dir.exists(), "retained slots must block new setup");
+        drop((first_cleanup, second_cleanup));
+        assert!(fresh.admission_available(), "finished cleanup must release shared admission");
+    }
+
+    #[test]
+    fn scratch_cleanup_failure_retains_parser_capacity_until_the_owned_cache_is_clean() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let tree = Tree::new();
+        let parked = ExtractClient::new(fixture(), tree.0.join("parked-cache"));
+        let parked_cleanup = cleanup_trigger(&parked, tree.0.clone())();
+        let mut client = ExtractClient::new(fixture(), tree.0.join("cache"));
+        let pid = tree.0.join("parser.pid");
+        let release = tree.0.join("release");
+        client.worker_args = vec!["code-wait".into(), pid.to_string_lossy().into(), release.to_string_lossy().into()];
+        let client = Arc::new(client);
+        let request = client.request(tree.0.join("source.rs"), "code", 1);
+        let scratch = request.scratch_dir.clone();
+        let allowed = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let mut running = RunningExtractions { allowed: allowed.clone(), tasks: vec![] };
+        let active = client.clone();
+        running.tasks.push(thread::spawn(move || active.extract_while(&request,
+            Duration::from_secs(10), || allowed.load(Ordering::Acquire))));
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !pid.exists() && Instant::now() < deadline { thread::sleep(Duration::from_millis(2)); }
+        assert!(pid.exists(), "worker must actually start before locking its scratch");
+        let locked = std::fs::OpenOptions::new().write(true).create_new(true).share_mode(0)
+            .open(scratch.join("held.tmp")).unwrap();
+        std::fs::write(&release, b"release").unwrap();
+        let result = running.tasks.pop().unwrap().join().unwrap();
+        assert!(matches!(result, Err(ExtractClientError::AdmissionUnavailable)), "{result:?}");
+        dead(&pid);
+        assert!(scratch.exists(), "the fixture must actually prevent scratch deletion");
+        let fresh = ExtractClient::new(tree.0.join("missing.exe"), tree.0.join("fresh-cache"));
+        let request = fresh.request(tree.0.join("source.rs"), "code", 1);
+        let result = fresh.extract(&request, Duration::from_secs(1));
+        assert!(matches!(result, Err(ExtractClientError::AdmissionUnavailable)), "{result:?}");
+        assert!(!request.scratch_dir.exists(), "failed cleanup cannot be bypassed");
+        drop(locked);
+        drop(parked_cleanup);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !client.admission_available() && Instant::now() < deadline {
+            client.wait_for_admission(Duration::from_millis(20));
+        }
+        assert!(client.admission_available() && fresh.admission_available());
+        assert!(!scratch.exists(), "retained scratch must actually be cleaned");
     }
 
     fn real_client(tree: &Tree) -> ExtractClient {

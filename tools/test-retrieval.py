@@ -13,7 +13,8 @@ import uuid
 
 root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('suite', choices=['names', 'retrieval-development', 'retrieval-held-out'])
+parser.add_argument('suite', choices=['names', 'retrieval-development', 'retrieval-held-out',
+                                    'code-development', 'code-held-out'])
 parser.add_argument('output')
 args = parser.parse_args()
 output = (root/args.output).resolve()
@@ -32,6 +33,8 @@ frozen = {
     'names': '4640467f2867f24e61c2c5d6184ee1bb8200b1938807f36798fded8c55050037',
     'retrieval-development': 'd8830a7fe8ed0491b8752634bce741b9d909afceebf2ec0c8a2de7be3450bbe9',
     'retrieval-held-out': '4fba3a5dee353621501bba66a9ae785ce55e4d0f1a016abe450831545e2a58bd',
+    'code-development': '34a0a9951173d7f9e8469d66e36054269ca5a697541d6bb3d83742ab9d033f93',
+    'code-held-out': '38daace215c27241f6321b1a7f4e51bc38c2baaf5c8cb1719fdf5c40ec0fed86',
 }
 def digest(path):
     with path.open('rb') as stream:
@@ -51,6 +54,7 @@ lock = {
     'worker_sha256': digest(worker), 'generated_asset_sha256': asset_hashes,
     'recipe_frozen_commit': '4173543b8e434d9bef912623935cdc8b53aeeee6',
     'expected_pipeline_version': 2, 'expected_minimum_semantic_cosine': .65,
+    'expected_code_query_policy': 'code-and-search-task-corroboration-v1',
     'input_scope': 'declared fixture chunks and actual generated media, not native extraction proof',
     'workspace_files_at_invocation_not_build_manifest': {name: digest(root/name) for name in [
         'src/engine/crates/ws-modelmgr/src/recipe.rs',

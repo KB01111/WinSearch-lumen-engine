@@ -104,7 +104,10 @@ include Lumen integration and the final native/installed acceptance gates.
       native preview/editor interaction remains
 - [~] `code:` queries (semantic + exact identifier) (Phase 5) — native no-model
       daemon, persistent60s quiet/restart/pause/root revocation verified; deterministic
-      semantic fixtures and request revision checks pass; final review/quality remains
+      semantic fixtures and request revision checks pass. Managed-model native768d
+      vectors, semantic-only function/caller source lines and unrelated negatives now
+      pass through typed Rust client/CLI/pipe and offline snapshots. Frozen code
+      dev/held-out each Recall/MRR1, FP0; final review/scale/installed quality remains
 - [~] Editor detection + open-at-line (VS Code, Cursor, VS, JetBrains,
       Sublime, Zed, Notepad++, configurable) (Phase 5) — argument matrix and notebook
       fallback verified in .NET; installed editor interaction remains
@@ -132,7 +135,9 @@ include Lumen integration and the final native/installed acceptance gates.
 - [x] Sensitive-file exclusions (keys, certs, credential stores, hidden dirs) (Phase 2)
 - [x] No cloud-file hydration (OneDrive placeholders) (Phase 2) — metadata
       from directory enumeration; attribute-only identity opens
-- [ ] Untrusted-content parser limits (Phase 4)
+- [~] Untrusted-content parser limits (Phase 4) — two process-wide slots retained
+      through child/pipe/scratch cleanup; native cancellation and durable resource
+      deferral regressions pass. Final independent/installed resource review remains
 
 ## Distribution
 

@@ -1,0 +1,317 @@
+{
+  "name": "code-held-out",
+  "description": "Frozen generated source-text labels; actual model and production code store/ranker, separate from native parsing and installed acceptance.",
+  "thresholds": {
+    "min_recall_at_5": 0.9,
+    "min_mrr": 0.85,
+    "max_false_positive_rate": 0.0
+  },
+  "entries": [
+    {
+      "path": "C:/Eval/Code/names.rs",
+      "name": "names.rs",
+      "segments": [
+        {
+          "kind": "code",
+          "line": 1,
+          "text": "pub fn sort_names(names: &mut [String]) {\n    names.sort_unstable();\n}\n"
+        }
+      ]
+    },
+    {
+      "path": "C:/Eval/Code/unique.py",
+      "name": "unique.py",
+      "segments": [
+        {
+          "kind": "code",
+          "line": 1,
+          "text": "def unique_values(values):\n    return list(dict.fromkeys(values))\n"
+        }
+      ]
+    },
+    {
+      "path": "C:/Eval/Code/profile.ts",
+      "name": "profile.ts",
+      "segments": [
+        {
+          "kind": "code",
+          "line": 1,
+          "text": "async function loadProfile(id: string) {\n    const response = await fetch(\"/api/users/\" + id);\n    return response.json();\n}\n"
+        }
+      ]
+    },
+    {
+      "path": "C:/Eval/Code/Lines.cs",
+      "name": "Lines.cs",
+      "segments": [
+        {
+          "kind": "code",
+          "line": 1,
+          "text": "public static string[] LoadLines(string path) {\n    return System.IO.File.ReadAllLines(path);\n}\n"
+        }
+      ]
+    },
+    {
+      "path": "C:/Eval/Code/checksum.go",
+      "name": "checksum.go",
+      "segments": [
+        {
+          "kind": "code",
+          "line": 1,
+          "text": "func FileChecksum(data []byte) [32]byte {\n    return sha256.Sum256(data)\n}\n"
+        }
+      ]
+    },
+    {
+      "path": "C:/Eval/Code/Retry.java",
+      "name": "Retry.java",
+      "segments": [
+        {
+          "kind": "code",
+          "line": 1,
+          "text": "static void retry(Runnable operation, int attempts) {\n    for (int n = 0; ; n++) {\n        try { operation.run(); return; }\n        catch (RuntimeException failure) { if (n + 1 >= attempts) throw failure; }\n    }\n}\n"
+        }
+      ]
+    },
+    {
+      "path": "C:/Eval/Code/revenue.sql",
+      "name": "revenue.sql",
+      "segments": [
+        {
+          "kind": "code",
+          "line": 1,
+          "text": "SELECT customer_id, SUM(amount) AS total_spent\nFROM orders\nGROUP BY customer_id;\n"
+        }
+      ]
+    },
+    {
+      "path": "C:/Eval/Code/logs.ps1",
+      "name": "logs.ps1",
+      "segments": [
+        {
+          "kind": "code",
+          "line": 1,
+          "text": "Get-ChildItem -LiteralPath $logDirectory -Filter \"*.log\" |\n    Where-Object LastWriteTime -lt (Get-Date).AddDays(-30) |\n    Remove-Item -LiteralPath { $_.FullName }\n"
+        }
+      ]
+    },
+    {
+      "path": "C:/Eval/Code/scope.rs",
+      "name": "scope.rs",
+      "segments": [
+        {
+          "kind": "code",
+          "line": 1,
+          "text": "pub fn contains_path(root: &Path, candidate: &Path) -> bool {\n    candidate.strip_prefix(root).is_ok()\n}\n"
+        }
+      ]
+    },
+    {
+      "path": "C:/Eval/Code/batches.py",
+      "name": "batches.py",
+      "segments": [
+        {
+          "kind": "code",
+          "line": 1,
+          "text": "def batches(values, size):\n    for offset in range(0, len(values), size):\n        yield values[offset:offset + size]\n"
+        }
+      ]
+    },
+    {
+      "path": "C:/Eval/Code/debounce.ts",
+      "name": "debounce.ts",
+      "segments": [
+        {
+          "kind": "code",
+          "line": 1,
+          "text": "function debounce(callback: () => void, delay: number) {\n    let timer: ReturnType<typeof setTimeout>;\n    return () => { clearTimeout(timer); timer = setTimeout(callback, delay); };\n}\n"
+        }
+      ]
+    },
+    {
+      "path": "C:/Eval/Code/Copy.cs",
+      "name": "Copy.cs",
+      "segments": [
+        {
+          "kind": "code",
+          "line": 1,
+          "text": "public async Task Copy(Stream input, Stream output, CancellationToken stop) {\n    byte[] buffer = new byte[4096];\n    int count;\n    while ((count = await input.ReadAsync(buffer, stop)) != 0) {\n        stop.ThrowIfCancellationRequested();\n        await output.WriteAsync(buffer.AsMemory(0, count), stop);\n    }\n}\n"
+        }
+      ]
+    },
+    {
+      "path": "C:/Eval/Code/decode.go",
+      "name": "decode.go",
+      "segments": [
+        {
+          "kind": "code",
+          "line": 1,
+          "text": "func Decode(data []byte, target any) error {\n    return json.Unmarshal(data, target)\n}\n"
+        }
+      ]
+    },
+    {
+      "path": "C:/Eval/Code/Compress.java",
+      "name": "Compress.java",
+      "segments": [
+        {
+          "kind": "code",
+          "line": 1,
+          "text": "static byte[] compress(byte[] input) throws IOException {\n    var buffer = new ByteArrayOutputStream();\n    try (var gzip = new GZIPOutputStream(buffer)) { gzip.write(input); }\n    return buffer.toByteArray();\n}\n"
+        }
+      ]
+    },
+    {
+      "path": "C:/Eval/Code/latest.sql",
+      "name": "latest.sql",
+      "segments": [
+        {
+          "kind": "code",
+          "line": 1,
+          "text": "SELECT * FROM (\n  SELECT e.*, ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY created_at DESC) AS position\n  FROM events e\n) ranked WHERE position = 1;\n"
+        }
+      ]
+    },
+    {
+      "path": "C:/Eval/Code/graph.py",
+      "name": "graph.py",
+      "segments": [
+        {
+          "kind": "code",
+          "line": 1,
+          "text": "def breadth_first(graph, start):\n    visited = {start}\n    queue = [start]\n    while queue:\n        vertex = queue.pop(0)\n        yield vertex\n        for neighbor in graph[vertex]:\n            if neighbor not in visited:\n                visited.add(neighbor)\n                queue.append(neighbor)\n"
+        }
+      ]
+    }
+  ],
+  "queries": [
+    {
+      "query": "Determine whether a file belongs inside a selected directory",
+      "category": "code-heldout",
+      "mode": "code",
+      "include_semantic": true,
+      "expected_any": [
+        "scope.rs"
+      ]
+    },
+    {
+      "query": "Split a sequence into consecutive fixed size groups",
+      "category": "code-heldout",
+      "mode": "code",
+      "include_semantic": true,
+      "expected_any": [
+        "batches.py"
+      ]
+    },
+    {
+      "query": "Delay a callback until typing has stopped",
+      "category": "code-heldout",
+      "mode": "code",
+      "include_semantic": true,
+      "expected_any": [
+        "debounce.ts"
+      ]
+    },
+    {
+      "query": "Stop copying a stream when cancellation is requested",
+      "category": "code-heldout",
+      "mode": "code",
+      "include_semantic": true,
+      "expected_any": [
+        "Copy.cs"
+      ]
+    },
+    {
+      "query": "Deserialize encoded JSON into a native structure",
+      "category": "code-heldout",
+      "mode": "code",
+      "include_semantic": true,
+      "expected_any": [
+        "decode.go"
+      ]
+    },
+    {
+      "query": "Compress bytes into the GZIP format",
+      "category": "code-heldout",
+      "mode": "code",
+      "include_semantic": true,
+      "expected_any": [
+        "Compress.java"
+      ]
+    },
+    {
+      "query": "Find the most recent event for every customer",
+      "category": "code-heldout",
+      "mode": "code",
+      "include_semantic": true,
+      "expected_any": [
+        "latest.sql"
+      ]
+    },
+    {
+      "query": "Visit a graph breadth first without repeating vertices",
+      "category": "code-heldout",
+      "mode": "code",
+      "include_semantic": true,
+      "expected_any": [
+        "graph.py"
+      ]
+    },
+    {
+      "query": "Roasted vegetables with herbs and olive oil",
+      "category": "code-heldout",
+      "mode": "code",
+      "include_semantic": true,
+      "expect_empty": true
+    },
+    {
+      "query": "Professional football league match scores and stadium crowds",
+      "category": "code-heldout",
+      "mode": "code",
+      "include_semantic": true,
+      "expect_empty": true
+    },
+    {
+      "query": "Mountain climbing routes and summit conditions",
+      "category": "code-heldout",
+      "mode": "code",
+      "include_semantic": true,
+      "expect_empty": true
+    },
+    {
+      "query": "Identify wildflower plants from petals and leaves",
+      "category": "code-heldout",
+      "mode": "code",
+      "include_semantic": true,
+      "expect_empty": true
+    },
+    {
+      "query": "National election results and parliamentary coalitions",
+      "category": "code-heldout",
+      "mode": "code",
+      "include_semantic": true,
+      "expect_empty": true
+    },
+    {
+      "query": "Coral reef fish and underwater marine ecosystems",
+      "category": "code-heldout",
+      "mode": "code",
+      "include_semantic": true,
+      "expect_empty": true
+    },
+    {
+      "query": "Choose a comfortable sofa for a living room",
+      "category": "code-heldout",
+      "mode": "code",
+      "include_semantic": true,
+      "expect_empty": true
+    },
+    {
+      "query": "Romantic poetry and literary imagery",
+      "category": "code-heldout",
+      "mode": "code",
+      "include_semantic": true,
+      "expect_empty": true
+    }
+  ]
+}

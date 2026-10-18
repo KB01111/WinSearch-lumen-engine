@@ -26,3 +26,15 @@ Fixture locations must apply to their kind: doc/code use lines, PDF uses pages,
 audio/video use paired source times, images have no location, and OCR may use
 one page, line or time range. Video/OCR frame point timestamps are valid.
 Declared line spans are bounded by the fixture's 2 MiB source-line envelope.
+
+`code-development.json` and `code-held-out.json` add 16 generated source snippets
+in Rust, Python, TypeScript, C#, Go, Java, SQL and PowerShell. Each split contains
+eight natural-language positives and eight unrelated negatives, with the same
+.90/.85/zero-FP gates. Labels were frozen before model measurement; the chosen
+two-task corroboration policy was recorded before evaluating held-out queries.
+It retains the common .65 floor for each query view and the original code-task
+ranking score. The code-only baseline's prompt affinity admitted every negative
+in these sets. This supplements the existing suites and changes none of their
+labels or thresholds. Run either suite through `tools/test-retrieval.py` using
+its suite name and a fresh output directory. These are source-text fixtures,
+separate from native parser/model-manager/public-pipe acceptance.

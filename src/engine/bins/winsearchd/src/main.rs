@@ -90,7 +90,7 @@ fn main() -> anyhow::Result<()> {
     // priority order (small + recent files first) under per-file budgets.
     indexer.start_extract_workers(
         engine.embed_supervisor(),
-        Arc::new(extract::ExtractorRegistry::production()),
+        engine.extraction_registry(),
     );
     engine.start_code_scheduler()?;
     spawn_status_pusher(Arc::clone(&engine));

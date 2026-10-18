@@ -19,6 +19,7 @@ const MAX_UNITS: u64 = 131_072;
 const MAX_PARSE_BYTES: usize = 32 * 1024 * 1024;
 const VECTOR_PAGE_BUDGET: usize = 64;
 const VECTOR_BATCH: usize = 16;
+const PARSER_ADMISSION_WAIT: Duration = Duration::from_millis(100);
 
 #[derive(Default)]
 struct VectorState {
@@ -141,7 +142,7 @@ impl CodeService {
             })
             .unwrap_or_default()
     }
-    pub fn semantic(&self, vector: &[f32], limit: usize) -> Vec<CodeSearchHit> {
+    pub fn semantic(&self, vector: &[f32], corroboration: &[f32], limit: usize) -> Vec<CodeSearchHit> {
         let store = self.store.lock().unwrap_or_else(|p| p.into_inner());
         if store
             .meta_get("vector_fingerprint")
@@ -153,12 +154,12 @@ impl CodeService {
             return Vec::new();
         }
         store
-            .search_semantic(vector, limit, |file| {
+            .search_semantic(vector, corroboration, limit, |file| {
                 self.visible(
                     file,
                     store.source_snapshot(file.id).ok().flatten().as_deref(),
                 )
-            })
+            }, |score|ws_index::retrieval::semantic_admitted("code",score))
             .unwrap_or_default()
     }
     pub fn result_allowed(&self, path: &str, epoch: u64) -> bool {
@@ -283,6 +284,11 @@ impl CodeService {
         }
     }
     fn wait_for_work(&self) {
+        if self.indexer.indexing_pause_reason().is_none()
+            && self.parser_work_due() && !self.extract.admission_available() {
+            self.extract.wait_for_admission(PARSER_ADMISSION_WAIT);
+            return;
+        }
         let due = self.next_work_due();
         let due = if self.indexer.indexing_pause_reason().is_some() {
             crate::policy::schedule_wait(&self.policy()).map(|d| now() + d.as_millis() as i64)
@@ -319,6 +325,10 @@ impl CodeService {
             .retry_due;
         jobs.into_iter().chain(vectors).min()
     }
+    fn parser_work_due(&self) -> bool {
+        self.store.lock().unwrap_or_else(|p| p.into_inner()).next_job_due()
+            .ok().flatten().is_some_and(|due| due <= now())
+    }
     pub fn turn(&self) -> anyhow::Result<bool> {
         if self.indexer.indexing_pause_reason().is_some() {
             return Ok(false);
@@ -348,6 +358,9 @@ impl CodeService {
                 }
             }
             return Ok(true);
+        }
+        if self.parser_work_due() && !self.extract.admission_available() {
+            return Ok(false);
         }
         let job = self
             .store
@@ -387,18 +400,7 @@ impl CodeService {
             });
             return Ok(true);
         }
-        let outcome = self.parse(&job);
-        let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
-        match outcome {
-            Ok(()) => {
-                store.finish_job(&job)?;
-            }
-            Err(e) => {
-                let poison = !e.to_string().contains("changed");
-                store.retry_job(&job, now() + 60_000, poison)?;
-                tracing::warn!(path=%job.path,error=%e,"code job deferred");
-            }
-        }
+        self.complete_parse_job(&job, self.parse(&job))?;
         Ok(true)
     }
     fn fence(&self, job: &CodeJob, epoch: u64, policy: &ws_protocol::IndexingConfig) -> bool {
@@ -412,6 +414,21 @@ impl CodeService {
                 .unwrap_or_else(|p| p.into_inner())
                 .job_current(job)
                 .unwrap_or(false)
+    }
+
+    fn complete_parse_job(&self, job: &CodeJob, outcome: anyhow::Result<()>) -> anyhow::Result<()> {
+        let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+        match outcome {
+            Ok(()) => { store.finish_job(job)?; }
+            Err(error) => {
+                let capacity = matches!(error.downcast_ref::<crate::extract_client::ExtractClientError>(),
+                    Some(crate::extract_client::ExtractClientError::AdmissionUnavailable));
+                let delay = if capacity { PARSER_ADMISSION_WAIT.as_millis() as i64 } else { 60_000 };
+                store.retry_job(job, now() + delay, !capacity && !error.to_string().contains("changed"))?;
+                if !capacity { tracing::warn!(path=%job.path,error=%error,"code job deferred"); }
+            }
+        }
+        Ok(())
     }
     fn scan_step(&self, state: &mut ScanState) -> anyhow::Result<bool> {
         let valid =
@@ -687,6 +704,78 @@ impl CodeService {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    fn occupy_parser_capacity(root: &Path) -> Vec<crate::extract_client::tests::CleanupFixture> {
+        (0..2).map(|number| {
+            let directory = root.join(format!("capacity-{number}"));
+            std::fs::create_dir(&directory).unwrap();
+            let client = ExtractClient::new(directory.join("unused.exe"), directory.join("cache"));
+            crate::extract_client::tests::cleanup_trigger(&client, directory)()
+        }).collect()
+    }
+
+    #[test]
+    fn parser_capacity_preserves_due_code_jobs_and_waits_without_a_busy_loop() {
+        let (code, _indexer, root) = indexed_fixture();
+        let path = root.join("lib.rs");
+        let due = now();
+        code.store.lock().unwrap().enqueue_file_job(&path.to_string_lossy(),
+            &root.to_string_lossy(), 0, due).unwrap();
+        let occupied = occupy_parser_capacity(root.parent().unwrap());
+        let worked = code.turn().unwrap();
+        let (after_due, attempts) = {
+            let mut store = code.store.lock().unwrap();
+            let after_due = store.next_job_due().unwrap();
+            let job = store.claim_job(i64::MAX).unwrap().unwrap();
+            let attempts = job.attempts;
+            store.retry_job(&job, after_due.unwrap(), false).unwrap();
+            (after_due, attempts)
+        };
+        assert!(!worked && after_due == Some(due) && attempts == 0,
+            "resource denial must precede claims: worked={worked}, due={after_due:?}, attempts={attempts}");
+        *code.wake.0.lock().unwrap() = false;
+        let started = std::time::Instant::now();
+        code.wait_for_work();
+        assert!(started.elapsed() >= Duration::from_millis(20), "busy admission must wait for resource availability");
+        assert!(started.elapsed() < Duration::from_millis(500), "resource wait must remain policy-responsive");
+        drop(occupied);
+        assert!(code.turn().unwrap(), "uncharged durable work must resume when capacity returns");
+        assert!(!code.exact("needle", 2).is_empty());
+        drop(code);
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn parser_capacity_race_after_claim_requeues_without_charging_poison_attempts() {
+        let (code, _indexer, root) = indexed_fixture();
+        let path = root.join("lib.rs");
+        code.store.lock().unwrap().enqueue_file_job(&path.to_string_lossy(),
+            &root.to_string_lossy(), 0, now()).unwrap();
+        let job = code.store.lock().unwrap().claim_job(now()).unwrap().unwrap();
+        assert!(!job.scan);
+        let occupied = occupy_parser_capacity(root.parent().unwrap());
+        let outcome = code.parse(&job);
+        assert!(outcome.as_ref().err().is_some_and(|error|
+            matches!(error.downcast_ref::<crate::extract_client::ExtractClientError>(),
+                Some(crate::extract_client::ExtractClientError::AdmissionUnavailable))),
+            "this must exercise a real post-claim admission race: {outcome:?}");
+        code.complete_parse_job(&job, outcome).unwrap();
+        {
+            let mut store = code.store.lock().unwrap();
+            let due = store.next_job_due().unwrap().expect("resource failure must retain a wake");
+            assert!(due <= now() + 1000, "capacity must not defer code for the poison backoff");
+            let retried = store.claim_job(i64::MAX).unwrap().unwrap();
+            assert_eq!(retried.attempts, 0);
+            assert_eq!(retried.revision, job.revision);
+            store.retry_job(&retried, now(), false).unwrap();
+        }
+        drop(occupied);
+        assert!(code.turn().unwrap());
+        assert!(!code.exact("needle", 2).is_empty());
+        drop(code);
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
     fn vector_fixture(delay: u64, missing_worker: bool) -> (Arc<CodeService>, PathBuf) {
         let (mut code, root) = fixture();
         let model_dir = root.parent().unwrap().join("fixture-model");
@@ -1139,7 +1228,7 @@ pub(crate) mod tests {
         );
         code.indexer.store_lock().reset_content_vectors().unwrap();
         assert!(
-            code.semantic(&[1.0; ws_embed_protocol::STUB_DIM], 1)
+            code.semantic(&[1.0; ws_embed_protocol::STUB_DIM], &[1.0; ws_embed_protocol::STUB_DIM], 1)
                 .is_empty(),
             "stale recipe vectors must be hidden before invalidation"
         );

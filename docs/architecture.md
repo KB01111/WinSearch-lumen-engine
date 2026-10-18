@@ -569,3 +569,29 @@ queries. A two-hour
 owned decoder cancellation; it is not high-resolution throughput evidence.
 See benchmarks for measured resources. Full retrieval quality, completed-vector
 cache maintenance, installed payload and UI acceptance remain open.
+
+### Shared parser capacity and code retrieval
+
+All extraction clients share two process-wide parser permits. A request acquires
+capacity before scratch creation or child startup and retains it through child,
+pipe and private scratch cleanup. Exceptional cleanup keeps the permit in the
+existing owned reaper even after a client is dropped. The engine owns one
+extractor registry shared with background workers; consumer previews must reuse
+it so they also respect a client's outstanding cleanup barrier. Code jobs wait
+for capacity before claiming durable work. A post-claim admission race retries
+after a bounded wait without charging a source poison attempt.
+
+Code semantic retrieval batches the same query with the model's code-retrieval
+and general-search task prefixes. Each candidate must pass the existing common
+cosine floor under both views before the store truncates candidates. Ranking
+retains the code-task cosine and existing hybrid boosts. Daemon and CLI use the
+same code-store path and application admission callback. Stored code vectors,
+the 768-dimensional space and document formatting are unchanged; no reindex is
+needed for this query-only policy. Task-prefixed query-cache keys remain fenced
+by model generation, and both views share one bounded worker request.
+
+The added frozen code development/held-out suites assess generated source-text
+retrieval. Native parsing, actual managed-model code vectors, public streaming
+parity and installed consumer behavior remain separate checks. A worker model
+path override alone does not initialize the model manager or prove the native
+code pipeline created vectors.

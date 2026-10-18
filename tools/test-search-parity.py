@@ -1,7 +1,8 @@
 """Actual daemon/public CLI DTO parity, optionally including offline-ranker snapshots.
 
-Default: native document/PDF/code extraction without a model. --real-model adds
-genuine CPU semantic image/audio/video checks using existing generated fixtures.
+Default: native document/PDF/code extraction without a model. --real-model
+imports the pinned artifacts through ModelManager, requires real 768-dimensional
+code vectors, and checks semantic code/image/audio/video on generated fixtures.
 Both modes use an isolated data directory and a kill-on-close Windows job.
 The snapshot option compares query code on the same native indexed vectors;
 fixture seeding and native extraction remain separately classified evidence.
@@ -111,6 +112,7 @@ def main():
         'queries': [], 'checks': [], 'failures': [], 'quality_misses': [], 'owned_job_empty': False,
         'harness_sha256': digest(Path(__file__)),
         'expected_pipeline_version': 2, 'expected_semantic_floor': .65,
+        'expected_code_query_policy': 'code-and-search-task-corroboration-v1',
         'binary_sha256': {name: digest(binary/name) for name in
             ['winsearchd.exe', 'winsearch-cli.exe', 'winsearch-embed.exe', 'winsearch-extract.exe']},
         'adjacent_native_dll_sha256': {p.name: digest(p) for p in sorted(binary.glob('*.dll'))}}
@@ -152,7 +154,7 @@ def main():
         environment = {**os.environ, 'WINSEARCH_DATA_DIR': str(output/'data'),
             'WINSEARCH_INSTANCE_ID': instance, 'WS_PIPE': pipe_name,
             'WS_EMBED_STUB': '0', 'WS_EMBED_BACKEND': 'cpu',
-            'WS_EMBED_MODEL': str(model if options.real_model else generated/'missing.gguf'),
+            'WS_EMBED_MODEL': str(output/'data/models'/model.name if options.real_model else generated/'missing.gguf'),
             'WINSEARCH_TEST_DECODER_DIR': str(ROOT/'artifacts/dependencies/ffmpeg-2026-09-30/ffmpeg-n9.0.2-17-g2a571b6068-win64-lgpl-shared-9.0/bin')}
 
         def owned_command(args, timeout=45):
@@ -240,6 +242,21 @@ def main():
             control = harness.Pipe(pipe_name, child)
             client = Frames(pipe_name, child)
             compare('code_disabled', 'parityneedle', mode='code', empty=True)
+            if options.real_model:
+                # Exercise the production model manager as well as the worker;
+                # a worker-only model override leaves code vectors unavailable.
+                imported = control.request('model_import', path=str(model.parent))
+                assert imported['type'] == 'model_status', imported
+                def model_ready():
+                    status = control.request('get_model_status')['status']
+                    assert status['state'] != 'error', status
+                    summary['model_import_status'] = status
+                    return status['state'] == 'ready'
+                wait_for(model_ready)
+                for model_source in [model, projector]:
+                    staged = output/'data/models'/model_source.name
+                    assert digest(staged) == digest(model_source), ('staged model bytes changed', model_source.name)
+                summary['checks'].append('pinned_model_import_ready_and_staged_artifact_hashes')
             control.request('set_config', config={'semantic_enabled': options.real_model, 'preferred_backend': 'cpu'})
             config = control.request('get_indexing_config')['config']
             config.update(roots=[str(documents), str(code)], code_enabled=True, code_roots=[str(code)],
@@ -259,6 +276,15 @@ def main():
                 return complete and (not options.real_model or pending == 0)
             wait_for(ready)
             wait_for(lambda: bool(control.request('search', query={'text': 'parityneedle', 'mode': 'code', 'limit': 5})))
+            if options.real_model:
+                def code_vectors_ready():
+                    with sqlite3.connect((output/'data/db/code.db').as_uri()+'?mode=ro', uri=True) as connection:
+                        total, embedded, width = connection.execute(
+                            'SELECT count(*),sum(norm>0),sum(norm>0 AND length(vector)=1536) FROM code_chunks').fetchone()
+                    summary['code_vectors'] = {'chunks':total, 'embedded':embedded or 0, 'width_768':width or 0}
+                    return total > 0 and total == embedded == width
+                wait_for(code_vectors_ready)
+                summary['checks'].append('native_code_index_has_complete_768d_vectors')
             summary['index_seconds'] = round(time.perf_counter()-start, 3)
             document_hits = compare('document_exact', 'amberparitytoken', expected='item-a.txt', location={'kind': 'line', 'line': 2})
             document_hit = next(hit for hit in document_hits if Path(hit['path']).name == 'item-a.txt')
@@ -291,6 +317,7 @@ def main():
                 expected_code = next(record['cli'] for record in summary['queries']
                     if record['name'] == 'code_definition_reference')
                 assert native_client['code'] == expected_code, ('client code DTO parity', native_client)
+                assert len(native_client['semantic_checks']) == (3 if options.real_model else 0), native_client
                 summary['headless_client'] = native_client
                 summary['checks'].append('typed_async_client_native_dto_status_pause_revoke_restore_reconnect')
             if not options.real_model:
@@ -307,6 +334,24 @@ def main():
                 compare('pdf_semantic', 'railway timetable for trains and departure platforms', semantic=True, expected='item-b.pdf', expected_rank=5)
                 compare('semantic_negative', 'asteroid orbital mechanics and interstellar propulsion', semantic=True, empty=True)
                 compare('code_semantic_stream', 'parityneedle', mode='code', semantic=True, expected=source.name, location={'kind': 'line', 'line': 1})
+                code_query = 'a function named parityneedle and its caller'
+                compare('code_semantic_only_exact_control', code_query, mode='code', empty=True)
+                code_hits = compare('code_semantic_only', code_query, mode='code', semantic=True,
+                    expected=source.name, expected_rank=5)
+                source_lines = source.read_text(encoding='utf-8').splitlines()
+                returned_lines = set()
+                for hit in code_hits:
+                    if Path(hit['path']) != source: continue
+                    match = hit['location']
+                    assert match['kind'] == 'line' and 1 <= match['line'] <= len(source_lines), hit
+                    assert hit['excerpt'].rstrip('\r\n') == source_lines[match['line']-1], hit
+                    returned_lines.add(match['line'])
+                assert returned_lines == {1,2}, ('semantic query requested both function and caller', code_hits)
+                if options.compare_client:
+                    assert summary['headless_client']['semantic_code'] == code_hits, 'typed semantic-only code DTO parity'
+                compare('code_semantic_negative', 'asteroid orbital mechanics and interstellar propulsion',
+                    mode='code', semantic=True, empty=True)
+                summary['checks'].append('native_semantic_only_code_function_and_caller_source_lines')
                 for name, text, expected in [
                     ('image_semantic', 'a computer application screenshot with a red warning and a blue button', 'item-c.png'),
                     ('audio_semantic', 'the spoken explanation of baking chocolate cake in the kitchen', 'item-d.wav'),
@@ -370,6 +415,12 @@ def main():
             # miss; DTO/location errors and negative results still fail directly.
             summary['quality']={'positive_queries':len(positive),'Recall@5':recall,'MRR':mrr,
                 'minimum_recall_at_5':.90,'minimum_mrr':.85,'maximum_negative_fp_rate':0}
+            original=[record for record in positive if record['name']!='code_semantic_only']
+            original_recall=sum(record['relevant_rank'] is not None for record in original)/len(original)
+            original_mrr=sum(1/record['relevant_rank'] if record['relevant_rank'] else 0 for record in original)/len(original)
+            summary['quality']['original_positive_cases']={'positive_queries':len(original),
+                'Recall@5':original_recall,'MRR':original_mrr}
+            assert original_recall>=.90 and original_mrr>=.85,summary['quality']
             empty_controls=[record for record in summary['queries'] if record['expect_empty']]
             summary['quality'].update(empty_result_controls=len(empty_controls),
                 empty_control_fp_rate=sum(bool(record['cli']) for record in empty_controls)/len(empty_controls),

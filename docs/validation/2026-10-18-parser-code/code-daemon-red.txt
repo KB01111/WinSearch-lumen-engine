@@ -1,0 +1,22 @@
+---- engine::tests::code_semantic_query_views_cache_separately_and_keep_the_model_fence stdout ----
+
+thread 'engine::tests::code_semantic_query_views_cache_separately_and_keep_the_model_fence' (30568) panicked at bins\winsearchd\src\engine.rs:2122:9:
+assertion `left == right` failed
+  left: ["task: code retrieval | query: indirect code description"]
+ right: ["task: code retrieval | query: indirect code description", "task: search result | query: indirect code description"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- engine::tests::code_semantic_rejects_uncorroborated_task_affinity stdout ----
+
+thread 'engine::tests::code_semantic_rejects_uncorroborated_task_affinity' (18768) panicked at bins\winsearchd\src\engine.rs:2105:9:
+code-task affinity alone cannot admit an unrelated source
+
+
+rtk : test result: FAILED. 2 passed; 2 failed; 0 ignored; 0 measured; 193 filtered out; finished in 0.73s
+At line:1 char:1
++ rtk cargo test -p winsearchd code_semantic_ -- --test-threads=1 > C:/ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (test result: FA...nished in 0.73s:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+[full output: ~/AppData\Local\rtk\tee\1792296770_cargo_test.log]

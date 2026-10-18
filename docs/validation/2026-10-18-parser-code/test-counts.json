@@ -1,0 +1,20 @@
+{
+  "cpu_workspace_and_embed_lib": {
+    "passed": 508,
+    "failed": 0,
+    "ignored": 1
+  },
+  "explicit_previously_ignored_worker_test": {
+    "passed": 1,
+    "failed": 0,
+    "ignored": 0
+  },
+  "embed_native_media_text_integration_include_ignored": {
+    "passed": 9,
+    "failed": 0,
+    "ignored": 0
+  },
+  "total_executed_checks": 518,
+  "includes_one_api_doctest": true,
+  "gpu_acceptance": false
+}
