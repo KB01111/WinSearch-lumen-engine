@@ -11,6 +11,126 @@ namespace WinSearch.Tests;
 public class IndexingPipeTests
 {
     [Fact]
+    public async Task CodePreviewRequiresItsOwnCapabilityBeforeSending()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10)); var token = timeout.Token;
+        var pipe = "winsearch-code-preview-legacy-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        async Task Serve()
+        {
+            await server.WaitForConnectionAsync(token); await ReadAsync(server, token);
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1, Features = ["entry.preview.text"] }, token);
+            Assert.Equal(0, await server.ReadAsync(new byte[1], token));
+        }
+        var serving = Serve(); await using var client = new EngineClient(pipe);
+        Exception? error;
+        try {
+            error = await Record.ExceptionAsync(() => client.PreviewTextAsync(new() {
+                Reference = new() { ResultId = "c23", SourceRevision = "proof" }, Location = new LineLocation { Line = 1 } }, token));
+            if (error is EngineException { Code: ErrorCode.Unsupported }) await serving;
+        }
+        finally { timeout.Cancel(); try { await serving; } catch (OperationCanceledException) { } }
+        Assert.Equal(ErrorCode.Unsupported, Assert.IsType<EngineException>(error).Code);
+    }
+
+    [Fact]
+    public async Task CodePreviewRejectsInvalidCoordinatesBeforeConnecting()
+    {
+        await using var client = new EngineClient("unused-" + Guid.NewGuid());
+        foreach (var (id, location) in new (string, MatchLocation)[] {
+            ("c23", new PageLocation { Page = 1 }), ("c23", new TimestampLocation { Seconds = 0, EndSeconds = 1 }),
+            ("c23", new NotebookLocation { CellOrdinal = 0, Line = 0, EndLine = 1 }),
+            ("c23", new NotebookLocation { CellOrdinal = 0, Line = 3, EndLine = 2 }),
+            ("c23", new NotebookLocation { CellOrdinal = 0, Line = 1, EndLine = 64 * 1024 * 1024 + 1 }),
+            ("e23", new NotebookLocation { CellOrdinal = 0, Line = 1, EndLine = 1 }) })
+        {
+            var error = await Assert.ThrowsAsync<EngineException>(() => client.PreviewTextAsync(new() {
+                Reference = new() { ResultId = id }, Location = location }));
+            Assert.Equal(ErrorCode.InvalidRequest, error.Code);
+        }
+    }
+
+    [Theory]
+    [InlineData(0)] [InlineData(1)] [InlineData(2)] [InlineData(3)] [InlineData(4)] [InlineData(5)]
+    [InlineData(6)] [InlineData(7)] [InlineData(8)] [InlineData(9)] [InlineData(10)] [InlineData(11)] [InlineData(12)]
+    public async Task CodePreviewCopiesCellLocationsAndRejectsMalformedReplies(int scenario)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10)); var token = timeout.Token;
+        var pipe = "winsearch-code-preview-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        var hello = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var received = false;
+        async Task Serve()
+        {
+            await server.WaitForConnectionAsync(token); await ReadAsync(server, token); hello.TrySetResult();
+            await release.Task.WaitAsync(token);
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1, Features = ["entry.preview.code"] }, token);
+            var request = Assert.IsType<PreviewEntryMessage>(await ReadAsync(server, token)); received = true;
+            Assert.Equal("c23", request.Request.Reference.ResultId);
+            if (scenario == 1) Assert.Equal((uint)2, Assert.IsType<NotebookLocation>(request.Request.Location).CellOrdinal);
+            var preview = new EntryPreview { Entry = new() { ResultId = "c23", RootPath = @"C:\fixture", Path = @"C:\fixture\code.rs",
+                    Name = "code.rs", Kind = ResultKind.Code, IndexRevision = 1, SourceRevision = "proof", ContentSha256 = new string('a', 64) },
+                State = PreviewState.Ready, Parts = [new() { Kind = "code", Text = "first\nsecond", Location = scenario == 0
+                    ? new LineLocation { Line = 1 } : new NotebookLocation { CellOrdinal = 2, Line = 1, EndLine = 2 } }],
+                Extraction = [new() { Kind = "code", CompleteWithinLimit = true }] };
+            switch (scenario)
+            {
+                case 2: preview.Entry.ResultId = "e23"; break;
+                case 3: preview.Parts[0].Location = new NotebookLocation { CellOrdinal = 3, Line = 1, EndLine = 2 }; break;
+                case 4: preview.Parts[0].Location = new NotebookLocation { CellOrdinal = 2, Line = 1, EndLine = 3 }; break;
+                case 5: preview.Parts[0].Location = new LineLocation { Line = 1 }; break;
+                case 6: preview.Parts[0].Kind = "doc"; break;
+                case 7: preview.Extraction[0].Kind = "doc"; break;
+                case 8: preview.Parts[0].Text = string.Concat(Enumerable.Repeat("🌿", 17000)); break;
+                case 9: preview.Entry.IndexRevision = null; break;
+                case 10: preview.Entry.ContentSha256 = new string('A', 64); break;
+                case 11: preview.Parts[0].Text = "first\n"; break;
+                case 12: preview.Parts[0].Location = null; break;
+            }
+            await WriteAsync(server, new EntryPreviewMessage { Id = request.Id, Preview = preview }, token);
+        }
+        var serving = Serve(); await using var client = new EngineClient(pipe);
+        var request = new PreviewRequest { Reference = new() { ResultId = "c23", SourceRevision = "proof" }, Location = scenario == 0
+            ? new LineLocation { Line = 2 } : new NotebookLocation { CellOrdinal = 2, Line = 2, EndLine = 2 } };
+        var pending = client.PreviewTextAsync(request, token); EntryPreview? reply = null; Exception? error;
+        try
+        {
+            if (scenario == 1 && await Task.WhenAny(pending, hello.Task) == hello.Task)
+            {
+                request.Reference.ResultId = "c999"; Assert.IsType<NotebookLocation>(request.Location).CellOrdinal = 99;
+            }
+            release.TrySetResult(); error = await Record.ExceptionAsync(async () => { reply = await pending; });
+        }
+        finally { timeout.Cancel(); try { await serving; } catch (OperationCanceledException) { } }
+        Assert.True(received, "the code preview response must be validated after a real request");
+        if (scenario <= 1) { Assert.Null(error); Assert.Equal(PreviewState.Ready, Assert.IsType<EntryPreview>(reply).State); }
+        else Assert.Equal(ErrorCode.InvalidRequest, Assert.IsType<EngineException>(error).Code);
+    }
+
+    [Fact]
+    public async Task CodePreviewOrdinaryTrailingTerminatorDoesNotClaimAnotherLine()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10)); var token = timeout.Token;
+        var pipe = "winsearch-preview-newline-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        async Task Serve()
+        {
+            await server.WaitForConnectionAsync(token); await ReadAsync(server, token);
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1, Features = ["entry.preview.text"] }, token);
+            var request = Assert.IsType<PreviewEntryMessage>(await ReadAsync(server, token));
+            await WriteAsync(server, new EntryPreviewMessage { Id = request.Id, Preview = new() {
+                Entry = new() { ResultId = "e23", RootPath = @"C:\fixture", Path = @"C:\fixture\text.txt", Name = "text.txt",
+                    Kind = ResultKind.Document, IndexRevision = 1, SourceRevision = "proof" }, State = PreviewState.Ready,
+                Parts = [new() { Kind = "doc", Text = "first\nsecond\n", Location = new LineLocation { Line = 1 } }] } }, token);
+        }
+        var serving = Serve(); await using var client = new EngineClient(pipe);
+        var error = await Record.ExceptionAsync(() => client.PreviewTextAsync(new() { Reference = new() {
+            ResultId = "e23", SourceRevision = "proof" }, Location = new LineLocation { Line = 3 } }, token));
+        await serving; Assert.Equal(ErrorCode.InvalidRequest, Assert.IsType<EngineException>(error).Code);
+    }
+
+    [Fact]
     public async Task BoundReferencesRejectInvalidInputsWithoutConnecting()
     {
         await using var client = new EngineClient("unused-" + Guid.NewGuid());

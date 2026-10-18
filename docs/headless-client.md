@@ -77,7 +77,8 @@ and partial writes close their owned connection instead of reusing partial bytes
 Exact search requires `search.exact`; semantic requests also require
 `search.semantic`, code mode requires `code`, and entry resolution requires
 `entry.resolve` for ordinary `e` IDs or `entry.resolve.code` for code-file `c` IDs;
-cached ordinary text preview requires `entry.preview.text`.
+cached ordinary text preview requires `entry.preview.text`; code/notebook cached
+preview requires `entry.preview.code`.
 Capability presence is not semantic/model readiness. Existing
 `EngineStatus.model_loaded` and `ModelStatus` are returned unchanged; the richer
 semantic outcome/provenance contract remains part of the unfinished Lumen work.
@@ -99,8 +100,13 @@ future closes that connection; identity/proof, local root, state, kinds, aggrega
 64KiB/64part and eight extraction-kind bounds are checked before delivery.
 See the [cached-text contract](ipc-protocol.md#cached-text-previews). Extraction
 completion is within product limits; full source totals and cap state remain
-unknown. Code-specific references, raster/media/uncached preview and actual
-hash/provenance, Related and expanded filters remain open.
+unknown. Code previews use the same method/read admission with canonical `c`
+references and actual source-line or notebook cell-local coordinates. Ordinary
+entries reject notebook locations; code entries reject page/timestamp locations.
+Code parts require real locations and notebook ranges cannot exceed returned text.
+A trailing line terminator does not expose a following line. Full-byte code hashes
+include notebook outputs, while preview text excludes them. Raster/media/uncached
+preview, ordinary byte provenance, Related and expanded filters remain open.
 
 From `src/engine`, `cargo test -p ws-client --all-targets` runs framing and real
 Windows-pipe transport fixtures without models or a daemon. The
@@ -118,8 +124,11 @@ and requires the job to be empty afterward. The example changes only that
 explicit fixture instance's root/pause policy and restores it. Its document and
 code DTOs must equal the existing public CLI results; revocation must hide
 ordinary results and invalidate old proofs even after root restoration.
-The same example now requires four preview checks: actual cached document text,
-PDF page2 and rejection of revoked roots/previous proofs after restoration.
+The example requires four ordinary preview checks: actual cached document text,
+PDF page2 and rejection of revoked roots/previous proofs after restoration. Four
+separate code-preview checks cover actual source/notebook text, exclusion of output
+sentinels, and refusal of revoked/expired proofs after restoration. Code preview
+uses the reference and actual location supplied by search, without parsing hit IDs.
 These are native transport/extraction checks, not installed Lumen, model quality
 or launcher responsiveness acceptance. See the
 [gap matrix](v1-gap-matrix.md) for the remaining full v1 work.

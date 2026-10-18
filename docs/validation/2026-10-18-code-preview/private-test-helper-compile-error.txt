@@ -1,0 +1,16 @@
+rtk :    Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearchd
+)
+At line:1 char:224
++ ... src/engine; rtk proxy cargo test -p winsearchd code_preview_ -- --tes ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling wi...ins\winsearchd):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+error[E0616]: field `indexer` of struct `code::CodeService` is private
+    --> bins\winsearchd\src\engine.rs:1610:38
+     |
+1610 |         let indexer=Arc::clone(&code.indexer);indexer.set_code_service(Arc::downgrade(&code));
+     |                                      ^^^^^^^ private field
+
+For more information about this error, try `rustc --explain E0616`.
+error: could not compile `winsearchd` (bin "winsearchd" test) due to 1 previous error

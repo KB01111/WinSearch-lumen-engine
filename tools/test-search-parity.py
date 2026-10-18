@@ -143,7 +143,8 @@ def main():
         source.write_text('pub fn parityneedle() {}\nfn caller() { parityneedle(); }\n', encoding='utf-8')
         (code/'cells.ipynb').write_text(json.dumps({'metadata': {'language_info': {'name': 'python'}}, 'cells': [
             {'cell_type': 'markdown', 'source': ['Generated notebook']},
-            {'cell_type': 'code', 'source': ['def notebookparity():\n', '    return 1\n'], 'metadata': {}, 'outputs': []}]}), encoding='utf-8')
+            {'cell_type': 'code', 'source': ['def notebookparity():\n', '    return 1\n'], 'metadata': {},
+                'outputs': [{'text':['PRIVATE_OUTPUT_SENTINEL'],'output_type':'stream','name':'stdout'}]}]}), encoding='utf-8')
         if options.real_model:
             for original, name in [('test-models/screen.png', 'item-c.png'),
                     ('spoken-fixtures/two-passages-65s.wav', 'item-d.wav'),
@@ -335,6 +336,7 @@ def main():
                 summary['checks'].append('typed_client_bound_code_notebook_refs_and_actual_sha256')
                 assert len(native_client['semantic_checks']) == (3 if options.real_model else 0), native_client
                 assert len(native_client['preview_checks']) == 4, native_client
+                assert len(native_client['code_preview_checks']) == 4,native_client
                 summary['headless_client'] = native_client
                 summary['checks'].append('typed_async_client_native_dto_status_pause_revoke_restore_reconnect')
             if not options.real_model:

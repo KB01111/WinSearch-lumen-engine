@@ -1,0 +1,11 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  WinSearch.Core -> <checkout>\src\app\WinSearch.Core\bin\x64\Debug\net8.0-windows10.0.19041.0\WinSearch.Core.dll
+  WinSearch.ViewModels -> <checkout>\src\app\WinSearch.ViewModels\bin\x64\Debug\net8.0-windows10.0.19041.0\WinSearch.ViewModels.dll
+  WinSearch.App -> <checkout>\src\app\WinSearch.App\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\WinSearch.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:16.49

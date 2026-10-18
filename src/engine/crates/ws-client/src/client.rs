@@ -432,12 +432,16 @@ impl Client {
     }
 
     pub async fn preview_text(&self,request:ws_protocol::PreviewRequest)->Result<ws_protocol::EntryPreview,Error> {
-        if !request.reference.is_valid() || !matches!(request.reference.indexed_id(),Some(ws_protocol::IndexedEntryId::File(_)))
-            || !ws_protocol::valid_preview_location(request.location) {
+        if !request.reference.is_valid() {
             return Err(Error::InvalidInput("preview exceeds its request budget"));
         }
+        let feature=match request.reference.indexed_id() {
+            Some(ws_protocol::IndexedEntryId::File(_)) if ws_protocol::valid_preview_location(request.location)=>"entry.preview.text",
+            Some(ws_protocol::IndexedEntryId::Code(_)) if ws_protocol::valid_code_preview_location(request.location)=>"entry.preview.code",
+            _=>return Err(Error::InvalidInput("invalid preview location for this entry")),
+        };
         let expected=request.clone();
-        self.unary(false,Some("entry.preview.text"),|id|ClientMessage::PreviewEntry {id,request},|message|match message {
+        self.unary(false,Some(feature),|id|ClientMessage::PreviewEntry {id,request},|message|match message {
             ServerMessage::EntryPreview {preview,..} if preview_matches(&preview,&expected)=>Ok(preview),
             _=>Err(Error::Protocol("preview identity, location, state or budget changed")),
         }).await
@@ -540,7 +544,8 @@ fn entry_matches(entry: &ResolvedEntry, expected: &EntryReference) -> bool {
 
 fn preview_matches(preview:&ws_protocol::EntryPreview,expected:&ws_protocol::PreviewRequest)->bool {
     use ws_protocol::{MatchLocation,PreviewState,MAX_PREVIEW_EXTRACTIONS,MAX_PREVIEW_TEXT_BYTES,MAX_PREVIEW_TEXT_PARTS};
-    let known_kind=|kind:&str|matches!(kind,"doc"|"pdf"|"ocr"|"image"|"audio"|"video");
+    let code=matches!(expected.reference.indexed_id(),Some(ws_protocol::IndexedEntryId::Code(_)));
+    let known_kind=|kind:&str|if code {kind=="code"}else{matches!(kind,"doc"|"pdf"|"ocr"|"image"|"audio"|"video")};
     if !entry_matches(&preview.entry,&expected.reference) || preview.parts.len()>MAX_PREVIEW_TEXT_PARTS
         || preview.extraction.len()>MAX_PREVIEW_EXTRACTIONS {return false;}
     let ready=preview.state==PreviewState::Ready;
@@ -550,12 +555,18 @@ fn preview_matches(preview:&ws_protocol::EntryPreview,expected:&ws_protocol::Pre
     let mut bytes=0usize;
     for part in &preview.parts {
         bytes=match bytes.checked_add(part.text.len()) {Some(value) if value<=MAX_PREVIEW_TEXT_BYTES=>value,_=>return false};
-        if part.text.is_empty() || !known_kind(&part.kind) || !ws_protocol::valid_preview_location(part.location) {return false;}
+        let valid=if code {part.location.is_some() && ws_protocol::valid_code_preview_location(part.location)}else{ws_protocol::valid_preview_location(part.location)};
+        if part.text.is_empty() || !known_kind(&part.kind) || !valid {return false;}
+        if let Some(MatchLocation::Notebook {line,end_line,..})=part.location {
+            if u64::from(end_line-line)>=part.text.lines().count().max(1) as u64 {return false;}
+        }
         let matches=match (expected.location,part.location) {
             (None,_)=>true,
             (Some(MatchLocation::Page {page:expected}),Some(MatchLocation::Page {page}))=>expected==page,
             (Some(MatchLocation::Line {line:expected}),Some(MatchLocation::Line {line}))=>expected>=line
-                && u64::from(expected-line)<part.text.split('\n').count() as u64,
+                && u64::from(expected-line)<part.text.lines().count().max(1) as u64,
+            (Some(MatchLocation::Notebook {cell_ordinal:expected_cell,line:expected,end_line:expected_end}),
+                Some(MatchLocation::Notebook {cell_ordinal,line,end_line}))=>expected_cell==cell_ordinal && expected>=line && expected_end<=end_line,
             (Some(MatchLocation::Timestamp {seconds:expected,end_seconds:expected_end}),Some(MatchLocation::Timestamp {seconds,end_seconds}))=>expected==seconds && expected_end==end_seconds,
             _=>false,
         };
@@ -1028,6 +1039,80 @@ mod tests {
                 );
             }
             task.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn preview_text_trailing_terminator_does_not_cover_the_following_line() {
+        use ws_protocol::{PreviewRequest,EntryPreview,PreviewState,PreviewTextPart,MatchLocation};
+        let request=PreviewRequest {reference:EntryReference {result_id:"e42".into(),source_revision:Some("proof".into())},location:Some(MatchLocation::Line {line:3})};
+        let preview=EntryPreview {entry:resolved(),state:PreviewState::Ready,
+            parts:vec![PreviewTextPart {kind:"doc".into(),text:"first\nsecond\n".into(),location:Some(MatchLocation::Line {line:1})}],
+            truncated:false,extraction:Vec::new()};
+        assert!(!preview_matches(&preview,&request),"a reply cannot claim unreturned line3 after its trailing newline");
+    }
+
+    #[tokio::test]
+    async fn code_preview_client_requires_its_own_capability_before_request() {
+        let (client,mut peer)=fixture();
+        let task=tokio::spawn(async move {
+            peer.connect().await.unwrap();let _=read_client(&mut peer).await;
+            let mut info=ack();if let ServerMessage::HelloAck {features,..}=&mut info {features.push("entry.preview.text".into());}
+            send_server(&mut peer,&info).await;
+            use tokio::io::AsyncReadExt;
+            assert_eq!(peer.read(&mut [0]).await.unwrap(),0,"legacy peer cannot receive a code preview frame");
+        });
+        let result=client.preview_text(ws_protocol::PreviewRequest {reference:EntryReference {result_id:"c42".into(),source_revision:Some("proof".into())},location:Some(ws_protocol::MatchLocation::Line {line:1})}).await;
+        if !matches!(result,Err(Error::Unsupported("entry.preview.code"))) {task.abort();panic!("{result:?}");}
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn code_preview_client_rejects_invalid_code_and_ordinary_notebook_inputs() {
+        use ws_protocol::{MatchLocation,PreviewRequest};
+        let (client,_peer)=fixture();
+        for (id,location) in [("c42",MatchLocation::Page {page:1}),
+            ("c42",MatchLocation::Timestamp {seconds:0.0,end_seconds:1.0}),
+            ("c42",MatchLocation::Notebook {cell_ordinal:0,line:0,end_line:1}),
+            ("c42",MatchLocation::Notebook {cell_ordinal:0,line:3,end_line:2}),
+            ("e42",MatchLocation::Notebook {cell_ordinal:0,line:1,end_line:1})] {
+            assert!(matches!(client.preview_text(PreviewRequest {reference:EntryReference {result_id:id.into(),source_revision:None},location:Some(location)}).await,Err(Error::InvalidInput(_))));
+        }
+    }
+
+    #[tokio::test]
+    async fn code_preview_client_validates_actual_cell_ranges_kinds_hashes_and_budgets() {
+        use ws_protocol::{EntryPreview,PreviewRequest,PreviewState,PreviewTextPart,PreviewExtraction,MatchLocation,ResultKind};
+        for case in 0..12 {
+            let (client,mut peer)=fixture();
+            let task=tokio::spawn(async move {
+                peer.connect().await.unwrap();let _=read_client(&mut peer).await;
+                let mut info=ack();if let ServerMessage::HelloAck {features,..}=&mut info {features.push("entry.preview.code".into());}
+                send_server(&mut peer,&info).await;
+                let ClientMessage::PreviewEntry {id,..}=read_client(&mut peer).await else {panic!("code preview missing");};
+                let mut entry=resolved();entry.result_id="c42".into();entry.kind=ResultKind::Code;entry.content_sha256=Some("a".repeat(64));
+                let mut preview=EntryPreview {entry,state:PreviewState::Ready,parts:vec![PreviewTextPart {kind:"code".into(),text:"first\nsecond".into(),
+                    location:Some(if case==0 {MatchLocation::Line {line:1}}else{MatchLocation::Notebook {cell_ordinal:2,line:1,end_line:2}})}],truncated:false,
+                    extraction:vec![PreviewExtraction {kind:"code".into(),complete_within_limit:true,source_units:None,indexed_units:None,capped:None}]};
+                match case {
+                    2=>preview.entry.result_id="e42".into(),
+                    3=>preview.parts[0].location=Some(MatchLocation::Notebook {cell_ordinal:3,line:1,end_line:2}),
+                    4=>preview.parts[0].location=Some(MatchLocation::Notebook {cell_ordinal:2,line:1,end_line:3}),
+                    5=>preview.parts[0].location=Some(MatchLocation::Line {line:1}),
+                    6=>preview.parts[0].kind="doc".into(),
+                    7=>preview.extraction[0].kind="doc".into(),
+                    8=>preview.parts[0].text="🌿".repeat(17000),
+                    9=>preview.entry.index_revision=None,
+                    10=>preview.entry.content_sha256=Some("A".repeat(64)),
+                    11=>preview.parts[0].text="first\n".into(),
+                    _=>{},
+                }
+                send_server(&mut peer,&ServerMessage::EntryPreview {id,preview}).await;
+            });
+            let result=client.preview_text(PreviewRequest {reference:EntryReference {result_id:"c42".into(),source_revision:Some("proof".into())},
+                location:Some(if case==0 {MatchLocation::Line {line:2}}else{MatchLocation::Notebook {cell_ordinal:2,line:2,end_line:2}})}).await;
+            let good=if case<=1 {result.is_ok()}else{matches!(result,Err(Error::Protocol(_)))};
+            if !good {task.abort();panic!("case {case}: {result:?}");}task.await.unwrap();
         }
     }
 

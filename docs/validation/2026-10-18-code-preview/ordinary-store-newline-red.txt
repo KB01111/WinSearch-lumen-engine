@@ -1,0 +1,30 @@
+rtk :    Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-prot
+ocol)
+At line:1 char:61
++ ... src/engine; rtk proxy cargo test -p ws-index preview_text_trailing_te ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-index v0.1.0 (<checkout>\src\engine\crates\ws-index)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.11s
+     Running unittests src\lib.rs (target\debug\deps\ws_index-70ff3159c871f712.exe)
+
+running 1 test
+test store::tests::preview_text_trailing_terminator_does_not_cover_the_following_line ... FAILED
+
+failures:
+
+---- store::tests::preview_text_trailing_terminator_does_not_cover_the_following_line stdout ----
+
+thread 'store::tests::preview_text_trailing_terminator_does_not_cover_the_following_line' (108464) panicked at crates\ws-index\src\store.rs:2642:9:
+a trailing terminator does not return the following line
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    store::tests::preview_text_trailing_terminator_does_not_cover_the_following_line
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 85 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `-p ws-index --lib`

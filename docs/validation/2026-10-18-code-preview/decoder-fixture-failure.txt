@@ -1,0 +1,45 @@
+failures:
+
+---- extract::tests::media_audio_native_drafts_defer_without_model_or_fake_transcript stdout ----
+
+thread 'extract::tests::media_audio_native_drafts_defer_without_model_or_fake_transcript' (20388) panicked at bins\winsearchd\src\extract.rs:1308:9:
+assertion `left == right` failed
+  left: Some(Failed("io: decode error: pinned decoder dependency missing/unsafe: <checkout>\\src\\engine\\bins\\winsearchd\\../../../..\\artifacts/dependencies/ffmpeg-2026-09-30/ffmpeg-n9.0.2-17-g2a571b6068-win64-lgpl-shared-9.0/bin\\ffprobe.exe"))
+ right: Some(Extracted)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- extract::tests::media_completed_native_cache_recovery_preserves_vectors_and_exact_rows stdout ----
+
+thread 'extract::tests::media_completed_native_cache_recovery_preserves_vectors_and_exact_rows' (66760) panicked at bins\winsearchd\src\extract.rs:1259:13:
+assertion failed: progress.complete
+
+---- extract::tests::media_video_native_both_phases_reject_source_pause_and_root_changes stdout ----
+
+thread 'extract::tests::media_video_native_both_phases_reject_source_pause_and_root_changes' (79752) panicked at bins\winsearchd\src\extract.rs:1019:17:
+assertion failed: indexer.store_lock().content_progress(entry.id,
+                    "video").unwrap().unwrap().media_plan.is_some()
+
+---- extract::tests::media_video_native_ocr_exact_survives_model_and_frame_cache_absence stdout ----
+
+thread 'extract::tests::media_video_native_ocr_exact_survives_model_and_frame_cache_absence' (76224) panicked at bins\winsearchd\src\extract.rs:1086:9:
+assertion failed: indexer.store_lock().content_progress(entry.id,
+                "video").unwrap().unwrap().complete
+
+---- extract::tests::media_video_native_restart_defers_all_phases_and_restores_primary_frame stdout ----
+
+thread 'extract::tests::media_video_native_restart_defers_all_phases_and_restores_primary_frame' (12208) panicked at bins\winsearchd\src\extract.rs:1145:13:
+assertion `left == right` failed
+  left: Some(Failed("io: decode error: pinned decoder dependency missing/unsafe: <checkout>\\src\\engine\\bins\\winsearchd\\../../../..\\artifacts/dependencies/ffmpeg-2026-09-30/ffmpeg-n9.0.2-17-g2a571b6068-win64-lgpl-shared-9.0/bin\\ffprobe.exe"))
+ right: Some(Extracted)
+
+
+failures:
+    extract::tests::media_audio_native_drafts_defer_without_model_or_fake_transcript
+    extract::tests::media_completed_native_cache_recovery_preserves_vectors_and_exact_rows
+    extract::tests::media_video_native_both_phases_reject_source_pause_and_root_changes
+    extract::tests::media_video_native_ocr_exact_survives_model_and_frame_cache_absence
+    extract::tests::media_video_native_restart_defers_all_phases_and_restores_primary_frame
+
+test result: FAILED. 205 passed; 5 failed; 0 ignored; 0 measured; 0 filtered out; finished in 122.66s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

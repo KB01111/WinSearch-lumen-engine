@@ -1,0 +1,54 @@
+rtk :    Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-prot
+ocol)
+At line:1 char:61
++ ... src/engine; rtk proxy cargo test -p ws-code code_preview_ -- --test-t ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-platform v0.1.0 (<checkout>\src\engine\crates\ws-platform)
+   Compiling ws-code v0.1.0 (<checkout>\src\engine\crates\ws-code)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.85s
+     Running unittests src\lib.rs (target\debug\deps\ws_code-02f94e88609646da.exe)
+
+running 4 tests
+test store::tests::code_preview_bounds_utf8_and_part_count_before_loading_unbounded_content ... FAILED
+test store::tests::code_preview_notebooks_preserve_cell_local_lines_and_exclude_outputs ... FAILED
+test store::tests::code_preview_preserves_real_source_lines_without_reading_vectors ... FAILED
+test store::tests::code_preview_requires_current_revision_repo_and_source_guard ... FAILED
+
+failures:
+
+---- store::tests::code_preview_bounds_utf8_and_part_count_before_loading_unbounded_content stdout ----
+
+thread 'store::tests::code_preview_bounds_utf8_and_part_count_before_loading_unbounded_content' (19836) panicked at crates\ws-code\src\store.rs:1436:9:
+assertion failed: truncated && bytes > 0 && bytes <= ws_protocol::MAX_PREVIEW_TEXT_BYTES
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- store::tests::code_preview_notebooks_preserve_cell_local_lines_and_exclude_outputs stdout ----
+
+thread 'store::tests::code_preview_notebooks_preserve_cell_local_lines_and_exclude_outputs' (99832) panicked at crates\ws-code\src\store.rs:1422:29:
+assertion failed: !parts.is_empty()
+
+---- store::tests::code_preview_preserves_real_source_lines_without_reading_vectors stdout ----
+
+thread 'store::tests::code_preview_preserves_real_source_lines_without_reading_vectors' (113544) panicked at crates\ws-code\src\store.rs:1409:29:
+assertion failed: !parts.is_empty()
+
+---- store::tests::code_preview_requires_current_revision_repo_and_source_guard stdout ----
+
+thread 'store::tests::code_preview_requires_current_revision_repo_and_source_guard' (70008) panicked at crates\ws-code\src\store.rs:1451:9:
+assertion `left == right` failed: native source admission must precede content selection
+  left: 0
+ right: 1
+
+
+failures:
+    store::tests::code_preview_bounds_utf8_and_part_count_before_loading_unbounded_content
+    store::tests::code_preview_notebooks_preserve_cell_local_lines_and_exclude_outputs
+    store::tests::code_preview_preserves_real_source_lines_without_reading_vectors
+    store::tests::code_preview_requires_current_revision_repo_and_source_guard
+
+test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 39 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `-p ws-code --lib`

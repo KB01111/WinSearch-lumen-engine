@@ -13,7 +13,7 @@ use crate::engine::SharedEngine;
 pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn features() -> Vec<String> {
-    vec!["search.exact".to_string(), "search.semantic".to_string(), "code".to_string(), "entry.resolve".to_string(), "entry.resolve.code".to_string(), "search.entry_references".to_string(), "entry.preview.text".to_string()]
+    vec!["search.exact".to_string(), "search.semantic".to_string(), "code".to_string(), "entry.resolve".to_string(), "entry.resolve.code".to_string(), "search.entry_references".to_string(), "entry.preview.text".to_string(), "entry.preview.code".to_string()]
 }
 
 pub fn handle_connection(stream: PipeStream, engine: SharedEngine) {
@@ -239,6 +239,7 @@ mod tests {
         write_message(&mut client,&ClientMessage::Hello {protocol_version:1,client:"preview-test".into(),client_version:"1".into()}).unwrap();
         let Some(ServerMessage::HelloAck {features,..})=read_message::<_,ServerMessage>(&mut client).unwrap() else {panic!("preview handshake");};
         assert!(features.iter().any(|feature|feature=="entry.preview.text"));
+        assert!(features.iter().any(|feature|feature=="entry.preview.code"));
         assert!(features.iter().any(|feature|feature=="entry.resolve.code"));
         assert!(features.iter().any(|feature|feature=="search.entry_references"));
         assert!(matches!(read_message::<_,ServerMessage>(&mut client).unwrap(),Some(ServerMessage::Status {..})));

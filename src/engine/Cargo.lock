@@ -1620,6 +1620,7 @@ dependencies = [
  "tree-sitter-yaml",
  "windows",
  "ws-platform",
+ "ws-protocol",
 ]
 
 [[package]]

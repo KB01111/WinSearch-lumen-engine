@@ -1,0 +1,17 @@
+failures:
+
+---- extract::tests::media_audio_native_drafts_defer_without_model_or_fake_transcript stdout ----
+
+thread 'extract::tests::media_audio_native_drafts_defer_without_model_or_fake_transcript' (26248) panicked at bins\winsearchd\src\extract.rs:1309:9:
+assertion `left == right` failed
+  left: Some(Failed("io: decode error: pinned decoder dependency missing/unsafe: <checkout>\\src\\engine\\bins\\winsearchd\\../../../..\\artifacts/dependencies/ffmpeg-2026-09-30/ffmpeg-n9.0.2-17-g2a571b6068-win64-lgpl-shared-9.0/bin\\ffprobe.exe"))
+ right: Some(Extracted)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    extract::tests::media_audio_native_drafts_defer_without_model_or_fake_transcript
+
+test result: FAILED. 209 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 164.51s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

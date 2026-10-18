@@ -389,15 +389,29 @@ impl EngineService {
         ->Result<ws_protocol::EntryPreview,ErrorCode> {
         use ws_protocol::{EntryPreview,EntryReference,PreviewState};
         if cancel.load(Ordering::Acquire) {return Err(ErrorCode::Cancelled);}
-        if !ws_protocol::valid_preview_location(request.location) {return Err(ErrorCode::InvalidRequest);}
+        let indexed=request.reference.indexed_id().ok_or(ErrorCode::InvalidRequest)?;
+        let valid=match indexed {
+            ws_protocol::IndexedEntryId::File(_)=>ws_protocol::valid_preview_location(request.location),
+            ws_protocol::IndexedEntryId::Code(_)=>ws_protocol::valid_code_preview_location(request.location),
+        };
+        if !valid {return Err(ErrorCode::InvalidRequest);}
         let entry=self.resolve_entry_snapshot(&request.reference)?;
         if cancel.load(Ordering::Acquire) {return Err(ErrorCode::Cancelled);}
-        let id=entry.result_id.strip_prefix('e').and_then(|id|id.parse::<i64>().ok()).ok_or(ErrorCode::InvalidRequest)?;
         let (parts,truncated,extraction)=if entry.index_revision.is_some() {
-            let store=self.indexer.store_lock();
-            let (parts,truncated)=store.preview_text(id,request.location).map_err(|_|ErrorCode::Internal)?;
-            let extraction=store.preview_extraction(id).map_err(|_|ErrorCode::Internal)?;
-            (parts,truncated,extraction)
+            match indexed {
+                ws_protocol::IndexedEntryId::File(id)=>{
+                    let store=self.indexer.store_lock();
+                    let (parts,truncated)=store.preview_text(id,request.location).map_err(|_|ErrorCode::Internal)?;
+                    let extraction=store.preview_extraction(id).map_err(|_|ErrorCode::Internal)?;
+                    (parts,truncated,extraction)
+                },
+                ws_protocol::IndexedEntryId::Code(id)=>{
+                    let (parts,truncated)=self.code_service().ok_or(ErrorCode::NotReady)?.preview_text(id,&entry,request.location)
+                        .map_err(|_|ErrorCode::Internal)?;
+                    (parts,truncated,vec![ws_protocol::PreviewExtraction {kind:"code".into(),complete_within_limit:true,
+                        source_units:None,indexed_units:None,capped:None}])
+                },
+            }
         } else {(Vec::new(),false,Vec::new())};
         if cancel.load(Ordering::Acquire) {return Err(ErrorCode::Cancelled);}
         let current=self.resolve_entry_snapshot(&EntryReference {result_id:entry.result_id.clone(),source_revision:Some(entry.source_revision.clone())})?;
@@ -1575,6 +1589,55 @@ mod tests {
         assert_eq!(engine.validate_delivery(semantic,&sources).into_iter().map(|hit|hit.id).collect::<Vec<_>>(),unaffected,
             "replacement removes only the affected source's semantic hits");
         drop(engine);drop(code);std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn code_preview_uses_current_native_code_and_notebook_cache_then_rejects_stale_proofs() {
+        use ws_protocol::{EntryReference,PreviewRequest,PreviewState};
+        let (code,indexer,root)=crate::code::tests::unindexed_fixture();
+        fs::write(root.join("lib.rs"),"fn needle() {}\n").unwrap();
+        let notebook=root.join("cells.ipynb");
+        fs::write(&notebook,r#"{"metadata":{"language_info":{"name":"python"}},"cells":[{"cell_type":"raw","source":["skip"]},{"cell_type":"code","source":["def cached_needle():\n","    return 7\n"],"outputs":[{"text":["PRIVATE_OUTPUT"]}]}]}"#).unwrap();
+        code.configure().unwrap();
+        let deadline=std::time::Instant::now()+Duration::from_secs(30);
+        loop {
+            let ready={let store=code.store.lock().unwrap();let files=store.all_files().unwrap();
+                files.len()==2 && files.iter().all(|file|store.source_provenance(file.id).unwrap().is_some_and(|state|state.sha256.is_some()))};
+            if ready {break;}
+            assert!(std::time::Instant::now()<deadline,"new notebook must complete its admitted native parse");
+            if !code.turn().unwrap() {std::thread::sleep(Duration::from_millis(10));}
+        }
+        indexer.set_code_service(Arc::downgrade(&code));
+        let engine=EngineService::new_with_model_dir(indexer,root.parent().unwrap().join("models"));
+        *engine.code.lock().unwrap()=Some(Arc::clone(&code));
+        for (path,location,marker) in [(root.join("lib.rs"),MatchLocation::Line {line:1},"needle"),
+            (notebook,MatchLocation::Notebook {cell_ordinal:1,line:2,end_line:2},"return 7")] {
+            let id=code.store.lock().unwrap().find_file_by_path(&path.to_string_lossy()).unwrap().unwrap().id;
+            let initial=EntryReference {result_id:format!("c{id}"),source_revision:None};
+            let entry=engine.resolve_entry_snapshot(&initial).unwrap();
+            let request=PreviewRequest {reference:EntryReference {result_id:initial.result_id.clone(),source_revision:Some(entry.source_revision.clone())},location:Some(location)};
+            let cancel=engine.begin_request_for_client(777,1);
+            let preview=engine.preview_snapshot(&request,&cancel).expect("cached code uses the same bounded preview route");
+            assert_eq!(preview.state,PreviewState::Ready);assert_eq!(preview.entry,entry);
+            assert!(preview.parts.iter().any(|part|part.text.contains(marker)));
+            assert!(preview.parts.iter().all(|part|part.kind=="code" && !part.text.contains("PRIVATE_OUTPUT")));
+            assert!(preview.extraction.iter().all(|item|item.kind=="code" && item.complete_within_limit
+                && item.source_units.is_none() && item.indexed_units.is_none() && item.capped.is_none()));
+            let selected=engine.indexer.get_indexing_config().unwrap();let mut denied=selected.clone();denied.code_enabled=false;
+            engine.indexer.set_indexing_config(&denied).unwrap();
+            assert_eq!(engine.preview_snapshot(&request,&cancel).unwrap_err(),ErrorCode::NotReady);
+            engine.indexer.set_indexing_config(&selected).unwrap();
+            assert_eq!(engine.preview_snapshot(&request,&cancel).unwrap_err(),ErrorCode::NotReady);
+            let current=engine.resolve_entry_snapshot(&initial).unwrap();
+            let request=PreviewRequest {reference:EntryReference {source_revision:Some(current.source_revision),..initial},location:Some(location)};
+            cancel.store(true,Ordering::Release);
+            assert_eq!(engine.preview_snapshot(&request,&cancel).unwrap_err(),ErrorCode::Cancelled);
+            cancel.store(false,Ordering::Release);
+            fs::write(&path,b"replacement source without the cached marker").unwrap();
+            assert_eq!(engine.preview_snapshot(&request,&cancel).unwrap_err(),ErrorCode::NotReady);
+            engine.end_request_for_client(777,1,&cancel);
+        }
+        drop(engine);drop(code);fs::remove_dir_all(root.parent().unwrap()).unwrap();
     }
 
     #[test]

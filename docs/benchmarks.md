@@ -434,3 +434,21 @@ the comparison now excludes only that proof, retaining reference IDs and all
 ranking/location/excerpt fields. Same-engine CLI/pipe equality is unchanged.
 Final1k/10k/50k/200k native latency/resource and CPU/GPU/installed gates remain open.
 [Logs, hashes, review scope and failures](validation/2026-10-18-bound-references/README.md).
+
+### Cached code-preview checkpoint, 2026-10-18
+
+The rebuilt daemon/client now previews actual cached code/notebook source through
+the same bounded preview operation. No-model10 public/seven offline cases pass
+in7.174s (index3.879s); managed CPU21 public/17 offline pass in78.381s
+(index63.504s), with four actual768-dimensional code vectors. Both retain eight
+client lifecycle, four ordinary-preview and four reference checks, and add four
+code-preview checks covering actual source/cell ranges, output exclusion and
+revoked/expired proofs. CPU retains three semantic checks; both owned jobs end empty.
+
+Original CPU Recall@5 .90/MRR .85, expanded.9091/.8636 and ten empty controls FP0
+remain unchanged; screenshot miss/audio rank2 retained. These whole-harness samples
+are uncontrolled and establish no causal performance change from the prior76.239s
+sample. No model, ranking or acceptance threshold changed. Final source passes464
+selected Rust checks,76 .NET tests, coherent CPU binaries/examples and the x64
+WinUI build. These are scoped local checks; required scale/installed/final gates
+remain open. [Logs, failures, hashes and review scope](validation/2026-10-18-code-preview/README.md).

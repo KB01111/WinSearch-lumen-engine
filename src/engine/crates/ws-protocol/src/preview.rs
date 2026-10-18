@@ -18,6 +18,15 @@ pub fn valid_preview_location(location:Option<MatchLocation>)->bool {
     }
 }
 
+pub fn valid_code_preview_location(location:Option<MatchLocation>)->bool {
+    match location {
+        None=>true,
+        Some(MatchLocation::Line {line})=>(1..=64*1024*1024).contains(&line),
+        Some(MatchLocation::Notebook {line,end_line,..})=>line>0 && end_line>=line && end_line<=64*1024*1024,
+        _=>false,
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PreviewRequest {

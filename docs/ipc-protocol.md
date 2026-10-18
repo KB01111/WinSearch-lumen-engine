@@ -229,7 +229,7 @@ must match the entry kind. Those lexical checks complement the
 engine's native residency/reparse/current-policy checks; they do not replace them.
 The additive operation retains protocol version1. The
 [async Rust client](headless-client.md) performs equivalent reply checks and
-uses the same shared DTOs. The cached-text route below is additive; code previews,
+uses the same shared DTOs. The cached-text routes below are additive;
 ordinary-source provenance and Lumen host integration remain open.
 
 Peers advertising `search.entry_references` add optional `entry_reference` to
@@ -258,7 +258,9 @@ has `kind`, UTF-8 `text` and nullable actual `location`. States are `ready`,
 `not_indexed`, `no_cached_text` and `location_unavailable`; only `ready` has text.
 Requests accept pages1..5000, lines1..67108864 and finite ordered timestamps within
 366days. Pages and timestamp pairs select exact stored positions; a line selects
-cached text covering that line and returns its actual start line. A missing position
+cached text covering that line and returns its actual start line. A trailing newline
+terminates the preceding line; it does not make a following empty line available.
+A missing position
 never causes a fabricated page/line/time or a fallback to unrelated text.
 
 The reply is bounded to **64KiB aggregate UTF-8 text, 64parts and eight extraction
@@ -287,8 +289,35 @@ local preview slots and leaves its UI/control connection independent.
 Both clients require the capability and validate identity/proof, local root,
 state, kinds, locations and reply budgets. Capability presence establishes cached
 text only. Raster/page thumbnails, media playback, uncached/on-demand rendering,
-code/notebook cached previews, ordinary content hashes and the consumer UI remain open.
-Protocol version remains1. See [validation](validation/2026-10-18-preview-text/README.md).
+ordinary content hashes and the consumer UI remain open.
+Protocol version remains1. See [ordinary-text validation](validation/2026-10-18-preview-text/README.md).
+
+Peers advertising `entry.preview.code` accept canonical code-file `c` references
+through the same `preview_entry` operation, job quota and delivery fences:
+
+```json
+{"type":"preview_entry","id":43,"request":{"reference":{"result_id":"c7","source_revision":"<current opaque proof>"},"location":{"kind":"notebook","cell_ordinal":1,"line":1,"end_line":2}}}
+```
+
+Code locations are null, a positive source line, or a notebook cell ordinal with
+positive ordered cell-local lines, bounded to67108864. Cell ordinals are zero-based.
+Page/timestamp coordinates are rejected for code; notebook coordinates are rejected
+for ordinary entries. Code parts always have `kind: "code"` and actual line/notebook
+locations. A requested notebook range selects chunks that cover that range in the
+requested cell. Replies retain actual cached ranges, clipped to returned text if
+the transport budget truncates a part; missing cells/ranges never select another
+cell. Notebook outputs are excluded even though the source byte hash covers the
+complete notebook JSON.
+
+The code store checks enabled repository, current parsed revision/provenance and
+native source admission before selecting bounded text prefixes. SQL joins the
+current source snapshot/hash and parse version again before applying location and
+row limits. No vectors, parser inputs or source bytes are loaded by this route.
+The same64KiB/64part bounds and final current-source checks apply to both domains.
+Current indexed code reports completion within parser limits; full source totals
+and cap state remain null. Rust/C# require the separate capability, validate code
+parts and actual ranges, and refuse legacy peers before sending a preview request.
+See [code-preview validation](validation/2026-10-18-code-preview/README.md).
 
 ## Internal embed-worker protocol (P3.2)
 

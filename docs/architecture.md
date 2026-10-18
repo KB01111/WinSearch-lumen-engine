@@ -416,10 +416,11 @@ parse's content revision at1 with an unknown hash. Reconciliation reparses missi
 hashes from current admitted sources; no metadata/path/chunk-text digest is used
 as a substitute. A non-provenance parse clears any older hash.
 
-These hashes are persisted internal provenance, not yet the public code-reference
-or preview contract. Canonical code references, bounded notebook/code previews,
-public hash metadata and ordinary document/media provenance remain open. See
-[current verification](validation/2026-10-18-code-provenance/README.md).
+Canonical code references and current public hash metadata use this persisted
+provenance; bounded cached code/notebook previews also require the current parsed
+revision/snapshot/hash. Ordinary document/media byte provenance remains open. See
+[provenance verification](validation/2026-10-18-code-provenance/README.md) and
+[cached code-preview verification](validation/2026-10-18-code-preview/README.md).
 
 The code coordinator persists source snapshots, revisioned claims and scan
 staging in `code.db`. Initial selected roots reconcile immediately; watcher
@@ -628,3 +629,17 @@ provenance record. Ordinary files do not yet expose byte hashes. Rust/C# clients
 validate canonical identities, proof budgets, result domains, hash format and local
 root confinement. These checks do not grant the Lumen webview filesystem access;
 the trusted native host must enforce its own current grants before content/actions.
+
+### Cached code and notebook previews
+
+`entry.preview.code` extends the existing preview route with code-file references,
+actual source lines and zero-based notebook cells with cell-local line ranges.
+The same two engine jobs and64KiB/64part transport limits apply across ordinary
+and code previews. The code store admits current native source identity/policy,
+enabled repository and parsed provenance before a bounded text-only SQL selection;
+the engine re-resolves metadata after selection and at delivery. No parser,
+inference, vector decoding or source-content read is started by cached preview.
+Notebook outputs never enter preview text. Returned ranges reflect actual returned
+lines, including truncation at a line terminator. Clients negotiate the code
+capability separately, reject foreign coordinate domains and validate real ranges.
+Raster/media/uncached previews and Lumen consumer wiring remain unfinished.

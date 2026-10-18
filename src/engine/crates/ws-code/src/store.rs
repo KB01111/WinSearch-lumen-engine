@@ -303,6 +303,61 @@ impl CodeStore {
         }
         Ok(state)
     }
+    /// Reads bounded cached source text after current native admission, never vectors.
+    pub fn preview_text(&self,file:i64,revision:i64,location:Option<ws_protocol::MatchLocation>,
+        allowed:impl FnOnce(&CodeFileRow,&crate::model::CodeSourceState)->bool)
+        ->Result<(Vec<ws_protocol::PreviewTextPart>,bool),CodeStoreError> {
+        use ws_protocol::{MatchLocation,PreviewTextPart,MAX_PREVIEW_TEXT_BYTES,MAX_PREVIEW_TEXT_PARTS};
+        if !ws_protocol::valid_code_preview_location(location) {
+            return Err(CodeStoreError::InvalidChunk("unsupported code preview location".into()));
+        }
+        let Some(row)=self.get_file(file)? else {return Ok((Vec::new(),false));};
+        let Some(state)=self.source_provenance(file)? else {return Ok((Vec::new(),false));};
+        if state.revision!=revision || !self.get_repo(row.repo_id)?.is_some_and(|repo|repo.enabled)
+            || !allowed(&row,&state) {return Ok((Vec::new(),false));}
+        let (line,cell,first,last)=match location {
+            Some(MatchLocation::Line {line})=>(Some(line),None,None,None),
+            Some(MatchLocation::Notebook {cell_ordinal,line,end_line})=>(None,Some(cell_ordinal),Some(line),Some(end_line)),
+            _=>(None,None,None,None),
+        };
+        let mut statement=self.conn.prepare("SELECT substr(CAST(c.text AS BLOB),1,?3),length(CAST(c.text AS BLOB)),c.start_line,c.end_line,c.notebook_cell,c.cell_start_line,c.cell_end_line FROM code_chunks c JOIN code_files f ON f.id=c.file_id JOIN repos r ON r.id=f.repo_id JOIN code_source_state s ON s.file_id=f.id WHERE c.file_id=?1 AND f.content_revision=?2 AND f.parse_version=?9 AND s.snapshot=?10 AND s.sha256 IS ?11 AND r.enabled=1 AND c.text!='' AND (?4 IS NULL OR (c.notebook_cell IS NULL AND c.start_line<=?4 AND c.end_line>=?4)) AND (?5 IS NULL OR (c.notebook_cell=?5 AND c.cell_start_line<=?6 AND c.cell_end_line>=?7)) ORDER BY c.chunk_index,c.id LIMIT ?8")?;
+        let mut rows=statement.query(params![file,revision,(MAX_PREVIEW_TEXT_BYTES+1) as i64,line,cell,first,last,
+            (MAX_PREVIEW_TEXT_PARTS+1) as i64,crate::model::CODE_PARSE_VERSION,state.snapshot,state.sha256])?;
+        let (mut parts,mut used,mut seen,mut truncated)=(Vec::new(),0,0,false);
+        while let Some(row)=rows.next()? {
+            seen+=1;
+            if seen>MAX_PREVIEW_TEXT_PARTS {truncated=true;break;}
+            let bytes:Vec<u8>=row.get(0)?;
+            let original=usize::try_from(row.get::<_,i64>(1)?)
+                .map_err(|_|CodeStoreError::InvalidChunk("invalid cached source size".into()))?;
+            let prefix=&bytes[..bytes.len().min(MAX_PREVIEW_TEXT_BYTES-used)];
+            let text=match std::str::from_utf8(prefix) {
+                Ok(text)=>text,
+                Err(error) if error.error_len().is_none()=>std::str::from_utf8(&prefix[..error.valid_up_to()]).expect("validated UTF8 prefix"),
+                Err(_)=>return Err(CodeStoreError::InvalidChunk("cached source is not UTF8".into())),
+            };
+            if text.is_empty() {truncated|=original>0;break;}
+            let cell:Option<u32>=row.get(4)?;
+            let (first,last)=if cell.is_some() {(row.get::<_,Option<u32>>(5)?.ok_or_else(||CodeStoreError::InvalidChunk("missing cell range".into()))?,
+                row.get::<_,Option<u32>>(6)?.ok_or_else(||CodeStoreError::InvalidChunk("missing cell range".into()))?)} else {(row.get::<_,u32>(2)?,row.get::<_,u32>(3)?)};
+            if first==0 || last<first {return Err(CodeStoreError::InvalidChunk("invalid cached source range".into()));}
+            let last=last.min(first.saturating_add((text.lines().count().max(1)-1) as u32));
+            let actual=cell.map(|cell_ordinal|MatchLocation::Notebook {cell_ordinal,line:first,end_line:last})
+                .unwrap_or(MatchLocation::Line {line:first});
+            let covers=match location {
+                None=>true,
+                Some(MatchLocation::Line {line})=>cell.is_none() && line>=first && line<=last,
+                Some(MatchLocation::Notebook {cell_ordinal,line,end_line})=>cell==Some(cell_ordinal) && line>=first && end_line<=last,
+                _=>false,
+            };
+            if !covers {truncated|=original>text.len();continue;}
+            used+=text.len();
+            parts.push(PreviewTextPart {kind:"code".into(),text:text.to_owned(),location:Some(actual)});
+            if original>text.len() {truncated=true;break;}
+        }
+        Ok((parts,truncated))
+    }
+
     /// Publish parsed content and its byte provenance in the same transaction.
     pub fn commit_parsed_source(&mut self,file:i64,parsed:&crate::ParsedCodeFile,snapshot:&str,sha256:&str)->Result<Vec<i64>,CodeStoreError> {
         if snapshot.is_empty() || snapshot.len()>65536 || !valid_source_sha256(sha256) {
@@ -1383,6 +1438,94 @@ pub fn dot_fp16_row_vs_normalized(stored_fp16: &[u8], normed_query: &[f32]) -> f
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn code_preview_fixture(parsed:crate::ParsedCodeFile)->(CodeStore,i64,i64) {
+        let mut store=CodeStore::open_in_memory().unwrap();
+        let repo=store.ensure_repo(&DetectedRepo {root_path:"C:/code".into(),name:"code".into(),has_git:false}).unwrap();
+        let record=CodeFileRecord {path:"C:/code/source.rs".into(),rel_path:"source.rs".into(),name:"source.rs".into(),
+            ext:"rs".into(),language:parsed.language.clone(),size:16,mtime:1,volume_serial:7,file_id:9};
+        let file=store.apply_file_batch(repo,1,&[record]).unwrap()[0].file_id();
+        store.commit_parsed_source(file,&parsed,"fixture-current-source",&"a".repeat(64)).unwrap();
+        (store,file,repo)
+    }
+
+    #[test]
+    fn code_preview_preserves_real_source_lines_without_reading_vectors() {
+        use ws_protocol::MatchLocation;
+        let (store,file,_)=code_preview_fixture(crate::parse_source("// header\nfn target() {\n    let value=7;\n}\n","rust"));
+        store.conn.execute("UPDATE code_chunks SET vector=x'01',norm=1 WHERE file_id=?1",[file]).unwrap();
+        let (parts,truncated)=store.preview_text(file,1,Some(MatchLocation::Line {line:3}),|_,_|true).unwrap();
+        assert!(!truncated);assert!(!parts.is_empty());
+        assert!(parts.iter().all(|part|part.kind=="code" && part.location==Some(MatchLocation::Line {line:2})
+            && part.text.contains("let value=7;")));
+        assert!(store.preview_text(file,1,Some(MatchLocation::Line {line:500}),|_,_|true).unwrap().0.is_empty());
+    }
+
+    #[test]
+    fn code_preview_notebooks_preserve_cell_local_lines_and_exclude_outputs() {
+        use ws_protocol::MatchLocation;
+        let notebook=crate::parse_notebook(r#"{"metadata":{"language_info":{"name":"python"}},"cells":[{"cell_type":"code","source":["first=1\n"]},{"cell_type":"raw","source":["not indexed"]},{"cell_type":"code","source":["def target():\n","    return 7\n"],"outputs":[{"text":["PRIVATE_OUTPUT"]}]}]}"#).unwrap();
+        let (store,file,_)=code_preview_fixture(notebook.parsed);
+        let focus=MatchLocation::Notebook {cell_ordinal:2,line:2,end_line:2};
+        let (parts,truncated)=store.preview_text(file,1,Some(focus),|_,_|true).unwrap();
+        assert!(!truncated);assert!(!parts.is_empty());
+        assert!(parts.iter().all(|part|part.text.contains("return 7") && !part.text.contains("PRIVATE_OUTPUT")
+            && part.location==Some(MatchLocation::Notebook {cell_ordinal:2,line:1,end_line:2})));
+        for focus in [MatchLocation::Line {line:3},MatchLocation::Notebook {cell_ordinal:1,line:1,end_line:1},
+            MatchLocation::Notebook {cell_ordinal:2,line:3,end_line:3}] {
+            assert!(store.preview_text(file,1,Some(focus),|_,_|true).unwrap().0.is_empty());
+        }
+    }
+
+    #[test]
+    fn code_preview_bounds_utf8_and_part_count_before_loading_unbounded_content() {
+        let (store,file,_)=code_preview_fixture(crate::parse_source(&"🌿".repeat(20000),"text"));
+        let (parts,truncated)=store.preview_text(file,1,None,|_,_|true).unwrap();
+        let bytes=parts.iter().map(|part|part.text.len()).sum::<usize>();
+        assert!(truncated && bytes>0 && bytes<=ws_protocol::MAX_PREVIEW_TEXT_BYTES);
+        assert!(parts.len()<=ws_protocol::MAX_PREVIEW_TEXT_PARTS && parts.iter().all(|part|part.text.chars().all(|c|c=='🌿')));
+        let parsed=crate::ParsedCodeFile {diagnostics:Vec::new(),language:"text".into(),symbols:Vec::new(),chunks:(1..=70).map(|line|crate::ParsedCodeUnit {
+            notebook:None,start_line:line,end_line:line,symbol_name:String::new(),symbol_kind:"text".into(),text:"x".into()}).collect()};
+        let (store,file,_)=code_preview_fixture(parsed);
+        let (parts,truncated)=store.preview_text(file,1,None,|_,_|true).unwrap();
+        assert!(truncated);assert_eq!(parts.len(),64);
+    }
+
+    #[test]
+    fn code_preview_notebook_truncation_at_newline_does_not_claim_the_next_line() {
+        let mut chunks=vec![16384,16384,16384,16368].into_iter().enumerate().map(|(index,size)|crate::ParsedCodeUnit {
+            notebook:Some(crate::model::NotebookLocation {cell_ordinal:index as u32,start_line:1,end_line:1}),
+            start_line:index as u32+1,end_line:index as u32+1,symbol_name:String::new(),symbol_kind:"text".into(),text:"x".repeat(size),
+        }).collect::<Vec<_>>();
+        chunks.push(crate::ParsedCodeUnit {notebook:Some(crate::model::NotebookLocation {cell_ordinal:4,start_line:1,end_line:2}),
+            start_line:5,end_line:6,symbol_name:String::new(),symbol_kind:"text".into(),text:format!("{}\nsecond","a".repeat(15))});
+        assert!(chunks.iter().all(|chunk|chunk.text.len()<=16384));
+        let parsed=crate::ParsedCodeFile {diagnostics:Vec::new(),language:"notebook".into(),symbols:Vec::new(),chunks};
+        let (store,file,_)=code_preview_fixture(parsed);
+        let (parts,truncated)=store.preview_text(file,1,None,|_,_|true).unwrap();
+        assert!(truncated);assert_eq!(parts.iter().map(|part|part.text.len()).sum::<usize>(),65536);
+        let last=parts.last().unwrap();assert!(last.text.ends_with('\n'));
+        assert_eq!(last.location,Some(ws_protocol::MatchLocation::Notebook {cell_ordinal:4,line:1,end_line:1}),
+            "the newline terminates the returned line; it does not return the next one");
+    }
+
+    #[test]
+    fn code_preview_requires_current_revision_repo_and_source_guard() {
+        let (store,file,repo)=code_preview_fixture(crate::parse_source("fn target() {}","rust"));
+        let calls=std::cell::Cell::new(0);
+        assert!(store.preview_text(file,1,None,|row,state|{calls.set(calls.get()+1);assert_eq!(row.id,file);
+            assert_eq!(state.snapshot,"fixture-current-source");false}).unwrap().0.is_empty());
+        assert_eq!(calls.get(),1,"native source admission must precede content selection");
+        assert!(store.preview_text(file,2,None,|_,_|true).unwrap().0.is_empty());
+        store.conn.execute("UPDATE repos SET enabled=0 WHERE id=?1",[repo]).unwrap();
+        assert!(store.preview_text(file,1,None,|_,_|true).unwrap().0.is_empty());
+        store.conn.execute("UPDATE repos SET enabled=1 WHERE id=?1",[repo]).unwrap();
+        assert!(!store.preview_text(file,1,None,|_,_|true).unwrap().0.is_empty());
+        for location in [ws_protocol::MatchLocation::Page {page:1},ws_protocol::MatchLocation::Line {line:0},
+            ws_protocol::MatchLocation::Notebook {cell_ordinal:0,line:2,end_line:1}] {
+            assert!(store.preview_text(file,1,Some(location),|_,_|true).is_err());
+        }
+    }
 
     #[test]
     fn code_provenance_commits_hash_revision_and_chunks_atomically_and_survives_reopen() {

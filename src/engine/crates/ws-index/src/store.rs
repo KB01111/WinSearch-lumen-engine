@@ -370,7 +370,7 @@ impl IndexStore {
             };
             let part_line:Option<u32>=row.get(6)?;
             if line.is_some_and(|focus|part_line.is_none_or(|first|
-                focus<first || u64::from(focus-first)>=text.split('\n').count() as u64)) {
+                focus<first || u64::from(focus-first)>=text.lines().count().max(1) as u64)) {
                 truncated|=original_size>text.len();continue;
             }
             let part_page:Option<u32>=row.get(3)?;
@@ -2631,6 +2631,16 @@ mod tests {
         assert!(!truncated);
         store.invalidate_content_source(job.entry_id).unwrap();
         assert!(store.preview_text(job.entry_id,None).unwrap().0.is_empty());
+    }
+
+    #[test]
+    fn preview_text_trailing_terminator_does_not_cover_the_following_line() {
+        let (mut store,job,progress)=batch_fixture();
+        let mut lines=content_chunk(&job,0,"first\nsecond\n");lines.location.line=Some(20);
+        assert!(store.commit_content_batch(&job,&progress,&[lines],None).unwrap());
+        assert_eq!(store.preview_text(job.entry_id,Some(ws_protocol::MatchLocation::Line {line:21})).unwrap().0.len(),1);
+        assert!(store.preview_text(job.entry_id,Some(ws_protocol::MatchLocation::Line {line:22})).unwrap().0.is_empty(),
+            "a trailing terminator does not return the following line");
     }
 
     #[test]

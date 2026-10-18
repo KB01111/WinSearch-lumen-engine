@@ -175,6 +175,17 @@ impl CodeService {
             && self.query_epoch() == epoch
     }
 
+    pub fn preview_text(&self,file:i64,entry:&ws_protocol::ResolvedEntry,location:Option<ws_protocol::MatchLocation>)
+        ->Result<(Vec<ws_protocol::PreviewTextPart>,bool),ws_code::store::CodeStoreError> {
+        let store=self.store.lock().unwrap_or_else(|p|p.into_inner());
+        store.preview_text(file,entry.index_revision.unwrap_or(0),location,|row,state| {
+            row.path==entry.path && state.sha256==entry.content_sha256
+                && self.visible(row,Some(&state.snapshot))
+                && ws_code::parse::guard_source_path(Path::new(&row.path)).is_ok()
+                && ws_platform::identity::file_identity(Path::new(&row.path))==Some((row.volume_serial,row.file_id))
+        })
+    }
+
     pub fn resolve_metadata(&self,file_id:i64,reference:&ws_protocol::EntryReference,incarnation:windows::core::GUID)
         ->Result<ws_protocol::ResolvedEntry,ws_protocol::ErrorCode> {
         use ws_protocol::ErrorCode;
@@ -1121,6 +1132,10 @@ pub(crate) mod tests {
         }
         let indexer = Arc::clone(&code.indexer);
         (code, indexer, root)
+    }
+
+    pub(crate) fn unindexed_fixture() -> (Arc<CodeService>,Arc<Indexer>,PathBuf) {
+        let (code,root)=fixture();let indexer=Arc::clone(&code.indexer);(code,indexer,root)
     }
 
     #[test]

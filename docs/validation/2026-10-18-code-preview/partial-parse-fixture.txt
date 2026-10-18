@@ -1,0 +1,17 @@
+failures:
+
+---- engine::tests::code_preview_uses_current_native_code_and_notebook_cache_then_rejects_stale_proofs stdout ----
+
+thread 'engine::tests::code_preview_uses_current_native_code_and_notebook_cache_then_rejects_stale_proofs' (76080) panicked at bins\winsearchd\src\engine.rs:1621:13:
+assertion `left == right` failed
+  left: NotIndexed
+ right: Ready
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    engine::tests::code_preview_uses_current_native_code_and_notebook_cache_then_rejects_stale_proofs
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 209 filtered out; finished in 0.23s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

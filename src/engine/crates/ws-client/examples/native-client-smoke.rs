@@ -35,7 +35,7 @@ async fn search(
 
 async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_json::Value> {
     let info = client.info().await?;
-    for feature in ["search.entry_references","entry.resolve.code"] {assert!(info.supports(feature));}
+    for feature in ["search.entry_references","entry.resolve.code","entry.preview.code"] {assert!(info.supports(feature));}
     let status = client.status().await?;
     let model = client.model_status().await?;
     let engine_config = client.config().await?;
@@ -113,6 +113,16 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
     }).await?;
     assert!(pdf_preview.parts.iter().any(|part| part.text.contains("pdfparitytoken")
         && part.location == Some(ws_client::protocol::MatchLocation::Page { page: 2 })));
+    let code_preview=client.preview_text(ws_client::protocol::PreviewRequest {
+        reference:code_reference.clone(),location:code[0].location,
+    }).await?;
+    assert!(code_preview.parts.iter().any(|part|part.kind=="code" && part.text.contains("parityneedle")));
+    let notebook_preview=client.preview_text(ws_client::protocol::PreviewRequest {
+        reference:notebook[0].entry_reference.clone().unwrap(),location:notebook[0].location,
+    }).await?;
+    assert!(notebook_preview.parts.iter().any(|part|part.text.contains("notebookparity")
+        && matches!(part.location,Some(ws_client::protocol::MatchLocation::Notebook {cell_ordinal:1,line:1,end_line:2}))));
+    assert!(notebook_preview.parts.iter().all(|part|!part.text.contains("PRIVATE_OUTPUT_SENTINEL")));
 
     // Disconnect before consuming results, then reconnect for an independent operation.
     drop(
@@ -132,6 +142,9 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
     revoked.code_enabled=false;
     client.set_indexing_config(revoked).await?;
     assert!(matches!(client.preview_text(ws_client::protocol::PreviewRequest {
+        reference:code_reference.clone(),location:code[0].location,
+    }).await,Err(ws_client::Error::Remote {code:ErrorCode::NotReady,..})));
+    assert!(matches!(client.preview_text(ws_client::protocol::PreviewRequest {
         reference: reference.clone(), location: None,
     }).await, Err(ws_client::Error::Remote { code: ErrorCode::NotReady, .. })));
     assert!(matches!(
@@ -145,6 +158,9 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
         .await?
         .is_empty());
     client.set_indexing_config(original.clone()).await?;
+    assert!(matches!(client.preview_text(ws_client::protocol::PreviewRequest {
+        reference:code_reference.clone(),location:code[0].location,
+    }).await,Err(ws_client::Error::Remote {code:ErrorCode::NotReady,..})));
     assert!(matches!(client.resolve_entry(code_reference).await,
         Err(ws_client::Error::Remote {code:ErrorCode::NotReady,..})));
     assert!(matches!(client.preview_text(ws_client::protocol::PreviewRequest {
@@ -171,6 +187,9 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
         "reference_checks":["bound_document_and_pdf_refs", "bound_code_and_notebook_refs",
             "resolved_code_hashes", "code_proof_stays_invalid_after_restore"],
         "document_preview": document_preview, "pdf_preview": pdf_preview,
+        "code_preview":code_preview,"notebook_preview":notebook_preview,
+        "code_preview_checks":["actual_cached_code", "actual_notebook_cell_and_no_outputs",
+            "code_preview_rejects_revoked_root", "code_preview_proof_stays_invalid_after_restore"],
         "preview_checks": ["current_metadata_bound_document_text", "actual_pdf_page_two",
             "preview_rejects_revoked_root", "preview_proof_stays_invalid_after_restore"],
         "semantic_checks": if semantic_code.is_some() { vec!["exact_only_control_empty", "semantic_only_code", "semantic_negative_empty"] } else { vec![] },

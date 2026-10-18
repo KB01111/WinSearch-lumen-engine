@@ -202,16 +202,20 @@ public sealed class EngineClient : IEngineClient
     public async Task<EntryPreview> PreviewTextAsync(PreviewRequest request, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
-        if (request?.Reference is null || !ReferenceValid(request.Reference) || request.Reference.ResultId[0] != 'e'
-            || !PreviewLocationValid(request.Location))
+        if (request?.Reference is null || !ReferenceValid(request.Reference))
             throw new EngineException(ErrorCode.InvalidRequest, "invalid preview request");
+        var code = request.Reference.ResultId[0] == 'c';
+        if (!(code ? CodePreviewLocationValid(request.Location) : PreviewLocationValid(request.Location)))
+            throw new EngineException(ErrorCode.InvalidRequest, "invalid preview location for this entry");
+        var feature = code ? "entry.preview.code" : "entry.preview.text";
         var snapshot = new PreviewRequest { Reference = new() { ResultId = request.Reference.ResultId, SourceRevision = request.Reference.SourceRevision },
             Location = request.Location switch {
                 null => null, PageLocation page => new PageLocation { Page = page.Page },
                 LineLocation line => new LineLocation { Line = line.Line },
+                NotebookLocation cell => new NotebookLocation { CellOrdinal = cell.CellOrdinal, Line = cell.Line, EndLine = cell.EndLine },
                 TimestampLocation time => new TimestampLocation { Seconds = time.Seconds, EndSeconds = time.EndSeconds },
                 _ => throw new EngineException(ErrorCode.InvalidRequest, "unsupported preview location") } };
-        if (IsConnected && !_features.Contains("entry.preview.text", StringComparer.Ordinal))
+        if (IsConnected && !_features.Contains(feature, StringComparer.Ordinal))
             throw new EngineException(ErrorCode.Unsupported, "engine does not support cached text previews");
         using var total = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
         total.CancelAfter(TimeSpan.FromSeconds(35));
@@ -221,7 +225,7 @@ public sealed class EngineClient : IEngineClient
             // An owned read connection can be retired on partial I/O without corrupting UI/control traffic.
             await using var owned = new EngineClient(PipeName, _clientName, ClientVersion) { _oneShot = true };
             var info = await owned.ConnectOnceAsync(total.Token);
-            if (!info.Features.Contains("entry.preview.text", StringComparer.Ordinal))
+            if (!info.Features.Contains(feature, StringComparer.Ordinal))
                 throw new EngineException(ErrorCode.Unsupported, "engine does not support cached text previews");
             return await owned.UnaryAsync(id => new PreviewEntryMessage { Id = id, Request = snapshot }, message =>
                 message is EntryPreviewMessage reply && PreviewMatches(reply.Preview, snapshot)
@@ -239,9 +243,18 @@ public sealed class EngineClient : IEngineClient
             && time.Seconds >= 0 && time.EndSeconds >= time.Seconds && time.EndSeconds <= 366 * 86400,
         _ => false };
 
+    private static bool CodePreviewLocationValid(MatchLocation? location) => location switch {
+        null => true,
+        LineLocation line => line.Line is > 0 and <= 64 * 1024 * 1024,
+        NotebookLocation cell => cell.Line > 0 && cell.EndLine >= cell.Line && cell.EndLine <= 64 * 1024 * 1024,
+        _ => false };
+
+    private static int PreviewLineCount(string text) => Math.Max(1, text.Count(c => c == '\n') + (text.EndsWith('\n') ? 0 : 1));
+
     private static bool PreviewMatches(EntryPreview? preview, PreviewRequest expected)
     {
-        static bool Known(string? kind) => kind is "doc" or "pdf" or "ocr" or "image" or "audio" or "video";
+        var code = expected.Reference.ResultId[0] == 'c';
+        bool Known(string? kind) => code ? kind == "code" : kind is "doc" or "pdf" or "ocr" or "image" or "audio" or "video";
         if (preview?.Parts is null || preview.Extraction is null || !Enum.IsDefined(preview.State)
             || !ResolvedEntryMatches(preview.Entry, expected.Reference.ResultId, expected.Reference.SourceRevision)
             || preview.Parts.Count > 64 || preview.Extraction.Count > 8) return false;
@@ -252,14 +265,18 @@ public sealed class EngineClient : IEngineClient
         var bytes = 0;
         foreach (var part in preview.Parts)
         {
-            if (part is null || string.IsNullOrEmpty(part.Text) || !Known(part.Kind) || !PreviewLocationValid(part.Location)) return false;
+            if (part is null || string.IsNullOrEmpty(part.Text) || !Known(part.Kind)
+                || !(code ? part.Location is not null && CodePreviewLocationValid(part.Location) : PreviewLocationValid(part.Location))) return false;
+            if (part.Location is NotebookLocation range && (ulong)(range.EndLine - range.Line) >= (ulong)PreviewLineCount(part.Text)) return false;
             bytes += Encoding.UTF8.GetByteCount(part.Text);
             if (bytes > 65536) return false;
             var matches = (expected.Location, part.Location) switch {
                 (null, _) => true,
                 (PageLocation first, PageLocation actual) => first.Page == actual.Page,
                 (LineLocation first, LineLocation actual) => first.Line >= actual.Line
-                    && (ulong)(first.Line - actual.Line) < (ulong)part.Text.Count(c => c == '\n') + 1,
+                    && (ulong)(first.Line - actual.Line) < (ulong)PreviewLineCount(part.Text),
+                (NotebookLocation first, NotebookLocation actual) => first.CellOrdinal == actual.CellOrdinal
+                    && first.Line >= actual.Line && first.EndLine <= actual.EndLine,
                 (TimestampLocation first, TimestampLocation actual) => first.Seconds == actual.Seconds && first.EndSeconds == actual.EndSeconds,
                 _ => false };
             if (!matches) return false;

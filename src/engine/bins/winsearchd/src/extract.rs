@@ -968,7 +968,8 @@ mod tests {
         let mut registry = ExtractorRegistry::production();
         let mut client=ExtractClient::new(worker,cache.0.clone());
         client.worker_env.push(("WINSEARCH_TEST_DECODER_DIR".into(),PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../..").join("artifacts/dependencies/ffmpeg-2026-09-30/ffmpeg-n9.0.2-17-g2a571b6068-win64-lgpl-shared-9.0/bin")));
+            .join("../../../..").join("artifacts/dependencies/ffmpeg-2026-09-30/ffmpeg-n9.0.2-17-g2a571b6068-win64-lgpl-shared-9.0/bin")
+            .canonicalize().expect("install the pinned decoder before native tests")));
         registry.worker = Some(client);
         registry
     }
@@ -1296,7 +1297,7 @@ mod tests {
     fn media_audio_native_drafts_defer_without_model_or_fake_transcript() {
         let tree = TempTree::new();
         let cache = TempTree::new();
-        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..").canonicalize().unwrap();
         let source = tree.0.join("時刻 recording.wav");
         fs::copy(repo.join("artifacts/spoken-fixtures/two-passages-65s.wav"), &source).unwrap();
         let indexer = seeded_indexer(&tree);

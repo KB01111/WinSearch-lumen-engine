@@ -101,10 +101,11 @@ include Lumen integration and the final native/installed acceptance gates.
       diagnostics, data-preserving schema4 migration, native scheduler and exact definition ranking verified
 - [~] Code byte provenance — exact admitted SHA256, durable content revision,
       atomic replacement and legacy-hash recovery; public bound code references
-      and current hash metadata added; bounded code/notebook preview remains open
+      and current hash metadata added; bounded cached code/notebook preview verified
+      with actual line/cell ranges, source checks and output exclusion
 - [~] Notebook cells without outputs, virtual/cell-local line preservation (Phase 5) —
       native child/store/reopen and actual named-pipe cell-local location verified;
-      native preview/editor interaction remains
+      cached native preview verified; installed preview/editor interaction remains
 - [~] `code:` queries (semantic + exact identifier) (Phase 5) — native no-model
       daemon, persistent60s quiet/restart/pause/root revocation verified; deterministic
       semantic fixtures and request revision checks pass. Managed-model native768d
@@ -120,9 +121,9 @@ include Lumen integration and the final native/installed acceptance gates.
 - [x] Tray icon: open/settings/exit, indexing tooltip
 - [x] Settings window (theme, hotkey rebind w/ conflict detection, query memory)
 - [ ] Expanded search explorer: list + grid, category filters, preview pane (Phase 6)
-- [~] Native preview contract: bounded cached document/PDF/OCR text with actual
-      locations, source/root checks and cancellation in Rust/C# clients;
-      raster/media/uncached/code preview and explorer wiring remain open
+- [~] Native preview contract: bounded cached document/PDF/OCR/code/notebook text
+      with actual locations, source/root checks and cancellation in Rust/C# clients;
+      raster/media/uncached preview and explorer wiring remain open
 - [ ] Onboarding (6 steps incl. model download, folder estimates, shortcut) (Phase 6)
 - [ ] Full settings sections (General/Search/Folders/Code/AI/Performance/Storage/About) (Phase 6)
 - [ ] Animations (overlay, selection, category), reduced-motion + high contrast (Phase 6)

@@ -1,0 +1,117 @@
+[
+  {
+    "file": "rust-tests.txt",
+    "local_raw_sha256": "ce4a32134d6593662c539699092965169b874af2979913bd27eba276ab592482",
+    "published_sha256": "7ccd6e9956803ee246f4d812d75991ebcdc080b061934ec99333560264c905dd"
+  },
+  {
+    "file": "coherent-build.txt",
+    "local_raw_sha256": "f28a3224033d34e247ba031d21bf24fd53ce327fa35afc1cbbe4646fd648a5ff",
+    "published_sha256": "ccc6dec93a3b333cc47f722d7b8ca5efbafced244b1b29dbdef3183601cba57c"
+  },
+  {
+    "file": "dotnet-tests.txt",
+    "local_raw_sha256": "fd0b69ddf5c79a208373d1a3ce56ead5d4b9cb8672a8065b1ee8965862973548",
+    "published_sha256": "d84d826500f80d7040f5e491e28b6ab5e658ef2d97e65d9edde93339f659543d"
+  },
+  {
+    "file": "x64-build.txt",
+    "local_raw_sha256": "707b78e3a4a01180ef43510d3a7a288c09e11d75013788a23fd2a0286046d544",
+    "published_sha256": "2371f0cad129800b0085abe5bee95f6a4dc36aa49f5581e68b546cc3e4e0fe3d"
+  },
+  {
+    "file": "store-red.txt",
+    "local_raw_sha256": "30f12d1252e66ce9b4dfda13d4137e2717233e8e65a6bdc89b19ba3892b7bfa5",
+    "published_sha256": "cd53ebc5e20c91fe2f7b65e87ad8ea76cb6698bfca0e995892e91f9dd45b106c"
+  },
+  {
+    "file": "protocol-red.txt",
+    "local_raw_sha256": "ccc51382c92a91e689c3453a102eebcdcc7d3c59b0b189acc3e39f6c485d20f6",
+    "published_sha256": "8e690dd43db462a20c8936c6eb63ccb4eacdf2e869ac755e5afdaa9927eef102"
+  },
+  {
+    "file": "engine-red.txt",
+    "local_raw_sha256": "3238762ff7e9c4d0d93f8c684d9f76f5efd5666d2947967c8039136e3f55ce41",
+    "published_sha256": "5711c5240e06b45938009d6f9d1ecac749cb3a7a034219b431f83d88e74e7d24"
+  },
+  {
+    "file": "rust-client-red.txt",
+    "local_raw_sha256": "15101f83c7e7b364e9c387950080983250cf7a036d67fd8cdbfe0a9e73a791a9",
+    "published_sha256": "fb24e975aaed0fec3f789519d30ea8f40d2c14c0ff03a7a47d1755eea66fa963"
+  },
+  {
+    "file": "dotnet-red.txt",
+    "local_raw_sha256": "d0972a2e81fee22670548514fa06183bfdf0680651ec997c935e6bcbd97cd7e9",
+    "published_sha256": "cd383a82b478148a1289ac52c35c45e358bd6634ed0e6e46403d56a163d32c13"
+  },
+  {
+    "file": "notebook-newline-red.txt",
+    "local_raw_sha256": "a4d1783e202077f56d9cc3197487e0b8b73f370c7471b3cbbab647178dfd55e5",
+    "published_sha256": "0b026ada31a8b5da74a8c5c8c36eb090741c12cce071494ec683f33ff90f8438"
+  },
+  {
+    "file": "ordinary-client-newline-red.txt",
+    "local_raw_sha256": "c00c312b7bfb91626126337882aa0b0dc6dda6f8bf70b56e977d92405fa27a67",
+    "published_sha256": "af3a99ee5a4b463271297f6af7c49790138e5d6577dada5a54e8b9513d42366b"
+  },
+  {
+    "file": "ordinary-store-newline-red.txt",
+    "local_raw_sha256": "77c24c8efbe60ac44bf9f6077246601d6fd20f48685f3ed455c36d829351cb2d",
+    "published_sha256": "4a24785750afec49ddb7735f66081e431fadd9ca28ddad38d48b1ead05b1a6ea"
+  },
+  {
+    "file": "missing-notebook-fixture.txt",
+    "local_raw_sha256": "f5db1f1e6bed345ab92923a64b8c6f802d6dacc5e3b82a0bf366d7ff071ba2dc",
+    "published_sha256": "ac13089433796389cb0d00424e3584f246a7a2bcd69d961b80c1391477db94da"
+  },
+  {
+    "file": "watcher-scan-fixture.txt",
+    "local_raw_sha256": "12c213b282a5fe28315068848d32688702f24da69cf24275cf88283acc9d3e2c",
+    "published_sha256": "239c3e028e77707e4dc7dde7ada72afa61f39c502d45b600d96e07e675929546"
+  },
+  {
+    "file": "deferred-scan-fixture.txt",
+    "local_raw_sha256": "77022f13935e5e898247951c4deb03a2b2ec9ca64687a55859fda45a19c22eed",
+    "published_sha256": "ff715a8e0495d8da1b4abf15469a8b868d4c425920ae36f8fcdc8a6f5bc48d4b"
+  },
+  {
+    "file": "private-test-helper-compile-error.txt",
+    "local_raw_sha256": "6b06e830ded0a461245ccc8a04bb74fe23d48171f84ac923a5a32646e76019fb",
+    "published_sha256": "bd4a9e39437cec1ccd2f4e49cd7d59247cd7caf047f99b33c4905dbd43c26512"
+  },
+  {
+    "file": "partial-parse-fixture.txt",
+    "local_raw_sha256": "ae3b2f74efc654b06134d20a77cc727f670167778a6a15baa6716dcf8eb8c027",
+    "published_sha256": "6fc0c6016f2ff4442d08596b2ac29bc4465509ba72a2e3524e374997e0047240"
+  },
+  {
+    "file": "decoder-fixture-failure.txt",
+    "local_raw_sha256": "0b3c249a41f43050c84005a44d72cd1201f931939b3897a3b5454a6883066c73",
+    "published_sha256": "6cf88838d94a51c8094aa2c75ce9762f938dcf74627c4143d8d0ad7ccfed64ae"
+  },
+  {
+    "file": "decoder-audio-fixture-failure.txt",
+    "local_raw_sha256": "d9f93d7e461b60db0901a7b5d9194a908641221350aa99c3f26c47ff46f9d8ed",
+    "published_sha256": "40a87ade8a36a240acd18f727e3a6547458b3c88577f3b960596963af31e7018"
+  },
+  {
+    "file": "fixture-diagnosis.txt",
+    "local_raw_sha256": "92552fc7eec5e8bf581c87247513ef638ac240b0fb794c3301eb6820031a83ed",
+    "published_sha256": "92552fc7eec5e8bf581c87247513ef638ac240b0fb794c3301eb6820031a83ed"
+  },
+  {
+    "file": "native-no-model.json",
+    "local_raw_sha256": "ecabd06c61a4e3cd22426e5f315631863fc7aa2b256b75e6df18c76b0188d3af",
+    "published_sha256": "c239fd0914d40589941210af503d37d428112e4b54e3a999987b7d6366712e44"
+  },
+  {
+    "file": "native-managed-cpu.json",
+    "local_raw_sha256": "708eb850906ca98c72c57e54e6fa6934460db6610d52753f06c6c66e424120da",
+    "published_sha256": "d663f7949a8cdb982d7f362cc7e15cb8e057df66b0155a38e230341df8e0d2aa"
+  },
+  {
+    "file": "host.json",
+    "local_raw_sha256": "805f9cb81838c737dac3dfd06987a5f6759cf6d184c111ff27f61b62815081cf",
+    "published_sha256": "07508ebeb657b220d7204fc4f6e3906868276f8978c7066daa98b15df6a35d99"
+  }
+]
