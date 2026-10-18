@@ -128,6 +128,7 @@ pub struct Indexer {
     store: Mutex<IndexStore>,
     vector_index: std::sync::RwLock<Option<CachedVectors>>,
     cache_epoch: std::sync::atomic::AtomicU64,
+    policy_epoch: std::sync::atomic::AtomicU64,
     counters: Mutex<Counters>,
     wake: (Mutex<bool>, Condvar),
     shutdown: AtomicBool,
@@ -158,8 +159,10 @@ impl Indexer {
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let config = crate::policy::validate(config)?;
+        let policy_changed = *self.policy.read().unwrap_or_else(|p| p.into_inner()) != config;
         let mut store = self.store_lock();
         store.set_indexing_config(&config)?;
+        if policy_changed { self.policy_epoch.fetch_add(1, Ordering::AcqRel); }
         if let Some(code)=self.code_service.lock().unwrap_or_else(|p|p.into_inner()).as_ref().and_then(|w|w.upgrade()) {code.policy_changed();}
         *self.policy.write().unwrap_or_else(|p| p.into_inner()) = config.clone();
         let mut roots = Vec::new();
@@ -259,6 +262,7 @@ impl Indexer {
             store: Mutex::new(store),
             vector_index: std::sync::RwLock::new(None),
             cache_epoch: std::sync::atomic::AtomicU64::new(1),
+            policy_epoch: std::sync::atomic::AtomicU64::new(1),
             counters: Mutex::new(Counters::default()),
             wake: (Mutex::new(false), Condvar::new()),
             shutdown: AtomicBool::new(false),
@@ -394,6 +398,8 @@ impl Indexer {
     }
 
     pub(crate) fn search_epoch(&self)->u64 {self.cache_epoch.load(Ordering::Acquire)}
+
+    pub(crate) fn policy_epoch(&self)->u64 {self.policy_epoch.load(Ordering::Acquire)}
 
     pub(crate) fn invalidate_vector_cache(&self) {
         self.cache_epoch.fetch_add(1, Ordering::AcqRel);

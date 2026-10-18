@@ -175,6 +175,47 @@ Breaking wire changes bump `PROTOCOL_VERSION`. Both sides refuse mismatched
 versions at handshake with `error: protocol_version_mismatch` and disconnect.
 Additive fields use `#[serde(default)]` semantics and do not bump the version.
 
+## Indexed entry resolution
+
+Peers advertising `entry.resolve` support a metadata-only operation for native
+preview and action consumers. It resolves current ordinary filesystem IDs
+(`e<positive entry id>`); code-specific and catalog application resolution remain
+separate work. The caller supplies an indexed identity, never a source path:
+
+```json
+{"type":"resolve_entry","id":41,"reference":{"result_id":"e23","source_revision":null}}
+```
+
+`source_revision` is optional/nullable for initial resolution. Supplying a prior
+value requires an exact match to the current source, content revision, model
+generation and access-policy epoch. Source replacement or revoked/restored grants
+expire it. Unrelated vector-cache updates and unchanged policy saves do not.
+Unknown fields inside `reference`, including a caller-supplied `path`, are refused.
+Malformed IDs produce `invalid_request`; unavailable, denied or changed sources
+produce `not_ready`, with a sanitized message and no entry payload.
+
+The correlated `resolved_entry` reply contains `entry`: `result_id`, `root_path`,
+`path`, `name`, `kind`, current `size_bytes`, nullable `modified_unix_seconds`,
+nullable `index_revision`, and opaque `source_revision`. Metadata-only entries
+have no `index_revision`; stale extracted content cannot supply one for a replaced
+source. A positive revision does not imply complete extraction or uncapped page
+coverage. **The source revision is a metadata/identity proof, not a content hash.**
+It must never be supplied as Lumen's file/content hash.
+
+Native clients must resolve/revalidate references immediately before preview,
+open/reveal or media-source access, enforce their own admitted root boundary, and
+cancel stale work. This endpoint reads attributes/identity only: it does not read
+source content, render, start inference, grant a webview filesystem scope or
+implement the content-preview/playback route. Lumen's trusted Rust host keeps
+the IPC and native paths out of a direct React transport.
+
+The C# client checks the capability before sending, snapshots mutable caller
+arguments, correlates replies and rejects foreign IDs/proofs, missing metadata
+and paths outside the returned local root. Those lexical checks complement the
+engine's native residency/reparse/current-policy checks; they do not replace them.
+The additive operation retains protocol version1. Content previews, code identity
+mapping and the reusable Rust client remain required by the integration plan.
+
 ## Internal embed-worker protocol (P3.2)
 
 `winsearchd` talks to its inference worker `winsearch-embed` over a **second**

@@ -9,6 +9,7 @@ namespace WinSearch.Core.Protocol;
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
 [JsonDerivedType(typeof(HelloMessage), "hello")]
 [JsonDerivedType(typeof(PingMessage), "ping")]
+[JsonDerivedType(typeof(ResolveEntryMessage), "resolve_entry")]
 [JsonDerivedType(typeof(SearchMessage), "search")]
 [JsonDerivedType(typeof(CancelMessage), "cancel")]
 [JsonDerivedType(typeof(GetStatusMessage), "get_status")]
@@ -33,6 +34,33 @@ public sealed class HelloMessage : ClientMessage
 public sealed class PingMessage : ClientMessage
 {
     public ulong Id { get; set; }
+}
+
+public sealed class ResolveEntryMessage : ClientMessage
+{
+    public ulong Id { get; set; }
+    public EntryReference Reference { get; set; } = new();
+}
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed class EntryReference
+{
+    public string ResultId { get; set; } = "";
+    public string? SourceRevision { get; set; }
+}
+
+public sealed class ResolvedEntry
+{
+    public string ResultId { get; set; } = "";
+    public string RootPath { get; set; } = "";
+    public string Path { get; set; } = "";
+    public string Name { get; set; } = "";
+    public ResultKind Kind { get; set; }
+    public ulong SizeBytes { get; set; }
+    public long? ModifiedUnixSeconds { get; set; }
+    public long? IndexRevision { get; set; }
+    /// <summary>Opaque metadata/identity and policy proof, never a content hash.</summary>
+    public string SourceRevision { get; set; } = "";
 }
 
 public sealed class SearchMessage : ClientMessage
@@ -102,6 +130,7 @@ public sealed class SetIndexingConfigMessage : ClientMessage
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
 [JsonDerivedType(typeof(HelloAckMessage), "hello_ack")]
 [JsonDerivedType(typeof(PongMessage), "pong")]
+[JsonDerivedType(typeof(ResolvedEntryMessage), "resolved_entry")]
 [JsonDerivedType(typeof(ResultsMessage), "results")]
 [JsonDerivedType(typeof(StatusMessage), "status")]
 [JsonDerivedType(typeof(ModelStatusMessage), "model_status")]
@@ -120,6 +149,12 @@ public sealed class HelloAckMessage : ServerMessage
 public sealed class PongMessage : ServerMessage
 {
     public ulong Id { get; set; }
+}
+
+public sealed class ResolvedEntryMessage : ServerMessage
+{
+    public ulong Id { get; set; }
+    public ResolvedEntry Entry { get; set; } = new();
 }
 
 public sealed class ResultsMessage : ServerMessage

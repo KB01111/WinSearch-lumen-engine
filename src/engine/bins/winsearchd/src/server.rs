@@ -13,7 +13,7 @@ use crate::engine::SharedEngine;
 pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn features() -> Vec<String> {
-    vec!["search.exact".to_string(), "search.semantic".to_string(), "code".to_string()]
+    vec!["search.exact".to_string(), "search.semantic".to_string(), "code".to_string(), "entry.resolve".to_string()]
 }
 
 pub fn handle_connection(stream: PipeStream, engine: SharedEngine) {
@@ -89,6 +89,7 @@ pub fn handle_connection(stream: PipeStream, engine: SharedEngine) {
         };
 
         match msg {
+            ClientMessage::ResolveEntry { id, reference } => engine.resolve_entry(&client, id, reference),
             ClientMessage::GetIndexingConfig { id } => engine.get_indexing_config(&client, id),
             ClientMessage::SetIndexingConfig { id, config } => engine.set_indexing_config(&client, id, config),
             ClientMessage::Hello { .. } => {
@@ -218,6 +219,81 @@ mod tests {
                 None => panic!("pipe closed before Results frame"),
             }
         }
+    }
+
+    #[test]
+    fn resolves_native_entry_identity_and_rejects_stale_source_or_grants() {
+        let root = std::env::temp_dir().join(format!("winsearch-resolve-{}-{}",
+            std::process::id(), SERVER_PIPE_SEQ.fetch_add(1, Ordering::SeqCst)));
+        std::fs::create_dir(&root).unwrap();
+        let source = root.join("report.txt");
+        std::fs::write(&source, "original text").unwrap();
+        let indexer = Indexer::open(ws_index::IndexStore::open_in_memory().unwrap(), &[root.clone()]).unwrap();
+        indexer.enqueue_initial_scan().unwrap();
+        while indexer.scan_available(64) > 0 {}
+        let entry_id = indexer.store_lock().find_by_path(&source.to_string_lossy()).unwrap().unwrap().id;
+        let engine = EngineService::new_with_model_dir(indexer.clone(), root.join("unused-models"));
+        let pipe = unique_pipe(); let server_pipe = pipe.clone();
+        std::thread::spawn(move || { let _ = ws_platform::pipe::serve(&server_pipe,
+            move |stream| handle_connection(stream, engine.clone())); });
+        let mut client = connect_retry(&pipe);
+        write_message(&mut client, &ClientMessage::Hello { protocol_version:1, client:"resolve-test".into(), client_version:"1".into() }).unwrap();
+        assert!(matches!(read_message::<_,ServerMessage>(&mut client).unwrap(),Some(ServerMessage::HelloAck {..})));
+        fn resolve(client: &mut PipeStream, id: u64, result_id: &str, proof: Option<String>) -> ServerMessage {
+            write_message(client, &ClientMessage::ResolveEntry { id,
+                reference: ws_protocol::EntryReference { result_id: result_id.into(), source_revision: proof } }).unwrap();
+            loop {
+                match read_message::<_,ServerMessage>(client).unwrap().unwrap() {
+                    ServerMessage::Status { .. } => continue,
+                    response => return response,
+                }
+            }
+        }
+        let result_id = format!("e{entry_id}");
+        let ServerMessage::ResolvedEntry { id:1, entry } = resolve(&mut client, 1, &result_id, None)
+            else { panic!("a native indexed identity must resolve to current admitted metadata"); };
+        assert_eq!(entry.path, source.to_string_lossy());
+        assert_eq!(entry.root_path, root.to_string_lossy());
+        assert_eq!(entry.size_bytes, 13);
+        assert_eq!(entry.index_revision, None, "metadata-only crawl has no content revision proof");
+        std::fs::OpenOptions::new().write(true).open(&source).unwrap().set_times(
+            std::fs::FileTimes::new().set_modified(std::time::UNIX_EPOCH - Duration::from_millis(500))).unwrap();
+        let ServerMessage::ResolvedEntry {entry,..} = resolve(&mut client,10,&result_id,None)
+            else {panic!("resolve pre-epoch file metadata");};
+        assert_eq!(entry.modified_unix_seconds,Some(-1),"Unix seconds floor fractional pre-epoch times");
+        indexer.extract_once_with(&crate::extract::ExtractorRegistry::default(),
+            |texts| Ok(vec![vec![1.0, 0.0]; texts.len()])).unwrap();
+        let ServerMessage::ResolvedEntry {entry,..} = resolve(&mut client,11,&result_id,None)
+            else {panic!("resolve after exact content extraction");};
+        assert!(entry.index_revision.is_some_and(|revision| revision > 0));
+        indexer.invalidate_vector_cache();
+        assert!(matches!(resolve(&mut client,2,&result_id,Some(entry.source_revision.clone())),
+            ServerMessage::ResolvedEntry {id:2,..}), "unrelated vector cache changes must not expire media references");
+        indexer.set_indexing_config(&indexer.get_indexing_config().unwrap()).unwrap();
+        assert!(matches!(resolve(&mut client,20,&result_id,Some(entry.source_revision.clone())),
+            ServerMessage::ResolvedEntry {id:20,..}), "saving an unchanged policy must not expire a current reference");
+        std::fs::write(&source, "replacement with a different size").unwrap();
+        assert!(matches!(resolve(&mut client,3,&result_id,Some(entry.source_revision)),ServerMessage::Error { id:Some(3),.. }));
+        let ServerMessage::ResolvedEntry {entry: fresh,..} = resolve(&mut client,4,&result_id,None) else {panic!("refresh after source replacement");};
+        assert_eq!(fresh.size_bytes, 33);
+        assert_eq!(fresh.index_revision,None,"old extracted content cannot prove a replacement source");
+        indexer.store_lock().reset_content_vectors().unwrap();
+        assert!(matches!(resolve(&mut client,5,&result_id,Some(fresh.source_revision)),ServerMessage::Error {id:Some(5),..}));
+        let ServerMessage::ResolvedEntry {entry: fresh,..} = resolve(&mut client,6,&result_id,None) else {panic!("refresh after model change");};
+        let config = indexer.get_indexing_config().unwrap();
+        let mut revoked = config.clone(); revoked.roots.clear();
+        indexer.set_indexing_config(&revoked).unwrap();
+        assert!(matches!(resolve(&mut client,7,&result_id,None),ServerMessage::Error {id:Some(7),..}));
+        indexer.set_indexing_config(&config).unwrap();
+        assert!(matches!(resolve(&mut client,8,&result_id,Some(fresh.source_revision)),ServerMessage::Error {id:Some(8),..}),
+            "restoring a grant cannot revive a pre-revocation reference");
+        for bad in ["C:/outside/secret.txt","e-1","e+1","e01","e0","e9223372036854775808"] {
+            assert!(matches!(resolve(&mut client,9,bad,None),ServerMessage::Error {id:Some(9),..}),"{bad}");
+        }
+        indexer.set_indexing_config(&revoked).unwrap();
+        drop(client);
+        std::fs::remove_file(&source).unwrap();
+        std::fs::remove_dir(&root).unwrap();
     }
 
     #[test]

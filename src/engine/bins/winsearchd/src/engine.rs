@@ -301,6 +301,72 @@ impl EngineService {
 
     // ---- model management (P3.3) ----
 
+    pub fn resolve_entry(&self, client: &ClientHandle, id: RequestId, reference: ws_protocol::EntryReference) {
+        let response = match self.resolve_entry_snapshot(&reference) {
+            Ok(entry) => ServerMessage::ResolvedEntry { id, entry },
+            Err(code) => ServerMessage::Error { id: Some(id), code,
+                message: "entry is unavailable or changed".into() },
+        };
+        let _ = client.send(&response);
+    }
+
+    pub(crate) fn resolve_entry_snapshot(&self, reference: &ws_protocol::EntryReference)
+        -> Result<ws_protocol::ResolvedEntry, ErrorCode> {
+        let invalid = ErrorCode::InvalidRequest;
+        if reference.result_id.len() > 32 || reference.source_revision.as_ref().is_some_and(|s| s.len() > 64 * 1024) {
+            return Err(invalid);
+        }
+        let entry_id = reference.result_id.strip_prefix('e').and_then(|s| s.parse::<i64>().ok())
+            .filter(|id| *id > 0 && reference.result_id == format!("e{id}"))
+            .ok_or(invalid)?;
+        let policy_epoch = self.indexer.policy_epoch();
+        let (entry, root_path, revision, generation, indexed) = {
+            let store = self.indexer.store_lock();
+            if !store.entry_visible(entry_id).map_err(|_| ErrorCode::Internal)? { return Err(ErrorCode::NotReady); }
+            let entry = store.get_entry(entry_id).map_err(|_| ErrorCode::Internal)?.ok_or(ErrorCode::NotReady)?;
+            if entry.is_app || entry.missing { return Err(ErrorCode::NotReady); }
+            let root = store.roots().map_err(|_| ErrorCode::Internal)?.into_iter()
+                .find(|r| r.id == entry.root_id && r.enabled).ok_or(ErrorCode::NotReady)?;
+            let revision = store.content_revision(entry_id).map_err(|_| ErrorCode::Internal)?;
+            let generation = store.model_generation().map_err(|_| ErrorCode::Internal)?;
+            let indexed = store.entry_content_allowed(entry_id).map_err(|_| ErrorCode::Internal)?;
+            (entry, root.path, revision, generation, indexed)
+        };
+        let path = std::path::Path::new(&entry.path);
+        if !self.indexer.content_path_allowed(path) || ws_platform::identity::file_identity(path).is_none() {
+            return Err(ErrorCode::NotReady);
+        }
+        let snapshot = crate::extract::source_snapshot(path);
+        if snapshot.is_empty() { return Err(ErrorCode::NotReady); }
+        let metadata = std::fs::metadata(path).map_err(|_| ErrorCode::NotReady)?;
+        let proof = format!("{policy_epoch}:{generation}:{revision}:{snapshot}");
+        if reference.source_revision.as_ref().is_some_and(|expected| expected != &proof) {
+            return Err(ErrorCode::NotReady);
+        }
+        let modified = metadata.modified().ok().and_then(|time| match time.duration_since(std::time::UNIX_EPOCH) {
+            Ok(duration) => i64::try_from(duration.as_secs()).ok(),
+            Err(error) => {
+                let duration = error.duration();
+                duration.as_secs().checked_add(u64::from(duration.subsec_nanos() > 0))
+                    .and_then(|seconds| i64::try_from(seconds).ok()).and_then(i64::checked_neg)
+            }
+        });
+        {
+            let store = self.indexer.store_lock();
+            if self.indexer.policy_epoch() != policy_epoch
+                || store.model_generation().map_err(|_| ErrorCode::Internal)? != generation
+                || store.content_revision(entry_id).map_err(|_| ErrorCode::Internal)? != revision
+                || !store.entry_visible(entry_id).map_err(|_| ErrorCode::Internal)?
+                || !self.indexer.content_path_allowed(path) || crate::extract::source_snapshot(path) != snapshot {
+                return Err(ErrorCode::NotReady);
+            }
+        }
+        Ok(ws_protocol::ResolvedEntry { result_id: reference.result_id.clone(), root_path,
+            path: entry.path.clone(), name: entry.name.clone(), kind: to_result_kind(entry_hit_kind(&entry)),
+            size_bytes: metadata.len(), modified_unix_seconds: modified,
+            index_revision: (indexed && revision > 0).then_some(revision), source_revision: proof })
+    }
+
     fn answer_model_status(&self, client: &ClientHandle, id: RequestId) {
         let _ = client.send(&ServerMessage::ModelStatus {
             id: Some(id),

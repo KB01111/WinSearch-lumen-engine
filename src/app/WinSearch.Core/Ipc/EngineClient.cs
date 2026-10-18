@@ -23,6 +23,7 @@ public interface IEngineClient : IAsyncDisposable
     event EventHandler? Reconnected;
 
     Task<EngineStatus> GetStatusAsync(CancellationToken cancellationToken = default);
+    Task<ResolvedEntry> ResolveEntryAsync(EntryReference reference, CancellationToken cancellationToken = default);
     Task<ModelStatus> StartModelDownloadAsync(CancellationToken cancellationToken = default);
     Task<ModelStatus> CancelModelDownloadAsync(CancellationToken cancellationToken = default);
     Task<ModelStatus> ImportModelAsync(string path, CancellationToken cancellationToken = default);
@@ -55,6 +56,7 @@ public sealed class EngineClient : IEngineClient
     private Task? _readLoop;
     private TaskCompletionSource<HelloAckMessage>? _helloAck;
     private long _nextRequestId;
+    private string[] _features = [];
     private bool _disposed;
 
     public string PipeName { get; }
@@ -142,6 +144,7 @@ public sealed class EngineClient : IEngineClient
         }
 
         _pipe = pipe;
+        _features = [];
         _lifetime.Dispose();
         _lifetime = new CancellationTokenSource();
         _helloAck = new TaskCompletionSource<HelloAckMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -168,6 +171,7 @@ public sealed class EngineClient : IEngineClient
                 ErrorCode.ProtocolVersionMismatch,
                 $"engine speaks protocol v{ack.ProtocolVersion}, client speaks v{ProtocolJson.Version}");
         }
+        _features = ack.Features.ToArray();
         Reconnected?.Invoke(this, EventArgs.Empty);
         return ack;
     }
@@ -175,6 +179,47 @@ public sealed class EngineClient : IEngineClient
     /// <summary>Requests a status snapshot; pushed updates also arrive via <see cref="StatusChanged"/>.</summary>
     public Task<EngineStatus> GetStatusAsync(CancellationToken cancellationToken = default)
         => UnaryAsync(static id => new GetStatusMessage { Id = id }, static m => ((StatusMessage)m).Status, cancellationToken);
+
+    public Task<ResolvedEntry> ResolveEntryAsync(EntryReference reference, CancellationToken cancellationToken = default)
+    {
+        if (IsConnected && !_features.Contains("entry.resolve", StringComparer.Ordinal))
+            return Task.FromException<ResolvedEntry>(new EngineException(ErrorCode.Unsupported, "engine does not support entry resolution"));
+        var resultId = reference.ResultId;
+        var sourceRevision = reference.SourceRevision;
+        return UnaryAsync(id => new ResolveEntryMessage { Id = id,
+                Reference = new() { ResultId = resultId, SourceRevision = sourceRevision } }, m =>
+            m is ResolvedEntryMessage resolved && ResolvedEntryMatches(resolved.Entry, resultId, sourceRevision)
+                ? resolved.Entry : throw new EngineException(ErrorCode.InvalidRequest, "entry resolution identity changed"), cancellationToken);
+    }
+
+    private static bool ResolvedEntryMatches(ResolvedEntry? entry, string resultId, string? sourceRevision)
+    {
+        if (entry is null || entry.RootPath is null || entry.Path is null
+            || entry.ResultId != resultId || string.IsNullOrWhiteSpace(entry.SourceRevision)
+            || string.IsNullOrWhiteSpace(entry.Name) || entry.IndexRevision is <= 0
+            || (sourceRevision is not null && entry.SourceRevision != sourceRevision)
+            || !Enum.IsDefined(entry.Kind))
+            return false;
+        var root = entry.RootPath.Replace('/', '\\');
+        var path = entry.Path.Replace('/', '\\');
+        static bool LocalDisk(string path)
+        {
+            if (path.StartsWith(@"\\?\", StringComparison.Ordinal)) path = path[4..];
+            return path.Length >= 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && path[2] == '\\'
+                && !path.AsSpan(2).Contains(':');
+        }
+        if (!LocalDisk(root) || !LocalDisk(path)) return false;
+        try
+        {
+            var relative = Path.GetRelativePath(root, path);
+            return !Path.IsPathRooted(relative) && relative != ".."
+                && !relative.StartsWith(@"..\", StringComparison.Ordinal);
+        }
+        catch (Exception error) when (error is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+    }
 
     /// <summary>Starts (or resumes) the embedding-model download; progress arrives via <see cref="ModelStatusChanged"/>.</summary>
     public Task<ModelStatus> StartModelDownloadAsync(CancellationToken cancellationToken = default)
@@ -379,6 +424,10 @@ public sealed class EngineClient : IEngineClient
     {
         switch (message)
         {
+            case ResolvedEntryMessage resolved:
+                if (_unary.TryRemove(resolved.Id, out var resolvedTcs))
+                    resolvedTcs.TrySetResult(resolved);
+                break;
             case IndexingConfigMessage indexing:
                 if (indexing.Id is { } indexingId && _unary.TryRemove(indexingId, out var indexingTcs))
                     indexingTcs.TrySetResult(indexing);

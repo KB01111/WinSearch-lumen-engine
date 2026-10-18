@@ -27,6 +27,108 @@ public class IndexingPipeTests
         ((IDictionary)typeof(EngineClient).GetField(field, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(client)!).Count;
 
     [Fact]
+    public async Task EntryResolutionDispatchesMetadataAndRejectsAnotherIdentity()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = timeout.Token;
+        var pipe = "winsearch-entry-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        var received = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        async Task Serve()
+        {
+            await server.WaitForConnectionAsync(token);
+            Assert.IsType<HelloMessage>(await ReadAsync(server, token));
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1, Features = ["entry.resolve"] }, token);
+            var request = Assert.IsType<ResolveEntryMessage>(await ReadAsync(server, token));
+            Assert.Equal("e23", request.Reference.ResultId);
+            Assert.Equal("opaque-native-proof", request.Reference.SourceRevision);
+            received.TrySetResult();
+            await release.Task.WaitAsync(token);
+            await WriteAsync(server, new ResolvedEntryMessage { Id = request.Id,
+                Entry = new() { ResultId = "e23", SourceRevision = "opaque-native-proof", SizeBytes = 1234,
+                    RootPath = @"C:\fixture", Path = @"C:\fixture\report.pdf", Name = "report.pdf", Kind = ResultKind.Document } }, token);
+            request = Assert.IsType<ResolveEntryMessage>(await ReadAsync(server, token));
+            await WriteAsync(server, new ResolvedEntryMessage { Id = request.Id,
+                Entry = new() { ResultId = "e24", SourceRevision = "opaque-native-proof" } }, token);
+            request = Assert.IsType<ResolveEntryMessage>(await ReadAsync(server, token));
+            await WriteAsync(server, new ResolvedEntryMessage { Id = request.Id,
+                Entry = new() { ResultId = "e23", SourceRevision = "opaque-native-proof",
+                    RootPath = @"C:\fixture", Path = @"C:\outside\secret.txt", Name = "secret.txt", Kind = ResultKind.Document } }, token);
+            request = Assert.IsType<ResolveEntryMessage>(await ReadAsync(server, token));
+            await WriteAsync(server, new ResolvedEntryMessage { Id = request.Id,
+                Entry = new() { ResultId = "e23", RootPath = @"C:\fixture", Path = @"C:\fixture\report.pdf",
+                    Name = "report.pdf", Kind = ResultKind.Document } }, token);
+            foreach (var entry in new object?[] { null, new { result_id = "e23", source_revision = "proof",
+                root_path = (string?)null, path = @"C:\fixture\report.pdf", name = "report.pdf", kind = "document" } })
+            {
+                request = Assert.IsType<ResolveEntryMessage>(await ReadAsync(server, token));
+                var malformed = JsonSerializer.SerializeToUtf8Bytes(new { type = "resolved_entry", id = request.Id, entry });
+                await server.WriteAsync(BitConverter.GetBytes(malformed.Length), token);
+                await server.WriteAsync(malformed, token);
+                await server.FlushAsync(token);
+            }
+            request = Assert.IsType<ResolveEntryMessage>(await ReadAsync(server, token));
+            await WriteAsync(server, new ResolvedEntryMessage { Id = request.Id,
+                Entry = new() { ResultId = "e23", RootPath = @"C:\fixture", Path = @"C:\fixture\report.pdf",
+                    Name = "report.pdf", Kind = ResultKind.Document, SourceRevision = "other-proof" } }, token);
+        }
+        var serving = Serve();
+        await using var client = new EngineClient(pipe);
+        await client.ConnectAsync(token);
+        var reference = new EntryReference { ResultId = "e23", SourceRevision = "opaque-native-proof" };
+        var resolving = client.ResolveEntryAsync(reference, token);
+        await received.Task.WaitAsync(token);
+        reference.ResultId = "e24";
+        reference.SourceRevision = "different-proof";
+        release.TrySetResult();
+        var entry = await resolving;
+        Assert.Equal("e23", entry.ResultId);
+        Assert.Equal(1234UL, entry.SizeBytes);
+        await Assert.ThrowsAsync<EngineException>(() => client.ResolveEntryAsync(new() { ResultId = "e23" }, token));
+        await Assert.ThrowsAsync<EngineException>(() => client.ResolveEntryAsync(new() { ResultId = "e23" }, token));
+        await Assert.ThrowsAsync<EngineException>(() => client.ResolveEntryAsync(new() { ResultId = "e23" }, token));
+        await Assert.ThrowsAsync<EngineException>(() => client.ResolveEntryAsync(new() { ResultId = "e23" }, token));
+        await Assert.ThrowsAsync<EngineException>(() => client.ResolveEntryAsync(new() { ResultId = "e23" }, token));
+        await Assert.ThrowsAsync<EngineException>(() => client.ResolveEntryAsync(new()
+            { ResultId = "e23", SourceRevision = "opaque-native-proof" }, token));
+        Assert.Equal(0, Pending(client, "_unary"));
+        await serving;
+    }
+
+    [Fact]
+    public async Task EntryResolutionRequiresTheAdvertisedEngineCapability()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = timeout.Token;
+        var pipe = "winsearch-entry-legacy-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        async Task Serve()
+        {
+            await server.WaitForConnectionAsync(token);
+            Assert.IsType<HelloMessage>(await ReadAsync(server, token));
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1 }, token);
+            var request = await ReadAsync(server, token);
+            if (request is ResolveEntryMessage unexpected)
+            {
+                await WriteAsync(server, new ResolvedEntryMessage { Id = unexpected.Id, Entry = new()
+                { ResultId = "e1", RootPath = @"C:\fixture", Path = @"C:\fixture\file.txt",
+                    Name = "file.txt", Kind = ResultKind.File, SourceRevision = "proof" } }, token);
+                return;
+            }
+            var status = Assert.IsType<GetStatusMessage>(request);
+            await WriteAsync(server, new StatusMessage { Id = status.Id, Status = new() }, token);
+        }
+        var serving = Serve();
+        await using var client = new EngineClient(pipe);
+        await client.ConnectAsync(token);
+        await Assert.ThrowsAsync<EngineException>(() => client.ResolveEntryAsync(new() { ResultId = "e1" }, token));
+        await client.GetStatusAsync(token);
+        Assert.Equal(0, Pending(client, "_unary"));
+        await serving;
+    }
+
+    [Fact]
     public async Task FailedWritesReleaseUnaryAndSearchWaiters()
     {
         await using var client = new EngineClient("unused-" + Guid.NewGuid());

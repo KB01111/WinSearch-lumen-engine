@@ -7,6 +7,33 @@ namespace WinSearch.Tests;
 public class IndexingContractTests
 {
     [Fact]
+    public void NativeResolvedEntryRetainsCurrentSourceAndContentRevisionSeparately()
+    {
+        const string json = """
+            {"type":"resolved_entry","id":41,"entry":{"result_id":"e23","root_path":"C:/fixture",
+            "path":"C:/fixture/report.pdf","name":"report.pdf","kind":"document","size_bytes":1234,
+            "modified_unix_seconds":1700000000,"index_revision":7,"source_revision":"opaque-native-source-proof"}}
+            """;
+        var message = JsonSerializer.Deserialize<ServerMessage>(json, ProtocolJson.Options)!;
+        using var encoded = JsonDocument.Parse(JsonSerializer.Serialize(message, ProtocolJson.Options));
+        Assert.Equal("resolved_entry", encoded.RootElement.GetProperty("type").GetString());
+        var entry = encoded.RootElement.GetProperty("entry");
+        Assert.Equal("opaque-native-source-proof", entry.GetProperty("source_revision").GetString());
+        Assert.Equal(7, entry.GetProperty("index_revision").GetInt64());
+        Assert.Equal(1234UL, entry.GetProperty("size_bytes").GetUInt64());
+    }
+
+    [Fact]
+    public void EntryReferenceAcceptsIndexedIdentityAndRejectsCallerPaths()
+    {
+        const string valid = """{"type":"resolve_entry","id":1,"reference":{"result_id":"e23"}}""";
+        var request = Assert.IsType<ResolveEntryMessage>(JsonSerializer.Deserialize<ClientMessage>(valid, ProtocolJson.Options));
+        Assert.Equal("e23", request.Reference.ResultId);
+        const string invalid = """{"type":"resolve_entry","id":1,"reference":{"result_id":"e23","path":"C:/outside/secret.txt"}}""";
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<ClientMessage>(invalid, ProtocolJson.Options));
+    }
+
+    [Fact]
     public void ExactMatchMomentsAreTypedAndOldResultsKeepDefaults()
     {
         var oldResult = JsonSerializer.Deserialize<SearchResult>("{\"id\":\"e1\",\"title\":\"old.txt\"}", ProtocolJson.Options)!;

@@ -256,7 +256,19 @@ def main():
             wait_for(ready)
             wait_for(lambda: bool(control.request('search', query={'text': 'parityneedle', 'mode': 'code', 'limit': 5})))
             summary['index_seconds'] = round(time.perf_counter()-start, 3)
-            compare('document_exact', 'amberparitytoken', expected='item-a.txt', location={'kind': 'line', 'line': 2})
+            document_hits = compare('document_exact', 'amberparitytoken', expected='item-a.txt', location={'kind': 'line', 'line': 2})
+            document_hit = next(hit for hit in document_hits if Path(hit['path']).name == 'item-a.txt')
+            reference = {'result_id':document_hit['id'],'source_revision':None}
+            resolved = control.request('resolve_entry', reference=reference)
+            assert resolved['type']=='resolved_entry',resolved
+            entry = resolved['entry']
+            assert entry['result_id']==document_hit['id'] and Path(entry['path'])==documents/'item-a.txt',entry
+            assert Path(entry['root_path'])==documents and entry['size_bytes']==(documents/'item-a.txt').stat().st_size,entry
+            assert entry['index_revision']>0 and entry['source_revision'],entry
+            reference['source_revision']=entry['source_revision']
+            assert control.request('resolve_entry',reference=reference)['entry']==entry
+            summary['entry_resolution']={'admitted':resolved}
+            summary['checks'].append('native_indexed_entry_resolution_with_current_source_proof')
             compare('pdf_exact', 'pdfparitytoken', expected='item-b.pdf', location={'kind': 'page', 'page': 2})
             hits = compare('code_definition_reference', 'parityneedle', mode='code', expected=source.name, location={'kind': 'line', 'line': 1})
             assert len(hits) == 2 and hits[1]['location'] == {'kind': 'line', 'line': 2}, hits
@@ -324,6 +336,14 @@ def main():
                 summary['checks'].append('real_in_flight_root_revocation_empty_terminal')
             config.update(roots=[], code_roots=[])
             control.request('set_indexing_config', config=config)
+            client.sequence+=1
+            client.send({'type':'resolve_entry','id':client.sequence,'reference':reference})
+            while True:
+                denied=client.read()
+                if denied.get('id')==client.sequence:break
+            assert denied['type']=='error' and denied['code']=='not_ready' and 'entry' not in denied,denied
+            summary['entry_resolution']['revoked']=denied
+            summary['checks'].append('native_entry_reference_rejected_after_root_revocation')
             compare('revoked_document', 'amberparitytoken', empty=True)
             compare('revoked_code', 'parityneedle', mode='code', empty=True)
             if options.real_model:

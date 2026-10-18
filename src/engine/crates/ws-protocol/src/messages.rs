@@ -23,6 +23,10 @@ pub enum ClientMessage {
     Ping {
         id: RequestId,
     },
+    ResolveEntry {
+        id: RequestId,
+        reference: crate::EntryReference,
+    },
     /// Execute a search. Results stream back as `Results` frames with the same
     /// id; the last frame has `done: true`. Superseded/cancelled requests are
     /// closed early with `done: true`.
@@ -101,6 +105,10 @@ pub enum ServerMessage {
     },
     Pong {
         id: RequestId,
+    },
+    ResolvedEntry {
+        id: RequestId,
+        entry: crate::ResolvedEntry,
     },
     Results {
         id: RequestId,

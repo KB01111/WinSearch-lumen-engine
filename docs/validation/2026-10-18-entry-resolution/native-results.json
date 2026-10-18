@@ -1,0 +1,738 @@
+{
+  "scope": "Actual daemon/public CLI DTO parity, optionally including offline-ranker snapshots.\n\nDefault: native document/PDF/code extraction without a model. --real-model adds\ngenuine CPU semantic image/audio/video checks using existing generated fixtures.\nBoth modes use an isolated data directory and a kill-on-close Windows job.\nThe snapshot option compares query code on the same native indexed vectors;\nfixture seeding and native extraction remain separately classified evidence.\n",
+  "real_model_requested": false,
+  "queries": [
+    {
+      "name": "code_disabled",
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 2,
+          "batch": [],
+          "done": true
+        }
+      ],
+      "cli": [],
+      "expect_empty": true
+    },
+    {
+      "name": "document_exact",
+      "query": {
+        "text": "amberparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 3,
+          "batch": [
+            {
+              "id": "e3",
+              "kind": "document",
+              "title": "item-a.txt",
+              "subtitle": "<fixture>\\documents\\item-a.txt",
+              "match_explanation": "Matches extracted content",
+              "score": 0.41,
+              "path": "<fixture>\\documents\\item-a.txt",
+              "location": {
+                "kind": "line",
+                "line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+              "matching_moments": [
+                {
+                  "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+                  "location": {
+                    "kind": "line",
+                    "line": 2
+                  },
+                  "thumbnail_path": null
+                }
+              ]
+            }
+          ],
+          "done": true
+        }
+      ],
+      "cli": [
+        {
+          "id": "e3",
+          "kind": "document",
+          "title": "item-a.txt",
+          "subtitle": "<fixture>\\documents\\item-a.txt",
+          "match_explanation": "Matches extracted content",
+          "score": 0.41,
+          "path": "<fixture>\\documents\\item-a.txt",
+          "location": {
+            "kind": "line",
+            "line": 2
+          },
+          "thumbnail_path": null,
+          "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+          "matching_moments": [
+            {
+              "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+              "location": {
+                "kind": "line",
+                "line": 2
+              },
+              "thumbnail_path": null
+            }
+          ]
+        }
+      ],
+      "expect_empty": false,
+      "expected_name": "item-a.txt",
+      "expected_max_rank": 1,
+      "modality": "document",
+      "relevant_rank": 1
+    },
+    {
+      "name": "pdf_exact",
+      "query": {
+        "text": "pdfparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 4,
+          "batch": [
+            {
+              "id": "e4",
+              "kind": "document",
+              "title": "item-b.pdf",
+              "subtitle": "<fixture>\\documents\\item-b.pdf",
+              "match_explanation": "Matches extracted content",
+              "score": 0.41,
+              "path": "<fixture>\\documents\\item-b.pdf",
+              "location": {
+                "kind": "page",
+                "page": 2
+              },
+              "thumbnail_path": "<checkout>\\artifacts\\entry-resolution-daemon-green-v2\\data\\cache\\thumbs\\extract-69388-1792291447892318500-3-0.png",
+              "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+              "matching_moments": [
+                {
+                  "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+                  "location": {
+                    "kind": "page",
+                    "page": 2
+                  },
+                  "thumbnail_path": "<checkout>\\artifacts\\entry-resolution-daemon-green-v2\\data\\cache\\thumbs\\extract-69388-1792291447892318500-3-1.png"
+                }
+              ]
+            }
+          ],
+          "done": true
+        }
+      ],
+      "cli": [
+        {
+          "id": "e4",
+          "kind": "document",
+          "title": "item-b.pdf",
+          "subtitle": "<fixture>\\documents\\item-b.pdf",
+          "match_explanation": "Matches extracted content",
+          "score": 0.41,
+          "path": "<fixture>\\documents\\item-b.pdf",
+          "location": {
+            "kind": "page",
+            "page": 2
+          },
+          "thumbnail_path": "<checkout>\\artifacts\\entry-resolution-daemon-green-v2\\data\\cache\\thumbs\\extract-69388-1792291447892318500-3-0.png",
+          "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+          "matching_moments": [
+            {
+              "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+              "location": {
+                "kind": "page",
+                "page": 2
+              },
+              "thumbnail_path": "<checkout>\\artifacts\\entry-resolution-daemon-green-v2\\data\\cache\\thumbs\\extract-69388-1792291447892318500-3-1.png"
+            }
+          ]
+        }
+      ],
+      "expect_empty": false,
+      "expected_name": "item-b.pdf",
+      "expected_max_rank": 1,
+      "modality": "document",
+      "relevant_rank": 1
+    },
+    {
+      "name": "code_definition_reference",
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 5,
+          "batch": [
+            {
+              "id": "code:2:1:true:parityneedle",
+              "kind": "code",
+              "title": "parityneedle",
+              "subtitle": "<fixture>\\code\\\u6e90 code.rs",
+              "match_explanation": "function \u00b7 line 1",
+              "score": 1.0,
+              "path": "<fixture>\\code\\\u6e90 code.rs",
+              "location": {
+                "kind": "line",
+                "line": 1
+              },
+              "thumbnail_path": null,
+              "excerpt": "pub fn parityneedle() {}",
+              "matching_moments": []
+            },
+            {
+              "id": "code:2:2:false:parityneedle",
+              "kind": "code",
+              "title": "parityneedle",
+              "subtitle": "<fixture>\\code\\\u6e90 code.rs",
+              "match_explanation": "reference \u00b7 line 2",
+              "score": 0.949999988079071,
+              "path": "<fixture>\\code\\\u6e90 code.rs",
+              "location": {
+                "kind": "line",
+                "line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "parityneedle",
+              "matching_moments": []
+            }
+          ],
+          "done": true
+        }
+      ],
+      "cli": [
+        {
+          "id": "code:2:1:true:parityneedle",
+          "kind": "code",
+          "title": "parityneedle",
+          "subtitle": "<fixture>\\code\\\u6e90 code.rs",
+          "match_explanation": "function \u00b7 line 1",
+          "score": 1.0,
+          "path": "<fixture>\\code\\\u6e90 code.rs",
+          "location": {
+            "kind": "line",
+            "line": 1
+          },
+          "thumbnail_path": null,
+          "excerpt": "pub fn parityneedle() {}",
+          "matching_moments": []
+        },
+        {
+          "id": "code:2:2:false:parityneedle",
+          "kind": "code",
+          "title": "parityneedle",
+          "subtitle": "<fixture>\\code\\\u6e90 code.rs",
+          "match_explanation": "reference \u00b7 line 2",
+          "score": 0.949999988079071,
+          "path": "<fixture>\\code\\\u6e90 code.rs",
+          "location": {
+            "kind": "line",
+            "line": 2
+          },
+          "thumbnail_path": null,
+          "excerpt": "parityneedle",
+          "matching_moments": []
+        }
+      ],
+      "expect_empty": false,
+      "expected_name": "\u6e90 code.rs",
+      "expected_max_rank": 1,
+      "modality": "code",
+      "relevant_rank": 1
+    },
+    {
+      "name": "notebook",
+      "query": {
+        "text": "notebookparity",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 6,
+          "batch": [
+            {
+              "id": "code:1:2:true:notebookparity",
+              "kind": "code",
+              "title": "notebookparity",
+              "subtitle": "<fixture>\\code\\cells.ipynb",
+              "match_explanation": "function \u00b7 cell 2, line 1",
+              "score": 1.0,
+              "path": "<fixture>\\code\\cells.ipynb",
+              "location": {
+                "kind": "notebook",
+                "cell_ordinal": 1,
+                "line": 1,
+                "end_line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "def notebookparity():\n    return 1",
+              "matching_moments": []
+            }
+          ],
+          "done": true
+        }
+      ],
+      "cli": [
+        {
+          "id": "code:1:2:true:notebookparity",
+          "kind": "code",
+          "title": "notebookparity",
+          "subtitle": "<fixture>\\code\\cells.ipynb",
+          "match_explanation": "function \u00b7 cell 2, line 1",
+          "score": 1.0,
+          "path": "<fixture>\\code\\cells.ipynb",
+          "location": {
+            "kind": "notebook",
+            "cell_ordinal": 1,
+            "line": 1,
+            "end_line": 2
+          },
+          "thumbnail_path": null,
+          "excerpt": "def notebookparity():\n    return 1",
+          "matching_moments": []
+        }
+      ],
+      "expect_empty": false,
+      "expected_name": "cells.ipynb",
+      "expected_max_rank": 1,
+      "modality": "code",
+      "relevant_rank": 1
+    },
+    {
+      "name": "code_isolation",
+      "query": {
+        "text": "parityneedle",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 7,
+          "batch": [],
+          "done": true
+        }
+      ],
+      "cli": [],
+      "expect_empty": true
+    },
+    {
+      "name": "absent_exact",
+      "query": {
+        "text": "unfindableparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 8,
+          "batch": [],
+          "done": true
+        }
+      ],
+      "cli": [],
+      "expect_empty": true
+    },
+    {
+      "name": "code_absent_exact",
+      "query": {
+        "text": "unfindableparitytoken",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 9,
+          "batch": [],
+          "done": true
+        }
+      ],
+      "cli": [],
+      "expect_empty": true
+    },
+    {
+      "name": "revoked_document",
+      "query": {
+        "text": "amberparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 11,
+          "batch": [],
+          "done": true
+        }
+      ],
+      "cli": [],
+      "expect_empty": true
+    },
+    {
+      "name": "revoked_code",
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 12,
+          "batch": [],
+          "done": true
+        }
+      ],
+      "cli": [],
+      "expect_empty": true
+    }
+  ],
+  "checks": [
+    "native_indexed_entry_resolution_with_current_source_proof",
+    "native_extraction_exact_code_opt_in_and_payload_parity",
+    "native_code_exact_with_zero_model_vectors",
+    "shared_offline_ranker_native_snapshot_ordered_ids_and_locations",
+    "native_entry_reference_rejected_after_root_revocation",
+    "live_root_revocation_public_cli_and_pipe",
+    "unchanged_overall_recall_mrr_and_zero_negative_controls"
+  ],
+  "failures": [],
+  "quality_misses": [],
+  "owned_job_empty": true,
+  "harness_sha256": "0412daa6046bc143c605c931adabc252d9020f8c78c97856ecf4cd42a19da713",
+  "expected_pipeline_version": 2,
+  "expected_semantic_floor": 0.65,
+  "binary_sha256": {
+    "winsearchd.exe": "aaa2a6a1031c29bcc42c4ec6d0a9f920d81b1c7921379c490989bf061c3587dd",
+    "winsearch-cli.exe": "cbe8bc0ff7377e4228b1e402b938d1b0695c08d668bd84fea966823f0b56dfe6",
+    "winsearch-embed.exe": "90c998ba28f1ebbb522fbb1cbe5b78d6d433131461221027ce5df937cef3a698",
+    "winsearch-extract.exe": "958201bf4b31b8b5d49a23d41295919e0af6921f30d476b983799821e80ccba2"
+  },
+  "adjacent_native_dll_sha256": {
+    "ggml-base.dll": "f90aa4e0cfd7809b84f8866526e70d3dc0f5deecf59371e24ce57a6f4da54b89",
+    "ggml-cpu-alderlake.dll": "697a3d64209cd048941a52cc659bd721b843ec2460fefd015cf6c05851bc6998",
+    "ggml-cpu-cannonlake.dll": "d1a1703e870094b3ded18fbaa703cc6ba109a4ec17eae75933b5e37e97ec94c1",
+    "ggml-cpu-cascadelake.dll": "ab6bb30884c0bb91cb7ab35e3a5cf2e94817a5be02afa373db43fb43d912d3c2",
+    "ggml-cpu-haswell.dll": "ff1899b838915629b543eefaca2b59cbd697eb545ca3d053849e9720dcf93bf2",
+    "ggml-cpu-icelake.dll": "c37dd0d96c6d18cfcbe613415348989054bca4b813fc895c1e0ea5e2fa582f0f",
+    "ggml-cpu-sandybridge.dll": "a185ef2810f9b94b227cdc79cceecd73392964897383021cf549ae0a93f8ab1d",
+    "ggml-cpu-skylakex.dll": "f735470e98ac465bcaefa49c011e9a6312792ed8352447ca5b94e0d3ea959828",
+    "ggml-cpu-sse42.dll": "1cc60a342cfa4e3671d8248c331bfffbc75a16c29c889832fc78b736bbef2488",
+    "ggml-cpu-x64.dll": "9856ba92bbf4f17a643bf86e5da819f4ea2ecff86a3f76072d6fd0f6b489bec3",
+    "ggml.dll": "d9380866b1560cd58f129d5ead2ec2b3d36c4c25097efed504d7747959ae0513",
+    "llama.dll": "46209859b057ce876c8b1d320087cde3e0d7e21baef9dcadce309ca349906a7c",
+    "mtmd.dll": "384b412308a247a2404911e2bcc95c6d6470cb99626f29cdf141d4f47e863c69",
+    "pdfium.dll": "1f2aee4286b8cf0413ab4562b7121aa454f9cfd9afd6ca8609bcef80927b3f80"
+  },
+  "offline_comparator_sha256": "144e60e01e5de695eb2747276023fe8c4224e6117fb560c55a13e79076b69341",
+  "generated_source_sha256": {
+    "code\\cells.ipynb": "c26bfe670e78159ce485c66550cb8b38f5b7853d607d710950372a09254f1c01",
+    "code\\\u6e90 code.rs": "e91ca6326352f465dabbe4bc67d4271714e226c0a09cc36fdecc9f45c2e80bef",
+    "documents\\item-a.txt": "9fc1db8e72de0275279a18f08a76e43fbbeae6fbde7b9924c4d1f351eb4652d1",
+    "documents\\item-b.pdf": "028cfcb54c84c18f5351445f7edeb6d2651e9e4950714c61042cdd911870671e"
+  },
+  "index_seconds": 2.142,
+  "entry_resolution": {
+    "admitted": {
+      "type": "resolved_entry",
+      "id": 6,
+      "entry": {
+        "result_id": "e3",
+        "root_path": "<fixture>\\documents",
+        "path": "<fixture>\\documents\\item-a.txt",
+        "name": "item-a.txt",
+        "kind": "document",
+        "size_bytes": 85,
+        "modified_unix_seconds": 1792291446,
+        "index_revision": 1,
+        "source_revision": "<opaque native identity proof redacted>"
+      }
+    },
+    "revoked": {
+      "type": "error",
+      "id": 10,
+      "code": "not_ready",
+      "message": "entry is unavailable or changed"
+    }
+  },
+  "offline_input_sha256": "64338cfdfc807f13dcf4c25b953a49b58b0b5eee2f78f208ba2d34c33fcf1468",
+  "offline_snapshot_sha256": {
+    "index": "352479f655c9f1a9a9bfac94f15915ec56a793691801e2bb5c9b88e7a27fa33d",
+    "code": "ff456f9d2c08ffc92750e3569274babf93a5d9bfc73577f76e8385027f05733c"
+  },
+  "offline_parity": {
+    "cases": [
+      {
+        "equal": true,
+        "name": "document_exact",
+        "native": [
+          {
+            "id": "e3",
+            "location": {
+              "kind": "line",
+              "line": 2
+            },
+            "moments": [
+              {
+                "kind": "line",
+                "line": 2
+              }
+            ],
+            "path": "<fixture>\\documents\\item-a.txt"
+          }
+        ],
+        "offline": [
+          {
+            "id": "e3",
+            "location": {
+              "kind": "line",
+              "line": 2
+            },
+            "moments": [
+              {
+                "kind": "line",
+                "line": 2
+              }
+            ],
+            "path": "<fixture>\\documents\\item-a.txt"
+          }
+        ],
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "files",
+          "text": "amberparitytoken"
+        }
+      },
+      {
+        "equal": true,
+        "name": "pdf_exact",
+        "native": [
+          {
+            "id": "e4",
+            "location": {
+              "kind": "page",
+              "page": 2
+            },
+            "moments": [
+              {
+                "kind": "page",
+                "page": 2
+              }
+            ],
+            "path": "<fixture>\\documents\\item-b.pdf"
+          }
+        ],
+        "offline": [
+          {
+            "id": "e4",
+            "location": {
+              "kind": "page",
+              "page": 2
+            },
+            "moments": [
+              {
+                "kind": "page",
+                "page": 2
+              }
+            ],
+            "path": "<fixture>\\documents\\item-b.pdf"
+          }
+        ],
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "files",
+          "text": "pdfparitytoken"
+        }
+      },
+      {
+        "equal": true,
+        "name": "code_definition_reference",
+        "native": [
+          {
+            "id": "code:2:1:true:parityneedle",
+            "location": {
+              "kind": "line",
+              "line": 1
+            },
+            "moments": [],
+            "path": "<fixture>\\code\\\u6e90 code.rs"
+          },
+          {
+            "id": "code:2:2:false:parityneedle",
+            "location": {
+              "kind": "line",
+              "line": 2
+            },
+            "moments": [],
+            "path": "<fixture>\\code\\\u6e90 code.rs"
+          }
+        ],
+        "offline": [
+          {
+            "id": "code:2:1:true:parityneedle",
+            "location": {
+              "kind": "line",
+              "line": 1
+            },
+            "moments": [],
+            "path": "<fixture>\\code\\\u6e90 code.rs"
+          },
+          {
+            "id": "code:2:2:false:parityneedle",
+            "location": {
+              "kind": "line",
+              "line": 2
+            },
+            "moments": [],
+            "path": "<fixture>\\code\\\u6e90 code.rs"
+          }
+        ],
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "code",
+          "text": "parityneedle"
+        }
+      },
+      {
+        "equal": true,
+        "name": "notebook",
+        "native": [
+          {
+            "id": "code:1:2:true:notebookparity",
+            "location": {
+              "cell_ordinal": 1,
+              "end_line": 2,
+              "kind": "notebook",
+              "line": 1
+            },
+            "moments": [],
+            "path": "<fixture>\\code\\cells.ipynb"
+          }
+        ],
+        "offline": [
+          {
+            "id": "code:1:2:true:notebookparity",
+            "location": {
+              "cell_ordinal": 1,
+              "end_line": 2,
+              "kind": "notebook",
+              "line": 1
+            },
+            "moments": [],
+            "path": "<fixture>\\code\\cells.ipynb"
+          }
+        ],
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "code",
+          "text": "notebookparity"
+        }
+      },
+      {
+        "equal": true,
+        "name": "code_isolation",
+        "native": [],
+        "offline": [],
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "files",
+          "text": "parityneedle"
+        }
+      },
+      {
+        "equal": true,
+        "name": "absent_exact",
+        "native": [],
+        "offline": [],
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "files",
+          "text": "unfindableparitytoken"
+        }
+      },
+      {
+        "equal": true,
+        "name": "code_absent_exact",
+        "native": [],
+        "offline": [],
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "code",
+          "text": "unfindableparitytoken"
+        }
+      }
+    ],
+    "embedder": "ConceptStubEmbedder (pipeline smoke test; deterministic 768d CI fallback)",
+    "equal": true,
+    "scope": "shared offline query functions versus public daemon results on native DB snapshots; no re-extraction"
+  },
+  "quality": {
+    "positive_queries": 4,
+    "Recall@5": 1.0,
+    "MRR": 1.0,
+    "minimum_recall_at_5": 0.9,
+    "minimum_mrr": 0.85,
+    "maximum_negative_fp_rate": 0,
+    "empty_result_controls": 6,
+    "empty_control_fp_rate": 0.0,
+    "empty_control_scope": "all declared empty-result cases, including code isolation and root revocation",
+    "by_modality": {
+      "code": {
+        "positive_queries": 2,
+        "Recall@5": 1.0,
+        "MRR": 1.0
+      },
+      "document": {
+        "positive_queries": 2,
+        "Recall@5": 1.0,
+        "MRR": 1.0
+      }
+    }
+  },
+  "pids": [],
+  "elapsed_seconds": 3.708
+}
