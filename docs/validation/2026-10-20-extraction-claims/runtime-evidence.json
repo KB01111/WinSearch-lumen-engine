@@ -1,0 +1,160 @@
+{
+  "engineCommit": "ef56d84b2c19c86cb296a0d3d2868ee54eb7c1b6",
+  "scope": "ef56d84 runtime before the later prepared-statement experiment; scoped local/native evidence only",
+  "modelTests": {
+    "wsEmbedPassed": 25,
+    "explicitRealWorkerPassed": 1,
+    "allFourCommandsExitCode": 0
+  },
+  "nativeProfiles": {
+    "no-model": {
+      "queries": 10,
+      "quality": {
+        "positive_queries": 4,
+        "Recall@5": 1.0,
+        "MRR": 1.0,
+        "minimum_recall_at_5": 0.9,
+        "minimum_mrr": 0.85,
+        "maximum_negative_fp_rate": 0,
+        "original_positive_cases": {
+          "positive_queries": 4,
+          "Recall@5": 1.0,
+          "MRR": 1.0
+        },
+        "empty_result_controls": 6,
+        "empty_control_fp_rate": 0.0,
+        "empty_control_scope": "all declared empty-result cases, including code isolation and root revocation",
+        "by_modality": {
+          "code": {
+            "positive_queries": 2,
+            "Recall@5": 1.0,
+            "MRR": 1.0
+          },
+          "document": {
+            "positive_queries": 2,
+            "Recall@5": 1.0,
+            "MRR": 1.0
+          }
+        }
+      },
+      "elapsedSeconds": 15.628,
+      "ownedJobEmpty": true
+    },
+    "cpu": {
+      "queries": 21,
+      "quality": {
+        "positive_queries": 11,
+        "Recall@5": 0.9090909090909091,
+        "MRR": 0.8636363636363636,
+        "minimum_recall_at_5": 0.9,
+        "minimum_mrr": 0.85,
+        "maximum_negative_fp_rate": 0,
+        "original_positive_cases": {
+          "positive_queries": 10,
+          "Recall@5": 0.9,
+          "MRR": 0.85
+        },
+        "empty_result_controls": 10,
+        "empty_control_fp_rate": 0.0,
+        "empty_control_scope": "all declared empty-result cases, including code isolation and root revocation",
+        "by_modality": {
+          "audio": {
+            "positive_queries": 1,
+            "Recall@5": 1.0,
+            "MRR": 0.5
+          },
+          "code": {
+            "positive_queries": 4,
+            "Recall@5": 1.0,
+            "MRR": 1.0
+          },
+          "document": {
+            "positive_queries": 4,
+            "Recall@5": 1.0,
+            "MRR": 1.0
+          },
+          "image": {
+            "positive_queries": 1,
+            "Recall@5": 0.0,
+            "MRR": 0.0
+          },
+          "video": {
+            "positive_queries": 1,
+            "Recall@5": 1.0,
+            "MRR": 1.0
+          }
+        }
+      },
+      "elapsedSeconds": 118.21,
+      "ownedJobEmpty": true
+    }
+  },
+  "package": {
+    "assembly": {
+      "engineCommit": "ef56d84b2c19c86cb296a0d3d2868ee54eb7c1b6",
+      "files": 62,
+      "sizeBytes": 269181630,
+      "manifestSha256": "c3688466db06103467be42a17af8588a9ff3323b6e20069b8401cc9734c27346"
+    },
+    "passed": false,
+    "timedOut": false,
+    "ownedJobEmpty": true,
+    "elapsedSeconds": 87.797,
+    "failure": "AssertionError: hidden opt-in was not admitted",
+    "checks": [
+      "ffmpeg.exe starts outside checkout with System32-only PATH",
+      "ffprobe.exe starts outside checkout with System32-only PATH",
+      "winsearch-embed.exe starts outside checkout with System32-only PATH",
+      "identity, per-folder policy and search-limit capabilities are active",
+      "actual confined text/PDF extraction and public exact search: notes.txt",
+      "actual confined text/PDF extraction and public exact search: pages.pdf",
+      "1000 exact results stream in bounded frames; a 10000 limit preserves 1100 eligible files"
+    ],
+    "largeQueryFrames": [
+      {
+        "query": "budget-source",
+        "count": 512,
+        "done": false,
+        "elapsedSeconds": 42.488
+      },
+      {
+        "query": "budget-source",
+        "count": 488,
+        "done": true,
+        "elapsedSeconds": 52.144
+      },
+      {
+        "query": "budget-source",
+        "count": 512,
+        "done": false,
+        "elapsedSeconds": 75.811
+      },
+      {
+        "query": "budget-source",
+        "count": 512,
+        "done": false,
+        "elapsedSeconds": 86.029
+      },
+      {
+        "query": "budget-source",
+        "count": 76,
+        "done": true,
+        "elapsedSeconds": 87.598
+      }
+    ]
+  },
+  "localArtifactSha256": {
+    "claim-runtime-build.log": "0722aac903c9a7f37f46d8bf46dacff71d30e67a65e3429bbebcb52c36cb1417",
+    "claim-runtime-build-inputs.json": "c7e920aae3fcbf5bc4093da0b352db77b5b532c81e736a7274689fdd9a8ff5da",
+    "claim-native-profiles.log": "28d22323f8341c7fd672982e8ba032f8bb3fc64c41de5ec6a4077e3ba20b15c1",
+    "claim-package-assembly.json": "1f270f3f7bd80378f3c15a7491d23cc9a3383b8b51b16784dc8ddba1322a6aa0",
+    "claim-package-native.log": "28589145fd5949c69a354b389cbb77516a5c18951011e159df202819f9a3e39a",
+    "claim-package-native.json": "88459195cc426436442988bf2ff7084945714bca9599cdf0741657ba5e3141db"
+  },
+  "limits": [
+    "Package remains rejected; Lumen pin unchanged",
+    "No controlled scale, latency, idle or resource acceptance",
+    "Five retrieval suites must rerun because CLI bytes changed",
+    "Prepared-statement experiment not included in these binaries"
+  ]
+}

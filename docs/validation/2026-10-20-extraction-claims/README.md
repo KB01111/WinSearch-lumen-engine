@@ -31,13 +31,38 @@ Independent GPT-6.1 Sol read-only review found no scoped actionable issue after
 checking correlation scope, visibility, ordering, atomicity, state transitions
 and production callers. The reviewer did not run tests or native workloads.
 
+## Rebuilt ef56d84 runtime
+
+Coherent debug binaries from `ef56d84b2c19c86cb296a0d3d2868ee54eb7c1b6`
+pass all 25 actual embedding/reference cases and the explicit real-worker round
+trip. The same frozen binaries pass both no-model and CPU native profiles,
+including the typed client and offline comparator. Original CPU Recall@5/MRR
+remain .90/.85; expanded positives remain .9091/.8636 and ten empty controls
+have zero false positives. The screenshot miss and audio rank two remain.
+
+The rebuilt 62-file package has manifest SHA-256
+`c3688466db06103467be42a17af8588a9ff3323b6e20069b8401cc9734c27346`.
+Outside the checkout with System32-only PATH, it now completes text/PDF readiness
+and the 1,000-result and 1,100-result streams in bounded frames. The full test
+still fails: the large searches take tens of seconds, and the hidden-file
+reconfiguration check reaches the existing readiness deadline. The 90-second
+watchdog did not fire; cleanup left the owned job empty. The package remains
+rejected and Lumen's pin is unchanged. Neither deadlines nor requirements were
+relaxed.
+
+[Runtime evidence](runtime-evidence.json) and [native inputs](native-inputs.json)
+record this candidate separately from later source changes. Whole-harness times
+are observations, not controlled performance comparisons. The CLI bytes changed,
+so the older five retrieval-suite runs do not validate this candidate.
+
 ## Remaining acceptance
 
 These counts establish reduced policy work in the tested claim paths. They do
 not establish package throughput, latency under contention, or controlled scale
-and resource acceptance. Rebuild coherent binaries and rerun the existing native
-profiles and expanded outside-checkout test without changing its deadlines or
-requirements. Lumen's pinned payload must not advance on this regression alone.
+and resource acceptance. Finish the remaining large-result latency work, rebuild
+coherent binaries and rerun native profiles, frozen retrieval suites and the
+expanded outside-checkout test without changing deadlines or requirements.
+Lumen's pinned payload must not advance on this regression alone.
 
 The full v1.0 scope, Lumen search/data migration, installed acceptance and broad
 final review remain incomplete. All 33 README TODOs remain open.
