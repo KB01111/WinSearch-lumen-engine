@@ -161,7 +161,7 @@ impl IndexStore {
         if expression.is_empty() {
             return Ok(Vec::new());
         }
-        let mut stmt=self.conn().prepare("SELECT f.text,c.page,c.start_ms,c.end_ms,c.line,c.thumbnail_path,highlight(content_fts,2,char(1),char(2)),f.rowid FROM content_fts f LEFT JOIN content_chunks c ON c.id=f.rowid AND c.entry_id=CAST(f.entry_id AS INTEGER) WHERE content_fts MATCH ?1 AND CAST(f.entry_id AS INTEGER)=?2 AND EXISTS(SELECT 1 FROM query_entries e WHERE e.id=?2 AND e.missing=0) AND EXISTS(SELECT 1 FROM query_content_rows v WHERE v.id=f.rowid) ORDER BY f.rowid LIMIT ?3 OFFSET ?4")?;
+        let mut stmt=self.conn().prepare_cached("SELECT f.text,c.page,c.start_ms,c.end_ms,c.line,c.thumbnail_path,highlight(content_fts,2,char(1),char(2)),f.rowid FROM content_fts f LEFT JOIN content_chunks c ON c.id=f.rowid AND c.entry_id=CAST(f.entry_id AS INTEGER) WHERE content_fts MATCH ?1 AND CAST(f.entry_id AS INTEGER)=?2 AND EXISTS(SELECT 1 FROM query_entries e WHERE e.id=?2 AND e.missing=0) AND EXISTS(SELECT 1 FROM query_content_rows v WHERE v.id=f.rowid) ORDER BY f.rowid LIMIT ?3 OFFSET ?4")?;
         let rows = stmt.query_map(
             params![
                 expression,

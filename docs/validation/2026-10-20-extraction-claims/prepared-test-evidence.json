@@ -1,0 +1,47 @@
+{
+  "scope": "Four hot compiled-statement lookups; source rows and policies are reread on every execution",
+  "command": "cargo test --locked --workspace --exclude ws-embed --all-targets -- --test-threads=1",
+  "exitCode": 0,
+  "totals": {
+    "passed": 655,
+    "failed": 0,
+    "ignored": 1
+  },
+  "sourceSha256": {
+    "src/engine/bins/winsearchd/src/engine.rs": "3833c6433c2d195e1d0831cff4cc3a7128f999e21aa262efc84f215b1745bdc7",
+    "src/engine/bins/winsearchd/src/server.rs": "9cbc05a8d25f0a36f64a4339a816691208c3f1ca56610f0f67efb0173190f86b",
+    "src/engine/crates/ws-index/src/search.rs": "5081dd5c72ea9bfee87656cd0c699d3b55b80f2756712f625e2b727e42aa1819",
+    "src/engine/crates/ws-index/src/store.rs": "959cf4add3ab52d6dfb1fc1a16644eeb5aca67146e85bec39a392cfe6ec50eea"
+  },
+  "all137SourceInputsVerifiedUnchanged": true,
+  "localArtifactSha256": {
+    "prepared-source-index-green.log": "dfca46db5679db0e53242295a51371f9437f461f289740717f6d74aaa5b9a38c",
+    "prepared-source-workspace.log": "29ed37ca2d27e0d4f729023b5b350f22be2c3a75aea36a9d85d531f102725075",
+    "prepared-source-tested-source.json": "150a80198fa886cce59a4293e1a04f4b90afe896cf78fb21b22e452dd5775ad5",
+    "large-exact-phase-probe-replay.log": "2e347dd30ccc088c5d0212e1c218a0c67b7fdce41e8a1745bd19572b5ed30824",
+    "large-exact-phase-detail.log": "d4a22a7f39dfeae54e9aa89c47829dd0b3d72c8a6e86acbca7c13eb2de9bcbe1",
+    "large-exact-prepared-probe.log": "4ba3ccf7ce1ec9b18f5558fb3600a91f7591ca43779faae99a243c32b99f1c07",
+    "native-attribute-query-probe.log": "c30d70062be76a13e31530fddd191b4a7d7963b0938974d4b663abe6c8547f20"
+  },
+  "focusedIndexTests": 100,
+  "focusedTestsAddedAgainToTotals": false,
+  "freshnessRegression": "Warm metadata/content/hash/match queries, toggle live callback true/false/true, invalidate source content, revoke roots",
+  "review": {
+    "model": "gpt-6.1-sol",
+    "result": "no scoped actionable findings",
+    "coverage": "CachedStatement/Rows lifecycle, function replacement, bundled SQLite recompile and current-policy predicates",
+    "reviewerRanTests": false
+  },
+  "performanceEvidence": {
+    "functionalFailure": "Prior ef56d84 package still fails hidden reconfiguration readiness after slow large-result streams; see runtime-evidence.json",
+    "timingProbeLimit": "Coarse timings varied materially; no causal speedup or accepted latency budget is claimed",
+    "win32ApiProbe": "No Windows attribute API or metadata guard change is retained"
+  },
+  "remaining": [
+    "coherent rebuilt binary/model/native replay",
+    "all five frozen retrieval suites",
+    "outside-checkout package and actual packaged CPU inference",
+    "Lumen search/data migration",
+    "scale/resource/installed acceptance"
+  ]
+}

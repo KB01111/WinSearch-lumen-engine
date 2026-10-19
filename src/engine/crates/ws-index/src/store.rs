@@ -106,7 +106,7 @@ impl IndexStore {
     }
 
     pub fn entry_content_allowed(&self, entry:i64) -> Result<bool,StoreError> {
-        Ok(self.conn.query_row("SELECT EXISTS(SELECT 1 FROM query_entries e JOIN content_progress p ON p.entry_id=e.id JOIN content_revisions r ON r.entry_id=e.id AND r.revision=p.revision WHERE e.id=?1 AND query_source_allowed(e.path,p.source,e.is_app))",[entry],|r|r.get(0))?)
+        Ok(self.conn.prepare_cached("SELECT EXISTS(SELECT 1 FROM query_entries e JOIN content_progress p ON p.entry_id=e.id JOIN content_revisions r ON r.entry_id=e.id AND r.revision=p.revision WHERE e.id=?1 AND query_source_allowed(e.path,p.source,e.is_app))")?.query_row([entry],|r|r.get(0))?)
     }
 
     pub fn content_revision(&self, entry: i64) -> Result<i64, StoreError> {
@@ -122,7 +122,7 @@ impl IndexStore {
     }
 
     pub fn content_sha256(&self, entry: i64) -> Result<Option<String>, StoreError> {
-        let mut statement=self.conn.prepare("SELECT DISTINCT p.source_sha256 FROM content_progress p JOIN content_revisions r ON r.entry_id=p.entry_id AND r.revision=p.revision JOIN query_entries e ON e.id=p.entry_id WHERE p.entry_id=?1 AND p.source_sha256_revision=p.revision AND p.source_sha256 IS NOT NULL AND query_source_allowed(e.path,p.source,e.is_app) LIMIT 2")?;
+        let mut statement=self.conn.prepare_cached("SELECT DISTINCT p.source_sha256 FROM content_progress p JOIN content_revisions r ON r.entry_id=p.entry_id AND r.revision=p.revision JOIN query_entries e ON e.id=p.entry_id WHERE p.entry_id=?1 AND p.source_sha256_revision=p.revision AND p.source_sha256 IS NOT NULL AND query_source_allowed(e.path,p.source,e.is_app) LIMIT 2")?;
         let hashes=statement.query_map([entry],|row|row.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
         Ok(match hashes.as_slice() {
             [hash] if ws_protocol::valid_content_sha256(hash)=>Some(hash.clone()),
@@ -761,8 +761,8 @@ pub const CONFIG_KEY_PREFERRED_BACKEND: &str = "preferred_backend";
 
 impl IndexStore {
     pub fn entry_visible(&self, id: i64) -> Result<bool, StoreError> {
-        Ok(self.conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM query_entries WHERE id=?1)",
+        Ok(self.conn.prepare_cached(
+            "SELECT EXISTS(SELECT 1 FROM query_entries WHERE id=?1)")?.query_row(
             [id],
             |r| r.get(0),
         )?)
@@ -2618,6 +2618,37 @@ fn fts_keywords(rec: &EntryRecord) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_entry_queries_recheck_live_source_policy_and_invalidated_content() {
+        use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+        let (mut store, job, progress) = batch_fixture();
+        let chunk = content_chunk(&job, 0, "freshneedle generated fixture");
+        assert!(store.commit_content_batch(&job, &progress, &[chunk], None).unwrap());
+        let hash = "a".repeat(64);
+        store.conn.execute("UPDATE content_progress SET source_sha256=?2,source_sha256_revision=revision WHERE entry_id=?1",
+            params![job.entry_id, hash]).unwrap();
+        let admitted = Arc::new(AtomicBool::new(true));
+        let current = Arc::clone(&admitted);
+        store.set_query_source_guard(move |_, _, _| current.load(Ordering::Acquire)).unwrap();
+        let tokens = vec!["freshneedle".into()];
+        for allowed in [true, false, true] {
+            admitted.store(allowed, Ordering::Release);
+            for _ in 0..2 {
+                assert_eq!(store.entry_visible(job.entry_id).unwrap(), allowed);
+                assert_eq!(store.entry_content_allowed(job.entry_id).unwrap(), allowed);
+                assert_eq!(store.content_sha256(job.entry_id).unwrap(), allowed.then_some(hash.clone()));
+                assert_eq!(store.content_matches(job.entry_id, &tokens).unwrap().len(), usize::from(allowed));
+            }
+        }
+        store.invalidate_content_source(job.entry_id).unwrap();
+        assert!(store.entry_visible(job.entry_id).unwrap());
+        assert!(!store.entry_content_allowed(job.entry_id).unwrap());
+        assert!(store.content_sha256(job.entry_id).unwrap().is_none());
+        assert!(store.content_matches(job.entry_id, &tokens).unwrap().is_empty());
+        store.set_indexing_config(&ws_protocol::IndexingConfig::default()).unwrap();
+        assert!(!store.entry_visible(job.entry_id).unwrap(), "cached SQL must honor root revocation");
+    }
 
     #[test]
     fn extraction_claims_check_candidate_visibility_without_materializing_the_index() {

@@ -1,4 +1,4 @@
-# Extraction claim work — 2026-10-20
+# Extraction queue and large-result work — 2026-10-20
 
 The expanded outside-checkout payload test still fails readiness/search checks.
 Investigation found unnecessary work in all three ordinary extraction claim
@@ -54,6 +54,25 @@ relaxed.
 record this candidate separately from later source changes. Whole-harness times
 are observations, not controlled performance comparisons. The CLI bytes changed,
 so the older five retrieval-suite runs do not validate this candidate.
+
+## Repeated source lookup statements
+
+Four hot metadata/content/match queries now reuse compiled SQL through the
+existing prepared-statement cache. Every execution still reads current rows and
+invokes the same source-policy predicates. The native metadata, source identity
+and before/after validation boundaries remain in place.
+
+A new regression warms the queries, changes admission through the same callback,
+invalidates content and revokes roots; metadata, content, hashes and matches must
+all reflect the new state. All 100 index tests and the final serial workspace run
+pass: 655 tests, with one actual-model worker test ignored. Focused repeats are
+not added again. Independent GPT-6.1 Sol review found no scoped actionable issue
+after checking statement/row cleanup, binding reset and function replacement.
+
+[Prepared-query evidence](prepared-test-evidence.json) records these source and
+log hashes separately. Timing probes varied materially; they do not establish a
+causal speedup or an accepted latency budget. New coherent binaries and package
+acceptance are still required for this source change.
 
 ## Remaining acceptance
 
