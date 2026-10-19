@@ -1,6 +1,7 @@
 import importlib.util
 import hashlib
 import io
+import json
 from pathlib import Path
 import tarfile
 import tempfile
@@ -14,6 +15,77 @@ spec.loader.exec_module(payload)
 
 
 class PayloadTests(unittest.TestCase):
+    def assembly_fixture(self, root, *, mismatched_codec=False):
+        pins = root / 'src/engine/third_party'
+        binaries = root / 'binaries'
+        pins.mkdir(parents=True)
+        binaries.mkdir()
+        (root / 'llama').mkdir()
+        sha = lambda content: hashlib.sha256(content).hexdigest()
+        native = {'llama.dll': b'inference', 'pdfium.dll': b'pdf',
+                  'codec.dll': b'wrong codec' if mismatched_codec else b'codec',
+                  'vcruntime140.dll': b'crt'}
+        executables = {name: name.encode() for name in
+                      ('winsearchd.exe', 'winsearch-embed.exe', 'winsearch-extract.exe')}
+        for name, content in {**native, **executables}.items():
+            (binaries / name).write_bytes(content)
+        inputs = root / 'docs/validation/2026-10-20-extraction-claims/release-native-inputs.json'
+        inputs.parent.mkdir(parents=True)
+        inputs.write_text(json.dumps({'cpu': {
+            'binary_sha256': {name: sha(content) for name, content in executables.items()},
+            'adjacent_native_dll_sha256': {name: sha(content) for name, content in native.items()}}}), encoding='utf-8')
+        for file in ('THIRD-PARTY-NOTICES.txt', 'src/engine/third_party/licenses/FFmpeg-GPLv3.txt',
+                     'src/engine/third_party/ffmpeg-source.md', 'src/engine/third_party/msvc-runtime.md',
+                     'src/engine/third_party/code-grammars-LICENSES.txt',
+                     'src/engine/crates/ws-embed/tests/fixtures/media/LICENSE-DigUp.txt'):
+            path = root / file
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'fixture notice')
+        ffmpeg = root / 'ffmpeg.zip'
+        decoder_files = {'ffmpeg.exe': b'decoder', 'ffprobe.exe': b'probe', 'codec.dll': b'codec'}
+        with zipfile.ZipFile(ffmpeg, 'w') as archive:
+            for name, content in decoder_files.items():
+                archive.writestr('ffmpeg/bin/' + name, content)
+            archive.writestr('ffmpeg/LICENSE.txt', b'decoder license')
+        msvc = root / 'msvc.zip'
+        with zipfile.ZipFile(msvc, 'w') as archive:
+            archive.writestr('crt/vcruntime140.dll', b'crt')
+        pdfium = root / 'pdfium.tgz'
+        with tarfile.open(pdfium, 'w:gz') as archive:
+            for name, content in {'bin/pdfium.dll': b'pdf', 'LICENSE': b'pdf license'}.items():
+                item = tarfile.TarInfo(name)
+                item.size = len(content)
+                archive.addfile(item, io.BytesIO(content))
+        for name, value in {
+            'ffmpeg': {'directory': 'ffmpeg', 'required_binaries': list(decoder_files), 'sha256': sha(ffmpeg.read_bytes())},
+            'pdfium': {'sha256': sha(pdfium.read_bytes())},
+            'msvc-runtime': {'directory': 'crt', 'required_binaries': ['vcruntime140.dll'], 'sha256': sha(msvc.read_bytes())},
+        }.items():
+            (pins / (name + '.json')).write_text(json.dumps(value), encoding='utf-8')
+        return binaries, ffmpeg, pdfium, msvc, root / 'llama', root / 'output'
+
+    def test_assembly_accepts_archive_libraries_already_staged_beside_binaries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inputs = self.assembly_fixture(root)
+            with patch.object(payload, 'ROOT', root), patch.object(payload.subprocess, 'check_output', return_value=b'llama license'):
+                result = payload.assemble(*inputs)
+            manifest_bytes = (root / 'output/payload.json').read_bytes()
+            files = json.loads(manifest_bytes)['files']
+            self.assertEqual(result['manifestSha256'], hashlib.sha256(manifest_bytes).hexdigest())
+            self.assertEqual(len({file['path'].casefold() for file in files}), len(files))
+            for name, content in {'codec.dll': b'codec', 'vcruntime140.dll': b'crt', 'llama.dll': b'inference'}.items():
+                self.assertEqual((root / 'output' / name).read_bytes(), content)
+
+    def test_assembly_rejects_staged_archive_library_with_different_verified_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inputs = self.assembly_fixture(root, mismatched_codec=True)
+            with patch.object(payload, 'ROOT', root), patch.object(payload.subprocess, 'check_output', return_value=b'llama license'):
+                with self.assertRaisesRegex(ValueError, 'native.*match'):
+                    payload.assemble(*inputs)
+            self.assertFalse((root / 'output').exists())
+
     def test_publish_retries_transient_windows_lock_without_overwriting(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

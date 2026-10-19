@@ -147,6 +147,18 @@ def main():
                     assert child.poll() is None and time.monotonic() < deadline, (token, hits)
                     time.sleep(.2)
                 result["checks"].append("actual confined text/PDF extraction and public exact search: " + expected)
+            frames = complete({"text": "policy", "mode": "files", "limit": 10000})
+            assert [Path(hit["path"]).name for frame in frames for hit in frame["batch"]] == ["policy-visible.txt"]
+            control.request("set_indexing_config", config={**config, "root_policies": [{**rule, "include_hidden": True}]})
+            while True:
+                frames = complete({"text": "policy-hidden", "mode": "files", "limit": 5})
+                hits = [hit for frame in frames for hit in frame["batch"]]
+                if frames[-1]["outcome"]["disposition"] == "complete" and hits:
+                    assert Path(hits[0]["path"]).name == ".policy-hidden.txt"
+                    break
+                assert child.poll() is None and time.monotonic() < deadline, "hidden opt-in was not admitted"
+                time.sleep(.2)
+            result["checks"].append("per-folder hidden, size and exclusion restrictions apply; hidden opt-in reconciles")
             while True:
                 frames = complete({"text": "budget-source", "mode": "files", "limit": 1000})
                 hits = [hit for frame in frames for hit in frame["batch"]]
@@ -162,18 +174,6 @@ def main():
                 assert child.poll() is None and time.monotonic() < deadline, "10000-limit search lost eligible files"
                 time.sleep(.2)
             result["checks"].append("1000 exact results stream in bounded frames; a 10000 limit preserves 1100 eligible files")
-            frames = complete({"text": "policy", "mode": "files", "limit": 10000})
-            assert [Path(hit["path"]).name for frame in frames for hit in frame["batch"]] == ["policy-visible.txt"]
-            control.request("set_indexing_config", config={**config, "root_policies": [{**rule, "include_hidden": True}]})
-            while True:
-                frames = complete({"text": "policy-hidden", "mode": "files", "limit": 5})
-                hits = [hit for frame in frames for hit in frame["batch"]]
-                if frames[-1]["outcome"]["disposition"] == "complete" and hits:
-                    assert Path(hits[0]["path"]).name == ".policy-hidden.txt"
-                    break
-                assert child.poll() is None and time.monotonic() < deadline, "hidden opt-in was not admitted"
-                time.sleep(.2)
-            result["checks"].append("per-folder hidden, size and exclusion restrictions apply; hidden opt-in reconciles")
             result["checks"].append("deferred startup admits only explicit generated root")
             result["files"] = len(manifest["files"])
             result["passed"] = True

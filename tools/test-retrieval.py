@@ -16,6 +16,8 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('suite', choices=['names', 'retrieval-development', 'retrieval-held-out',
                                     'code-development', 'code-held-out'])
 parser.add_argument('output')
+parser.add_argument('--binary-dir', type=Path, default=root/'src/engine/target/debug',
+    help='directory containing the coherent CLI, worker and native DLLs')
 args = parser.parse_args()
 output = (root/args.output).resolve()
 assert output.is_relative_to(root/'artifacts') and not output.exists()
@@ -26,8 +28,8 @@ spec.loader.exec_module(harness)
 owner = harness.OwnedJob()
 model = root/'artifacts/test-models/embeddinggemma-2-Q8_0.gguf'
 projector = root/'artifacts/test-models/mmproj-embeddinggemma-2-Q8_0.gguf'
-binary = root/'src/engine/target/debug/winsearch-cli.exe'
-worker = root/'src/engine/target/debug/winsearch-embed.exe'
+binary = args.binary_dir.resolve()/'winsearch-cli.exe'
+worker = args.binary_dir.resolve()/'winsearch-embed.exe'
 suite = root/'evals'/f'{args.suite}.json'
 frozen = {
     'names': '4640467f2867f24e61c2c5d6184ee1bb8200b1938807f36798fded8c55050037',

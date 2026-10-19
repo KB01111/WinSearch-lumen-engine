@@ -3,7 +3,7 @@
 `tools/assemble-engine-payload.py` assembles a model-free Windows x64 package
 without WinUI or .NET. It consumes explicit local inputs; it does not download,
 compile, install, start or publish them. The current binary pin is the tested
-**debug/development** checkpoint `de3d18645dca3a47e4e5bbb6167c3165b7678093`.
+**optimized release-profile** checkpoint `d4f1448068d93d51120f7ec1e2a17395f88089f7`.
 This is not a signed release package or complete installed-Lumen acceptance.
 
 ## Contents and trust
@@ -12,17 +12,19 @@ The flat runtime directory contains `winsearchd.exe`, `winsearch-embed.exe`,
 `winsearch-extract.exe`, the CPU llama.cpp/ggml/mtmd DLLs, PDFium, FFmpeg/FFprobe,
 their shared DLLs and the Microsoft x64 release CRT. Notices retain the PDFium
 dependency licenses, FFmpeg source instructions, llama.cpp license, code-parser
-licenses and DigUp license. CUDA is not included in this CPU development package;
-supported GPU calibration and release packaging remain open.
+licenses and DigUp license. CUDA is not included in this CPU package;
+supported GPU calibration, signing and installed acceptance remain open.
 
 The assembler verifies engine binary/DLL hashes against the published
-[native inputs](validation/2026-10-19-owned-startup/native-inputs.json), and
+[native inputs](validation/2026-10-20-extraction-claims/release-native-inputs.json), and
 dependency archives against the repository's FFmpeg, PDFium and MSVC pins.
 The llama.cpp license is read from the pinned Git object, avoiding checkout
 line-ending changes. Source links/reparse points, unsafe archive names, special
 entries, duplicate case aliases and excessive expansion are rejected. Existing
 output directories are never overwritten. A fresh candidate is published only
 after every copy and notice succeeds.
+Libraries already staged beside release binaries are sourced once from their
+verified archives and checked against the native proof before publication.
 
 `payload.json` records schema version, engine commit, Windows target, and each
 file's relative path, SHA-256 and byte length. Models, indexes, databases, WinUI
@@ -44,7 +46,7 @@ python tools/assemble-engine-payload.py `
   --pdfium-archive <pinned-pdfium-tgz> `
   --msvc-archive <pinned-microsoft-crt-vsix> `
   --llama-source <pinned-llama.cpp-checkout> `
-  --engine-commit de3d18645dca3a47e4e5bbb6167c3165b7678093 `
+  --engine-commit d4f1448068d93d51120f7ec1e2a17395f88089f7 `
   --output <new-output-directory>
 
 python tools/test_engine_payload.py -v
@@ -58,9 +60,20 @@ The native test copies the actual payload to a temporary directory outside the
 checkout, removes inherited engine overrides and developer PATH entries, and
 uses an isolated data/pipe identity and kill-on-close process job. It starts the
 decoders and embedding executable, then runs actual text/PDF extraction and
-public exact search with no model. It checks deferred folder admission and that
-the owned job finishes empty. It does not establish model inference, GPU,
+public exact search with no model. It checks deferred folder admission, source
+policies, 1,000/1,100-result bounded streams and that the owned job finishes empty.
+The test alone does not establish model inference, GPU,
 installed UI, crash-recovery or performance acceptance.
+
+The [current release checkpoint](validation/2026-10-20-release-runtime/README.md)
+also passes actual copied-package CPU inference and all five frozen retrieval
+suites. Its 62-file manifest SHA-256 is
+`d4da84bfcc0ed1ae709963614911a6a1051162589bf666f72d5177c0d6a7c9e9`.
+It uses Rust's existing release profile; no source guard or threshold was relaxed.
+For native/retrieval development checks, `tools/test-search-parity.py` and
+`tools/test-retrieval.py` accept `--binary-dir src/engine/target/release` while
+retaining their debug default. Stage the pinned native dependencies alongside
+release executables; production decoding does not honor the debug override.
 
 ## Lumen staging
 
@@ -83,8 +96,8 @@ existing backend. Root-policy forwarding, migration, streaming and the
 single-index cutover remain open; the staged payload/client still uses the
 earlier pinned checkpoint.
 
-Before release, replace the development binary pin with verified final release
-artifacts, finish runtime validation and single-index ownership, and run clean
+Before final delivery, reconcile any later binary changes, finish single-index
+ownership and final runtime validation, and run clean
 installed Lumen/standalone, signing, licensing, update and uninstall gates.
 All [README TODOs](../README.md#v10-todo) remain open until their complete scope
 and acceptance checks are satisfied.

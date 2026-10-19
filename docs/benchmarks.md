@@ -640,3 +640,27 @@ unknown sources. Its corrected synthetic-exclusion case permits valid indexed
 matches while forbidding calculator/settings/action results. The failure and
 binary identity are retained without publishing machine application inventory.
 Other named/empty expectations and all frozen quality gates remain unchanged.
+
+## Optimized release runtime checkpoint (2026-10-20)
+
+Rust source `d4f1448` now has coherent release-profile binaries using the existing
+thin-LTO profile. Actual model/reference tests pass 25 cases and the explicit
+real-worker round trip passes. Final no-model/managed-CPU native profiles pass
+10/21 public queries in 12.455s/52.059s whole-harness time, with matching frozen
+inputs and no Rust build between profiles. CPU original Recall@5/MRR remain
+.90/.85, expanded positives .9091/.8636 and ten empty controls FP0.
+
+The 62-file CPU package passes the unchanged outside-checkout text/PDF, policy
+and 1,000/1,100-result gate in 45.492s without reaching its 90-second watchdog;
+the owned job finishes empty. Actual copied-package CPU media references retain
+the .999 cosine floor and all four strict cross-modal positives pass. All five
+frozen CLI suites pass with existing allowed misses and zero negative-control
+false positives: names .933/.933, retrieval development .938/.938, held-out
+.938/.906 and both code suites 1/1 Recall@5/MRR.
+
+[Source, input, command and retained-failure evidence](validation/2026-10-20-release-runtime/README.md)
+separates actual inference/native extraction from fixture retrieval and static
+PE inspection. Earlier debug watchdog failures and initial missing release-local
+dependencies are retained. Whole-harness observations do not establish a causal
+speedup, query latency percentiles, concurrent-indexing or required scale/resource
+acceptance. Those gates, GPU calibration and installed Lumen remain open.

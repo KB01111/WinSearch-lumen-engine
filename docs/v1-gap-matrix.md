@@ -1,6 +1,6 @@
 # WinSearch v1 verification and remaining work
 
-Snapshot: 2026-10-19, including `765f5f8` entry resolution, the async Rust
+Snapshot: 2026-10-20, including `765f5f8` entry resolution, the async Rust
 client, parser/code retrieval, cached ordinary/code/notebook previews, code byte
 provenance and bound-reference checkpoints. The approved
 [design](superpowers/specs/2026-10-16-v1-design.md), full roadmap and
@@ -13,7 +13,11 @@ adds terminal state and native read-change notification. The latest
 Related retrieval and fixes reproduced committed-cache loss during unavailable
 inference/policy changes. Retained failures and exact verification scopes remain
 documented. Lumen's
-read-only baseline is refreshed to `3b60ba4`; consumer implementation remains pending.
+baseline is refreshed to `3b60ba4`; owned startup is published, while the search
+adapter and data migration remain pending. The
+[optimized release package](validation/2026-10-20-release-runtime/README.md) now
+passes actual-model, both native profiles, frozen retrieval and outside-checkout
+functional gates; consumer pinning, controlled performance and installed gates remain.
 
 Paths below are repository-relative. `engine` means `src/engine`, `app` means
 `src/app`. “Scoped verified” means the named implementation/tests passed for
@@ -62,7 +66,7 @@ contains selected local logs and resource/input records; final acceptance remain
 | Vector scale/performance | FP16 contiguous cached full scan, active-policy synthetic50k probe | 1k/10k/50k/200k exact/semantic/hybrid p50/p95/p99 and native overhead | `engine/crates/ws-index/src/vectors.rs`; index benchmark example; `docs/benchmarks.md` | Latest50k exact19.05/39.55/43.48ms; cached scan76.29/122.83ms p50/p95 | Measure all required sizes, profile and choose simplest quality-preserving optimization | Incomplete; separate host samples are not causal A/B |
 | End-to-end resource/startup/recovery/inference performance | Small actual CPU/native media runs with hashes/owned-job cleanup | Cold/warm/batch inference, indexing/incremental, memory/disk/idle/startup/recovery at required sizes; Lumen input/selection/Stop budgets | `tools/test-{retrieval,indexed-media,media-resources,search-parity}.py`; release/Lumen plans | Scoped resource logs; three frozen CPU suites | Build reproducible final performance matrix separating synthetic/native/model/installed | Required, pending |
 | Confined previews/actions and privacy | Existing sensitive policy/per-user IPC; bounded text previews recheck source/root/cancellation through delivery | Rich preview/action endpoints, host grants and final audit; synchronous raw server writer still lacks a deadline | Platform content; daemon engine/indexer; protocol; shell/Lumen plans | Native reparse/offline/root plus cached preview/revoke/cancel/resource cases | Complete identity-based cache/stream route; preserve64KiB text/4MiB raster/40x12 XLSX host limits | Cached text scoped locally verified; full new surfaces pending |
-| Reproducible1.0 self-contained release/engine-only payload | Pinned local PDFium/FFmpeg/native inference dependency tooling; source architecture | Final workers/DLLs/notices/hashes manifest, clean outside-checkout runs, CI workflow | `tools/fetch-{pdfium,ffmpeg}.ps1`; release planTask1 | Dependency fetch tests; existing debug builds | Assemble verified standalone and Lumen engine-only artifacts, reject missing/corrupt dependencies | Required, pending; no CI/release artifact claimed |
+| Reproducible1.0 self-contained release/engine-only payload | Optimized CPU engine-only package: 62 files, pinned workers/DLLs/notices and independent manifest hash; real outside-checkout text/PDF/large-result and packaged-model gates pass | Lumen pin/staging refresh, standalone package, installed lifecycle and CI/release delivery | `tools/assemble-engine-payload.py`; `tools/test-engine-payload-native.py`; release planTask1 | [Release evidence](validation/2026-10-20-release-runtime/README.md): 13 assembly tests, both native profiles, five retrieval suites, actual packaged CPU references and 36-file PE closure | Consume verified release bytes; complete standalone and installed acceptance without relaxing gates | Local engine package scoped verified; no signed release, hosted artifact or full installed acceptance claimed |
 | Installer/startup/update/uninstall | Basic app startup/hotkey/tray behavior | Per-user Inno package, upgrade/data preservation, isolated install/uninstall, update checks, signing/WinGet docs | `app/WinSearch.App`; shell/release plans | Existing launch/hotkey tests; planned installed matrix | Implement approved reversible install/update lifecycle; no automatic public release | Required, pending |
 | Final accessibility/native UI/security/test/review/PR | Multiple independently reviewed core checkpoints; PR2 open, owner marked ready | Complete unchanged workspace/.NET/WinUI/native/installed/accessibility/performance matrix and broad review | All v1 plans; final source diff | Existing scoped logs are not one final-source full run | Reconcile gaps, fix/review, run gates and update the attached PR with explicit incomplete acceptance | PR exists; full goal remains active |
 

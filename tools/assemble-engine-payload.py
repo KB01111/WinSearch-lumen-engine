@@ -14,7 +14,7 @@ import tempfile
 import time
 import zipfile
 
-ENGINE_COMMIT = "de3d18645dca3a47e4e5bbb6167c3165b7678093"
+ENGINE_COMMIT = "d4f1448068d93d51120f7ec1e2a17395f88089f7"
 MAX_FILE_BYTES = 256 * 1024 * 1024
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -177,7 +177,8 @@ def assemble(binaries, ffmpeg_archive, pdfium_archive, msvc_archive, llama_sourc
     ffmpeg = json.loads((pins / "ffmpeg.json").read_text(encoding="utf-8"))
     pdfium = json.loads((pins / "pdfium.json").read_text(encoding="utf-8"))
     msvc = json.loads((pins / "msvc-runtime.json").read_text(encoding="utf-8"))
-    inputs = json.loads((ROOT / "docs/validation/2026-10-19-owned-startup/native-inputs.json").read_text(encoding="utf-8"))["cpu"]
+    inputs = json.loads((ROOT / "docs/validation/2026-10-20-extraction-claims/release-native-inputs.json").read_text(encoding="utf-8"))["cpu"]
+    archive_libraries = {"pdfium.dll", *ffmpeg["required_binaries"], *msvc["required_binaries"]}
     candidate = Path(tempfile.mkdtemp(prefix=".engine-payload-", dir=output.parent))
     try:
         records = []
@@ -185,7 +186,7 @@ def assemble(binaries, ffmpeg_archive, pdfium_archive, msvc_archive, llama_sourc
         for name in ("winsearchd.exe", "winsearch-embed.exe", "winsearch-extract.exe"):
             records.append({"path": name, **checked_copy(binaries / name, candidate / name, inputs["binary_sha256"][name])})
         for name, expected in inputs["adjacent_native_dll_sha256"].items():
-            if name not in ("ggml-cuda.dll", "pdfium.dll"):
+            if name != "ggml-cuda.dll" and name not in archive_libraries:
                 records.append({"path": name, **checked_copy(binaries / name, candidate / name, expected)})
         records.extend(copy_zip(ffmpeg_archive, ffmpeg["sha256"], {
             **{ffmpeg["directory"] + "/bin/" + name: name for name in ffmpeg["required_binaries"]},
@@ -198,6 +199,10 @@ def assemble(binaries, ffmpeg_archive, pdfium_archive, msvc_archive, llama_sourc
         records.extend(copy_zip(msvc_archive, msvc["sha256"], {
             msvc["directory"] + "/" + name: name for name in msvc["required_binaries"]
         }, candidate))
+        for record in records:
+            expected = inputs["adjacent_native_dll_sha256"].get(record["path"])
+            if expected is not None and record["sha256"] != expected:
+                raise ValueError("native library does not match verified inputs")
         llama_source = no_links(llama_source)
         license_bytes = subprocess.check_output(["git", "-C", str(llama_source), "show", "4fbc76dec51d0add466f0210855c0596589b60d4:LICENSE"])
         notices = {

@@ -1,0 +1,655 @@
+{
+  "scope": "Optimized CPU engine package and local native/reference/retrieval verification; not full v1, installed Lumen or controlled performance acceptance",
+  "engineCommit": "d4f1448068d93d51120f7ec1e2a17395f88089f7",
+  "buildHead": "db91ab3bee031ba5f380f7cd382eadb26e499732",
+  "profile": "release",
+  "sourceSha256": {
+    "src/engine/Cargo.lock": "75921dce94ebc37779dc30508af05d2e67652a820c48842b237f9b70771e7a53",
+    "src/engine/Cargo.toml": "43dc111a340ffc0253bd083bd0fe08a42b963d7ffc15c1e5b2007ce5bc609b53",
+    "src/engine/bins/winsearch-cli/Cargo.toml": "4d199f71e705a318302634b901ac7e2d00ec2cc7bdaf9028139e6960851ea2ce",
+    "src/engine/bins/winsearch-cli/examples/native-eval-parity.rs": "68cb348dad98b67df055485e0c55f155d7e13739aa68c4c9acdc5596578a35cc",
+    "src/engine/bins/winsearch-cli/src/eval.rs": "39096cb42335d09a0f0715f75376a1f13f63c718c02eb26c58d610110eeed241",
+    "src/engine/bins/winsearch-cli/src/ipc.rs": "3b587e4898ccb64c61a1f18844d7d7e2d8a798d9821869070644c8e5381d6b6e",
+    "src/engine/bins/winsearch-cli/src/main.rs": "23a31f9d05a3c59e0f48687b8f9d578d7b21f8c7be96f4891ec85f8eb595c259",
+    "src/engine/bins/winsearch-cli/tests/eval_provenance.rs": "0c289f971c558cb4af73382d9572e5ef2bb4c2a49262452c7aaf24a5bfe9e02a",
+    "src/engine/bins/winsearch-cli/tests/search_json.rs": "17395b293e3c49cd641c8fb99dd4d2214ac1462a6ed39348679e45d4d3c11b7e",
+    "src/engine/bins/winsearch-embed/Cargo.toml": "09d2b129ed390b39a6825de14f114104c7a3091df25c912de6f1c9d7c8e4d0c5",
+    "src/engine/bins/winsearch-embed/src/main.rs": "c16dc4b7679efce34bd6a26af4e02249ecefe5f7756ae19f9013b7d35e6f16d7",
+    "src/engine/bins/winsearch-embed/src/server.rs": "5ee6e3c550e862de59e2721b89ab1c742f2af54e8d4d389a1d315fe3cc40f431",
+    "src/engine/bins/winsearch-embed/src/wav.rs": "f8540f23ce006cb83cb59f24bda002beff4d287e3bc85b6e28b26505953805e2",
+    "src/engine/bins/winsearch-extract/Cargo.toml": "9248265622ea00a047c3bfae771b8ad6d29f08afd9a7878f74f966fd387974bb",
+    "src/engine/bins/winsearch-extract/src/main.rs": "a6dcad8d9d50df897e5bce00f0590fc957a59072fe71479648c48d083232db0b",
+    "src/engine/bins/winsearch-extract/tests/media_native.rs": "5e7f5b1c97463a26d0071ea167afb30b31cc8211befb88db75070993ae609dcb",
+    "src/engine/bins/winsearch-extract/tests/pdf_native.rs": "489ac04f49353aaff2cc7e0a6a20cc63e88e4d3f22140ee5a450a2774db5e660",
+    "src/engine/bins/winsearchd/Cargo.toml": "3d448d21660a9ed797f9fdb16b50333c403e4628d8330fc95e099104f13ac804",
+    "src/engine/bins/winsearchd/src/catalog.rs": "91885a48ba5bd98a951f4d57c8568aba72ea86536dd438c4ac7bd199ae41d33c",
+    "src/engine/bins/winsearchd/src/code.rs": "a910388996ed5a09818df2676329d138207a043b956525b39278728f5ba55c76",
+    "src/engine/bins/winsearchd/src/crawl.rs": "d5cee6ab1259f9caddf91f01fc588cbd1c04f338c030c796817c8f9751f7a4d0",
+    "src/engine/bins/winsearchd/src/embed_client.rs": "80761a67c949f2121a9ec0c0c0ee6389eab26d4a0fd7e09b72abc8ce761be7af",
+    "src/engine/bins/winsearchd/src/engine.rs": "3833c6433c2d195e1d0831cff4cc3a7128f999e21aa262efc84f215b1745bdc7",
+    "src/engine/bins/winsearchd/src/extract.rs": "e62afb4d78c014be59a1bfec1b8a6278b88de8617f9c223495d50cf928806d3b",
+    "src/engine/bins/winsearchd/src/extract_client.rs": "d2baf09c659d2228768d21a378a882d80fd51c26954e71f0571e4c5bb6b970e2",
+    "src/engine/bins/winsearchd/src/indexer.rs": "458596a634122a85772bfe38834137fe45e0a879e8704e686004d24579ec6a24",
+    "src/engine/bins/winsearchd/src/main.rs": "d6efa0d33865338d76d51935b8e03df34e29f2ddad8ec8365c69df03082290bb",
+    "src/engine/bins/winsearchd/src/model.rs": "9b225e3a537064365e24158f38f17f7510b5cfd497ac7429622f11ded51d1904",
+    "src/engine/bins/winsearchd/src/policy.rs": "b21f90f168dfd49813035f89789259761b10dd317b0b4d61ad94d65605ddacf8",
+    "src/engine/bins/winsearchd/src/root_policy_tests.rs": "38ee4ae7f856a663f01837812e5366d9c9af8c7039c2e4a760bd21f67e1fe058",
+    "src/engine/bins/winsearchd/src/root_rules.rs": "3fd8b6f0c3290a6a9bf98f9e47bf5dd1632e3ebd6de975523190073db7f0c0ba",
+    "src/engine/bins/winsearchd/src/search_budget.rs": "4d4193d91799dd593dc3da79a59ae7265e65f56f866048c3594b796d8d3996ef",
+    "src/engine/bins/winsearchd/src/server.rs": "9cbc05a8d25f0a36f64a4339a816691208c3f1ca56610f0f67efb0173190f86b",
+    "src/engine/bins/winsearchd/src/watcher.rs": "763cf35c52f1197e0bb1f916db5b30bb6bd01f5d16bc6ff1225fef3bb5af80c4",
+    "src/engine/bins/winsearchd/tests/fixtures/extract_transport.rs": "6f8311d1958995690d9acf3728af04747fe062720ced7e8f4e0acf732d2a2f58",
+    "src/engine/crates/ws-client/Cargo.toml": "d90418a2bcf003a88c4b4f31f05aa8faf33edbc8b03b5b9454a7c84f17998b75",
+    "src/engine/crates/ws-client/examples/native-client-smoke.rs": "43c55ed36f374023571574b66693caa3dce3d1271f9406a9fcaab097d9eddae0",
+    "src/engine/crates/ws-client/src/client.rs": "d493277725ae2349e4346ef92516bec624ed16b496c7695d646cd5c262c795cc",
+    "src/engine/crates/ws-client/src/lib.rs": "598224672a5f28631f638624c6006e0db08060588cc80483bade11dd18d5195d",
+    "src/engine/crates/ws-client/src/transport.rs": "b0eff7fa3ffd33b33af47e68f4fe8d9d29e05c187e311700d02bc8ea4c90ee18",
+    "src/engine/crates/ws-code/Cargo.toml": "c30c057f1c5cecaf02b6439a68952211f7dc0edaab11955ee160cc98bfecdb65",
+    "src/engine/crates/ws-code/src/crawl.rs": "b4d67698bbc355efdcba45d351817edf5c7bcb268a7324cbf07f3861f370063d",
+    "src/engine/crates/ws-code/src/lib.rs": "c61bfb0c39b5624f7f7ec8b8740bf40a1b9815184ce9722ac2540b21473468ec",
+    "src/engine/crates/ws-code/src/model.rs": "50106a921aa2ae0b9e9f0ac0f1cc7ef8567b1abb14d9de13ab63add6a2ba8992",
+    "src/engine/crates/ws-code/src/notebook.rs": "230bffedb19285d39f192430d7a92c0948a6b01b6acc7880531c64ca47329031",
+    "src/engine/crates/ws-code/src/parse.rs": "2d0c300f24c1a4eb5a273b48801a3348b9afdc03adeec90f754950e5a66c1fcd",
+    "src/engine/crates/ws-code/src/store.rs": "666a1b17de88372209aaf3457669cc13715b0a0b7b19b79b26f6b7bc6240b13a",
+    "src/engine/crates/ws-code/src/symbols.rs": "2bac149a1a3ba5bbbb2c7d83cacca692172382b4f1f761b56284bcec9d869bf8",
+    "src/engine/crates/ws-code/src/syntax.rs": "662a354e3d3f95206df7488bfb090d7887b1d12b865f27fc68ea4e5d2109f1ca",
+    "src/engine/crates/ws-code/tests/fixtures/schema-v1.sql": "17943cc6207abe99b0d7b7b6f98b4d9424fbb61a969e9e7c9909a4fc26679e5c",
+    "src/engine/crates/ws-embed-protocol/Cargo.toml": "ca4be39c48332156c89ad890c183355bee25893efa4f5955611a5ed82daffe7e",
+    "src/engine/crates/ws-embed-protocol/src/lib.rs": "596b550ba7832a6c19dcafc204257d41e55ebe8acd5a384643a5adec2f8ef306",
+    "src/engine/crates/ws-embed/Cargo.toml": "053802f41c564f08bdea0fbd9e9856569c9a70b3003a560fdd03e17fea8b5904",
+    "src/engine/crates/ws-embed/build.rs": "c31b5e1bd1aed064b33433dbdc83de3115c3d81e3d7343779d6d51556c6082a0",
+    "src/engine/crates/ws-embed/examples/media-throughput.rs": "2dd44c32805253e92c35ea927d1fff8c6684f9edf4f0f39356e726153a1f5ede",
+    "src/engine/crates/ws-embed/shim/ws_embed_shim.cpp": "06472068b2e857294e29d4e4688ff69665c85fef45378dd763f5bdf732b91148",
+    "src/engine/crates/ws-embed/src/backends.rs": "d02e4e967a5744773f7a77b457bc35a71292b60c180c89a532e595eba72212ec",
+    "src/engine/crates/ws-embed/src/ffi.rs": "ec5020cf7951c8a8f9f93ab5a2033c4191c3b0d528836bca7e4ae42f69780a88",
+    "src/engine/crates/ws-embed/src/image.rs": "648b9537ed8b7674e9505a5fc3cc4f7cf51239a615e1e9949157a12597e58126",
+    "src/engine/crates/ws-embed/src/lib.rs": "07a8be3aa3c8bb34f9787317f7dcbc3fc68b8e053285cb94a91a8a15fe97aea5",
+    "src/engine/crates/ws-embed/src/runtime.rs": "e0d213649c158049a3b0728995d3137086e425f0b7e7aaee893e6330ae773a59",
+    "src/engine/crates/ws-embed/src/vector.rs": "5a482d1c526e30255ef96df36190490cff1b585617d530e6e216da6049dfbd1b",
+    "src/engine/crates/ws-embed/tests/fixtures/embeddinggemma2-reference.json": "fbf4df37b305dd9a11bf5001d811c93c60eb373f8dd2361cb7b761a2a7bced27",
+    "src/engine/crates/ws-embed/tests/fixtures/media/.gitattributes": "a9aade347e8a3ecacab6179548c37b3200b06283b7ce74a4de7ae5bbeb4c45ca",
+    "src/engine/crates/ws-embed/tests/fixtures/media/LICENSE-DigUp.txt": "2ba7d3ad3aafa9b791002d62a6fe237e89fa4287c2f4e59234b09d25bd909b26",
+    "src/engine/crates/ws-embed/tests/fixtures/media/README.md": "9058f05353a69b1e22fd8fe7cf483e3b59cf9dfd4eee1ee7bbde34f1de85ba1a",
+    "src/engine/crates/ws-embed/tests/fixtures/media/photo.jpg": "243df6bca3dfce7888ba872d9a774b7d030f5f6d4c5f92bd11d0f3402c026133",
+    "src/engine/crates/ws-embed/tests/fixtures/media/reference-media-vectors.json": "0ec9336aa53fb0d5bafa074cd56122e2fd914cb73f080b4f98332872089f6dd8",
+    "src/engine/crates/ws-embed/tests/fixtures/media/screen.png": "a8a0c831fe4746d00c95e3ab436d53e4cc9046a774fe4f0f6edb73d1a7d55f9b",
+    "src/engine/crates/ws-embed/tests/fixtures/media/speech.wav": "bfbc029af6c0bacdbaccfa6c695d6772373453249386fa6a62a7b02a31d33e1f",
+    "src/engine/crates/ws-embed/tests/media.rs": "7db0dfc00d761c580acbbd475f8325763255003a1fc77da86ec73a04b49118e3",
+    "src/engine/crates/ws-embed/tests/native.rs": "cabd2b3e86ebfc74205fe9984abaa9a73edc1d7cf9799ffca6b4c48de94e4810",
+    "src/engine/crates/ws-embed/tests/reference.rs": "3f83782538e878b361c7719d45df2ad64da93ea4c27e098efb174a824d8572da",
+    "src/engine/crates/ws-extract/Cargo.toml": "4ac3edc1f9cb855135ad6299061dee5b250d1abe35ff3076027f93518f86f754",
+    "src/engine/crates/ws-extract/src/audio.rs": "4d375cbddf030e4b8300ab4fe0300245aabb1eac093d2a740e284d738e6f202a",
+    "src/engine/crates/ws-extract/src/budget.rs": "2c649b95b7d2a14a509ab65469983ca3553bf63aaddc6642c0fb5cdba7f90eac",
+    "src/engine/crates/ws-extract/src/chunk.rs": "bc490e2e1a6f90c2ef61993a06a127fe9dc93396951f49a45506f21df3997f97",
+    "src/engine/crates/ws-extract/src/code.rs": "7be06b29f98cad8d083e56fb5a69c9eaa8dbcd9883b78b401577c65126e95d32",
+    "src/engine/crates/ws-extract/src/decoder.rs": "df1bfc7fa4d810ef764fe5a574015255d217b34e84d6d6c791e3cdd29f563334",
+    "src/engine/crates/ws-extract/src/docs.rs": "6e6667925b37a43a0e27b8e7039fa61eeae24d8c02998d7e44aaab7006fc7ef5",
+    "src/engine/crates/ws-extract/src/image.rs": "2ade182ebb70af44dd4b2f6479e554e3467248545b7db10d4b34a02fff086408",
+    "src/engine/crates/ws-extract/src/lib.rs": "c3f2a4bd869aed0defbe9143643e6ff767452d08750ccdce89ddba02054a3cf7",
+    "src/engine/crates/ws-extract/src/ocr.rs": "7dd487673776a40292caae22c00dbaf8ea4aef5aae8cfed66073a0e348cd1da1",
+    "src/engine/crates/ws-extract/src/pdf.rs": "4b0d802ff5169bf87c3b8f19db657ad787c8564208185489f47cc366fa177228",
+    "src/engine/crates/ws-extract/src/source.rs": "d6c79fbfc2418e58153c74e0095bffbb3ef159784f30d678aafdbb3784c019b6",
+    "src/engine/crates/ws-extract/src/video.rs": "4ce5dd2e18d52a3b320275c1875fb8eeee56f51304ea01b6f539708be20fc223",
+    "src/engine/crates/ws-extract/src/worker.rs": "f13752a82ecfef57e9910db52755c5994041554e96150b40b931b13f423ae3a9",
+    "src/engine/crates/ws-index/Cargo.toml": "f5875728bb3047f122443d33db77d7f37c01006f3de4237b8035664c69b3545d",
+    "src/engine/crates/ws-index/examples/bench.rs": "6affc6acafeb0ab33010c5a2658e74ed2238cb65191e223d716937f7f276915b",
+    "src/engine/crates/ws-index/src/calc.rs": "df7e8cda558215fd1ebeb1f0c71a52223ecbdd6c74b10244929c22066dd6e607",
+    "src/engine/crates/ws-index/src/lib.rs": "c79e832bead696dca9630b07b2d5fe19bf5faaf37eaa7ae60a909c1430056e80",
+    "src/engine/crates/ws-index/src/model.rs": "82be10d389c3cf47a4930b464db20bff649a0f56e8e012e083ad50a47f05a253",
+    "src/engine/crates/ws-index/src/retrieval.rs": "764f629b2422d4d48626f3cd8952b4393815b851ff2a0bf5ddb69d8c8c2bc334",
+    "src/engine/crates/ws-index/src/search.rs": "5081dd5c72ea9bfee87656cd0c699d3b55b80f2756712f625e2b727e42aa1819",
+    "src/engine/crates/ws-index/src/settings.rs": "c09f88d9b5317cfb7503f9390d1bde8db26e12ac4103cc1cd3266111480241ae",
+    "src/engine/crates/ws-index/src/store.rs": "959cf4add3ab52d6dfb1fc1a16644eeb5aca67146e85bec39a392cfe6ec50eea",
+    "src/engine/crates/ws-index/src/vectors.rs": "d2f3099b9299d1a43f42b6f9b2be94bba95ea8cc83ffb95384423e1e9a205689",
+    "src/engine/crates/ws-modelmgr/Cargo.toml": "85db86327be1e4bfa68a5b8059b2eed8a6553d66c82aa9687d3281e299009af5",
+    "src/engine/crates/ws-modelmgr/src/download.rs": "652510cee09f33c77c44a8dad25864b302ce6a02e085250f3ca5d02b73f0e69a",
+    "src/engine/crates/ws-modelmgr/src/lib.rs": "de964afb1b8f6d6e6a5e057a15536db8b56fdc15e4895dc6de93012d3bccfee1",
+    "src/engine/crates/ws-modelmgr/src/manager.rs": "ff0d9115ca77f35492a2a9cbd5048cbfb0c8413814c7735753d07bfda0b66818",
+    "src/engine/crates/ws-modelmgr/src/manifest.rs": "51897ff70390fdaf6a5dc7816fef8200aa1e5728d02f7edca5e78696254f48df",
+    "src/engine/crates/ws-modelmgr/src/recipe.rs": "20f19620090e97c471909d43398af5e50031c5358c35bb81ad89f8cd84d92157",
+    "src/engine/crates/ws-platform/Cargo.toml": "f55c97e22a9c68fbe14a319eb25dbdd5a6262abad863e0beb34ff257d9cd13f5",
+    "src/engine/crates/ws-platform/src/child_job.rs": "44762896974c91ea41c5a5b044295c9b69439063f7d40548f0f81b08e685d4e0",
+    "src/engine/crates/ws-platform/src/content.rs": "5b47e0e7689719fbf9e8e33a2bd25317a09002dd0277ed5cbfa64a4734bd4f00",
+    "src/engine/crates/ws-platform/src/identity.rs": "f7ab6287da4f06f612e4d038ac046315cbddbdfac25750af6979f59db30c4834",
+    "src/engine/crates/ws-platform/src/ifilter.rs": "fbc25f2478f0f1377ca78ba8003e2a5cf5c3424adb95061c793df7736549c57f",
+    "src/engine/crates/ws-platform/src/lib.rs": "02a45ac9be62e547b29221ed8d78e618425f62e5ea2d1fa6e7240e0410f523bf",
+    "src/engine/crates/ws-platform/src/ocr.rs": "1e1a9cb51bcd40104d99596e64fc6029f9007e358b548efe0d17bb0d856503c1",
+    "src/engine/crates/ws-platform/src/paths.rs": "252f86f36e7e06771d2956451dc48e3a3f33549ca0aa6d64f814cb70833f6c37",
+    "src/engine/crates/ws-platform/src/pdfium.rs": "de122286c223d78e6245f6281580148428b9115c8bf9a07606521172d39d16dd",
+    "src/engine/crates/ws-platform/src/pipe.rs": "20f268da2ef0eb2080f161382b62fcb7f4d04e927c07d29b216471a4e2d8902c",
+    "src/engine/crates/ws-platform/src/single_instance.rs": "31bc1630eae6a84f432e7d1e9540ebe7a887b6ed0a2748a86c16127a9b188370",
+    "src/engine/crates/ws-platform/src/source_guard.rs": "a19d99b7092f455a08bce5ae63bbe86c45423012c665e1ba7e357a01a8713c37",
+    "src/engine/crates/ws-platform/src/wic.rs": "54bd17cc66fb4812c8912ba499947be4742a6b03c67f931ea18aec57306d6334",
+    "src/engine/crates/ws-protocol/Cargo.toml": "e514800b5fea68a70ee1bf0066d4b3d32c5fa38f594640fe7182abfe14db20e5",
+    "src/engine/crates/ws-protocol/src/entry.rs": "7758c57d66595c7be3a0d462627a050e9e59a79869d0d2a425eb046baba8a1c9",
+    "src/engine/crates/ws-protocol/src/file_kind.rs": "11f332e13d4e466a81ca5142e1676da6d341059954df48eff480a97a33495ee2",
+    "src/engine/crates/ws-protocol/src/framing.rs": "fa611bf9ea4cb4b983af095fc2e97cd5664eea71215ebc52f2a5cf8718eb652c",
+    "src/engine/crates/ws-protocol/src/lib.rs": "8f59ed7efcd7451839b556074e96df7435ce61bf1dc1600a21b7cad3ae600b3c",
+    "src/engine/crates/ws-protocol/src/limits.rs": "3db48e5465a765c931222f677ce79feee3e9adcae2aefdc5ff76fadb87f6cfea",
+    "src/engine/crates/ws-protocol/src/messages.rs": "0aaa73495b2fd4e8be3376bd280d2a4042607eca49b7f4cff3bdfc0bcc0aab64",
+    "src/engine/crates/ws-protocol/src/outcome.rs": "ea86bb50c5577c9c294bc8627b3d39ac4efd9acb91761a12170c818f89eba44e",
+    "src/engine/crates/ws-protocol/src/preview.rs": "bfa939f64962098af604960ef655a4a19ed3f49b29b86d2bceb6da86c30103b9",
+    "src/engine/crates/ws-protocol/src/related.rs": "fe99db8836cc910b8233825e8a1c6233e48d08f5c922c8287a2ed8c2bb7100f3",
+    "src/engine/crates/ws-protocol/tests/entry_resolution.rs": "03129992bdb027a62f9bad4fc0a0a8ed3e742b9b3c7de324fcb96fe962965ff3",
+    "src/engine/crates/ws-protocol/tests/indexing_config.rs": "3281bb59e06f51eef7cff6eefbe820c1d6051cdf89de4c1b4ce322e83538ad1b",
+    "src/engine/crates/ws-protocol/tests/preview.rs": "282573de4d106b88e1dda90901e4faaf3808475ccdeaecac3531e2178bda8600",
+    "src/engine/third_party/code-grammars-LICENSES.txt": "241f52bfb300a7f999b4157f307babdc725333dea027397695e03a091cd9a8d7",
+    "src/engine/third_party/ffmpeg-source.md": "0d16f827d44ff9e1fec0080c001669727587d242ce51f0210bf4096de076c3d8",
+    "src/engine/third_party/ffmpeg.json": "2cd3adf31621e2578b64e8a5fec5cee233e88db22956d9fd99f3c469dc2e2d0b",
+    "src/engine/third_party/licenses/FFmpeg-GPLv3.txt": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+    "src/engine/third_party/llama.cpp.md": "b3afbf9a637a3f2d3ef978b453fff273241bc80054c8f8c4be6f9d50669be706",
+    "src/engine/third_party/msvc-runtime.json": "1a094e2a34cbc84d98092589d0da918bb9564f49ab0ab81ba2263bfb9a04c59f",
+    "src/engine/third_party/msvc-runtime.md": "40df3e86e1d2457c506cae8b40e39017ca94b82442e8085ffc7f8b7dd3a7d9b9",
+    "src/engine/third_party/pdfium.json": "4288427acd96cc76b4caa1f2505e7e50f66523e050c0bfe8c0b7fee1ec8f960e"
+  },
+  "binarySha256": {
+    "winsearchd.exe": "a8963f28292e4c6c587517bae587e46add571e351fd970246bf2961369c966e4",
+    "winsearch-cli.exe": "17dfda9c191779aa101592e6b510bb90eb1da1d96eb004b7e97a7f8aa593f412",
+    "winsearch-embed.exe": "f455430829227c9d254a818febddcc6c0f1d44ea5e80382a6bb50e72a641b94d",
+    "winsearch-extract.exe": "70a3ebb329a68f42407211bd1adea368f2318635ac1cd9cd156363081aa4209e",
+    "examples/native-client-smoke.exe": "ba61450eb7ecd384b20ef3b9d53e58f6ae72d0b3140ffca4bb0fcd8ace973659",
+    "examples/native-eval-parity.exe": "04f78b51a0ae76872f54d2d9eeb2372323ee3d84633499348c51f19f7a27d8ce"
+  },
+  "dllSha256": {
+    "avcodec-63.dll": "525060f60b3d0171bb9e0ea4b2074a2ff07f5d96b2483a82d9e08fe2ece58e9c",
+    "avdevice-63.dll": "e9e4306ac36778f2faceb1b3ee42152e9b16f10227d2315ae42d282d77c9105c",
+    "avfilter-12.dll": "df6f94c43a04be9f3cedcf94b9c5085ae4186339b6828271d42055723eccc060",
+    "avformat-63.dll": "7275053ebb1dfa708d45d8544ad94bf664e0cb534cd0f2ed979fdf024bc190b3",
+    "avutil-61.dll": "a34c7ef846a2d353c1a6a266b22a001ccd42f6654ab92631a7196e961bdedffd",
+    "concrt140.dll": "a5b9af428829ab7b61ceae9d88a37ce1053551379ee007d8df53a7ba4d33c251",
+    "ggml-base.dll": "1fef4fe44a9a0ba54e04ae58c651ecce330cf425463041cc407b42be62b56962",
+    "ggml-cpu-alderlake.dll": "6f335fe79a35276fcef8ed098d4e2b5952a6cce036549e6547ed7c9b08ac3147",
+    "ggml-cpu-cannonlake.dll": "8a78dfa98d6f6621f96041805227ed78a2a18e0459ba3446d4912cb9aa9e0511",
+    "ggml-cpu-cascadelake.dll": "26cb79d301458ab48143c6634ff4b9a17b247c8bd3203add4e9e3d90b93deed7",
+    "ggml-cpu-haswell.dll": "ea84ecaeab37d2fd794032dd6c7e441b6329abba5835f8ddcbdd9ffde7f4eb5e",
+    "ggml-cpu-icelake.dll": "d60448a478c6029c7e4f7abbb4343ecb2c1b4dea99b6e409028202a85aff0a4a",
+    "ggml-cpu-sandybridge.dll": "777f1172ff889dce5c2baf1bdb3313af7a7f04f213b7e783177d4692b90fad2a",
+    "ggml-cpu-skylakex.dll": "987007c231607c71e92c578c51efe05b263f4558983017446f38a86a7a967328",
+    "ggml-cpu-sse42.dll": "916bf899d3dd80d886ed604059a6ed9693eb37ac4734997ffeb625ce66c6fa1a",
+    "ggml-cpu-x64.dll": "e12f726dce960488ec911e7a0e0a99c67fe32986facbddd49c35ed49120a3656",
+    "ggml-cuda.dll": "8bf0d44ebdb60df7e398b9fddcc4ef5a7aeb63adfbcb85764db2e43e507edf1c",
+    "ggml.dll": "7516e5d871d1fe0e31897f6ee0f3aaf4c6471ce9016472285e65b19a42443f1a",
+    "llama.dll": "a66c29aa35f7301977b24389cc38f2c9c07a04a0cb49349cd2f5055b891f61e5",
+    "msvcp140.dll": "639342ea9a67c0009122238ce070a8257e2e04d367d627509fec29f8442afb42",
+    "msvcp140_1.dll": "456aebccb449fcba35f1109c259ba0aa10923e660f4de812a490d35f37f54fc9",
+    "msvcp140_2.dll": "7a403abf753d0bdf09776cf4bcb13b5a6ebe3a47670de124a3c621aa4b952f82",
+    "msvcp140_atomic_wait.dll": "d759dd381bdbd6142372de4cb57acc382e1b80c106b7414a408816564ee1eb6a",
+    "msvcp140_codecvt_ids.dll": "f781e1e0133c397c3a2c73fd4dbcdb442378ba20fced56a2f7db5822436ddd2a",
+    "mtmd.dll": "4abc3e9e8ce9a378a76a2c885fd5078a251389b36dd6ecaed3811d48e1baef30",
+    "pdfium.dll": "1f2aee4286b8cf0413ab4562b7121aa454f9cfd9afd6ca8609bcef80927b3f80",
+    "swresample-7.dll": "1fbcea031ada11a15e609e209e1cd71a9c632f39bc4794190137b67351db677f",
+    "swscale-10.dll": "9ff8d80bc228f0e557553fd5cfcefc67b682098e9bd6ab08dc7a7d2dc8ad4699",
+    "vccorlib140.dll": "9ce6f235791450717f8e05ecd729e95ec98e9630a9caae661ba6773b669ecbf7",
+    "vcruntime140.dll": "19c293ac482fdb882cd29d2b0e6d807419efdcada04068f03e5723670895e17d",
+    "vcruntime140_1.dll": "a253a12e4a8e9e23ebfe0ced829f7751e4f42c60066986bf20515ced8dcc68cd",
+    "vcruntime140_threads.dll": "cd05a48a1183b074e81275d6c6472ecb5b09db8a0db8d1850b009ad041907ce9"
+  },
+  "modelSha256": {
+    "embeddinggemma-2-Q8_0.gguf": "2188ac1deca4b77dffefd603c2776a9d76d9d74ec01841392982ebb840b09135",
+    "mmproj-embeddinggemma-2-Q8_0.gguf": "c4a8a52691ecef40618438928bdf9e68379b854e24166f292592353db0aab64f"
+  },
+  "buildAndModelCommands": [
+    [
+      "cargo",
+      "test",
+      "--release",
+      "--locked",
+      "-p",
+      "ws-embed",
+      "--all-targets",
+      "--",
+      "--include-ignored",
+      "--test-threads=1",
+      "--nocapture"
+    ],
+    [
+      "cargo",
+      "build",
+      "--release",
+      "--locked",
+      "--workspace",
+      "--bins",
+      "--examples"
+    ],
+    [
+      "cargo",
+      "test",
+      "--release",
+      "--locked",
+      "-p",
+      "winsearch-embed",
+      "--bin",
+      "winsearch-embed",
+      "real_model_round_trip_through_worker_binary",
+      "--",
+      "--ignored",
+      "--test-threads=1",
+      "--nocapture"
+    ],
+    [
+      "cargo",
+      "build",
+      "--release",
+      "--locked",
+      "--workspace",
+      "--bins",
+      "--examples"
+    ]
+  ],
+  "actualModelTests": 25,
+  "explicitRealWorkerTests": 1,
+  "assemblyTests": 13,
+  "nativeProfiles": {
+    "no-model": {
+      "queries": 10,
+      "checks": [
+        "deferred_startup_and_invalid_policy_remain_unadmitted",
+        "native_ordinary_document_media_byte_sha256_and_resolved_metadata",
+        "native_file_kind_exact_code_notebook_union_intersection_and_synthetic_controls",
+        "native_extension_filters_before_results_and_invalid_request_rejection",
+        "native_indexed_entry_resolution_with_current_source_proof",
+        "native_code_and_notebook_exact_byte_sha256_provenance",
+        "native_extraction_exact_code_opt_in_and_payload_parity",
+        "typed_client_bound_code_notebook_refs_and_actual_sha256",
+        "typed_async_client_native_dto_status_pause_revoke_restore_reconnect",
+        "committed_exact_cache_revisions_and_hashes_survive_consumer_policy_lifecycle",
+        "native_code_exact_with_zero_model_vectors",
+        "shared_offline_ranker_native_snapshot_ordered_ids_and_locations",
+        "raw_related_bound_seed_domain_budget_outcomes_and_unavailable_controls",
+        "native_entry_reference_rejected_after_root_revocation",
+        "live_root_revocation_public_cli_and_pipe",
+        "unchanged_overall_recall_mrr_and_zero_negative_controls"
+      ],
+      "index_seconds": 5.563,
+      "elapsed_seconds": 12.455,
+      "quality": {
+        "positive_queries": 4,
+        "Recall@5": 1.0,
+        "MRR": 1.0,
+        "minimum_recall_at_5": 0.9,
+        "minimum_mrr": 0.85,
+        "maximum_negative_fp_rate": 0,
+        "original_positive_cases": {
+          "positive_queries": 4,
+          "Recall@5": 1.0,
+          "MRR": 1.0
+        },
+        "empty_result_controls": 6,
+        "empty_control_fp_rate": 0.0,
+        "empty_control_scope": "all declared empty-result cases, including code isolation and root revocation",
+        "by_modality": {
+          "code": {
+            "positive_queries": 2,
+            "Recall@5": 1.0,
+            "MRR": 1.0
+          },
+          "document": {
+            "positive_queries": 2,
+            "Recall@5": 1.0,
+            "MRR": 1.0
+          }
+        }
+      },
+      "quality_misses": [],
+      "owned_job_empty": true,
+      "harness_sha256": "e5298bca435fc7653fa26a22499b492e9514491304d395e387a62a119f2f957f"
+    },
+    "cpu": {
+      "queries": 21,
+      "checks": [
+        "deferred_startup_and_invalid_policy_remain_unadmitted",
+        "pinned_model_import_ready_and_staged_artifact_hashes",
+        "native_code_index_has_complete_768d_vectors",
+        "native_ordinary_document_media_byte_sha256_and_resolved_metadata",
+        "native_file_kind_exact_code_notebook_union_intersection_and_synthetic_controls",
+        "native_extension_filters_before_results_and_invalid_request_rejection",
+        "native_indexed_entry_resolution_with_current_source_proof",
+        "native_code_and_notebook_exact_byte_sha256_provenance",
+        "native_extraction_exact_code_opt_in_and_payload_parity",
+        "typed_client_bound_code_notebook_refs_and_actual_sha256",
+        "typed_async_client_native_dto_status_pause_revoke_restore_reconnect",
+        "committed_exact_cache_revisions_and_hashes_survive_consumer_policy_lifecycle",
+        "raw_related_bound_seed_domain_budget_outcomes_and_unavailable_controls",
+        "native_semantic_only_code_function_and_caller_source_lines",
+        "shared_offline_ranker_native_snapshot_ordered_ids_and_locations",
+        "real_in_flight_cancel_empty_terminal_transport_live",
+        "real_in_flight_root_revocation_empty_terminal",
+        "actual_cpu_related_document_positive_after_original_quality_queries",
+        "native_entry_reference_rejected_after_root_revocation",
+        "live_root_revocation_public_cli_and_pipe",
+        "unchanged_overall_recall_mrr_and_zero_negative_controls"
+      ],
+      "index_seconds": 32.535,
+      "elapsed_seconds": 52.059,
+      "quality": {
+        "positive_queries": 11,
+        "Recall@5": 0.9090909090909091,
+        "MRR": 0.8636363636363636,
+        "minimum_recall_at_5": 0.9,
+        "minimum_mrr": 0.85,
+        "maximum_negative_fp_rate": 0,
+        "original_positive_cases": {
+          "positive_queries": 10,
+          "Recall@5": 0.9,
+          "MRR": 0.85
+        },
+        "empty_result_controls": 10,
+        "empty_control_fp_rate": 0.0,
+        "empty_control_scope": "all declared empty-result cases, including code isolation and root revocation",
+        "by_modality": {
+          "audio": {
+            "positive_queries": 1,
+            "Recall@5": 1.0,
+            "MRR": 0.5
+          },
+          "code": {
+            "positive_queries": 4,
+            "Recall@5": 1.0,
+            "MRR": 1.0
+          },
+          "document": {
+            "positive_queries": 4,
+            "Recall@5": 1.0,
+            "MRR": 1.0
+          },
+          "image": {
+            "positive_queries": 1,
+            "Recall@5": 0.0,
+            "MRR": 0.0
+          },
+          "video": {
+            "positive_queries": 1,
+            "Recall@5": 1.0,
+            "MRR": 1.0
+          }
+        }
+      },
+      "quality_misses": [
+        "image_semantic"
+      ],
+      "owned_job_empty": true,
+      "harness_sha256": "e5298bca435fc7653fa26a22499b492e9514491304d395e387a62a119f2f957f"
+    }
+  },
+  "retrievalSuites": {
+    "names": {
+      "passed": true,
+      "Recall@5": 0.933,
+      "MRR": 0.933,
+      "Negative FP rate": 0.0,
+      "failures": [
+        "[MISS] [semantic_paraphrase] \"cooking recipe\" -> not found (RR=0.00) | top1: <none>"
+      ],
+      "elapsed_seconds": 3.106,
+      "real_worker_verified": true,
+      "owned_job_empty": true
+    },
+    "retrieval-development": {
+      "passed": true,
+      "Recall@5": 0.938,
+      "MRR": 0.938,
+      "Negative FP rate": 0.0,
+      "failures": [
+        "[MISS] [application] \"play a movie\" -> not found (RR=0.00) | top1: <none>"
+      ],
+      "elapsed_seconds": 14.476,
+      "real_worker_verified": true,
+      "owned_job_empty": true
+    },
+    "retrieval-held-out": {
+      "passed": true,
+      "Recall@5": 0.938,
+      "MRR": 0.906,
+      "Negative FP rate": 0.0,
+      "failures": [
+        "[MISS] [application] \"edit a sound recording\" -> not found (RR=0.00) | top1: voice-102.wav (0.79, semantic name match \u00b7 similarity 0.7057)"
+      ],
+      "elapsed_seconds": 14.424,
+      "real_worker_verified": true,
+      "owned_job_empty": true
+    },
+    "code-development": {
+      "passed": true,
+      "Recall@5": 1.0,
+      "MRR": 1.0,
+      "Negative FP rate": 0.0,
+      "failures": [],
+      "elapsed_seconds": 3.808,
+      "real_worker_verified": true,
+      "owned_job_empty": true
+    },
+    "code-held-out": {
+      "passed": true,
+      "Recall@5": 1.0,
+      "MRR": 1.0,
+      "Negative FP rate": 0.0,
+      "failures": [],
+      "elapsed_seconds": 3.859,
+      "real_worker_verified": true,
+      "owned_job_empty": true
+    }
+  },
+  "package": {
+    "scope": "Run the actual pinned payload outside the checkout, with only Windows on PATH.\n\nThis is no-model package acceptance, not installed Lumen or model-quality evidence.\n",
+    "manifestSha256": "d4da84bfcc0ed1ae709963614911a6a1051162589bf666f72d5177c0d6a7c9e9",
+    "engineCommit": "d4f1448068d93d51120f7ec1e2a17395f88089f7",
+    "checks": [
+      "ffmpeg.exe starts outside checkout with System32-only PATH",
+      "ffprobe.exe starts outside checkout with System32-only PATH",
+      "winsearch-embed.exe starts outside checkout with System32-only PATH",
+      "identity, per-folder policy and search-limit capabilities are active",
+      "actual confined text/PDF extraction and public exact search: notes.txt",
+      "actual confined text/PDF extraction and public exact search: pages.pdf",
+      "per-folder hidden, size and exclusion restrictions apply; hidden opt-in reconciles",
+      "1000 exact results stream in bounded frames; a 10000 limit preserves 1100 eligible files",
+      "deferred startup admits only explicit generated root"
+    ],
+    "ownedJobEmpty": true,
+    "passed": true,
+    "timedOut": false,
+    "queryFrames": [
+      {
+        "query": "packagecontenttoken",
+        "count": 0,
+        "done": true,
+        "elapsedSeconds": 6.225
+      },
+      {
+        "query": "packagecontenttoken",
+        "count": 0,
+        "done": true,
+        "elapsedSeconds": 7.131
+      },
+      {
+        "query": "packagecontenttoken",
+        "count": 0,
+        "done": true,
+        "elapsedSeconds": 7.345
+      },
+      {
+        "query": "packagecontenttoken",
+        "count": 0,
+        "done": true,
+        "elapsedSeconds": 7.58
+      },
+      {
+        "query": "packagecontenttoken",
+        "count": 1,
+        "done": true,
+        "elapsedSeconds": 7.896
+      },
+      {
+        "query": "pdfparitytoken",
+        "count": 0,
+        "done": true,
+        "elapsedSeconds": 7.905
+      },
+      {
+        "query": "pdfparitytoken",
+        "count": 0,
+        "done": true,
+        "elapsedSeconds": 8.113
+      },
+      {
+        "query": "pdfparitytoken",
+        "count": 1,
+        "done": true,
+        "elapsedSeconds": 8.454
+      },
+      {
+        "query": "policy",
+        "count": 1,
+        "done": true,
+        "elapsedSeconds": 8.587
+      },
+      {
+        "query": "policy-hidden",
+        "count": 0,
+        "done": true,
+        "elapsedSeconds": 8.675
+      },
+      {
+        "query": "policy-hidden",
+        "count": 1,
+        "done": true,
+        "elapsedSeconds": 9.586
+      },
+      {
+        "query": "budget-source",
+        "count": 0,
+        "done": true,
+        "elapsedSeconds": 20.295
+      },
+      {
+        "query": "budget-source",
+        "count": 512,
+        "done": false,
+        "elapsedSeconds": 29.16
+      },
+      {
+        "query": "budget-source",
+        "count": 488,
+        "done": true,
+        "elapsedSeconds": 32.67
+      },
+      {
+        "query": "budget-source",
+        "count": 512,
+        "done": false,
+        "elapsedSeconds": 41.347
+      },
+      {
+        "query": "budget-source",
+        "count": 512,
+        "done": false,
+        "elapsedSeconds": 44.916
+      },
+      {
+        "query": "budget-source",
+        "count": 76,
+        "done": true,
+        "elapsedSeconds": 45.482
+      }
+    ],
+    "supersededRetries": 1,
+    "activeQuery": "budget-source",
+    "files": 62,
+    "elapsedSeconds": 45.492
+  },
+  "assembly": {
+    "manifestSha256": "d4da84bfcc0ed1ae709963614911a6a1051162589bf666f72d5177c0d6a7c9e9",
+    "files": 62,
+    "sizeBytes": 220906174
+  },
+  "packageMedia": {
+    "backend": "cpu",
+    "stub": false,
+    "references": {
+      "screen-280": 0.9999420467524335,
+      "photo-140": 0.9998148075830819,
+      "frame-70": 0.9996982675196524,
+      "speech": 0.999750500695376
+    },
+    "retrieval": [
+      {
+        "query": "a computer application screenshot with a red warning and a blue button",
+        "expected": 0,
+        "scores": [
+          0.6436432766475132,
+          0.5363543207245405
+        ]
+      },
+      {
+        "query": "a landscape with a tree and green hills under a blue sky",
+        "expected": 1,
+        "scores": [
+          0.5778621252715366,
+          0.7589841728360176
+        ]
+      },
+      {
+        "query": "a train to Stockholm leaves the railway station from platform five",
+        "expected": 0,
+        "scores": [
+          0.8444276691966782,
+          0.5048316051466761
+        ]
+      },
+      {
+        "query": "baking a chocolate cake in the kitchen with flour butter eggs and sugar",
+        "expected": 1,
+        "scores": [
+          0.5019086504886976,
+          0.8135445491469359
+        ]
+      }
+    ],
+    "image_pair_cosine": 0.6926908050929034,
+    "worker_exit": 0,
+    "elapsed_seconds": 9.857,
+    "scope": "Actual copied package CPU worker outside checkout with System32-only PATH; models are explicit verified local inputs",
+    "passed": true,
+    "manifestSha256": "d4da84bfcc0ed1ae709963614911a6a1051162589bf666f72d5177c0d6a7c9e9",
+    "engineCommit": "d4f1448068d93d51120f7ec1e2a17395f88089f7",
+    "workerSha256": "f455430829227c9d254a818febddcc6c0f1d44ea5e80382a6bb50e72a641b94d",
+    "modelSha256": {
+      "embeddinggemma-2-Q8_0.gguf": "2188ac1deca4b77dffefd603c2776a9d76d9d74ec01841392982ebb840b09135",
+      "mmproj-embeddinggemma-2-Q8_0.gguf": "c4a8a52691ecef40618438928bdf9e68379b854e24166f292592353db0aab64f"
+    }
+  },
+  "retainedFailures": [
+    "Earlier d4f debug package failed after long searches; readiness-first ordering then reached the unchanged 90-second watchdog",
+    "Initial release native profile lacked staged PDFium; the next CPU profile lacked release-local FFmpeg; both failures remain retained",
+    "New assembly regressions reproduced duplicate archive libraries before the fix; all 13 final assembly tests pass"
+  ],
+  "review": "Independent GPT-6.1 Sol read-only review: no scoped findings in binary-directory options, release runner or assembler duplicate/mismatch handling; no reviewer workloads",
+  "limits": [
+    "Thresholds and 45/90/180/240/300-second harness deadlines unchanged",
+    "Readiness now precedes load queries; post-load reconfiguration and controlled concurrency remain unverified",
+    "Native CPU screenshot miss and audio rank two retained; frozen suite allowable misses retained",
+    "CPU package excludes CUDA; no successful GPU or NPU execution claim",
+    "Explicit local weights/projector are external verified inputs, not bundled models",
+    "Lumen search adapter/data migration, standalone UI, scale/resource/recovery and installed/signing/update/uninstall gates remain open"
+  ],
+  "logSha256": {
+    "artifacts/release-runtime-build.log": "f055ae39d453de48e3682dcae84a169855217e0be4514dbadb2af97fa53200cf",
+    "artifacts/release-native-profiles.log": "468911d4ad1c81a6c23846e2cb65a74bbd44e55bac8381dec7ec2ea217ba22ac",
+    "artifacts/release-ready-native-profiles.log": "d31de09a4e39a49c7db8f8afba515e92c10115f5143f4422054cb7ca5b180e1a",
+    "artifacts/release-complete-native-profiles.log": "fc57479ef2e761385b5e7b2339d61d6b47745b162c4b88b462771363e2578b57",
+    "artifacts/release-assembly-staged-red.log": "9c8cf6a4e4e812622ee0a7e90ed494f2ba3b136432fcc2e9bfca8cf667d7236d",
+    "artifacts/release-assembly-staged-green.log": "8946fb4901dd4d4873677da147688ec5e7304a0a3e3de2eef113d222a879d1db",
+    "artifacts/release-package-native.log": "fae4db80d6e74ecdadb1f3c4c55652955de6c11af0ae4aff9bfe7068beb091dd",
+    "artifacts/release-package-media.log": "9d48055a1014265918447e801b76aa1f298675b6f79ec10dea030d1161be4eb1",
+    "artifacts/release-retrieval.log": "c2880efdf48fabc435554a2f5bba26d54f99bac44848f50d18368523fa4abd64",
+    "artifacts/prepared-package-native.log": "4fa262aeab3c4fc3198664c71a0a8f0f9f30a5cb472f4d1aa93372027ddd1076",
+    "artifacts/prepared-package-native-readiness-first.log": "ad9af85dca5580677de3af5311ecbfbcf0af7371f1c4719953d6c6700ea2c317"
+  },
+  "harnessSha256": {
+    "tools/assemble-engine-payload.py": "be1e0a0d542ef309157b50140a3fd68d67194ebca271454842502556b02ea86b",
+    "tools/test_engine_payload.py": "3f3bbf2c2b28e4093aaf67eaa1a79b71a4108efd731b944f2c9a880cb98135b2",
+    "tools/test-search-parity.py": "e5298bca435fc7653fa26a22499b492e9514491304d395e387a62a119f2f957f",
+    "tools/test-engine-payload-native.py": "7b598d5528ef5bc3270e9c66cf52ee6c587a96920be1469daa8419de9ad8320b",
+    "tools/test-retrieval.py": "89d5708ccebf9dd29a1ae21ec26696354768533b67b277dc31d89e313c9785d5",
+    "tools/test-media-runtime.py": "fb787687bae5f0f57a686b21e3b6c6abfb17211f16c2da53fde186ce3cb8916b"
+  }
+}

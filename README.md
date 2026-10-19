@@ -22,7 +22,7 @@ in the [gap matrix](docs/v1-gap-matrix.md); the
 [Lumen integration plan](docs/superpowers/plans/2026-10-17-v1-lumen-engine.md)
 define the full scope.
 
-The immediate blockers are the rebuilt package's indexing/search stalls,
+The immediate blockers are large-result search latency,
 Lumen's search adapter and data migration, the remaining standalone UI, and
 final performance, recovery and installed-app acceptance. NPU support is not a
 release requirement.
@@ -60,24 +60,25 @@ payload remain open.
 The [metadata-identity checkpoint](docs/validation/2026-10-20-metadata-identity/README.md)
 preserves metadata-only entry references without reviving old content proofs.
 The [rebuilt-runtime checkpoint](docs/validation/2026-10-20-engine-contract/README.md)
-records scoped actual-model, retrieval and native checks; the expanded
-outside-checkout package test still fails. Lumen's package pin must wait for a
-coherent rebuilt payload to pass that test with its existing deadlines.
+retains earlier actual-model, retrieval and native checks, including rejected
+debug packages.
 The [extraction-claim checkpoint](docs/validation/2026-10-20-extraction-claims/README.md)
 reduces repeated policy work in the queue; rebuilt-package acceptance remains open.
-The latest outside-checkout replay passes text/PDF and folder-policy readiness,
-but reaches the unchanged 90-second watchdog before the 1,100-result stream
-finishes. Large-result latency remains a blocker to advancing Lumen's payload.
+The [release-runtime checkpoint](docs/validation/2026-10-20-release-runtime/README.md)
+now passes both native profiles, actual packaged CPU inference, the five frozen
+retrieval suites and the outside-checkout 1,000/1,100-result gate with unchanged
+deadlines. Updating Lumen's package/client pin, consumer integration and controlled
+performance acceptance remain open; the earlier failures are retained.
 
 ### Lumen integration and native contract
 
 - [ ] Complete remaining provenance contracts and verify finer file-kind scopes
   through Lumen's native adapter. Preserve per-folder hidden-file, size and
   exclusion policies before candidate limits, and reconcile consumer result
-  limits without silently truncating them. Resolve indexing/search stalls in the
-  expanded outside-checkout package test, verify current metadata/source
-  identities and pass its unchanged readiness, 1,000/1,100-result and 90-second
-  watchdog checks before advancing Lumen's pinned payload.
+  limits without silently truncating them. Complete large-result latency and
+  concurrent indexing validation, and advance Lumen's pinned client/payload to
+  the verified release checkpoint while preserving current metadata/source
+  identities and the unchanged package gates.
 - [ ] Consume and verify the engine's terminal outcomes in Lumen and the
   standalone UI, preserving complete/superseded/canceled/failed and semantic
   disabled/ready/degraded states, exact results on optional failure and legacy

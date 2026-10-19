@@ -111,6 +111,8 @@ class Frames(harness.Pipe):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--binary-dir', type=Path, default=ROOT/'src/engine/target/debug',
+        help='directory containing the coherent engine binaries and native DLLs')
     parser.add_argument('--real-model', action='store_true')
     parser.add_argument('--compare-offline', action='store_true',
         help='also compare shared offline query functions against native DB snapshots')
@@ -120,7 +122,7 @@ def main():
     output = options.output.resolve()
     assert output.is_relative_to(ROOT/'artifacts') and not output.exists()
     output.mkdir(parents=True)
-    binary = ROOT/'src/engine/target/debug'
+    binary = options.binary_dir.resolve()
     model = ROOT/'artifacts/test-models/embeddinggemma-2-Q8_0.gguf'
     projector = model.with_name('mmproj-embeddinggemma-2-Q8_0.gguf')
     summary = {'scope': __doc__, 'real_model_requested': options.real_model,
