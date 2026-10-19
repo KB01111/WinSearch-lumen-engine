@@ -92,6 +92,21 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
         else {assert!(hits.is_empty());}
         extension_filters.push(serde_json::json!({"query":text,"extension":extension,"results":hits}));
     }
+    let mut file_kind_filters=Vec::new();
+    for (text,mode,kind,expected) in [
+        ("pdfparitytoken",SearchMode::Files,ws_client::protocol::FileKind::Pdf,Some("item-b.pdf")),
+        ("pdfparitytoken",SearchMode::Files,ws_client::protocol::FileKind::Document,None),
+        ("parityneedle",SearchMode::Code,ws_client::protocol::FileKind::Source,Some("源 code.rs")),
+        ("parityneedle",SearchMode::Code,ws_client::protocol::FileKind::Pdf,None),
+        ("notebookparity",SearchMode::Code,ws_client::protocol::FileKind::Unknown,Some("cells.ipynb")),
+        ("notebookparity",SearchMode::Code,ws_client::protocol::FileKind::Source,None),
+    ] {
+        let hits=search_query(client,SearchQuery {text:text.into(),mode,limit:5,file_kinds:vec![kind],..Default::default()}).await?;
+        if let Some(name)=expected {assert!(hits.iter().any(|hit|hit.path.as_deref()
+            .is_some_and(|path|std::path::Path::new(path).file_name().unwrap()==name)));}
+        else {assert!(hits.is_empty());}
+        file_kind_filters.push(serde_json::json!({"query":text,"file_kind":kind,"results":hits}));
+    }
     let semantic_code = if engine_config.semantic_enabled {
         let query = "a function named parityneedle and its caller";
         assert!(search(client, query, SearchMode::Code, false).await?.is_empty());
@@ -157,7 +172,7 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
     let mut related_checks=Vec::new();
     for source in [&reference,&code_reference] {
         let mut stream=client.related(ws_client::protocol::RelatedQuery {source:source.clone(),limit:5,
-            categories:Vec::new(),extensions:Vec::new()}).await?;
+            categories:Vec::new(),extensions:Vec::new(),file_kinds:Vec::new()}).await?;
         if engine_config.semantic_enabled {
             let mut frames=Vec::new();
             while let Some(frame)=stream.next().await? {
@@ -239,6 +254,7 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
         "initial_status": status, "model_status": model, "engine_config": engine_config,
         "document": document, "code": code, "semantic_code": semantic_code,
         "extension_filters":extension_filters,
+        "file_kind_filters":file_kind_filters,
         "extension_checks":["pdf_extension_and_case", "excluded_document_extension", "code_extension", "excluded_code_extension"],
         "outcome_checks":["advertised_terminal_state_required", "completed_snapshot_without_retry", "actual_semantic_phase"],
         "related_checks":related_checks,

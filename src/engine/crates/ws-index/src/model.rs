@@ -367,6 +367,7 @@ impl MediaPlan {
 pub struct SearchRequest {
     pub text: String,
     pub extensions: Vec<String>,
+    pub file_kinds: Vec<ws_protocol::FileKind>,
     /// Restrict to applications (`Some(true)`) or to non-apps (`Some(false)`).
     pub apps_only: bool,
     pub files_only: bool,

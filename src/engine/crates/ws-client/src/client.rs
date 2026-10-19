@@ -73,6 +73,7 @@ pub struct SearchStream {
     frames: usize,
     mode: ws_protocol::SearchMode,
     extensions: Vec<String>,
+    file_kinds: Vec<ws_protocol::FileKind>,
     require_outcome: bool,
     requested_semantic: bool,
     max_results:usize,
@@ -122,6 +123,9 @@ impl SearchStream {
                     hit.kind==ws_protocol::ResultKind::Folder || !hit.path.as_deref().is_some_and(|path|ws_protocol::search_extension_allowed(&self.extensions,
                         std::path::Path::new(path).extension().and_then(|extension|extension.to_str()).unwrap_or("")))) {
                     return Err(Error::Protocol("search returned a result outside the extension filter"));
+                }
+                if batch.iter().any(|hit| !ws_protocol::search_file_kind_result_allowed(&self.file_kinds,hit)) {
+                    return Err(Error::Protocol("search returned a result outside the file kind filter"));
                 }
                 return Ok(SearchBatch { batch, done, outcome });
             }
@@ -473,7 +477,7 @@ impl Client {
 
     pub async fn search(&self, query: SearchQuery) -> Result<SearchStream, Error> {
         if query.limit as usize > MAX_SEARCH_RESULTS || query.text.len() > 64 * 1024
-            || !ws_protocol::valid_search_extensions(&query.extensions) {
+            || !ws_protocol::valid_search_extensions(&query.extensions) || !ws_protocol::valid_search_file_kinds(&query.file_kinds) {
             return Err(Error::InvalidInput("search exceeds its request budget"));
         }
         let mut operation = self.open(false, Some("search.exact")).await?;
@@ -481,6 +485,7 @@ impl Client {
             (query.include_semantic, "search.semantic"),
             (query.mode == ws_protocol::SearchMode::Code, "code"),
             (!query.extensions.is_empty(), "search.filters"),
+            (!query.file_kinds.is_empty(), "search.file_kinds"),
         ] {
             if feature.0 && !operation.session.info.supports(feature.1) {
                 return Err(Error::Unsupported(feature.1));
@@ -488,6 +493,7 @@ impl Client {
         }
         let mode=query.mode;
         let extensions=query.extensions.clone();
+        let file_kinds=query.file_kinds.clone();
         let requested_semantic=query.include_semantic;
         let require_outcome=operation.session.info.supports("search.outcomes");
         operation
@@ -506,6 +512,7 @@ impl Client {
             frames: 0,
             mode,
             extensions,
+            file_kinds,
             require_outcome,
             requested_semantic,
             max_results:MAX_SEARCH_RESULTS,
@@ -520,14 +527,15 @@ impl Client {
         let source=query.source.indexed_id().expect("validated indexed source");
         let code=matches!(source,ws_protocol::IndexedEntryId::Code(_));
         for (required,feature) in [(true,"search.semantic"),(true,"search.outcomes"),(code,"code"),
-            (!query.extensions.is_empty(),"search.filters")] {
+            (!query.extensions.is_empty(),"search.filters"),(!query.file_kinds.is_empty(),"search.file_kinds")] {
             if required && !operation.session.info.supports(feature) {return Err(Error::Unsupported(feature));}
         }
         let extensions=query.extensions.clone();let categories=query.categories.clone();let limit=query.limit as usize;
+        let file_kinds=query.file_kinds.clone();
         operation.session.send(&ClientMessage::Related {id:operation.id,query},operation.deadline).await?;
         Ok(SearchStream {operation:Some(operation),results:0,frames:0,
             mode:if code {ws_protocol::SearchMode::Code} else {ws_protocol::SearchMode::Files},
-            extensions,require_outcome:true,requested_semantic:true,max_results:limit,
+            extensions,file_kinds,require_outcome:true,requested_semantic:true,max_results:limit,
             related_source:Some(source),related_categories:categories})
     }
 
@@ -757,6 +765,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn file_kind_selection_requires_its_capability_before_dispatch() {
+        use tokio::io::AsyncReadExt;
+        let (client,mut peer)=fixture();
+        let task=tokio::spawn(async move { hello(&mut peer).await;
+            assert_eq!(peer.read(&mut [0]).await.unwrap(),0,"legacy peer cannot receive a kind-filtered query"); });
+        let outcome=client.search(SearchQuery {file_kinds:vec![ws_protocol::FileKind::Pdf],..Default::default()}).await;
+        assert!(matches!(outcome,Err(Error::Unsupported("search.file_kinds"))));task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn file_kind_selection_validates_every_reply_against_source_classification() {
+        for (path,kind,selected,allowed) in [
+            (Some("C:/Docs/book.XLSX"),ws_protocol::ResultKind::Document,ws_protocol::FileKind::Spreadsheet,true),
+            (Some("C:/Docs/book.pdf"),ws_protocol::ResultKind::Document,ws_protocol::FileKind::Spreadsheet,false),
+            (Some("C:/Docs/folder.pdf"),ws_protocol::ResultKind::Folder,ws_protocol::FileKind::Pdf,false),
+            (Some("C:/Docs/folder.pdf"),ws_protocol::ResultKind::Folder,ws_protocol::FileKind::Folder,true),
+            (Some("C:/Docs/.json"),ws_protocol::ResultKind::File,ws_protocol::FileKind::Unknown,true),
+            (None,ws_protocol::ResultKind::File,ws_protocol::FileKind::Unknown,false),
+            (Some("C:/Docs/calc.pdf"),ws_protocol::ResultKind::Calculator,ws_protocol::FileKind::Pdf,false),
+        ] {
+            let (client,mut peer)=fixture();
+            let task=tokio::spawn(async move {
+                peer.connect().await.unwrap();let _=read_client(&mut peer).await;
+                let mut response=ack();if let ServerMessage::HelloAck {features,..}=&mut response {features.push("search.file_kinds".into());}
+                send_server(&mut peer,&response).await;
+                let ClientMessage::Search {id,query}=read_client(&mut peer).await else {panic!("expected search");};
+                assert_eq!(query.file_kinds,vec![selected]);
+                send_server(&mut peer,&ServerMessage::Results {id,batch:vec![SearchResult {path:path.map(str::to_owned),kind,..Default::default()}],
+                    done:true,outcome:None}).await;
+            });
+            let mut stream=client.search(SearchQuery {file_kinds:vec![selected],..Default::default()}).await.unwrap();
+            let result=stream.next().await;
+            assert_eq!(result.is_ok(),allowed,"{path:?}/{selected:?}");task.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn file_kind_selection_rejects_excessive_lists_before_connecting() {
+        let (client,_peer)=fixture();
+        let result=tokio::time::timeout(Duration::from_millis(100),client.search(SearchQuery {
+            file_kinds:vec![ws_protocol::FileKind::Pdf;14],..Default::default()})).await;
+        assert!(matches!(result,Ok(Err(Error::InvalidInput(_)))));
+    }
+
+    #[tokio::test]
     async fn extension_filter_rejects_a_peer_returning_unselected_results() {
         for (path,kind,allowed) in [
             (Some("C:/Docs/image.png".to_string()),ws_protocol::ResultKind::Image,false),
@@ -830,26 +883,26 @@ mod tests {
     async fn related_rejects_unbound_source_before_opening_a_connection() {
         let (client,_peer)=fixture();
         let result=client.related(ws_protocol::RelatedQuery {source:ws_protocol::EntryReference {
-            result_id:"e1".into(),source_revision:None},limit:20,categories:vec![],extensions:vec![]}).await;
+            result_id:"e1".into(),source_revision:None},limit:20,categories:vec![],extensions:vec![],file_kinds:vec![]}).await;
         assert!(matches!(result,Err(Error::InvalidInput(_))));
     }
 
     #[tokio::test]
     async fn related_requires_each_capability_before_writing_an_unknown_or_downgraded_request() {
         use tokio::io::AsyncReadExt;
-        for missing in ["search.related","search.semantic","search.outcomes","code","search.filters"] {
+        for missing in ["search.related","search.semantic","search.outcomes","code","search.filters","search.file_kinds"] {
             let (client,mut peer)=fixture();
             let task=tokio::spawn(async move {
                 peer.connect().await.unwrap();let _=read_client(&mut peer).await;
                 let mut hello=ack();if let ServerMessage::HelloAck {features,..}=&mut hello {
-                    features.extend(["search.related","search.semantic","search.outcomes","code","search.filters"]
+                    features.extend(["search.related","search.semantic","search.outcomes","code","search.filters","search.file_kinds"]
                         .into_iter().filter(|feature|*feature!=missing).map(str::to_owned));
                 }
                 send_server(&mut peer,&hello).await;
                 assert_eq!(peer.read(&mut [0]).await.unwrap(),0,"unsupported Related must never be written");
             });
             let result=client.related(ws_protocol::RelatedQuery {source:EntryReference {
-                result_id:"c1".into(),source_revision:Some("proof".into())},limit:1,categories:vec![],extensions:vec!["rs".into()]}).await;
+                result_id:"c1".into(),source_revision:Some("proof".into())},limit:1,categories:vec![],extensions:vec!["rs".into()],file_kinds:vec![ws_protocol::FileKind::Source]}).await;
             assert!(matches!(result,Err(Error::Unsupported(feature)) if feature==missing));task.await.unwrap();
         }
     }
@@ -877,7 +930,7 @@ mod tests {
             });
             let mut stream=client.related(RelatedQuery {source:EntryReference {result_id:"e1".into(),source_revision:Some("source-proof".into())},
                 limit:1,categories:if case==6 {vec![ws_protocol::ResultKind::Audio]} else {vec![]},
-                extensions:if case==7 {vec!["pdf".into()]} else {vec![]}}).await.expect("new peer must support Related");
+                extensions:if case==7 {vec!["pdf".into()]} else {vec![]},file_kinds:vec![]}).await.expect("new peer must support Related");
             let result=stream.next().await;
             if case==0 {assert_eq!(result.unwrap().unwrap().batch.len(),1);}
             else {assert!(matches!(result,Err(Error::Protocol(_))),"case{case} must be rejected before delivery");}

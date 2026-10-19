@@ -10,6 +10,114 @@ namespace WinSearch.Tests;
 
 public class IndexingPipeTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FileKindSelectionRequiresCapabilityBeforeDispatch(bool related)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10)); var token = timeout.Token;
+        var pipe = "winsearch-kind-legacy-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        async Task<bool> Serve()
+        {
+            await server.WaitForConnectionAsync(token); await ReadAsync(server, token);
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1, Features = ["search.exact", "search.related", "search.semantic", "search.outcomes"] }, token);
+            try {
+                var message = await ReadAsync(server, token);
+                var id = message is RelatedMessage rel ? rel.Id : Assert.IsType<SearchMessage>(message).Id;
+                await WriteAsync(server, new ResultsMessage { Id = id, Done = true, Outcome = new() {
+                    Disposition = SearchDisposition.Complete, Semantic = new() { Phase = related ? SemanticPhase.Ready : SemanticPhase.Disabled } } }, token);
+                return true;
+            }
+            catch (EndOfStreamException) { return false; }
+        }
+        var serving = Serve(); await using var client = new EngineClient(pipe); await client.ConnectAsync(token);
+        var failure = await Record.ExceptionAsync(async () => {
+            var stream = related ? client.RelatedAsync(new() { Source = new() { ResultId = "e1", SourceRevision = "proof" }, FileKinds = [FileKind.Pdf] }, token)
+                : client.SearchAsync(new() { FileKinds = [FileKind.Pdf] }, token);
+            await foreach (var _ in stream) { }
+        });
+        await client.DisposeAsync(); Assert.False(await serving);
+        Assert.Equal(ErrorCode.Unsupported, Assert.IsType<EngineException>(failure).Code);
+    }
+
+    [Theory]
+    [InlineData("C:/Docs/book.XLSX", ResultKind.Document, true)]
+    [InlineData("C:/Docs/book.pdf", ResultKind.Document, false)]
+    [InlineData("C:/Docs/folder.xlsx", ResultKind.Folder, false)]
+    [InlineData("C:/Docs/book.xlsx", (ResultKind)999, false)]
+    [InlineData(null, ResultKind.File, false)]
+    public async Task FileKindSelectionRejectsUnselectedRepliesAndPreservesTheWireSelector(string? path, ResultKind kind, bool allowed)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10)); var token = timeout.Token;
+        var pipe = "winsearch-kind-reply-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        async Task<SearchQuery> Serve()
+        {
+            await server.WaitForConnectionAsync(token); await ReadAsync(server, token);
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1, Features = ["search.exact", "search.file_kinds"] }, token);
+            var message = Assert.IsType<SearchMessage>(await ReadAsync(server, token));
+            await WriteAsync(server, new ResultsMessage { Id = message.Id, Done = true,
+                Batch = [new SearchResult { Id = "e2", Path = path, Kind = kind }] }, token);
+            return message.Query;
+        }
+        var serving = Serve(); await using var client = new EngineClient(pipe); await client.ConnectAsync(token);
+        var failure = await Record.ExceptionAsync(async () => {
+            await foreach (var _ in client.SearchAsync(new() { FileKinds = [FileKind.Spreadsheet] }, token)) { }
+        });
+        Assert.Equal(new[] { FileKind.Spreadsheet }, (await serving).FileKinds);
+        if (allowed) Assert.Null(failure);
+        else Assert.Equal(ErrorCode.InvalidRequest, Assert.IsType<EngineException>(failure).Code);
+    }
+
+    [Fact]
+    public async Task FileKindSelectionRejectsInvalidListsBeforeConnecting()
+    {
+        await using var client = new EngineClient("unused-kinds-" + Guid.NewGuid());
+        foreach (var kinds in new List<FileKind>[] { null!, Enumerable.Repeat(FileKind.Pdf, 14).ToList(), [(FileKind)999] })
+        {
+            var failure = await Assert.ThrowsAsync<EngineException>(async () => {
+                await foreach (var _ in client.SearchAsync(new() { FileKinds = kinds })) { }
+            });
+            Assert.Equal(ErrorCode.InvalidRequest, failure.Code);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FileKindSelectionSnapshotsCallerListsDuringProgressiveSearch(bool related)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10)); var token = timeout.Token;
+        var pipe = "winsearch-kind-snapshot-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        var resume = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        async Task Serve()
+        {
+            await server.WaitForConnectionAsync(token); await ReadAsync(server, token);
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1,
+                Features = ["search.exact", "search.related", "search.semantic", "search.outcomes", "search.file_kinds"] }, token);
+            var message = await ReadAsync(server, token);
+            var id = message is RelatedMessage rel ? rel.Id : Assert.IsType<SearchMessage>(message).Id;
+            Assert.Equal(new[] { FileKind.Spreadsheet }, message is RelatedMessage r ? r.Query.FileKinds : ((SearchMessage)message).Query.FileKinds);
+            var hit = new SearchResult { Id = "e2", Kind = ResultKind.Document, Path = "C:/Docs/book.xlsx",
+                EntryReference = new() { ResultId = "e2", SourceRevision = "proof" } };
+            await WriteAsync(server, new ResultsMessage { Id = id, Done = false, Batch = [hit] }, token);
+            await resume.Task.WaitAsync(token);
+            await WriteAsync(server, new ResultsMessage { Id = id, Done = true, Batch = [hit], Outcome = new() {
+                Disposition = SearchDisposition.Complete, Semantic = new() { Phase = related ? SemanticPhase.Ready : SemanticPhase.Disabled } } }, token);
+        }
+        var serving = Serve(); await using var client = new EngineClient(pipe); await client.ConnectAsync(token);
+        var kinds = new List<FileKind> { FileKind.Spreadsheet };
+        var stream = related ? client.RelatedAsync(new() { Source = new() { ResultId = "e1", SourceRevision = "seed-proof" }, FileKinds = kinds }, token)
+            : client.SearchAsync(new() { FileKinds = kinds }, token);
+        await using var iterator = stream.GetAsyncEnumerator(token);
+        Assert.True(await iterator.MoveNextAsync()); Assert.False(iterator.Current.Done);
+        kinds[0] = FileKind.Pdf; resume.SetResult();
+        Assert.True(await iterator.MoveNextAsync()); Assert.True(iterator.Current.Done);
+        Assert.False(await iterator.MoveNextAsync()); await serving;
+    }
+
     [Fact]
     public async Task RelatedRejectsUnboundSourceBeforeConnecting()
     {

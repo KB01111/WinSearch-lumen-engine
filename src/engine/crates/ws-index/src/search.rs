@@ -28,11 +28,12 @@ struct Candidate {
 
 impl IndexStore {
     pub(crate) fn set_search_request_filter(&self,req:&SearchRequest)->Result<(),StoreError> {
-        if !ws_protocol::valid_search_extensions(&req.extensions) {
+        if !ws_protocol::valid_search_extensions(&req.extensions) || !ws_protocol::valid_search_file_kinds(&req.file_kinds) {
             return Err(StoreError::InvalidConfig("invalid search extension filter".into()));
         }
         let (apps_only,files_only,kinds)=(req.apps_only,req.files_only,req.kinds.clone());
         let extensions=req.extensions.clone();
+        let file_kinds=req.file_kinds.clone();
         // Connection-local request scope must not change admission/metadata in query_entries.
         self.conn().create_scalar_function("search_request_allowed",4,
             rusqlite::functions::FunctionFlags::SQLITE_UTF8,move|ctx| {
@@ -43,6 +44,7 @@ impl IndexStore {
                 Ok((!apps_only || is_app) && (!files_only || !is_app)
                     && (kinds.is_empty() || kinds.contains(&kind))
                     && (extensions.is_empty() || !is_dir)
+                    && ws_protocol::search_file_kind_allowed(&file_kinds,&ext,is_dir)
                     && ws_protocol::search_extension_allowed(&extensions,&ext))
             })?;
         Ok(())

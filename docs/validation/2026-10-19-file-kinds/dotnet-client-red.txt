@@ -1,0 +1,108 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  WinSearch.Core -> <checkout>\src\app\WinSearch.Core\bin\Debug\net8.0-windows10.0.19041.0\WinSearch.Core.dll
+  WinSearch.ViewModels -> <checkout>\src\app\WinSearch.ViewModels\bin\Debug\net8.0-windows10.0.19041.0\WinSearch.ViewModels.dll
+  WinSearch.Tests -> <checkout>\src\app\WinSearch.Tests\bin\Debug\net8.0-windows10.0.19041.0\WinSearch.Tests.dll
+Test run for <checkout>\src\app\WinSearch.Tests\bin\Debug\net8.0-windows10.0.19041.0\WinSearch.Tests.dll (.NETCoreApp,Version=v8.0)
+A total of 1 test files matched the specified pattern.
+rtk : [xUnit.net 00:00:00.44]     WinSearch.Tests.IndexingPipeTests.FileKindSelectionRejectsUnselectedRepliesAndPreserv
+esTheWireSelector(path: null, kind: File, allowed: False) [FAIL]
+At line:1 char:1
++ rtk proxy dotnet test src/app/WinSearch.Tests/WinSearch.Tests.csproj  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([xUnit.net 00:0...: False) [FAIL]:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+[xUnit.net 00:00:00.44]     WinSearch.Tests.IndexingPipeTests.FileKindSelectionRejectsUnselectedRepliesAndPreservesTheW
+ireSelector(path: "C:/Docs/folder.xlsx", kind: Folder, allowed: False) [FAIL]
+[xUnit.net 00:00:00.45]     WinSearch.Tests.IndexingPipeTests.FileKindSelectionRejectsUnselectedRepliesAndPreservesTheW
+ireSelector(path: "C:/Docs/book.XLSX", kind: Document, allowed: True) [FAIL]
+[xUnit.net 00:00:00.45]     WinSearch.Tests.IndexingPipeTests.FileKindSelectionRejectsUnselectedRepliesAndPreservesTheW
+ireSelector(path: "C:/Docs/book.pdf", kind: Document, allowed: False) [FAIL]
+[xUnit.net 00:00:00.48]     WinSearch.Tests.IndexingPipeTests.FileKindSelectionRejectsInvalidListsBeforeConnecting [FAI
+L]
+[xUnit.net 00:00:00.50]     WinSearch.Tests.IndexingPipeTests.FileKindSelectionRequiresCapabilityBeforeDispatch(related
+: False) [FAIL]
+[xUnit.net 00:00:00.52]     WinSearch.Tests.IndexingPipeTests.FileKindSelectionRequiresCapabilityBeforeDispatch(related
+: True) [FAIL]
+  Failed WinSearch.Tests.IndexingPipeTests.FileKindSelectionRejectsUnselectedRepliesAndPreservesTheWireSelector(path: null, kind: File, allowed: False) [161 ms]
+  Error Message:
+   Assert.Equal() Failure: Collections differ
+                          ↓ (pos 0)
+Expected: FileKind[]     [Spreadsheet]
+Actual:   List<FileKind> []
+  Stack Trace:
+     at WinSearch.Tests.IndexingPipeTests.FileKindSelectionRejectsUnselectedRepliesAndPreservesTheWireSelector(String path, ResultKind kind, Boolean allowed) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 67
+   at WinSearch.Tests.IndexingPipeTests.FileKindSelectionRejectsUnselectedRepliesAndPreservesTheWireSelector(String path, ResultKind kind, Boolean allowed) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 69
+--- End of stack trace from previous location ---
+  Failed WinSearch.Tests.IndexingPipeTests.FileKindSelectionRejectsUnselectedRepliesAndPreservesTheWireSelector(path: "C:/Docs/folder.xlsx", kind: Folder, allowed: False) [7 ms]
+  Error Message:
+   Assert.Equal() Failure: Collections differ
+                          ↓ (pos 0)
+Expected: FileKind[]     [Spreadsheet]
+Actual:   List<FileKind> []
+  Stack Trace:
+     at WinSearch.Tests.IndexingPipeTests.FileKindSelectionRejectsUnselectedRepliesAndPreservesTheWireSelector(String path, ResultKind kind, Boolean allowed) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 67
+   at WinSearch.Tests.IndexingPipeTests.FileKindSelectionRejectsUnselectedRepliesAndPreservesTheWireSelector(String path, ResultKind kind, Boolean allowed) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 69
+--- End of stack trace from previous location ---
+  Failed WinSearch.Tests.IndexingPipeTests.FileKindSelectionRejectsUnselectedRepliesAndPreservesTheWireSelector(path: "C:/Docs/book.XLSX", kind: Document, allowed: True) [3 ms]
+  Error Message:
+   Assert.Equal() Failure: Collections differ
+                          ↓ (pos 0)
+Expected: FileKind[]     [Spreadsheet]
+Actual:   List<FileKind> []
+  Stack Trace:
+     at WinSearch.Tests.IndexingPipeTests.FileKindSelectionRejectsUnselectedRepliesAndPreservesTheWireSelector(String path, ResultKind kind, Boolean allowed) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 67
+   at WinSearch.Tests.IndexingPipeTests.FileKindSelectionRejectsUnselectedRepliesAndPreservesTheWireSelector(String path, ResultKind kind, Boolean allowed) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 69
+--- End of stack trace from previous location ---
+  Failed WinSearch.Tests.IndexingPipeTests.FileKindSelectionRejectsUnselectedRepliesAndPreservesTheWireSelector(path: "C:/Docs/book.pdf", kind: Document, allowed: False) [3 ms]
+  Error Message:
+   Assert.Equal() Failure: Collections differ
+                          ↓ (pos 0)
+Expected: FileKind[]     [Spreadsheet]
+Actual:   List<FileKind> []
+  Stack Trace:
+     at WinSearch.Tests.IndexingPipeTests.FileKindSelectionRejectsUnselectedRepliesAndPreservesTheWireSelector(String path, ResultKind kind, Boolean allowed) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 67
+   at WinSearch.Tests.IndexingPipeTests.FileKindSelectionRejectsUnselectedRepliesAndPreservesTheWireSelector(String path, ResultKind kind, Boolean allowed) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 69
+--- End of stack trace from previous location ---
+  Failed WinSearch.Tests.IndexingPipeTests.FileKindSelectionRejectsInvalidListsBeforeConnecting [5 ms]
+  Error Message:
+   Assert.Throws() Failure: Exception type was not an exact match
+Expected: typeof(WinSearch.Core.Protocol.EngineException)
+Actual:   typeof(System.IO.IOException)
+---- System.IO.IOException : not connected
+  Stack Trace:
+     at WinSearch.Tests.IndexingPipeTests.FileKindSelectionRejectsInvalidListsBeforeConnecting() in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 78
+   at WinSearch.Tests.IndexingPipeTests.FileKindSelectionRejectsInvalidListsBeforeConnecting() in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 76
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at WinSearch.Core.Ipc.EngineClient.WriteAsync(ClientMessage message, CancellationToken cancellationToken) in <checkout>\src\app\WinSearch.Core\Ipc\EngineClient.cs:line 520
+   at WinSearch.Core.Ipc.EngineClient.SearchStreamAsync(Func`2 request, SearchQuery snapshot, String relatedSource, CancellationToken cancellationToken)+MoveNext() in <checkout>\src\app\WinSearch.Core\Ipc\EngineClient.cs:line 432
+   at WinSearch.Core.Ipc.EngineClient.SearchStreamAsync(Func`2 request, SearchQuery snapshot, String relatedSource, CancellationToken cancellationToken)+System.Threading.Tasks.Sources.IValueTaskSource<System.Boolean>.GetResult()
+   at WinSearch.Core.Ipc.EngineClient.SearchAsync(SearchQuery query, CancellationToken cancellationToken)+MoveNext() in <checkout>\src\app\WinSearch.Core\Ipc\EngineClient.cs:line 382
+   at WinSearch.Core.Ipc.EngineClient.SearchAsync(SearchQuery query, CancellationToken cancellationToken)+MoveNext() in <checkout>\src\app\WinSearch.Core\Ipc\EngineClient.cs:line 382
+   at WinSearch.Core.Ipc.EngineClient.SearchAsync(SearchQuery query, CancellationToken cancellationToken)+System.Threading.Tasks.Sources.IValueTaskSource<System.Boolean>.GetResult()
+   at WinSearch.Tests.IndexingPipeTests.<>c__DisplayClass2_1.<<FileKindSelectionRejectsInvalidListsBeforeConnecting>b__0>d.MoveNext() in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 79
+--- End of stack trace from previous location ---
+   at WinSearch.Tests.IndexingPipeTests.<>c__DisplayClass2_1.<<FileKindSelectionRejectsInvalidListsBeforeConnecting>b__0>d.MoveNext() in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 79
+--- End of stack trace from previous location ---
+  Failed WinSearch.Tests.IndexingPipeTests.FileKindSelectionRequiresCapabilityBeforeDispatch(related: False) [22 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at WinSearch.Tests.IndexingPipeTests.FileKindSelectionRequiresCapabilityBeforeDispatch(Boolean related) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 40
+   at WinSearch.Tests.IndexingPipeTests.FileKindSelectionRequiresCapabilityBeforeDispatch(Boolean related) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 41
+--- End of stack trace from previous location ---
+  Failed WinSearch.Tests.IndexingPipeTests.FileKindSelectionRequiresCapabilityBeforeDispatch(related: True) [16 ms]
+  Error Message:
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Stack Trace:
+     at WinSearch.Tests.IndexingPipeTests.FileKindSelectionRequiresCapabilityBeforeDispatch(Boolean related) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 40
+   at WinSearch.Tests.IndexingPipeTests.FileKindSelectionRequiresCapabilityBeforeDispatch(Boolean related) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 41
+--- End of stack trace from previous location ---
+
+Failed!  - Failed:     7, Passed:     0, Skipped:     0, Total:     7, Duration: 239 ms - WinSearch.Tests.dll (net8.0)

@@ -1,0 +1,68 @@
+rtk :    Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-prot
+ocol)
+At line:1 char:1
++ rtk proxy cargo test -p winsearchd --bin winsearchd file_kind_selecti ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-platform v0.1.0 (<checkout>\src\engine\crates\ws-platform)
+   Compiling ws-index v0.1.0 (<checkout>\src\engine\crates\ws-index)
+   Compiling ws-code v0.1.0 (<checkout>\src\engine\crates\ws-code)
+   Compiling ws-extract v0.1.0 (<checkout>\src\engine\crates\ws-extract)
+   Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearchd)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 20.65s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-950b3e8f0455252c.exe)
+
+running 5 tests
+test engine::tests::file_kind_selection_distinguishes_lumen_kinds_before_exact_limits ... FAILED
+test engine::tests::file_kind_selection_excludes_synthetic_and_unselected_code_results ... FAILED
+test engine::tests::file_kind_selection_precedes_crowded_exact_candidates_and_intersects_extensions ... FAILED
+test engine::tests::file_kind_selection_precedes_semantic_topk_in_the_actual_indexer ... FAILED
+test engine::tests::related_file_kind_selection_cannot_leak_targets_of_another_kind ... FAILED
+
+failures:
+
+---- engine::tests::file_kind_selection_distinguishes_lumen_kinds_before_exact_limits stdout ----
+
+thread 'engine::tests::file_kind_selection_distinguishes_lumen_kinds_before_exact_limits' (110664) panicked at bins\winsearchd\src\engine.rs:1831:13:
+assertion `left == right` failed: pdf
+  left: 13
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- engine::tests::file_kind_selection_excludes_synthetic_and_unselected_code_results stdout ----
+
+thread 'engine::tests::file_kind_selection_excludes_synthetic_and_unselected_code_results' (144176) panicked at bins\winsearchd\src\engine.rs:1853:9:
+assertion failed: engine.plan_results(&request).is_empty()
+
+---- engine::tests::file_kind_selection_precedes_crowded_exact_candidates_and_intersects_extensions stdout ----
+
+thread 'engine::tests::file_kind_selection_precedes_crowded_exact_candidates_and_intersects_extensions' (11504) panicked at bins\winsearchd\src\engine.rs:1845:48:
+assertion `left == right` failed
+  left: 20
+ right: 1
+
+---- engine::tests::file_kind_selection_precedes_semantic_topk_in_the_actual_indexer stdout ----
+
+thread 'engine::tests::file_kind_selection_precedes_semantic_topk_in_the_actual_indexer' (132160) panicked at bins\winsearchd\src\engine.rs:1872:90:
+assertion `left == right` failed
+  left: "noise-1005.txt"
+ right: "wanted.pdf"
+
+---- engine::tests::related_file_kind_selection_cannot_leak_targets_of_another_kind stdout ----
+
+thread 'engine::tests::related_file_kind_selection_cannot_leak_targets_of_another_kind' (135428) panicked at bins\winsearchd\src\engine.rs:1879:76:
+called `Result::unwrap()` on an `Err` value: Error("unknown field `file_kinds`, expected one of `source`, `limit`, `categories`, `extensions`", line: 0, column: 0)
+
+
+failures:
+    engine::tests::file_kind_selection_distinguishes_lumen_kinds_before_exact_limits
+    engine::tests::file_kind_selection_excludes_synthetic_and_unselected_code_results
+    engine::tests::file_kind_selection_precedes_crowded_exact_candidates_and_intersects_extensions
+    engine::tests::file_kind_selection_precedes_semantic_topk_in_the_actual_indexer
+    engine::tests::related_file_kind_selection_cannot_leak_targets_of_another_kind
+
+test result: FAILED. 0 passed; 5 failed; 0 ignored; 0 measured; 229 filtered out; finished in 45.47s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

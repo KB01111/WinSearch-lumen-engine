@@ -3,14 +3,15 @@ using System.Text.Json.Serialization;
 
 namespace WinSearch.Core.Protocol;
 
-public sealed class OutcomeEnumConverter : JsonConverterFactory
+public sealed class ProtocolCodeEnumConverter : JsonConverterFactory
 {
     public override bool CanConvert(Type typeToConvert) => typeToConvert == typeof(SearchDisposition)
-        || typeToConvert == typeof(SemanticPhase) || typeToConvert == typeof(SemanticIssue);
+        || typeToConvert == typeof(SemanticPhase) || typeToConvert == typeof(SemanticIssue) || typeToConvert == typeof(FileKind);
     public override JsonConverter CreateConverter(Type typeToConvert, JsonSerializerOptions options)
         => typeToConvert == typeof(SearchDisposition) ? new ClosedCodes<SearchDisposition>()
             : typeToConvert == typeof(SemanticPhase) ? new ClosedCodes<SemanticPhase>()
-            : new ClosedCodes<SemanticIssue>();
+            : typeToConvert == typeof(SemanticIssue) ? new ClosedCodes<SemanticIssue>()
+            : new ClosedCodes<FileKind>();
 
     private sealed class ClosedCodes<T> : JsonConverter<T> where T : struct, Enum
     {
@@ -18,11 +19,11 @@ public sealed class OutcomeEnumConverter : JsonConverterFactory
             .ToDictionary(value => JsonNamingPolicy.SnakeCaseLower.ConvertName(value.ToString()), StringComparer.Ordinal);
         public override T Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
             => reader.TokenType == JsonTokenType.String && Codes.TryGetValue(reader.GetString()!, out var value)
-                ? value : throw new JsonException("Invalid search outcome code");
+                ? value : throw new JsonException("Invalid protocol code");
         public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options)
         {
             var code = JsonNamingPolicy.SnakeCaseLower.ConvertName(value.ToString());
-            if (!Codes.ContainsKey(code)) throw new JsonException("Invalid search outcome code");
+            if (!Codes.ContainsKey(code)) throw new JsonException("Invalid protocol code");
             writer.WriteStringValue(code);
         }
     }

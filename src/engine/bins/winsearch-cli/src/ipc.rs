@@ -37,6 +37,10 @@ pub enum IpcError {
     UnsupportedFeature(&'static str),
     #[error("daemon returned a result outside the extension filter")]
     UnselectedSearchExtension,
+    #[error("invalid search file kind filter")]
+    InvalidSearchFileKinds,
+    #[error("daemon returned a result outside the file kind filter")]
+    UnselectedSearchFileKind,
 }
 
 pub struct DaemonClient {
@@ -185,10 +189,17 @@ impl DaemonClient {
         if !ws_protocol::valid_search_extensions(&query.extensions) {
             return Err(IpcError::InvalidSearchExtensions);
         }
+        if !ws_protocol::valid_search_file_kinds(&query.file_kinds) {
+            return Err(IpcError::InvalidSearchFileKinds);
+        }
+        if !query.file_kinds.is_empty() && !self.features.iter().any(|feature| feature == "search.file_kinds") {
+            return Err(IpcError::UnsupportedFeature("search.file_kinds"));
+        }
         if !query.extensions.is_empty() && !self.features.iter().any(|feature| feature == "search.filters") {
             return Err(IpcError::UnsupportedFeature("search.filters"));
         }
         let extensions = query.extensions.clone();
+        let file_kinds = query.file_kinds.clone();
         let requested_semantic=query.include_semantic;
         let require_outcome=self.features.iter().any(|feature|feature=="search.outcomes");
         let id = self.alloc_id();
@@ -202,6 +213,9 @@ impl DaemonClient {
                     done,
                     outcome,
                 }) if resp_id == id => {
+                    if batch.iter().any(|hit| !ws_protocol::search_file_kind_result_allowed(&file_kinds,hit)) {
+                        return Err(IpcError::UnselectedSearchFileKind);
+                    }
                     if !extensions.is_empty() && batch.iter().any(|hit|
                         hit.kind == ws_protocol::ResultKind::Folder || !hit.path.as_deref().is_some_and(|path|
                             ws_protocol::search_extension_allowed(&extensions,

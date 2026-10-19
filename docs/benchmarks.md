@@ -606,3 +606,30 @@ do not change those denominators. Extra CLI work and uncontrolled timing prevent
 causal speed comparisons; these samples do not establish scale/GPU/idle or
 installed-consumer acceptance. Finer file-kind scopes, Lumen integration and full
 v1 acceptance remain open.
+
+## 2026-10-19 source file-kind selection
+
+[File-kind evidence](validation/2026-10-19-file-kinds/README.md) records619 Rust
+workspace tests,25 actual-model embedding tests and one explicitly replayed
+model worker:645 executed tests across disjoint scopes. The default worker is
+ignored until that replay. The152 .NET tests pass, and x64 WinUI builds with
+zero warnings/errors; coherent binaries retain seven existing daemon warnings.
+
+Final no-model/managed-CPU profiles retain10/7 and21/17 original public/offline
+queries. They add11/13 raw kind cases, six typed kind cases each, and two CPU
+Related kind cases after original quality snapshots. Total/indexing times are
+10.389s/3.194s and91.556s/60.224s. Both owned jobs end empty, with matching
+executable/DLL/helper/comparator/harness hashes and no Rust build between profiles.
+
+Original CPU Recall@5/MRR remain .90/.85, expanded .9091/.8636 and ten empty
+controls FP0; screenshot miss/audio rank2 remain. Actual text worst drift1.32e-4
+and image/audio/photo/frame references pass unchanged tolerances. Model execution
+uses CPU; GPU/device/scale/resource calibration and installed acceptance remain
+open. Extra cases and uncontrolled whole-harness timings establish no causal
+performance comparison.
+
+The retained first CPU failure came from a fixture table omitting valid `.lnk`
+unknown sources. Its corrected synthetic-exclusion case permits valid indexed
+matches while forbidding calculator/settings/action results. The failure and
+binary identity are retained without publishing machine application inventory.
+Other named/empty expectations and all frozen quality gates remain unchanged.

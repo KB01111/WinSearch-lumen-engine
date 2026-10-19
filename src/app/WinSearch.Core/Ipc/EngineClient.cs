@@ -373,12 +373,14 @@ public sealed class EngineClient : IEngineClient
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
-        if (query is null || query.Categories is null || !SearchExtensionsValid(query.Extensions))
+        if (query is null || query.Categories is null || !SearchExtensionsValid(query.Extensions) || !FileKinds.Valid(query.FileKinds))
             throw new EngineException(ErrorCode.InvalidRequest, "invalid search extension filter");
         var snapshot = new SearchQuery { Text = query.Text, Mode = query.Mode, Limit = query.Limit,
-            IncludeSemantic = query.IncludeSemantic, Categories = query.Categories.ToList(), Extensions = query.Extensions.ToList() };
+            IncludeSemantic = query.IncludeSemantic, Categories = query.Categories.ToList(), Extensions = query.Extensions.ToList(), FileKinds = query.FileKinds.ToList() };
         if (snapshot.Extensions.Count > 0 && IsConnected && !_features.Contains("search.filters", StringComparer.Ordinal))
             throw new EngineException(ErrorCode.Unsupported, "engine does not support search filters");
+        if (snapshot.FileKinds.Count > 0 && IsConnected && !_features.Contains("search.file_kinds", StringComparer.Ordinal))
+            throw new EngineException(ErrorCode.Unsupported, "engine does not support search.file_kinds");
         await foreach (var batch in SearchStreamAsync(id => new SearchMessage { Id = id, Query = snapshot }, snapshot, null, cancellationToken))
             yield return batch;
     }
@@ -389,17 +391,17 @@ public sealed class EngineClient : IEngineClient
         ThrowIfDisposed();
         if (query is null || !ReferenceValid(query.Source, bound: true) || query.Limit is < 1 or > 10000
             || query.Categories is null || query.Categories.Count > 32 || query.Categories.Any(kind => !Enum.IsDefined(kind))
-            || !SearchExtensionsValid(query.Extensions))
+            || !SearchExtensionsValid(query.Extensions) || !FileKinds.Valid(query.FileKinds))
             throw new EngineException(ErrorCode.InvalidRequest, "invalid Related source or request budget");
         var snapshot = new RelatedQuery { Source = new() { ResultId = query.Source.ResultId, SourceRevision = query.Source.SourceRevision },
-            Limit = query.Limit, Categories = query.Categories.ToList(), Extensions = query.Extensions.ToList() };
+            Limit = query.Limit, Categories = query.Categories.ToList(), Extensions = query.Extensions.ToList(), FileKinds = query.FileKinds.ToList() };
         var code = snapshot.Source.ResultId[0] == 'c';
         foreach (var (required, feature) in new[] { (true, "search.related"), (true, "search.semantic"),
-            (true, "search.outcomes"), (code, "code"), (snapshot.Extensions.Count > 0, "search.filters") })
+            (true, "search.outcomes"), (code, "code"), (snapshot.Extensions.Count > 0, "search.filters"), (snapshot.FileKinds.Count > 0, "search.file_kinds") })
             if (required && !_features.Contains(feature, StringComparer.Ordinal))
                 throw new EngineException(ErrorCode.Unsupported, $"engine does not support {feature}");
         var context = new SearchQuery { Mode = code ? SearchMode.Code : SearchMode.Files, IncludeSemantic = true,
-            Limit = snapshot.Limit, Categories = snapshot.Categories, Extensions = snapshot.Extensions };
+            Limit = snapshot.Limit, Categories = snapshot.Categories, Extensions = snapshot.Extensions, FileKinds = snapshot.FileKinds };
         await foreach (var batch in SearchStreamAsync(id => new RelatedMessage { Id = id, Query = snapshot }, context,
             snapshot.Source.ResultId, cancellationToken)) yield return batch;
     }
@@ -445,7 +447,7 @@ public sealed class EngineClient : IEngineClient
                     || (snapshot.Categories.Count > 0 && !snapshot.Categories.Contains(hit.Kind)))))
                     throw new EngineException(ErrorCode.InvalidRequest, "Related returned its source, an unbound result or ordinary fallback state");
                 if (batch.Results is null || batch.Results.Any(hit => hit is null || (snapshot.Extensions.Count > 0 && hit.Kind == ResultKind.Folder)
-                    || !SearchExtensionMatches(snapshot.Extensions, hit.Path) || (hit.EntryReference is { } reference
+                    || !SearchExtensionMatches(snapshot.Extensions, hit.Path) || !FileKinds.Matches(snapshot.FileKinds,hit) || (hit.EntryReference is { } reference
                     && (!ReferenceValid(reference, bound: true) || !ReferenceKindMatches(reference, hit.Kind)
                         || ((reference.ResultId[0] == 'c') != (mode == SearchMode.Code))))))
                     throw new EngineException(ErrorCode.InvalidRequest, "search returned an invalid reference or filtered result");

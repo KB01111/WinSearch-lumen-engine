@@ -1,0 +1,1468 @@
+{
+  "scope": "Actual daemon/public CLI DTO parity, optionally including offline-ranker snapshots.\n\nDefault: native document/PDF/code extraction without a model. --real-model\nimports the pinned artifacts through ModelManager, requires real 768-dimensional\ncode vectors, and checks semantic code/image/audio/video on generated fixtures.\nBoth modes use an isolated data directory and a kill-on-close Windows job.\nThe snapshot option compares query code on the same native indexed vectors;\nfixture seeding and native extraction remain separately classified evidence.\n",
+  "real_model_requested": false,
+  "queries": [
+    {
+      "name": "code_disabled",
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": true,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "document_exact",
+      "query": {
+        "text": "amberparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": false,
+      "expected_name": "item-a.txt",
+      "expected_max_rank": 1,
+      "modality": "document",
+      "relevant_rank": 1,
+      "result_count": 1,
+      "cli_structural_sha256": "02da791131674ffe7e643ec1396aa525fc0d552c59c7aba20d4f53c9458ef718",
+      "pipe_structural_sha256": "02da791131674ffe7e643ec1396aa525fc0d552c59c7aba20d4f53c9458ef718",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "pdf_exact",
+      "query": {
+        "text": "pdfparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": false,
+      "expected_name": "item-b.pdf",
+      "expected_max_rank": 1,
+      "modality": "document",
+      "relevant_rank": 1,
+      "result_count": 1,
+      "cli_structural_sha256": "21512b4bbd62a8eb3f91d43fc3789264d4e2b0913b03c6b7ee5284a0e9b0fa42",
+      "pipe_structural_sha256": "21512b4bbd62a8eb3f91d43fc3789264d4e2b0913b03c6b7ee5284a0e9b0fa42",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "code_definition_reference",
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": false,
+      "expected_name": "源 code.rs",
+      "expected_max_rank": 1,
+      "modality": "code",
+      "relevant_rank": 1,
+      "result_count": 2,
+      "cli_structural_sha256": "fa0d07b13c3f1223813a2df45ce31c005af643817767cbf10cb19529fab722b8",
+      "pipe_structural_sha256": "fa0d07b13c3f1223813a2df45ce31c005af643817767cbf10cb19529fab722b8",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "notebook",
+      "query": {
+        "text": "notebookparity",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": false,
+      "expected_name": "cells.ipynb",
+      "expected_max_rank": 1,
+      "modality": "code",
+      "relevant_rank": 1,
+      "result_count": 1,
+      "cli_structural_sha256": "2aa80bc2ab6de8f7164d9e2ab5c67b6f8e90b36262cd1ef14c12454fdc3144ef",
+      "pipe_structural_sha256": "2aa80bc2ab6de8f7164d9e2ab5c67b6f8e90b36262cd1ef14c12454fdc3144ef",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "code_isolation",
+      "query": {
+        "text": "parityneedle",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": true,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "absent_exact",
+      "query": {
+        "text": "unfindableparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": true,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "code_absent_exact",
+      "query": {
+        "text": "unfindableparitytoken",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": true,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "revoked_document",
+      "query": {
+        "text": "amberparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": true,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "revoked_code",
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": true,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    }
+  ],
+  "checks": [
+    "native_ordinary_document_media_byte_sha256_and_resolved_metadata",
+    "native_file_kind_exact_code_notebook_union_intersection_and_synthetic_controls",
+    "native_extension_filters_before_results_and_invalid_request_rejection",
+    "native_indexed_entry_resolution_with_current_source_proof",
+    "native_code_and_notebook_exact_byte_sha256_provenance",
+    "native_extraction_exact_code_opt_in_and_payload_parity",
+    "typed_client_bound_code_notebook_refs_and_actual_sha256",
+    "typed_async_client_native_dto_status_pause_revoke_restore_reconnect",
+    "committed_exact_cache_revisions_and_hashes_survive_consumer_policy_lifecycle",
+    "native_code_exact_with_zero_model_vectors",
+    "shared_offline_ranker_native_snapshot_ordered_ids_and_locations",
+    "raw_related_bound_seed_domain_budget_outcomes_and_unavailable_controls",
+    "native_entry_reference_rejected_after_root_revocation",
+    "live_root_revocation_public_cli_and_pipe",
+    "unchanged_overall_recall_mrr_and_zero_negative_controls"
+  ],
+  "failures": [],
+  "quality_misses": [],
+  "owned_job_empty": true,
+  "harness_sha256": "0409a85743da266d8388a250d16b557d9b85c6dc787d1b36bbc96f254c6a311f",
+  "expected_pipeline_version": 2,
+  "expected_semantic_floor": 0.65,
+  "expected_code_query_policy": "code-and-search-task-corroboration-v1",
+  "binary_sha256": {
+    "winsearchd.exe": "9eb4e580a5c5c95d2d5369ff03d1825bc98c78f5236474cbea52ff06455a9d05",
+    "winsearch-cli.exe": "ba147799e5daa1e71c4a4720827a629c33263e05d1e9b50c671602c6ed78aee1",
+    "winsearch-embed.exe": "2417bb278b02807cca0ee4ddf98b2183c68a09a6ebad6dd3d463ed83c21b03ca",
+    "winsearch-extract.exe": "0066b4a6d5c0e3e235cf312796e1e4139fb9c0b494dfc018c531b9f9dc14afec"
+  },
+  "adjacent_native_dll_sha256": {
+    "ggml-base.dll": "1fef4fe44a9a0ba54e04ae58c651ecce330cf425463041cc407b42be62b56962",
+    "ggml-cpu-alderlake.dll": "6f335fe79a35276fcef8ed098d4e2b5952a6cce036549e6547ed7c9b08ac3147",
+    "ggml-cpu-cannonlake.dll": "8a78dfa98d6f6621f96041805227ed78a2a18e0459ba3446d4912cb9aa9e0511",
+    "ggml-cpu-cascadelake.dll": "26cb79d301458ab48143c6634ff4b9a17b247c8bd3203add4e9e3d90b93deed7",
+    "ggml-cpu-haswell.dll": "ea84ecaeab37d2fd794032dd6c7e441b6329abba5835f8ddcbdd9ffde7f4eb5e",
+    "ggml-cpu-icelake.dll": "d60448a478c6029c7e4f7abbb4343ecb2c1b4dea99b6e409028202a85aff0a4a",
+    "ggml-cpu-sandybridge.dll": "777f1172ff889dce5c2baf1bdb3313af7a7f04f213b7e783177d4692b90fad2a",
+    "ggml-cpu-skylakex.dll": "987007c231607c71e92c578c51efe05b263f4558983017446f38a86a7a967328",
+    "ggml-cpu-sse42.dll": "916bf899d3dd80d886ed604059a6ed9693eb37ac4734997ffeb625ce66c6fa1a",
+    "ggml-cpu-x64.dll": "e12f726dce960488ec911e7a0e0a99c67fe32986facbddd49c35ed49120a3656",
+    "ggml-cuda.dll": "8bf0d44ebdb60df7e398b9fddcc4ef5a7aeb63adfbcb85764db2e43e507edf1c",
+    "ggml.dll": "7516e5d871d1fe0e31897f6ee0f3aaf4c6471ce9016472285e65b19a42443f1a",
+    "llama.dll": "a66c29aa35f7301977b24389cc38f2c9c07a04a0cb49349cd2f5055b891f61e5",
+    "mtmd.dll": "4abc3e9e8ce9a378a76a2c885fd5078a251389b36dd6ecaed3811d48e1baef30",
+    "pdfium.dll": "1f2aee4286b8cf0413ab4562b7121aa454f9cfd9afd6ca8609bcef80927b3f80"
+  },
+  "offline_comparator_sha256": "bdb0d8d26dce444eeb619470e39a74ebd303c56036bfd3b6bfe836773a665622",
+  "headless_client_sha256": "64a15e7f93cee24fe3d93542a0d0282fd32f69b6e3754441ff083c2eb47c8ab7",
+  "generated_source_sha256": {
+    "code\\cells.ipynb": "39ff523217cbec65301238ccb92d04677898eba2ebc5c860baad13c1c25061b9",
+    "code\\源 code.rs": "e91ca6326352f465dabbe4bc67d4271714e226c0a09cc36fdecc9f45c2e80bef",
+    "documents\\item-a.txt": "9fc1db8e72de0275279a18f08a76e43fbbeae6fbde7b9924c4d1f351eb4652d1",
+    "documents\\item-b.pdf": "028cfcb54c84c18f5351445f7edeb6d2651e9e4950714c61042cdd911870671e"
+  },
+  "index_seconds": 3.194,
+  "ordinary_provenance": [
+    {
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\documents\\item-a.txt",
+      "revision": 1,
+      "hash_revision": 1,
+      "sha256": "9fc1db8e72de0275279a18f08a76e43fbbeae6fbde7b9924c4d1f351eb4652d1",
+      "resolved": {
+        "result_id": "e1",
+        "root_path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\documents",
+        "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\documents\\item-a.txt",
+        "name": "item-a.txt",
+        "kind": "document",
+        "size_bytes": 85,
+        "modified_unix_seconds": 1792419763,
+        "index_revision": 1,
+        "source_revision": "<opaque identity redacted>",
+        "content_sha256": "9fc1db8e72de0275279a18f08a76e43fbbeae6fbde7b9924c4d1f351eb4652d1"
+      }
+    },
+    {
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\documents\\item-b.pdf",
+      "revision": 1,
+      "hash_revision": 1,
+      "sha256": "028cfcb54c84c18f5351445f7edeb6d2651e9e4950714c61042cdd911870671e",
+      "resolved": {
+        "result_id": "e2",
+        "root_path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\documents",
+        "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\documents\\item-b.pdf",
+        "name": "item-b.pdf",
+        "kind": "document",
+        "size_bytes": 924,
+        "modified_unix_seconds": 1792419763,
+        "index_revision": 1,
+        "source_revision": "<opaque identity redacted>",
+        "content_sha256": "028cfcb54c84c18f5351445f7edeb6d2651e9e4950714c61042cdd911870671e"
+      }
+    }
+  ],
+  "extension_filters": [
+    {
+      "query": {
+        "text": "pdfparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          ".PDF"
+        ]
+      },
+      "expected_name": "item-b.pdf",
+      "result_count": 1,
+      "cli_structural_sha256": "21512b4bbd62a8eb3f91d43fc3789264d4e2b0913b03c6b7ee5284a0e9b0fa42",
+      "pipe_structural_sha256": "21512b4bbd62a8eb3f91d43fc3789264d4e2b0913b03c6b7ee5284a0e9b0fa42",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "pdfparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "txt"
+        ]
+      },
+      "expected_name": null,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "amberparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "txt"
+        ]
+      },
+      "expected_name": "item-a.txt",
+      "result_count": 1,
+      "cli_structural_sha256": "02da791131674ffe7e643ec1396aa525fc0d552c59c7aba20d4f53c9458ef718",
+      "pipe_structural_sha256": "02da791131674ffe7e643ec1396aa525fc0d552c59c7aba20d4f53c9458ef718",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "rs"
+        ]
+      },
+      "expected_name": "源 code.rs",
+      "result_count": 2,
+      "cli_structural_sha256": "fa0d07b13c3f1223813a2df45ce31c005af643817767cbf10cb19529fab722b8",
+      "pipe_structural_sha256": "fa0d07b13c3f1223813a2df45ce31c005af643817767cbf10cb19529fab722b8",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "py"
+        ]
+      },
+      "expected_name": null,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "notebookparity",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "ipynb"
+        ]
+      },
+      "expected_name": "cells.ipynb",
+      "result_count": 1,
+      "cli_structural_sha256": "2aa80bc2ab6de8f7164d9e2ab5c67b6f8e90b36262cd1ef14c12454fdc3144ef",
+      "pipe_structural_sha256": "2aa80bc2ab6de8f7164d9e2ab5c67b6f8e90b36262cd1ef14c12454fdc3144ef",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "1+2",
+        "mode": "auto",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "txt"
+        ]
+      },
+      "expected_name": null,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "pdfparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          ".PDF",
+          "txt"
+        ]
+      },
+      "expected_name": "item-b.pdf",
+      "result_count": 1,
+      "cli_structural_sha256": "21512b4bbd62a8eb3f91d43fc3789264d4e2b0913b03c6b7ee5284a0e9b0fa42",
+      "pipe_structural_sha256": "21512b4bbd62a8eb3f91d43fc3789264d4e2b0913b03c6b7ee5284a0e9b0fa42",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "amberparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          ".PDF",
+          "txt"
+        ]
+      },
+      "expected_name": "item-a.txt",
+      "result_count": 1,
+      "cli_structural_sha256": "02da791131674ffe7e643ec1396aa525fc0d552c59c7aba20d4f53c9458ef718",
+      "pipe_structural_sha256": "02da791131674ffe7e643ec1396aa525fc0d552c59c7aba20d4f53c9458ef718",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    }
+  ],
+  "file_kind_filters": [
+    {
+      "query": {
+        "text": "pdfparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "file_kinds": [
+          "pdf"
+        ],
+        "extensions": []
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 12,
+          "batch": [
+            {
+              "id": "e2",
+              "kind": "document",
+              "title": "item-b.pdf",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\documents\\item-b.pdf",
+              "match_explanation": "Matches extracted content",
+              "score": 0.41,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\documents\\item-b.pdf",
+              "location": {
+                "kind": "page",
+                "page": 2
+              },
+              "thumbnail_path": "<checkout>\\artifacts\\file-kind-native-verified-no-model\\data\\cache\\thumbs\\extract-131396-1792419766326322100-3-0.png",
+              "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+              "matching_moments": [
+                {
+                  "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+                  "location": {
+                    "kind": "page",
+                    "page": 2
+                  },
+                  "thumbnail_path": "<checkout>\\artifacts\\file-kind-native-verified-no-model\\data\\cache\\thumbs\\extract-131396-1792419766326322100-3-1.png"
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e2",
+                "source_revision": "<opaque identity redacted>"
+              }
+            }
+          ],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "expected_name": "item-b.pdf",
+      "expect_empty": false
+    },
+    {
+      "query": {
+        "text": "pdfparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "file_kinds": [
+          "document"
+        ],
+        "extensions": []
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 13,
+          "batch": [],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "expected_name": null,
+      "expect_empty": true
+    },
+    {
+      "query": {
+        "text": "amberparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "file_kinds": [
+          "document"
+        ],
+        "extensions": []
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 14,
+          "batch": [
+            {
+              "id": "e1",
+              "kind": "document",
+              "title": "item-a.txt",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\documents\\item-a.txt",
+              "match_explanation": "Matches extracted content",
+              "score": 0.41,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\documents\\item-a.txt",
+              "location": {
+                "kind": "line",
+                "line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+              "matching_moments": [
+                {
+                  "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+                  "location": {
+                    "kind": "line",
+                    "line": 2
+                  },
+                  "thumbnail_path": null
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e1",
+                "source_revision": "<opaque identity redacted>"
+              }
+            }
+          ],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "expected_name": "item-a.txt",
+      "expect_empty": false
+    },
+    {
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false,
+        "file_kinds": [
+          "source"
+        ],
+        "extensions": []
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 15,
+          "batch": [
+            {
+              "id": "code:2:1:true:parityneedle",
+              "kind": "code",
+              "title": "parityneedle",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\code\\源 code.rs",
+              "match_explanation": "function · line 1",
+              "score": 1.0,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\code\\源 code.rs",
+              "location": {
+                "kind": "line",
+                "line": 1
+              },
+              "thumbnail_path": null,
+              "excerpt": "pub fn parityneedle() {}",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c2",
+                "source_revision": "<opaque identity redacted>"
+              }
+            },
+            {
+              "id": "code:2:2:false:parityneedle",
+              "kind": "code",
+              "title": "parityneedle",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\code\\源 code.rs",
+              "match_explanation": "reference · line 2",
+              "score": 0.949999988079071,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\code\\源 code.rs",
+              "location": {
+                "kind": "line",
+                "line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "parityneedle",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c2",
+                "source_revision": "<opaque identity redacted>"
+              }
+            }
+          ],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "expected_name": "源 code.rs",
+      "expect_empty": false
+    },
+    {
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false,
+        "file_kinds": [
+          "pdf"
+        ],
+        "extensions": []
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 16,
+          "batch": [],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "expected_name": null,
+      "expect_empty": true
+    },
+    {
+      "query": {
+        "text": "notebookparity",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false,
+        "file_kinds": [
+          "unknown"
+        ],
+        "extensions": []
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 17,
+          "batch": [
+            {
+              "id": "code:1:2:true:notebookparity",
+              "kind": "code",
+              "title": "notebookparity",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\code\\cells.ipynb",
+              "match_explanation": "function · cell 2, line 1",
+              "score": 1.0,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\code\\cells.ipynb",
+              "location": {
+                "kind": "notebook",
+                "cell_ordinal": 1,
+                "line": 1,
+                "end_line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "def notebookparity():\n    return 1",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c1",
+                "source_revision": "<opaque identity redacted>"
+              }
+            }
+          ],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "expected_name": "cells.ipynb",
+      "expect_empty": false
+    },
+    {
+      "query": {
+        "text": "notebookparity",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false,
+        "file_kinds": [
+          "source"
+        ],
+        "extensions": []
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 18,
+          "batch": [],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "expected_name": null,
+      "expect_empty": true
+    },
+    {
+      "query": {
+        "text": "1+2",
+        "mode": "auto",
+        "limit": 5,
+        "include_semantic": false,
+        "file_kinds": [
+          "unknown"
+        ],
+        "extensions": []
+      },
+      "expected_name": null,
+      "expect_empty": false,
+      "result_count": 0,
+      "result_kind_counts": {},
+      "extension_counts": {},
+      "full_results_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "pdfparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "file_kinds": [
+          "pdf",
+          "document"
+        ],
+        "extensions": []
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 20,
+          "batch": [
+            {
+              "id": "e2",
+              "kind": "document",
+              "title": "item-b.pdf",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\documents\\item-b.pdf",
+              "match_explanation": "Matches extracted content",
+              "score": 0.41,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\documents\\item-b.pdf",
+              "location": {
+                "kind": "page",
+                "page": 2
+              },
+              "thumbnail_path": "<checkout>\\artifacts\\file-kind-native-verified-no-model\\data\\cache\\thumbs\\extract-131396-1792419766326322100-3-0.png",
+              "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+              "matching_moments": [
+                {
+                  "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+                  "location": {
+                    "kind": "page",
+                    "page": 2
+                  },
+                  "thumbnail_path": "<checkout>\\artifacts\\file-kind-native-verified-no-model\\data\\cache\\thumbs\\extract-131396-1792419766326322100-3-1.png"
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e2",
+                "source_revision": "<opaque identity redacted>"
+              }
+            }
+          ],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "expected_name": "item-b.pdf",
+      "expect_empty": false
+    },
+    {
+      "query": {
+        "text": "amberparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "file_kinds": [
+          "pdf",
+          "document"
+        ],
+        "extensions": []
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 21,
+          "batch": [
+            {
+              "id": "e1",
+              "kind": "document",
+              "title": "item-a.txt",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\documents\\item-a.txt",
+              "match_explanation": "Matches extracted content",
+              "score": 0.41,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\documents\\item-a.txt",
+              "location": {
+                "kind": "line",
+                "line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+              "matching_moments": [
+                {
+                  "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+                  "location": {
+                    "kind": "line",
+                    "line": 2
+                  },
+                  "thumbnail_path": null
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e1",
+                "source_revision": "<opaque identity redacted>"
+              }
+            }
+          ],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "expected_name": "item-a.txt",
+      "expect_empty": false
+    },
+    {
+      "query": {
+        "text": "pdfparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "file_kinds": [
+          "pdf"
+        ],
+        "extensions": [
+          "txt"
+        ]
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 22,
+          "batch": [],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "expected_name": null,
+      "expect_empty": true
+    }
+  ],
+  "invalid_extension_filter": {
+    "type": "error",
+    "id": 2,
+    "code": "invalid_request",
+    "message": "search request failed"
+  },
+  "invalid_file_kind_filter": {
+    "type": "error",
+    "id": 2,
+    "code": "invalid_request",
+    "message": "search request failed"
+  },
+  "entry_resolution": {
+    "admitted": {
+      "type": "resolved_entry",
+      "id": 8,
+      "entry": {
+        "result_id": "e1",
+        "root_path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\documents",
+        "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\documents\\item-a.txt",
+        "name": "item-a.txt",
+        "kind": "document",
+        "size_bytes": 85,
+        "modified_unix_seconds": 1792419763,
+        "index_revision": 1,
+        "source_revision": "<opaque identity redacted>",
+        "content_sha256": "9fc1db8e72de0275279a18f08a76e43fbbeae6fbde7b9924c4d1f351eb4652d1"
+      }
+    },
+    "revoked": {
+      "type": "error",
+      "id": 33,
+      "code": "not_ready",
+      "message": "entry is unavailable or changed"
+    }
+  },
+  "code_provenance": [
+    {
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\code\\cells.ipynb",
+      "revision": 1,
+      "sha256": "39ff523217cbec65301238ccb92d04677898eba2ebc5c860baad13c1c25061b9"
+    },
+    {
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\code\\源 code.rs",
+      "revision": 1,
+      "sha256": "e91ca6326352f465dabbe4bc67d4271714e226c0a09cc36fdecc9f45c2e80bef"
+    }
+  ],
+  "headless_client": {
+    "checks": [
+      "typed_status_and_configuration",
+      "paused_policy_pushed_subscription",
+      "native_document_and_code_locations",
+      "current_entry_source_proof",
+      "drop_disconnect_then_reconnect",
+      "root_revocation_hides_results",
+      "revoked_proof_stays_invalid_after_restore",
+      "fresh_reference_after_restore"
+    ],
+    "engine_config": {
+      "preferred_backend": "cpu",
+      "semantic_enabled": false
+    },
+    "engine_version": "0.1.0",
+    "features": [
+      "search.exact",
+      "search.semantic",
+      "search.filters",
+      "search.file_kinds",
+      "search.outcomes",
+      "search.related",
+      "code",
+      "entry.resolve",
+      "entry.resolve.code",
+      "search.entry_references",
+      "entry.preview.text",
+      "entry.preview.code"
+    ],
+    "file_kind_filters": [
+      {
+        "file_kind": "pdf",
+        "query": "pdfparitytoken",
+        "results": [
+          {
+            "entry_reference": {
+              "result_id": "e2",
+              "source_revision": "<opaque identity redacted>"
+            },
+            "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+            "id": "e2",
+            "kind": "document",
+            "location": {
+              "kind": "page",
+              "page": 2
+            },
+            "match_explanation": "Matches extracted content",
+            "matching_moments": [
+              {
+                "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+                "location": {
+                  "kind": "page",
+                  "page": 2
+                },
+                "thumbnail_path": "<checkout>\\artifacts\\file-kind-native-verified-no-model\\data\\cache\\thumbs\\extract-131396-1792419766326322100-3-1.png"
+              }
+            ],
+            "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\documents\\item-b.pdf",
+            "score": 0.41,
+            "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\documents\\item-b.pdf",
+            "thumbnail_path": "<checkout>\\artifacts\\file-kind-native-verified-no-model\\data\\cache\\thumbs\\extract-131396-1792419766326322100-3-0.png",
+            "title": "item-b.pdf"
+          }
+        ]
+      },
+      {
+        "file_kind": "document",
+        "query": "pdfparitytoken",
+        "results": []
+      },
+      {
+        "file_kind": "source",
+        "query": "parityneedle",
+        "results": [
+          {
+            "entry_reference": {
+              "result_id": "c2",
+              "source_revision": "<opaque identity redacted>"
+            },
+            "excerpt": "pub fn parityneedle() {}",
+            "id": "code:2:1:true:parityneedle",
+            "kind": "code",
+            "location": {
+              "kind": "line",
+              "line": 1
+            },
+            "match_explanation": "function · line 1",
+            "matching_moments": [],
+            "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\code\\源 code.rs",
+            "score": 1.0,
+            "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\code\\源 code.rs",
+            "thumbnail_path": null,
+            "title": "parityneedle"
+          },
+          {
+            "entry_reference": {
+              "result_id": "c2",
+              "source_revision": "<opaque identity redacted>"
+            },
+            "excerpt": "parityneedle",
+            "id": "code:2:2:false:parityneedle",
+            "kind": "code",
+            "location": {
+              "kind": "line",
+              "line": 2
+            },
+            "match_explanation": "reference · line 2",
+            "matching_moments": [],
+            "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\code\\源 code.rs",
+            "score": 0.949999988079071,
+            "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\code\\源 code.rs",
+            "thumbnail_path": null,
+            "title": "parityneedle"
+          }
+        ]
+      },
+      {
+        "file_kind": "pdf",
+        "query": "parityneedle",
+        "results": []
+      },
+      {
+        "file_kind": "unknown",
+        "query": "notebookparity",
+        "results": [
+          {
+            "entry_reference": {
+              "result_id": "c1",
+              "source_revision": "<opaque identity redacted>"
+            },
+            "excerpt": "def notebookparity():\n    return 1",
+            "id": "code:1:2:true:notebookparity",
+            "kind": "code",
+            "location": {
+              "cell_ordinal": 1,
+              "end_line": 2,
+              "kind": "notebook",
+              "line": 1
+            },
+            "match_explanation": "function · cell 2, line 1",
+            "matching_moments": [],
+            "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\code\\cells.ipynb",
+            "score": 1.0,
+            "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-6b70qlbr\\code\\cells.ipynb",
+            "thumbnail_path": null,
+            "title": "notebookparity"
+          }
+        ]
+      },
+      {
+        "file_kind": "source",
+        "query": "notebookparity",
+        "results": []
+      }
+    ],
+    "model_status": {
+      "bytes": 0,
+      "error": null,
+      "state": "not_downloaded",
+      "total_bytes": 864676480
+    },
+    "related_checks": [
+      {
+        "error": "not_ready",
+        "source": {
+          "result_id": "e1",
+          "source_revision": "<opaque identity redacted>"
+        }
+      },
+      {
+        "error": "not_ready",
+        "source": {
+          "result_id": "c2",
+          "source_revision": "<opaque identity redacted>"
+        }
+      }
+    ],
+    "full_structural_sha256": "2f38148e179af9d00447d5948eb3475a679dcb3289679c6aee304f0a75c29419"
+  },
+  "offline_input_sha256": "092ae149ef6abef2f4ca5e138ee9bdcbfe04166ed1d14bfa12096b499aa69713",
+  "offline_snapshot_sha256": {
+    "index": "1ffc4eb9b3ca7e3eb3b5c3edf0715e2bbab1bfc292a8d4f674027adf1341c1ca",
+    "code": "d841ed74129dbcfd354c23c4c4e9edc81995bca73ede80081ac5f6927213487b"
+  },
+  "offline_parity": {
+    "cases": [
+      {
+        "equal": true,
+        "name": "document_exact",
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "files",
+          "text": "amberparitytoken"
+        },
+        "native_structural_sha256": "448e395d00c292e2922fc43064ca46a811936efae8c533a26e611f84f8f55ae1",
+        "offline_structural_sha256": "448e395d00c292e2922fc43064ca46a811936efae8c533a26e611f84f8f55ae1"
+      },
+      {
+        "equal": true,
+        "name": "pdf_exact",
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "files",
+          "text": "pdfparitytoken"
+        },
+        "native_structural_sha256": "d693b141ce1b233aa4707c0780db3548e106077021f3447f683437262ebbab10",
+        "offline_structural_sha256": "d693b141ce1b233aa4707c0780db3548e106077021f3447f683437262ebbab10"
+      },
+      {
+        "equal": true,
+        "name": "code_definition_reference",
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "code",
+          "text": "parityneedle"
+        },
+        "native_structural_sha256": "b627f20b88fc918a8fe88b301791c9b16a290d7220b1acd6e7152e03fc689b14",
+        "offline_structural_sha256": "b627f20b88fc918a8fe88b301791c9b16a290d7220b1acd6e7152e03fc689b14"
+      },
+      {
+        "equal": true,
+        "name": "notebook",
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "code",
+          "text": "notebookparity"
+        },
+        "native_structural_sha256": "a2f8e3cc6587d4aba35a561699962d1045b0ab17e3e39c711c4517cf9debfd88",
+        "offline_structural_sha256": "a2f8e3cc6587d4aba35a561699962d1045b0ab17e3e39c711c4517cf9debfd88"
+      },
+      {
+        "equal": true,
+        "name": "code_isolation",
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "files",
+          "text": "parityneedle"
+        },
+        "native_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "offline_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+        "equal": true,
+        "name": "absent_exact",
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "files",
+          "text": "unfindableparitytoken"
+        },
+        "native_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "offline_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+        "equal": true,
+        "name": "code_absent_exact",
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "code",
+          "text": "unfindableparitytoken"
+        },
+        "native_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "offline_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      }
+    ],
+    "embedder": "ConceptStubEmbedder (pipeline smoke test; deterministic 768d CI fallback)",
+    "equal": true,
+    "scope": "shared offline query functions versus public daemon results on native DB snapshots; no re-extraction"
+  },
+  "related_checks": [
+    {
+      "name": "ordinary_bound_cached_source",
+      "source": {
+        "result_id": "e1",
+        "source_revision": "<opaque identity redacted>"
+      },
+      "frames": [
+        {
+          "type": "error",
+          "id": 30,
+          "code": "not_ready",
+          "message": "search request failed"
+        },
+        {
+          "type": "results",
+          "id": 30,
+          "batch": [],
+          "done": true,
+          "outcome": {
+            "disposition": "failed",
+            "semantic": null
+          }
+        }
+      ],
+      "expected_name": null,
+      "file_kinds": null
+    },
+    {
+      "name": "code_bound_cached_source",
+      "source": {
+        "result_id": "c2",
+        "source_revision": "<opaque identity redacted>"
+      },
+      "frames": [
+        {
+          "type": "error",
+          "id": 31,
+          "code": "not_ready",
+          "message": "search request failed"
+        },
+        {
+          "type": "results",
+          "id": 31,
+          "batch": [],
+          "done": true,
+          "outcome": {
+            "disposition": "failed",
+            "semantic": null
+          }
+        }
+      ],
+      "expected_name": null,
+      "file_kinds": null
+    },
+    {
+      "name": "reject_unbound_source",
+      "source": {
+        "result_id": "e1",
+        "source_revision": null
+      },
+      "frames": [
+        {
+          "type": "error",
+          "id": 32,
+          "code": "invalid_request",
+          "message": "search request failed"
+        },
+        {
+          "type": "results",
+          "id": 32,
+          "batch": [],
+          "done": true,
+          "outcome": {
+            "disposition": "failed",
+            "semantic": null
+          }
+        }
+      ],
+      "expected_name": null,
+      "file_kinds": null
+    }
+  ],
+  "quality": {
+    "positive_queries": 4,
+    "Recall@5": 1.0,
+    "MRR": 1.0,
+    "minimum_recall_at_5": 0.9,
+    "minimum_mrr": 0.85,
+    "maximum_negative_fp_rate": 0,
+    "original_positive_cases": {
+      "positive_queries": 4,
+      "Recall@5": 1.0,
+      "MRR": 1.0
+    },
+    "empty_result_controls": 6,
+    "empty_control_fp_rate": 0.0,
+    "empty_control_scope": "all declared empty-result cases, including code isolation and root revocation",
+    "by_modality": {
+      "code": {
+        "positive_queries": 2,
+        "Recall@5": 1.0,
+        "MRR": 1.0
+      },
+      "document": {
+        "positive_queries": 2,
+        "Recall@5": 1.0,
+        "MRR": 1.0
+      }
+    }
+  },
+  "pids": [],
+  "elapsed_seconds": 10.389,
+  "published_scope": "Full fixture kind DTOs; machine application inventory is counts/hashes only. Original queries, extension checks and offline parity are condensed to structural hashes. Full raw hash is retained."
+}

@@ -60,8 +60,11 @@ native CPU/no-model checks. It also retains a native failure and the regression
 for unavailable inference erasing committed exact cache during policy changes.
 The [CLI filter checkpoint](../../validation/2026-10-19-cli-filters/README.md)
 exposes the existing extension contract through arguments with capability/reply
-checks. Finer file-kind scopes, independent review and the consumer/installed
-gates below remain open; these checkpoints do not complete Task1.
+checks. The [file-kind checkpoint](../../validation/2026-10-19-file-kinds/README.md)
+adds bounded typed source-kind selectors before candidate caps and keeps omitted
+fields compatible with older peers. Lumen's scope/filter intersection mapping,
+expanded provenance, independent review and consumer/installed gates below
+remain open; these checkpoints do not complete Task1.
 
 - [ ] RED malformed/version/ID/frame/timeout/disconnect and cancellation cases.
 - [ ] Real isolated rebuilt daemon queries/configuration/pause/revoke/reconnect,

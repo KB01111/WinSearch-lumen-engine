@@ -369,13 +369,47 @@ Candidate/result bounds, model space, ranking and semantic thresholds are unchan
 Rust/C#/CLI clients reject nonempty extension filters on peers without the capability,
 validate request budgets and reject replies outside the selected extensions.
 C# snapshots the query and its lists before awaiting writes. Omitted extension
-fields remain compatible with older clients. Finer file-kind
-scopes remain separate unfinished contracts.
+fields remain compatible with older clients. The separate source file-kind
+selector is described below; Lumen's consumer scope mapping remains unfinished.
 
 The CLI accepts repeatable `--extension <ext>` / `-e <ext>` and
 `--extension=<ext>` arguments. Repeated extensions are alternatives. Invalid
 values fail before connecting; the final JSON result array is published only
 after every received batch passes extension and terminal-outcome validation.
+
+### Source file-kind selection
+
+`search.file_kinds` adds optional `file_kinds` to ordinary and Related queries.
+It accepts at most13 closed string codes: `folder`, `pdf`, `document`,
+`spreadsheet`, `presentation`, `source`, `image`, `video`, `audio`, `archive`,
+`executable`, `model`, `unknown`. Unknown/numeric/case-aliased codes are rejected.
+An empty/omitted list preserves existing behavior; Rust/C# omit empty lists when
+serializing so older Related peers still accept an unfiltered request.
+
+Kinds within the list are alternatives. The list intersects mode, result
+categories and extensions, with admission before exact/FTS candidate limits and
+ordinary/code semantic top-k. A nonempty list excludes synthetic results. It
+does not alter source/root/residency policy or grant access to any file.
+
+Source kinds are independent of result/retrieval kinds and extraction support.
+They follow Lumen's directory/extension classification at main `3b60ba4`:
+PDF is distinct from text documents, spreadsheets and presentations; `source`
+includes code/config extensions; `model` means supported 3D model extensions.
+Directories always classify as `folder`, regardless of suffix. Unrecognized or
+absent extensions, including a leading-dot file without a second dot, classify
+as `unknown`. Notebooks (`ipynb`) currently classify as `unknown` while remaining
+code-domain results and retaining notebook locations. This selector does not
+change parsing or advertise a newly supported extraction format.
+Indexed application shortcuts use their source extension (`lnk` is unknown);
+mode/categories still decide whether applications participate.
+
+Rust/C#/CLI typed clients require the capability for a nonempty selector, bound
+request lists and reject replies outside the source classification. C# snapshots
+the lists before awaiting writes. The CLI command exposes extension arguments;
+file-kind selection is currently a typed-client operation. Lumen's eventual
+adapter must preserve the intersection semantics of its existing native filters
+when deriving these OR selectors; an empty intersection cannot become an empty
+(unfiltered) selector.
 
 ### Related content search
 

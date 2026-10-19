@@ -11,6 +11,8 @@ pub struct RelatedQuery {
     pub categories: Vec<ResultKind>,
     #[serde(default)]
     pub extensions: Vec<String>,
+    #[serde(default, skip_serializing_if="Vec::is_empty")]
+    pub file_kinds: Vec<crate::FileKind>,
 }
 
 fn default_limit() -> u32 {
@@ -23,6 +25,7 @@ impl RelatedQuery {
             && (1..=10_000).contains(&self.limit)
             && self.categories.len() <= 32
             && crate::valid_search_extensions(&self.extensions)
+            && crate::valid_search_file_kinds(&self.file_kinds)
     }
 }
 
@@ -39,6 +42,7 @@ mod tests {
             limit: 20,
             categories: vec![],
             extensions: vec![".PDF".into()],
+            file_kinds: Vec::new(),
         }
     }
 
@@ -64,6 +68,9 @@ mod tests {
         assert!(!invalid.is_valid());
         let mut invalid = valid.clone();
         invalid.categories = vec![ResultKind::File; 33];
+        assert!(!invalid.is_valid());
+        let mut invalid = valid.clone();
+        invalid.file_kinds = vec![crate::FileKind::Pdf; 14];
         assert!(!invalid.is_valid());
         let mut code = valid.clone();
         code.source.result_id = "c12".into();

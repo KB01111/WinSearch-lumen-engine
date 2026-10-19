@@ -128,7 +128,15 @@ matching. An empty list preserves existing behavior. Nonempty filters require
 `search.filters`; the client rejects unsupported peers before sending a query,
 malformed input, mismatched reply extensions and folder/null-path replies.
 Mode/category/extension filters precede engine candidate caps and semantic top-k.
-Finer file-kind scopes and expanded source provenance remain open; typed terminal
+`SearchQuery.file_kinds` and `RelatedQuery.file_kinds` add up to13 typed `FileKind`
+alternatives, gated by `search.file_kinds`. They intersect the other selectors
+before candidate limits; the client rejects mismatched/pathless/synthetic replies.
+Source classification follows Lumen's directory/extension rules, independent of
+retrieval category or parser support. In particular, PDF/spreadsheet/presentation
+are distinct, folders override their suffix, and notebooks currently classify as
+unknown while remaining code-domain results. Empty lists are omitted for legacy
+compatibility. See the [wire contract](ipc-protocol.md#source-file-kind-selection).
+Lumen consumer scope mapping and expanded provenance remain open; typed terminal
 semantic outcomes are described above.
 
 The standalone CLI exposes the same extension selection with repeatable

@@ -1,0 +1,82 @@
+[
+  {
+    "file": "protocol-red.txt",
+    "local_raw_sha256": "00c38d2f38bdee8f5f14d86d7a5537c7a277403838d6af21d25cbb7ededcdb96",
+    "published_sha256": "bbec84c6bf34f8f5c7837e6f596448c02e97110721385f5b25dc538f9421726b"
+  },
+  {
+    "file": "daemon-red.txt",
+    "local_raw_sha256": "cc7df99b061f3ac11f9117ebe04b002f640be630a47e925bffb1dafd0dc79617",
+    "published_sha256": "4fef1be26eb79cd5177b8f85ecef7f1225b77500d178932859c812ddcbf2ff39"
+  },
+  {
+    "file": "rust-client-red.txt",
+    "local_raw_sha256": "79367b4078afd3663b7f4485beac04da674f6cf8385d8afe5f9c63bdd7bd423f",
+    "published_sha256": "044bbd87428b574d0aaae1be24d5adb901bf56c21d73623aae70bdbdf1e36d61"
+  },
+  {
+    "file": "dotnet-contract-red.txt",
+    "local_raw_sha256": "6c698ca35b12aa914b17f71a330c6efe6569632eaffb0c63ffc70dfe46b9646c",
+    "published_sha256": "3511d93aae165f10db9931c494b0d6b9e8ad9e01b717ac761d8ea61c7de79268"
+  },
+  {
+    "file": "dotnet-client-red.txt",
+    "local_raw_sha256": "c45c7031eeb0a9d7532cb6fafa4c2b4abe248a3f56e91637b8fefecc5250e086",
+    "published_sha256": "9c91a69c986c014d5ff5e395eaafe1b7654f4bf1ee6342cc2312f6332799a0a1"
+  },
+  {
+    "file": "dotnet-invalid-result-red.txt",
+    "local_raw_sha256": "d96669685ae2f6b1c0818b39a9840039ebe4a2dd72fb8521476c63121b5be25a",
+    "published_sha256": "48775525c2bc8ccec26cd8363291952228a145d827598a4dfbc102d82d5d40c5"
+  },
+  {
+    "file": "workspace.txt",
+    "local_raw_sha256": "a19bcbf811ceff99472ae62235adc56bbcf8c5ec87c2c56110ae96e821ba7d56",
+    "published_sha256": "613e619e5640c99848af148cff127a3806f40b49b0888b8b32b0f1028f2b9593"
+  },
+  {
+    "file": "code-semantic.txt",
+    "local_raw_sha256": "033654fb61ccaac515d2a5aa6ff8b8a13f0adb685eecb034896e078ead347c7a",
+    "published_sha256": "6fbdddd75c1876b940ab0b4cc2e4d54e189f92aebddbd816acf9226bbbcb0c68"
+  },
+  {
+    "file": "model-references.txt",
+    "local_raw_sha256": "08a1584b5eee5f09ed6ba5b95bf1e887fee9f905d3d5f13a792d60f57f15775c",
+    "published_sha256": "4422fa4775637f6eaeb6cd10e300c7fc9ebaf788083c5cad47d3ee1877e38363"
+  },
+  {
+    "file": "real-worker.txt",
+    "local_raw_sha256": "6b01ffb6db950d84ebe5ec27f866d0ee57e1217d8e80ec6d92b03da262878220",
+    "published_sha256": "a973c431f6ad1714e29f37be08cb73e7ef1c62b3e94ffc0f6923fcfd133803e9"
+  },
+  {
+    "file": "dotnet.txt",
+    "local_raw_sha256": "047cc534701d5ef470d60ecaefd34b04b06d7227e03d8e9733bc9ee0957e0f7a",
+    "published_sha256": "26e4f24532c10dbd897c3ab8962c011246790d825e499e33a7c09670f88509e7"
+  },
+  {
+    "file": "winui-build.txt",
+    "local_raw_sha256": "d4b4969bcd2b04bdab16a36493cf55c152c0681ef4c18ff0fd0894e7b6201394",
+    "published_sha256": "9a266cead55f06a273c215d101fccac9e2eb865e486e27cb8b4dce61d954d2b1"
+  },
+  {
+    "file": "coherent-build.txt",
+    "local_raw_sha256": "107fb1edca55da6e232b80741900f7850ca3f1bc71fe635db734424fbbe37a7d",
+    "published_sha256": "e9a4238d9536659f7231ed4828f0c32b146b2e267328ab967196943d0a854411"
+  },
+  {
+    "file": "native-no-model.json",
+    "local_raw_sha256": "083bb5e42c6dd5e2d897aa165b57b7c9bba023441abf15d74771128ebb7dce71",
+    "published_sha256": "c6a9a91ce39501a281f1c3b0a036c638433b944494e214d2980a22cb552c44cc"
+  },
+  {
+    "file": "native-managed-cpu.json",
+    "local_raw_sha256": "7a97d233f2d4d57a7ef25648978e0aa865aadb4e5d11f84a1292ff6079b36895",
+    "published_sha256": "fe5468fc624848315c4ef0d93010f9582cb8e8c0c197bf984344570243629f2c"
+  },
+  {
+    "file": "retained-fixture-failure.json",
+    "local_raw_sha256": "4c76ddfe2413caca914bb024b1b410b75b77fa09165178b4b9fd6f84e53ebb55",
+    "published_sha256": "d167237acfaa8b32e2218a1e052f04d695d2f34aca9d3e9f74db17b12b5c6234"
+  }
+]

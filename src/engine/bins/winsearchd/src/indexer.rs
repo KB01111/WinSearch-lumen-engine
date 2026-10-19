@@ -433,9 +433,9 @@ impl Indexer {
     }
 
     /// Filter before vector top-k, while preserving source checks in vector retrieval.
-    pub fn matching_entry_ids_with_extensions(&self,apps_only:bool,exclude_apps:bool,
-        kinds:&[ws_index::HitKind],extensions:&[String])->Result<Vec<i64>,StoreError> {
-        self.store_lock().matching_entry_ids_with_extensions(apps_only,exclude_apps,kinds,extensions)
+    pub fn matching_entry_ids_filtered(&self,apps_only:bool,exclude_apps:bool,
+        kinds:&[ws_index::HitKind],extensions:&[String],file_kinds:&[ws_protocol::FileKind])->Result<Vec<i64>,StoreError> {
+        self.store_lock().matching_entry_ids_filtered(apps_only,exclude_apps,kinds,extensions,file_kinds)
     }
 
     /// Engine search policy for the semantic stage (`semantic_enabled`

@@ -136,14 +136,15 @@ impl CodeService {
 
     #[cfg(test)]
     pub fn exact_filtered(&self,text:&str,limit:usize,extensions:&[String])->Vec<CodeSearchHit> {
-        self.exact_filtered_checked(text,limit,extensions).unwrap_or_default()
+        self.exact_filtered_checked(text,limit,extensions,&[]).unwrap_or_default()
     }
-    pub fn exact_filtered_checked(&self, text: &str, limit: usize,extensions:&[String]) -> Result<Vec<CodeSearchHit>,ws_code::store::CodeStoreError> {
+    pub fn exact_filtered_checked(&self, text: &str, limit: usize,extensions:&[String],file_kinds:&[ws_protocol::FileKind]) -> Result<Vec<CodeSearchHit>,ws_code::store::CodeStoreError> {
         let store = self.store.lock().unwrap_or_else(|p| p.into_inner());
         let failure=std::cell::RefCell::new(None);
         let hits=store
             .search_exact(text, limit, |file| {
                 if !ws_protocol::search_extension_allowed(extensions,&file.ext) {return false;}
+                if !ws_protocol::search_file_kind_allowed(file_kinds,&file.ext,false) {return false;}
                 match store.source_snapshot(file.id) {
                     Ok(source)=>self.visible(file,source.as_deref()),
                     Err(error)=>{*failure.borrow_mut()=Some(error);false}
@@ -164,9 +165,9 @@ impl CodeService {
     #[cfg(test)]
     pub fn semantic_filtered_checked(&self, vector: &[f32], corroboration: &[f32], limit: usize,extensions:&[String])
         ->Result<(Vec<CodeSearchHit>,bool),ws_protocol::SemanticIssue> {
-        self.semantic_excluding_checked(vector,corroboration,limit,extensions,None)
+        self.semantic_excluding_checked(vector,corroboration,limit,extensions,&[],None)
     }
-    pub fn semantic_excluding_checked(&self, vector: &[f32], corroboration: &[f32], limit: usize,extensions:&[String],excluded:Option<i64>)
+    pub fn semantic_excluding_checked(&self, vector: &[f32], corroboration: &[f32], limit: usize,extensions:&[String],file_kinds:&[ws_protocol::FileKind],excluded:Option<i64>)
         ->Result<(Vec<CodeSearchHit>,bool),ws_protocol::SemanticIssue> {
         use ws_protocol::SemanticIssue::RetrievalFailed;
         let fingerprint=self.fingerprint_checked().map_err(|_|RetrievalFailed)?;
@@ -179,6 +180,7 @@ impl CodeService {
             .search_semantic_report(vector, corroboration, limit, |file| {
                 if excluded==Some(file.id) {return false;}
                 if !ws_protocol::search_extension_allowed(extensions,&file.ext) {return false;}
+                if !ws_protocol::search_file_kind_allowed(file_kinds,&file.ext,false) {return false;}
                 match store.source_snapshot(file.id) {
                     Ok(source)=>self.visible(file,source.as_deref()),
                     Err(_)=>{failed.set(true);false}

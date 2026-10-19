@@ -20,16 +20,20 @@ in the [gap matrix](docs/v1-gap-matrix.md); the
 [Lumen integration plan](docs/superpowers/plans/2026-10-17-v1-lumen-engine.md)
 define the full scope.
 
-The latest [Related/cache-retention checkpoint](docs/validation/2026-10-19-related/README.md)
+The [Related/cache-retention checkpoint](docs/validation/2026-10-19-related/README.md)
 records the typed Related operation, a reproduced exact-cache fix and native
 CPU/no-model checks with retained failures. Consumer integration and the tasks
 below still require implementation or final acceptance.
 The [CLI filter checkpoint](docs/validation/2026-10-19-cli-filters/README.md)
 adds repeated extension arguments and rejects unsupported peers and mismatched replies.
+The [file-kind checkpoint](docs/validation/2026-10-19-file-kinds/README.md)
+adds typed source classifications before candidate limits, including PDF,
+spreadsheet, presentation, source and unknown kinds.
 
 ### Lumen integration and native contract
 
-- [ ] Complete finer file-kind scopes and remaining provenance contracts.
+- [ ] Complete remaining provenance contracts and verify finer file-kind scopes
+  through Lumen's native adapter.
 - [ ] Consume and verify the engine's terminal outcomes in Lumen and the
   standalone UI, preserving complete/superseded/canceled/failed and semantic
   disabled/ready/degraded states, exact results on optional failure and legacy

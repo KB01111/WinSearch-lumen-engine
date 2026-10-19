@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace WinSearch.Core.Protocol;
 
@@ -22,8 +23,13 @@ public static class ProtocolJson
             PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
             PropertyNameCaseInsensitive = true,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+            TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { typeInfo => {
+                if (typeInfo.Type == typeof(SearchQuery) || typeInfo.Type == typeof(RelatedQuery))
+                    typeInfo.Properties.Single(property => property.Name == "file_kinds").ShouldSerialize
+                        = (_, value) => value is List<FileKind> { Count: > 0 };
+            } } },
         };
-        options.Converters.Add(new OutcomeEnumConverter());
+        options.Converters.Add(new ProtocolCodeEnumConverter());
         options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseLower));
         return options;
     }

@@ -7,6 +7,8 @@
 
 pub mod entry;
 pub mod framing;
+pub mod file_kind;
+pub use file_kind::*;
 pub mod messages;
 pub mod outcome;
 pub mod related;

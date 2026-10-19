@@ -1,0 +1,66 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  WinSearch.Core -> <checkout>\src\app\WinSearch.Core\bin\Debug\net8.0-windows10.0.19041.0\WinSearch.Core.dll
+  WinSearch.ViewModels -> <checkout>\src\app\WinSearch.ViewModels\bin\Debug\net8.0-windows10.0.19041.0\WinSearch.ViewModels.dll
+  WinSearch.Tests -> <checkout>\src\app\WinSearch.Tests\bin\Debug\net8.0-windows10.0.19041.0\WinSearch.Tests.dll
+Test run for <checkout>\src\app\WinSearch.Tests\bin\Debug\net8.0-windows10.0.19041.0\WinSearch.Tests.dll (.NETCoreApp,Version=v8.0)
+A total of 1 test files matched the specified pattern.
+rtk : [xUnit.net 00:00:00.98]     WinSearch.Tests.FileKindContractTests.FileKindSelectionRejectsUnknownCaseAliasedAndNu
+mericCodes(kinds: "[\"notebook\"]") [FAIL]
+At line:1 char:1
++ rtk proxy dotnet test src/app/WinSearch.Tests/WinSearch.Tests.csproj  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([xUnit.net 00:0...ook\"]") [FAIL]:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+[xUnit.net 00:00:00.98]     WinSearch.Tests.FileKindContractTests.FileKindSelectionRejectsUnknownCaseAliasedAndNumericC
+odes(kinds: "[\"PDF\"]") [FAIL]
+[xUnit.net 00:00:00.99]     WinSearch.Tests.FileKindContractTests.FileKindSelectionRejectsUnknownCaseAliasedAndNumericC
+odes(kinds: "[\"1\"]") [FAIL]
+[xUnit.net 00:00:00.99]     WinSearch.Tests.FileKindContractTests.FileKindSelectionRejectsUnknownCaseAliasedAndNumericC
+odes(kinds: "[1]") [FAIL]
+[xUnit.net 00:00:00.99]     WinSearch.Tests.FileKindContractTests.FileKindSelectionRoundTripsAllClosedCodesAndPreserves
+LegacyQueries [FAIL]
+  Failed WinSearch.Tests.FileKindContractTests.FileKindSelectionRejectsUnknownCaseAliasedAndNumericCodes(kinds: "[\"notebook\"]") [182 ms]
+  Error Message:
+   Assert.Throws() Failure: No exception was thrown
+Expected: typeof(System.Text.Json.JsonException)
+  Stack Trace:
+     at WinSearch.Tests.FileKindContractTests.FileKindSelectionRejectsUnknownCaseAliasedAndNumericCodes(String kinds) in <checkout>\src\app\WinSearch.Tests\FileKindContractTests.cs:line 29
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeDirectByRefWithFewArgs(Object obj, Span`1 copyOfArgs, BindingFlags invokeAttr)
+  Failed WinSearch.Tests.FileKindContractTests.FileKindSelectionRejectsUnknownCaseAliasedAndNumericCodes(kinds: "[\"PDF\"]") [< 1 ms]
+  Error Message:
+   Assert.Throws() Failure: No exception was thrown
+Expected: typeof(System.Text.Json.JsonException)
+  Stack Trace:
+     at WinSearch.Tests.FileKindContractTests.FileKindSelectionRejectsUnknownCaseAliasedAndNumericCodes(String kinds) in <checkout>\src\app\WinSearch.Tests\FileKindContractTests.cs:line 29
+   at InvokeStub_FileKindContractTests.FileKindSelectionRejectsUnknownCaseAliasedAndNumericCodes(Object, Span`1)
+   at System.Reflection.MethodBaseInvoker.InvokeWithOneArg(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+  Failed WinSearch.Tests.FileKindContractTests.FileKindSelectionRejectsUnknownCaseAliasedAndNumericCodes(kinds: "[\"1\"]") [< 1 ms]
+  Error Message:
+   Assert.Throws() Failure: No exception was thrown
+Expected: typeof(System.Text.Json.JsonException)
+  Stack Trace:
+     at WinSearch.Tests.FileKindContractTests.FileKindSelectionRejectsUnknownCaseAliasedAndNumericCodes(String kinds) in <checkout>\src\app\WinSearch.Tests\FileKindContractTests.cs:line 29
+   at InvokeStub_FileKindContractTests.FileKindSelectionRejectsUnknownCaseAliasedAndNumericCodes(Object, Span`1)
+   at System.Reflection.MethodBaseInvoker.InvokeWithOneArg(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+  Failed WinSearch.Tests.FileKindContractTests.FileKindSelectionRejectsUnknownCaseAliasedAndNumericCodes(kinds: "[1]") [< 1 ms]
+  Error Message:
+   Assert.Throws() Failure: No exception was thrown
+Expected: typeof(System.Text.Json.JsonException)
+  Stack Trace:
+     at WinSearch.Tests.FileKindContractTests.FileKindSelectionRejectsUnknownCaseAliasedAndNumericCodes(String kinds) in <checkout>\src\app\WinSearch.Tests\FileKindContractTests.cs:line 29
+   at InvokeStub_FileKindContractTests.FileKindSelectionRejectsUnknownCaseAliasedAndNumericCodes(Object, Span`1)
+   at System.Reflection.MethodBaseInvoker.InvokeWithOneArg(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+  Failed WinSearch.Tests.FileKindContractTests.FileKindSelectionRoundTripsAllClosedCodesAndPreservesLegacyQueries [7 ms]
+  Error Message:
+   Assert.True() Failure
+Expected: True
+Actual:   False
+  Stack Trace:
+     at WinSearch.Tests.FileKindContractTests.FileKindSelectionRoundTripsAllClosedCodesAndPreservesLegacyQueries() in <checkout>\src\app\WinSearch.Tests\FileKindContractTests.cs:line 15
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+
+Failed!  - Failed:     5, Passed:     0, Skipped:     0, Total:     5, Duration: 188 ms - WinSearch.Tests.dll (net8.0)

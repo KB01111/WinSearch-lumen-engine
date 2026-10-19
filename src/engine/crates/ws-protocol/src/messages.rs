@@ -275,6 +275,9 @@ pub struct SearchQuery {
     /// Restrict indexed files to these extensions; optional leading dot, ASCII case-insensitive.
     #[serde(skip_serializing_if="Vec::is_empty")]
     pub extensions: Vec<String>,
+    /// Source-file classifications; alternatives within this list, intersecting other selectors.
+    #[serde(skip_serializing_if="Vec::is_empty")]
+    pub file_kinds: Vec<crate::FileKind>,
 }
 
 pub fn valid_search_extensions(extensions:&[String])->bool {
@@ -401,6 +404,19 @@ mod tests {
     use ws_modelmgr::ModelState;
 
     #[test]
+    fn file_kind_selection_round_trips_closed_codes_and_keeps_legacy_requests_unchanged() {
+        let kinds=serde_json::json!(["folder","pdf","document","spreadsheet","presentation","source",
+            "image","video","audio","archive","executable","model","unknown"]);
+        let query:SearchQuery=serde_json::from_value(serde_json::json!({"text":"needle","file_kinds":kinds})).unwrap();
+        assert_eq!(serde_json::to_value(query).unwrap()["file_kinds"],kinds);
+        for invalid in [serde_json::json!(["PDF"]),serde_json::json!(["notebook"]),serde_json::json!([1]),serde_json::json!(null)] {
+            assert!(serde_json::from_value::<SearchQuery>(serde_json::json!({"file_kinds":invalid})).is_err());
+        }
+        let legacy:SearchQuery=serde_json::from_value(serde_json::json!({"text":"needle"})).unwrap();
+        assert!(serde_json::to_value(legacy).unwrap().get("file_kinds").is_none());
+    }
+
+    #[test]
     fn search_extensions_validate_budgets_and_reject_path_or_wildcard_syntax() {
         for values in [vec![],vec!["pdf".into(),".PDF".into(),"c++".into(),"7z".into()]] {
             assert!(valid_search_extensions(&values));
@@ -434,6 +450,7 @@ mod tests {
                 include_semantic: true,
                 categories: vec![ResultKind::Image, ResultKind::Video],
                 extensions: Vec::new(),
+                file_kinds: Vec::new(),
             },
         };
         let json = serde_json::to_string(&msg).unwrap();

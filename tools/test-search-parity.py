@@ -264,6 +264,31 @@ def main():
             else:assert any(Path(hit['path']).name==expected for hit in hits),(query,hits)
             summary.setdefault('extension_filters',[]).append({'query':query,'frames':frames,'cli':actual,'expected_name':expected})
 
+        def source_kind(hit):
+            if hit['kind']=='folder':return 'folder'
+            extension=Path(hit['path']).suffix.lstrip('.')
+            if not extension.isascii():return 'unknown'
+            extension=extension.lower()
+            for kind,extensions in [
+                ('pdf','pdf'),('document','doc docx odt rtf txt md'),('spreadsheet','csv ods xls xlsx'),
+                ('presentation','odp ppt pptx'),
+                ('source','c cc cpp cs css go h hpp html java js jsx json kt kts lua php py rb rs scss sh sql swift toml ts tsx vue xml yaml yml'),
+                ('image','avif bmp gif ico jpeg jpg png webp'),('video','avi m4v mkv mov mp4 webm wmv'),
+                ('audio','aac flac m4a mp3 ogg wav wma'),('archive','7z bz2 gz rar tar xz zip'),
+                ('executable','bat cmd com exe msi ps1'),('model','fbx gltf glb obj stl'),
+            ]:
+                if extension in extensions.split():return kind
+            return 'unknown'
+
+        def kind_filtered(text, kinds, mode='files', semantic=False, expected=None, extensions=None, empty=True):
+            query={'text':text,'mode':mode,'limit':5,'include_semantic':semantic,'file_kinds':kinds,'extensions':extensions or []}
+            frames=client.search_frames(query)
+            hits=[hit for frame in frames for hit in frame['batch']]
+            assert all(hit.get('path') and hit['kind'] not in ['calculator','settings','action'] and source_kind(hit) in kinds for hit in hits),hits
+            if expected is None and empty:assert not hits,(query,hits)
+            if expected is not None:assert any(Path(hit['path']).name==expected for hit in hits),(query,hits)
+            summary.setdefault('file_kind_filters',[]).append({'query':query,'frames':frames,'expected_name':expected,'expect_empty':empty and expected is None})
+
         try:
             with (output/'daemon.log').open('wb') as log:
                 child = subprocess.Popen([str(binary/'winsearchd.exe'), '--test-stdin-gate'],
@@ -338,6 +363,20 @@ def main():
             filtered('1+2','txt',mode='auto')
             filtered('pdfparitytoken',['.PDF','txt'],expected='item-b.pdf')
             filtered('amberparitytoken',['.PDF','txt'],expected='item-a.txt')
+            kind_filtered('pdfparitytoken',['pdf'],expected='item-b.pdf')
+            kind_filtered('pdfparitytoken',['document'])
+            kind_filtered('amberparitytoken',['document'],expected='item-a.txt')
+            kind_filtered('parityneedle',['source'],mode='code',expected=source.name)
+            kind_filtered('parityneedle',['pdf'],mode='code')
+            kind_filtered('notebookparity',['unknown'],mode='code',expected='cells.ipynb')
+            kind_filtered('notebookparity',['source'],mode='code')
+            # Valid unknown-extension app shortcuts may match numeric tokens;
+            # the selector must exclude synthetic results, not those indexed sources.
+            kind_filtered('1+2',['unknown'],mode='auto',empty=False)
+            kind_filtered('pdfparitytoken',['pdf','document'],expected='item-b.pdf')
+            kind_filtered('amberparitytoken',['pdf','document'],expected='item-a.txt')
+            kind_filtered('pdfparitytoken',['pdf'],extensions=['txt'])
+            summary['checks'].append('native_file_kind_exact_code_notebook_union_intersection_and_synthetic_controls')
             malformed=Frames(pipe_name,child)
             try:
                 malformed.sequence+=1
@@ -347,6 +386,16 @@ def main():
                     if rejected.get('id')==malformed.sequence:break
                 assert rejected['type']=='error' and rejected['code']=='invalid_request',rejected
                 summary['invalid_extension_filter']=rejected
+            finally:malformed.stream.close()
+            malformed=Frames(pipe_name,child)
+            try:
+                malformed.sequence+=1
+                malformed.send({'type':'search','id':malformed.sequence,'query':{'text':'needle','file_kinds':['pdf']*14}})
+                while True:
+                    rejected=malformed.read()
+                    if rejected.get('id')==malformed.sequence:break
+                assert rejected['type']=='error' and rejected['code']=='invalid_request',rejected
+                summary['invalid_file_kind_filter']=rejected
             finally:malformed.stream.close()
             summary['checks'].append('native_extension_filters_before_results_and_invalid_request_rejection')
             document_hits = compare('document_exact', 'amberparitytoken', expected='item-a.txt', location={'kind': 'line', 'line': 2})
@@ -400,6 +449,7 @@ def main():
                 assert len(native_client['preview_checks']) == 4, native_client
                 assert len(native_client['code_preview_checks']) == 4,native_client
                 assert len(native_client['related_checks']) == 2,native_client
+                assert len(native_client['file_kind_filters']) == 6,native_client
                 summary['headless_client'] = native_client
                 summary['checks'].append('typed_async_client_native_dto_status_pause_revoke_restore_reconnect')
                 with sqlite3.connect(db.as_uri()+'?mode=ro', uri=True) as connection:
@@ -416,12 +466,15 @@ def main():
                 compare_offline()
             summary['related_checks'] = []
 
-            def related(name, result_id, *, error=None, extensions=None, unbound=False, expected=None):
+            def related(name, result_id, *, error=None, extensions=None, file_kinds=None, unbound=False, expected=None, no_vectors=False):
                 current = control.request('resolve_entry', reference={'result_id': result_id, 'source_revision': None})['entry']
                 seed = {'result_id': result_id, 'source_revision': None if unbound else current['source_revision']}
-                frames = client.related_frames({'source': seed, 'limit': 5, 'extensions': extensions or []})
+                query={'source': seed, 'limit': 5, 'extensions': extensions or []}
+                if file_kinds is not None:query['file_kinds']=file_kinds
+                frames = client.related_frames(query)
                 errors = [frame for frame in frames if frame['type'] == 'error']
                 hits = [hit for frame in frames if frame['type'] == 'results' for hit in frame['batch']]
+                if file_kinds is not None:assert all(hit.get('path') and source_kind(hit) in file_kinds for hit in hits),frames
                 terminal = frames[-1]
                 assert len(hits) <= 5 and all(hit['entry_reference']['source_revision']
                     and hit['entry_reference']['result_id'] != result_id
@@ -432,10 +485,10 @@ def main():
                 else:
                     assert not errors and terminal['outcome']['disposition'] == 'complete', frames
                     assert terminal['outcome']['semantic'] == ({'phase': 'degraded', 'reason': 'no_vectors'}
-                        if extensions == ['zzrelatedvoid'] else {'phase': 'ready', 'reason': None}), frames
+                        if extensions == ['zzrelatedvoid'] or no_vectors else {'phase': 'ready', 'reason': None}), frames
                 if expected:
                     assert any(Path(hit['path']).name == expected for hit in hits), ('missing actual Related target', frames)
-                summary['related_checks'].append({'name': name, 'source': seed, 'frames': frames, 'expected_name': expected})
+                summary['related_checks'].append({'name': name, 'source': seed, 'frames': frames, 'expected_name': expected,'file_kinds':file_kinds})
 
             related('ordinary_bound_cached_source', reference['result_id'], error=None if options.real_model else 'not_ready')
             code_source = next(record['cli'][0]['entry_reference']['result_id'] for record in summary['queries']
@@ -494,6 +547,8 @@ def main():
                 compare_offline()
                 filtered('baking a chocolate cake with flour butter eggs and sugar','txt',semantic=True,expected='item-a.txt')
                 filtered('a function named parityneedle and its caller','rs',mode='code',semantic=True,expected=source.name)
+                kind_filtered('baking a chocolate cake with flour butter eggs and sugar',['document'],semantic=True,expected='item-a.txt')
+                kind_filtered('a function named parityneedle and its caller',['source'],mode='code',semantic=True,expected=source.name)
                 # A cold query first yields the exact-stage frame. Cancel while
                 # real CPU semantic inference remains outstanding, then require
                 # an empty terminal frame and a live public transport.
@@ -536,6 +591,8 @@ def main():
                 with sqlite3.connect(db.as_uri()+'?mode=ro', uri=True) as connection:
                     seed_id = connection.execute("SELECT id FROM entries WHERE name='related-seed.txt'").fetchone()[0]
                 related('actual_cpu_related_twin_document', f'e{seed_id}', expected='related-target.txt')
+                related('actual_cpu_related_document_kind', f'e{seed_id}', file_kinds=['document'],expected='related-target.txt')
+                related('actual_cpu_related_kind_has_no_vectors', f'e{seed_id}', file_kinds=['spreadsheet'],no_vectors=True)
                 summary['checks'].append('actual_cpu_related_document_positive_after_original_quality_queries')
             config.update(roots=[], code_roots=[])
             control.request('set_indexing_config', config=config)

@@ -774,10 +774,10 @@ impl EngineService {
             ]).map_err(|_|EmbeddingFailed)?;
             if code.query_epoch()!=epoch {return Err(IndexChanged);}
             let exact=if exclude.is_some() {Vec::new()} else {
-                code.exact_filtered_checked(&query.text,query.limit.max(1) as usize,&query.extensions).map_err(|_|RetrievalFailed)?};
+                code.exact_filtered_checked(&query.text,query.limit.max(1) as usize,&query.extensions,&query.file_kinds).map_err(|_|RetrievalFailed)?};
             let candidates=(query.limit as usize).max(SEMANTIC_TOP_K).saturating_mul(8);
             let excluded=match exclude {Some(ws_protocol::IndexedEntryId::Code(id))=>Some(id),_=>None};
-            let (candidates,eligible)=code.semantic_excluding_checked(&vectors[0],&vectors[1],candidates,&query.extensions,excluded)?;
+            let (candidates,eligible)=code.semantic_excluding_checked(&vectors[0],&vectors[1],candidates,&query.extensions,&query.file_kinds,excluded)?;
             if !eligible {return Err(NoVectors);}
             let mut hits=candidates.into_iter().filter(|h|!exact.iter().any(|e|e.file.id==h.file.id && e.start_line>=h.start_line && e.start_line<=h.end_line)).map(|h| {
                 let score=if exclude.is_some() {f64::from(h.score)} else {hybrid_score(h.score,&query.text,&h.file.name_lower,h.file.mtime,crate::code::now()/1000)};
@@ -809,14 +809,15 @@ impl EngineService {
         let candidate_limit = (query.limit.max(1) as usize)
             .max(SEMANTIC_TOP_K)
             .saturating_mul(8);
-        let filter = if exclude.is_none() && query.mode == SearchMode::Auto && kinds.is_empty() && query.extensions.is_empty() {
+        let filter = if exclude.is_none() && query.mode == SearchMode::Auto && kinds.is_empty() && query.extensions.is_empty() && query.file_kinds.is_empty() {
             None
         } else {
-            let mut matching_ids = match self.indexer.matching_entry_ids_with_extensions(
+            let mut matching_ids = match self.indexer.matching_entry_ids_filtered(
                 query.mode == SearchMode::Apps,
                 query.mode == SearchMode::Files,
                 &kinds,
                 &query.extensions,
+                &query.file_kinds,
             ) {
                 Ok(ids) => ids,
                 Err(e) => {
@@ -949,7 +950,7 @@ impl EngineService {
     /// client can retire it.
     pub fn search(self: &Arc<Self>, client: &ClientHandle, id: RequestId, query: SearchQuery) {
         let cancel = self.begin_request_for_client(client.id(), id);
-        if !ws_protocol::valid_search_extensions(&query.extensions) {
+        if !ws_protocol::valid_search_extensions(&query.extensions) || !ws_protocol::valid_search_file_kinds(&query.file_kinds) {
             let _=self.send_search_failure(client,id,&cancel,ErrorCode::InvalidRequest);
             self.end_request_for_client(client.id(),id,&cancel);
             return;
@@ -974,7 +975,7 @@ impl EngineService {
         if text.trim().is_empty() {return Err(ErrorCode::NotReady);}
         let query=SearchQuery {text,mode:if matches!(request.source.indexed_id(),Some(ws_protocol::IndexedEntryId::Code(_))) {
             SearchMode::Code } else {SearchMode::Files},limit:request.limit,include_semantic:true,
-            categories:request.categories.clone(),extensions:request.extensions.clone()};
+            categories:request.categories.clone(),extensions:request.extensions.clone(),file_kinds:request.file_kinds.clone()};
         if self.semantic_unavailable(&query).is_some() {return Err(ErrorCode::NotReady);}
         Ok(query)
     }
@@ -1246,15 +1247,15 @@ impl EngineService {
         }
         if query.mode==SearchMode::Code {
             if !query.categories.is_empty() && !query.categories.contains(&ResultKind::Code) {return Ok(Vec::new());}
-            return self.code_service().map(|code|code.exact_filtered_checked(text,query.limit.max(1) as usize,&query.extensions)
+            return self.code_service().map(|code|code.exact_filtered_checked(text,query.limit.max(1) as usize,&query.extensions,&query.file_kinds)
                 .map(|hits|hits.into_iter().map(code_result).collect()).map_err(|_|ErrorCode::Internal)).unwrap_or_else(||Ok(Vec::new()));
         }
 
         let mut results = Vec::new();
         let wants_index = query.mode != SearchMode::Code;
-        let wants_calc = query.mode == SearchMode::Auto && query.extensions.is_empty()
+        let wants_calc = query.mode == SearchMode::Auto && query.extensions.is_empty() && query.file_kinds.is_empty()
             && (query.categories.is_empty() || query.categories.contains(&ResultKind::Calculator));
-        let wants_settings = query.mode == SearchMode::Auto && query.extensions.is_empty()
+        let wants_settings = query.mode == SearchMode::Auto && query.extensions.is_empty() && query.file_kinds.is_empty()
             && (query.categories.is_empty()
                 || query.categories.contains(&ResultKind::Settings)
                 || query.categories.contains(&ResultKind::Action));
@@ -1307,6 +1308,7 @@ impl EngineService {
             let request = SearchRequest {
                 text: text.to_string(),
                 extensions:query.extensions.clone(),
+                file_kinds:query.file_kinds.clone(),
                 apps_only: query.mode == SearchMode::Apps,
                 files_only: query.mode == SearchMode::Files,
                 kinds,
@@ -1611,7 +1613,7 @@ mod tests {
         engine.set_model_ready_override(Some(true));engine.set_query_embed_hook(Arc::new(|_|Ok(vec![1.0,0.0])));
         let entry=engine.resolve_entry_snapshot(&ws_protocol::EntryReference {result_id:format!("e{seed}"),source_revision:None}).unwrap();
         let request=ws_protocol::RelatedQuery {source:ws_protocol::EntryReference {result_id:entry.result_id,source_revision:Some(entry.source_revision)},
-            limit:1,categories:Vec::new(),extensions:Vec::new()};
+            limit:1,categories:Vec::new(),extensions:Vec::new(),file_kinds:Vec::new()};
         (engine,tree,request)
     }
 
@@ -1799,7 +1801,7 @@ mod tests {
         let file=code.exact("needle",20)[0].file.id;
         let entry=engine.resolve_entry_snapshot(&ws_protocol::EntryReference {result_id:format!("c{file}"),source_revision:None}).unwrap();
         let related=ws_protocol::RelatedQuery {source:ws_protocol::EntryReference {result_id:entry.result_id,source_revision:Some(entry.source_revision)},
-            limit:1,categories:vec![ResultKind::Code],extensions:vec!["rs".into()]};
+            limit:1,categories:vec![ResultKind::Code],extensions:vec!["rs".into()],file_kinds:Vec::new()};
         let mut query=engine.related_query(&related,&Arc::new(AtomicBool::new(false))).unwrap();
         assert!(query.text.contains("fn needle"));assert_eq!(query.mode,SearchMode::Code);
         query.text="resolve_record".into();
@@ -1815,6 +1817,75 @@ mod tests {
         let tree=TempTree::new();let engine=service_with(&tree,&[]);
         let mut request=query("1+2");request.extensions=vec!["pdf".into()];
         assert!(engine.plan_results(&request).is_empty(),"file extensions exclude synthetic calculator/settings hits");
+    }
+
+    #[test]
+    fn file_kind_selection_distinguishes_lumen_kinds_before_exact_limits() {
+        let tree=TempTree::new();fs::create_dir(tree.0.join("needle-folder.pdf")).unwrap();
+        let cases=[("pdf","pdf"),("document","txt"),("spreadsheet","xlsx"),("presentation","pptx"),
+            ("source","rs"),("image","png"),("video","mp4"),("audio","wav"),("archive","zip"),
+            ("executable","exe"),("model","glb"),("unknown","unrecognized")];
+        let files=cases.iter().map(|(_,ext)|format!("needle.{ext}")).collect::<Vec<_>>();
+        let engine=service_with(&tree,&files.iter().map(String::as_str).collect::<Vec<_>>());
+        for (kind,extension) in cases {
+            let request:SearchQuery=serde_json::from_value(serde_json::json!({"text":"needle","mode":"files","limit":1,"file_kinds":[kind]})).unwrap();
+            let hits=engine.plan_results(&request);
+            assert_eq!(hits.len(),1,"{kind}");assert_eq!(hits[0].title,format!("needle.{extension}"),"{kind}");
+        }
+        let request:SearchQuery=serde_json::from_value(serde_json::json!({"text":"needle","mode":"files","limit":1,"file_kinds":["folder"]})).unwrap();
+        let hits=engine.plan_results(&request);assert_eq!(hits.len(),1);assert_eq!(hits[0].kind,ResultKind::Folder);
+        assert_eq!(hits[0].title,"needle-folder.pdf");
+    }
+
+    #[test]
+    fn file_kind_selection_precedes_crowded_exact_candidates_and_intersects_extensions() {
+        let tree=TempTree::new();
+        let mut files=(0..510).map(|index|format!("needle-{index:04}.txt")).collect::<Vec<_>>();
+        files.push("needle-z.xlsx".into());
+        let engine=service_with(&tree,&files.iter().map(String::as_str).collect::<Vec<_>>());
+        let mut request:SearchQuery=serde_json::from_value(serde_json::json!({"text":"needle","mode":"files","limit":1,"file_kinds":["spreadsheet"]})).unwrap();
+        let hits=engine.plan_results(&request);assert_eq!(hits.len(),1);assert_eq!(hits[0].title,"needle-z.xlsx");
+        request.extensions=vec!["pdf".into()];assert!(engine.plan_results(&request).is_empty());
+    }
+
+    #[test]
+    fn file_kind_selection_excludes_synthetic_and_unselected_code_results() {
+        let (engine,code,_root)=code_search_service();crate::code::tests::stop_fixture_watchers(&code);
+        let request:SearchQuery=serde_json::from_value(serde_json::json!({"text":"needle","mode":"code","file_kinds":["pdf"]})).unwrap();
+        assert!(engine.plan_results(&request).is_empty());
+        let mut request:SearchQuery=serde_json::from_value(serde_json::json!({"text":"needle","mode":"code","file_kinds":["source"]})).unwrap();
+        assert!(!engine.plan_results(&request).is_empty());
+        request.text="indirect code description".into();request.include_semantic=true;
+        assert!(!engine.plan_semantic(&request,&HashSet::new()).is_empty());
+        request.file_kinds=vec![ws_protocol::FileKind::Pdf];
+        assert!(engine.plan_semantic(&request,&HashSet::new()).is_empty());
+        let request:SearchQuery=serde_json::from_value(serde_json::json!({"text":"1+2","file_kinds":["unknown"]})).unwrap();
+        assert!(engine.plan_results(&request).is_empty());
+    }
+
+    #[test]
+    fn file_kind_selection_precedes_semantic_topk_in_the_actual_indexer() {
+        let tree=TempTree::new();
+        let mut names=(0..SEMANTIC_TOP_K*8+9).map(|index|format!("noise-{index}.txt")).collect::<Vec<_>>();
+        names.push("wanted.pdf".into());
+        let engine=service_with(&tree,&names.iter().map(String::as_str).collect::<Vec<_>>());
+        while engine.indexer.embed_queue_depth().unwrap()>0 {
+            engine.indexer.embed_once_with(|texts|Ok(texts.iter().map(|text|
+                if text.contains("wanted") {vec![0.8,0.6]} else {vec![1.0,0.0]}).collect())).unwrap();
+        }
+        engine.set_model_ready_override(Some(true));engine.set_query_embed_hook(Arc::new(|_|Ok(vec![1.0,0.0])));
+        let request:SearchQuery=serde_json::from_value(serde_json::json!({"text":"unmatched concept","include_semantic":true,"limit":1,"file_kinds":["pdf"]})).unwrap();
+        let hits=engine.plan_semantic(&request,&HashSet::new());assert_eq!(hits.len(),1);assert_eq!(hits[0].title,"wanted.pdf");
+    }
+
+    #[test]
+    fn related_file_kind_selection_cannot_leak_targets_of_another_kind() {
+        let (engine,_tree,related)=related_fixture_with_chunks(1);
+        let mut json=serde_json::to_value(&related).unwrap();json["file_kinds"]=serde_json::json!(["pdf"]);
+        let related:ws_protocol::RelatedQuery=serde_json::from_value(json).unwrap();
+        let request=engine.related_query(&related,&Arc::new(AtomicBool::new(false))).unwrap();
+        assert!(matches!(engine.plan_semantic_excluding_checked(&request,&HashSet::new(),&mut HashMap::new(),related.source.indexed_id()),
+            Err(SemanticIssue::NoVectors)));
     }
 
     #[test]

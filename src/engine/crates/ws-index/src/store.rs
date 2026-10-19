@@ -2388,13 +2388,13 @@ COMMIT;
         exclude_apps: bool,
         kinds: &[crate::model::HitKind],
     ) -> Result<Vec<i64>, StoreError> {
-        self.matching_entry_ids_with_extensions(apps_only,exclude_apps,kinds,&[])
+        self.matching_entry_ids_filtered(apps_only,exclude_apps,kinds,&[],&[])
     }
 
-    pub fn matching_entry_ids_with_extensions(
-        &self,apps_only:bool,exclude_apps:bool,kinds:&[crate::model::HitKind],extensions:&[String],
+    pub fn matching_entry_ids_filtered(
+        &self,apps_only:bool,exclude_apps:bool,kinds:&[crate::model::HitKind],extensions:&[String],file_kinds:&[ws_protocol::FileKind],
     )->Result<Vec<i64>,StoreError> {
-        if !ws_protocol::valid_search_extensions(extensions) {
+        if !ws_protocol::valid_search_extensions(extensions) || !ws_protocol::valid_search_file_kinds(file_kinds) {
             return Err(StoreError::InvalidConfig("invalid search extension filter".into()));
         }
         let mut sql = String::from(
@@ -2420,6 +2420,7 @@ COMMIT;
         for r in rows {
             let (id, path, ext, is_dir, is_app) = r?;
             if (!extensions.is_empty() && is_dir) || !ws_protocol::search_extension_allowed(extensions,&ext) {continue;}
+            if !ws_protocol::search_file_kind_allowed(file_kinds,&ext,is_dir) {continue;}
             if !kinds.is_empty() {
                 let kind = if is_app {
                     crate::model::HitKind::Application
