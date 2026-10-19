@@ -187,9 +187,10 @@ def main():
             assert process.returncode == 0, stderr.decode('utf-8', errors='replace')
             return stdout, stderr
 
-        def cli(text, mode, semantic):
+        def cli(text, mode, semantic, extensions=()):
             args = [str(binary/'winsearch-cli.exe'), 'search', text, '--json', '--mode', mode, '--limit', '5']
             if semantic: args.append('--semantic')
+            for extension in extensions: args.extend(['--extension', extension])
             stdout, _ = owned_command(args)
             return json.loads(stdout)
 
@@ -251,14 +252,17 @@ def main():
                 time.sleep(.2)
 
         def filtered(text, extension, mode='files', semantic=False, expected=None):
-            query={'text':text,'mode':mode,'limit':5,'include_semantic':semantic,'extensions':[extension]}
+            extensions=[extension] if isinstance(extension,str) else extension
+            query={'text':text,'mode':mode,'limit':5,'include_semantic':semantic,'extensions':extensions}
             frames=client.search_frames(query)
             hits=[hit for frame in frames for hit in frame['batch']]
+            actual=cli(text,mode,semantic,extensions)
+            assert actual==hits,('filtered CLI DTO parity',query,hits,actual)
             assert all(hit['kind']!='folder' and hit.get('path') and
-                Path(hit['path']).suffix.lstrip('.').lower()==extension.lstrip('.').lower() for hit in hits),hits
+                any(Path(hit['path']).suffix.lstrip('.').lower()==value.lstrip('.').lower() for value in extensions) for hit in hits),hits
             if expected is None:assert not hits,hits
             else:assert any(Path(hit['path']).name==expected for hit in hits),(query,hits)
-            summary.setdefault('extension_filters',[]).append({'query':query,'frames':frames,'expected_name':expected})
+            summary.setdefault('extension_filters',[]).append({'query':query,'frames':frames,'cli':actual,'expected_name':expected})
 
         try:
             with (output/'daemon.log').open('wb') as log:
@@ -332,6 +336,8 @@ def main():
             filtered('parityneedle','py',mode='code')
             filtered('notebookparity','ipynb',mode='code',expected='cells.ipynb')
             filtered('1+2','txt',mode='auto')
+            filtered('pdfparitytoken',['.PDF','txt'],expected='item-b.pdf')
+            filtered('amberparitytoken',['.PDF','txt'],expected='item-a.txt')
             malformed=Frames(pipe_name,child)
             try:
                 malformed.sequence+=1

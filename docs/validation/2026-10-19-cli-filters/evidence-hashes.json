@@ -1,0 +1,37 @@
+[
+  {
+    "file": "parser-red.txt",
+    "local_raw_sha256": "559b0bf139326faa7c15b5107cf8f5dc00dc1477c722d5cfb1c941ec104669e6",
+    "published_sha256": "a3892671032a45566b1ca6dfdbe28e2a057a696ef06a7ff9132fd3b1db9762f6"
+  },
+  {
+    "file": "separator-red.txt",
+    "local_raw_sha256": "d859a8475f2bda63138642d9d7f6dee37baa82fbdb43a0c93a0f3e6c54ee3e19",
+    "published_sha256": "2e87fa416de6e86d0ef01d92e926cd652281e4402430f07eaf707c4a9a31d321"
+  },
+  {
+    "file": "wire-red.txt",
+    "local_raw_sha256": "8626abb5fe21a064679e8bea87f88f188944f4cf322077888f5fb3e78973c2c2",
+    "published_sha256": "24f15c2fe341f4ae005936eb2b8e0abfc2826c52e3feae90e3fb6e2e4ca36d1a"
+  },
+  {
+    "file": "cli-tests.txt",
+    "local_raw_sha256": "9b11c5400fbb2882a382e58a902de174994639148b3a37880486c7ad58dc74d5",
+    "published_sha256": "879bbcd06df936da6a1731468db45a6c70c6613f383373be7eb2ce164e50f10f"
+  },
+  {
+    "file": "cli-build.txt",
+    "local_raw_sha256": "37c0b3a82953723b23ac45eaa07fadd375a389bb4114822be9acb42ca11c298d",
+    "published_sha256": "4effab5d488187cee56a0204f13564f2547ce89bf8f5b531207484bf877fae05"
+  },
+  {
+    "file": "native-no-model.json",
+    "local_raw_sha256": "047fd90adaac13fcd8adeff0d082985ce29e6180be387bb5eaf242d008094d20",
+    "published_sha256": "960552814b920dcbee8ea133e60e5b4632623a444e23f2c1078304c0d48ce0c9"
+  },
+  {
+    "file": "native-managed-cpu.json",
+    "local_raw_sha256": "24d46562d74493117052fb83371a5dbbc4f686c5c7557ba4ad7e6756090b887a",
+    "published_sha256": "bfde0ef36eebf0092fc095d6ce66a3d55a50dd1413c20a6a4c80414124249879"
+  }
+]

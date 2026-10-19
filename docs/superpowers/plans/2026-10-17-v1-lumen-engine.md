@@ -58,8 +58,10 @@ The [2026-10-19 Related/cache checkpoint](../../validation/2026-10-19-related/RE
 records the distinct bound-source operation, typed Rust/C# clients and current
 native CPU/no-model checks. It also retains a native failure and the regression
 for unavailable inference erasing committed exact cache during policy changes.
-Finer file-kind scopes, CLI filter arguments, independent review and the consumer/
-installed gates below remain open; this does not complete Task1.
+The [CLI filter checkpoint](../../validation/2026-10-19-cli-filters/README.md)
+exposes the existing extension contract through arguments with capability/reply
+checks. Finer file-kind scopes, independent review and the consumer/installed
+gates below remain open; these checkpoints do not complete Task1.
 
 - [ ] RED malformed/version/ID/frame/timeout/disconnect and cancellation cases.
 - [ ] Real isolated rebuilt daemon queries/configuration/pause/revoke/reconnect,

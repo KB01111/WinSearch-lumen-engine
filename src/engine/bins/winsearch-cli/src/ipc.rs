@@ -31,6 +31,12 @@ pub enum IpcError {
     InvalidSearchOutcome,
     #[error("search interrupted: {0:?}")]
     SearchInterrupted(SearchDisposition),
+    #[error("invalid search extension filter")]
+    InvalidSearchExtensions,
+    #[error("daemon does not support {0}")]
+    UnsupportedFeature(&'static str),
+    #[error("daemon returned a result outside the extension filter")]
+    UnselectedSearchExtension,
 }
 
 pub struct DaemonClient {
@@ -176,6 +182,13 @@ impl DaemonClient {
     /// `done: true`.
     pub fn search(&mut self, query: SearchQuery) -> Result<Vec<SearchResult>, IpcError> {
         self.last_search_outcome=None;
+        if !ws_protocol::valid_search_extensions(&query.extensions) {
+            return Err(IpcError::InvalidSearchExtensions);
+        }
+        if !query.extensions.is_empty() && !self.features.iter().any(|feature| feature == "search.filters") {
+            return Err(IpcError::UnsupportedFeature("search.filters"));
+        }
+        let extensions = query.extensions.clone();
         let requested_semantic=query.include_semantic;
         let require_outcome=self.features.iter().any(|feature|feature=="search.outcomes");
         let id = self.alloc_id();
@@ -189,6 +202,12 @@ impl DaemonClient {
                     done,
                     outcome,
                 }) if resp_id == id => {
+                    if !extensions.is_empty() && batch.iter().any(|hit|
+                        hit.kind == ws_protocol::ResultKind::Folder || !hit.path.as_deref().is_some_and(|path|
+                            ws_protocol::search_extension_allowed(&extensions,
+                                std::path::Path::new(path).extension().and_then(|extension| extension.to_str()).unwrap_or("")))) {
+                        return Err(IpcError::UnselectedSearchExtension);
+                    }
                     if (done && require_outcome && outcome.is_none()) || outcome.as_ref()
                         .is_some_and(|state|!state.valid_for(done,batch.is_empty(),requested_semantic)) {
                         return Err(IpcError::InvalidSearchOutcome);

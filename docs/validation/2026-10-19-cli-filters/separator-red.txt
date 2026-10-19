@@ -1,0 +1,27 @@
+rtk :     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.39s
+At line:1 char:1
++ rtk proxy cargo test -p winsearch-cli --bin winsearch-cli search_reje ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Finished `t...get(s) in 0.39s:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+     Running unittests src\main.rs (target\debug\deps\winsearch_cli-a940bf76679cba8b.exe)
+
+running 1 test
+test tests::search_rejects_unknown_long_options_and_allows_literal_options_after_separator ... FAILED
+
+failures:
+
+---- tests::search_rejects_unknown_long_options_and_allows_literal_options_after_separator stdout ----
+
+thread 'tests::search_rejects_unknown_long_options_and_allows_literal_options_after_separator' (4964) panicked at bins\winsearch-cli\src\main.rs:685:9:
+assertion failed: parse_args(&vec_args(&["search", "needle", "--extensoin", "pdf"])).is_err()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    tests::search_rejects_unknown_long_options_and_allows_literal_options_after_separator
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 18 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p winsearch-cli --bin winsearch-cli`

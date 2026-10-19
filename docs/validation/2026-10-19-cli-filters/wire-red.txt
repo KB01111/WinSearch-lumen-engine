@@ -1,0 +1,43 @@
+rtk :     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.41s
+At line:1 char:1
++ rtk proxy cargo test -p winsearch-cli --test search_json json_extensi ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Finished `t...get(s) in 0.41s:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+     Running tests\search_json.rs (target\debug\deps\search_json-6250ac45e29f50b8.exe)
+
+running 3 tests
+test json_extension_options_fail_closed_when_the_peer_has_no_filter_capability ... FAILED
+test json_extension_options_reject_unselected_or_pathless_results_in_any_batch ... FAILED
+test json_extension_options_reach_the_wire_without_changing_query_or_output ... FAILED
+
+failures:
+
+---- json_extension_options_fail_closed_when_the_peer_has_no_filter_capability stdout ----
+
+thread 'json_extension_options_fail_closed_when_the_peer_has_no_filter_capability' (144540) panicked at bins\winsearch-cli\tests\search_json.rs:102:5:
+an unsupported filter cannot silently become an unfiltered query
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- json_extension_options_reject_unselected_or_pathless_results_in_any_batch stdout ----
+
+thread 'json_extension_options_reject_unselected_or_pathless_results_in_any_batch' (31880) panicked at bins\winsearch-cli\tests\search_json.rs:126:9:
+case 0 cannot publish unselected results
+
+---- json_extension_options_reach_the_wire_without_changing_query_or_output stdout ----
+
+thread 'json_extension_options_reach_the_wire_without_changing_query_or_output' (85372) panicked at bins\winsearch-cli\tests\search_json.rs:87:5:
+assertion `left == right` failed
+  left: "needle --extension .RS --extension=pdf"
+ right: "needle"
+
+
+failures:
+    json_extension_options_fail_closed_when_the_peer_has_no_filter_capability
+    json_extension_options_reach_the_wire_without_changing_query_or_output
+    json_extension_options_reject_unselected_or_pathless_results_in_any_batch
+
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.99s
+
+error: test failed, to rerun pass `-p winsearch-cli --test search_json`

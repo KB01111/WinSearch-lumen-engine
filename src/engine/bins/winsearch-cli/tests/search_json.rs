@@ -14,6 +14,17 @@ fn run_search(
 }
 
 fn run_search_with_features(label:&str,features:Vec<String>,reply:impl Fn(u64)->Vec<ServerMessage>+Send+Sync+'static)->std::process::Output {
+    run_search_with_args(label, features,
+        &["search", "needle", "--json", "--semantic", "--mode", "code"],
+        move |id, _| reply(id))
+}
+
+fn run_search_with_args(
+    label: &str,
+    features: Vec<String>,
+    args: &[&str],
+    reply: impl Fn(u64, ws_protocol::SearchQuery) -> Vec<ServerMessage> + Send + Sync + 'static,
+) -> std::process::Output {
     let pipe = format!(
         r"\\.\pipe\winsearch-cli-json-{}-{label}",
         std::process::id()
@@ -36,7 +47,7 @@ fn run_search_with_features(label:&str,features:Vec<String>,reply:impl Fn(u64)->
                 },
             )
             .unwrap();
-            if let Some(ClientMessage::Search { id, .. }) = read_message(&mut stream).unwrap() {
+            if let Some(ClientMessage::Search { id, query }) = read_message(&mut stream).unwrap() {
                 // An unrelated request's frame must not leak into the CLI JSON.
                 write_message(
                     &mut stream,
@@ -47,7 +58,7 @@ fn run_search_with_features(label:&str,features:Vec<String>,reply:impl Fn(u64)->
                     },
                 )
                 .unwrap();
-                for message in reply(id) {
+                for message in reply(id, query) {
                     write_message(&mut stream, &message).unwrap();
                 }
             }
@@ -56,10 +67,73 @@ fn run_search_with_features(label:&str,features:Vec<String>,reply:impl Fn(u64)->
     wait.recv().unwrap();
     std::thread::sleep(Duration::from_millis(50));
     Command::new(env!("CARGO_BIN_EXE_winsearch-cli"))
-        .args(["search", "needle", "--json", "--semantic", "--mode", "code"])
+        .args(args)
         .env("WS_PIPE", pipe)
         .output()
         .unwrap()
+}
+
+#[test]
+fn json_extension_options_reach_the_wire_without_changing_query_or_output() {
+    let (sent, received) = mpsc::channel();
+    let output = run_search_with_args("extensions-wire", vec!["search.filters".into()],
+        &["search", "needle", "--json", "--extension", ".RS", "--extension=pdf", "--limit", "3"],
+        move |id, query| {
+            sent.send(query).unwrap();
+            vec![ServerMessage::Results { id, batch: vec![hit("selected")], done: true, outcome: None }]
+        });
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let query = received.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(query.text, "needle");
+    assert_eq!(query.extensions, vec![".RS", "pdf"]);
+    assert_eq!(query.limit, 3);
+    assert_eq!(serde_json::from_slice::<Vec<SearchResult>>(&output.stdout).unwrap(), vec![hit("selected")]);
+}
+
+#[test]
+fn json_extension_options_fail_closed_when_the_peer_has_no_filter_capability() {
+    let (sent, received) = mpsc::channel();
+    let output = run_search_with_args("extensions-legacy", vec![],
+        &["search", "needle", "--json", "--extension", "rs"],
+        move |id, query| {
+            sent.send(query).unwrap();
+            vec![ServerMessage::Results { id, batch: vec![], done: true, outcome: None }]
+        });
+    assert!(!output.status.success(), "an unsupported filter cannot silently become an unfiltered query");
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("search.filters"));
+    assert!(received.try_recv().is_err(), "the filtered request must not be sent to a legacy peer");
+}
+
+#[test]
+fn json_extension_options_reject_unselected_or_pathless_results_in_any_batch() {
+    for case in 0..8 {
+        let output = run_search_with_args(&format!("extensions-invalid-{case}"), vec!["search.filters".into()],
+            &["search", "needle", "--json", "--extension", "rs"],
+            move |id, _| {
+                let mut invalid = hit("unselected");
+                match case % 4 {
+                    0 => invalid.path = Some(r"C:\generated\unselected.png".into()),
+                    1 => invalid.path = None,
+                    2 => invalid.kind = ResultKind::Folder,
+                    _ => invalid.path = Some(r"C:\generated\no-extension".into()),
+                }
+                if case < 4 {
+                    vec![
+                        ServerMessage::Results { id, batch: vec![hit("partial")], done: false, outcome: None },
+                        ServerMessage::Results { id, batch: vec![invalid], done: true, outcome: None },
+                    ]
+                } else {
+                    vec![
+                        ServerMessage::Results { id, batch: vec![invalid], done: false, outcome: None },
+                        ServerMessage::Results { id, batch: vec![hit("selected")], done: true, outcome: None },
+                    ]
+                }
+            });
+        assert!(!output.status.success(), "case {case} cannot publish unselected results");
+        assert!(output.stdout.is_empty(), "a rejected final batch cannot publish earlier partial hits as success");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("extension filter"));
+    }
 }
 
 fn hit(id: &str) -> SearchResult {

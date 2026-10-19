@@ -24,11 +24,12 @@ The latest [Related/cache-retention checkpoint](docs/validation/2026-10-19-relat
 records the typed Related operation, a reproduced exact-cache fix and native
 CPU/no-model checks with retained failures. Consumer integration and the tasks
 below still require implementation or final acceptance.
+The [CLI filter checkpoint](docs/validation/2026-10-19-cli-filters/README.md)
+adds repeated extension arguments and rejects unsupported peers and mismatched replies.
 
 ### Lumen integration and native contract
 
-- [ ] Complete finer file-kind scopes and remaining provenance
-  contracts; expose the existing extension filters through CLI arguments.
+- [ ] Complete finer file-kind scopes and remaining provenance contracts.
 - [ ] Consume and verify the engine's terminal outcomes in Lumen and the
   standalone UI, preserving complete/superseded/canceled/failed and semantic
   disabled/ready/degraded states, exact results on optional failure and legacy

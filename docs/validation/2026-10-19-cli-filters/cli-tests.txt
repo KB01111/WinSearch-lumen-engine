@@ -1,0 +1,74 @@
+rtk :    Compiling winsearch-cli v0.1.0 (<checkout>\src\engine\bins\winsear
+ch-cli)
+At line:1 char:1
++ rtk proxy cargo test -p winsearch-cli --all-targets *> ..\..\artifact ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling wi...\winsearch-cli):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.17s
+     Running unittests src\main.rs (target\debug\deps\winsearch_cli-a940bf76679cba8b.exe)
+
+running 19 tests
+test eval::tests::fixture_segments_reject_impossible_code_lines_and_missing_pdf_pages ... ok
+test eval::tests::fixture_locations_reject_conflicting_and_wrong_kind_fields ... ok
+test eval::tests::real_reply_rejects_wrong_identity_count_backend_shape_and_nonunit_vectors ... ok
+test eval::tests::concept_stub_groups_paraphrases_and_separates_negatives ... ok
+test tests::search_json_option_is_not_part_of_the_query ... ok
+test tests::search_extension_options_do_not_become_query_text ... ok
+test tests::cli_arg_parsing_covers_all_subcommands ... ok
+test tests::search_rejects_invalid_or_excessive_extension_options ... ok
+test tests::search_rejects_unknown_long_options_and_allows_literal_options_after_separator ... ok
+test eval::tests::unhandled_eval_fields_are_rejected_instead_of_silently_ignored ... ok
+test tests::ipc_client_round_trips_status_and_search_over_real_pipe ... ok
+test tests::cmd_model_routes_download_and_import_through_connected_daemon_pipe ... ok
+test eval::tests::code_fixture_uses_shared_store_and_code_recipe_without_ordinary_name_vectors ... ok
+test eval::tests::code_semantic_rejects_task_affinity_without_losing_corroborated_results ... ok
+test eval::tests::expanded_media_suite_refuses_concept_stub_instead_of_faking_visual_content ... ok
+test eval::tests::application_query_uses_search_task_prefix ... ok
+test eval::tests::expanded_suite_searches_exact_document_content_and_isolates_code_entries ... ok
+test eval::tests::eval_request_filters_apply_before_exact_and_semantic_limits ... ok
+test eval::tests::names_eval_suite_meets_all_thresholds ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+
+     Running tests\eval_provenance.rs (target\debug\deps\eval_provenance-eb91e758bc4f1f71.exe)
+
+running 2 tests
+test explicitly_missing_model_is_an_error_not_a_passing_fixture_run ... ok
+test requested_real_model_rejects_stub_worker_provenance ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.93s
+
+     Running tests\search_json.rs (target\debug\deps\search_json-6250ac45e29f50b8.exe)
+
+running 9 tests
+test json_preserves_order_and_complete_dtos_across_progressive_batches ... ok
+test json_rejection_is_an_empty_array ... ok
+test json_preserves_exact_hits_and_reports_bounded_optional_semantic_failure ... ok
+test json_server_error_fails_without_a_success_payload ... ok
+test json_extension_options_fail_closed_when_the_peer_has_no_filter_capability ... ok
+test json_extension_options_reach_the_wire_without_changing_query_or_output ... ok
+test json_does_not_publish_partial_hits_as_success_after_interruption ... ok
+test json_requires_advertised_terminal_outcome_and_rejects_premature_or_malformed_state ... ok
+test json_extension_options_reject_unselected_or_pathless_results_in_any_batch ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.63s
+
+     Running unittests examples\native-eval-parity.rs (target\debug\examples\native_eval_parity-5863ecec7c8b37a5.exe)
+
+running 12 tests
+test eval::tests::fixture_segments_reject_impossible_code_lines_and_missing_pdf_pages ... ok
+test eval::tests::concept_stub_groups_paraphrases_and_separates_negatives ... ok
+test eval::tests::real_reply_rejects_wrong_identity_count_backend_shape_and_nonunit_vectors ... ok
+test eval::tests::fixture_locations_reject_conflicting_and_wrong_kind_fields ... ok
+test eval::tests::unhandled_eval_fields_are_rejected_instead_of_silently_ignored ... ok
+test eval::tests::code_fixture_uses_shared_store_and_code_recipe_without_ordinary_name_vectors ... ok
+test eval::tests::code_semantic_rejects_task_affinity_without_losing_corroborated_results ... ok
+test eval::tests::expanded_media_suite_refuses_concept_stub_instead_of_faking_visual_content ... ok
+test eval::tests::application_query_uses_search_task_prefix ... ok
+test eval::tests::expanded_suite_searches_exact_document_content_and_isolates_code_entries ... ok
+test eval::tests::eval_request_filters_apply_before_exact_and_semantic_limits ... ok
+test eval::tests::names_eval_suite_meets_all_thresholds ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s

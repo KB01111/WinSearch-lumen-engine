@@ -131,6 +131,21 @@ Mode/category/extension filters precede engine candidate caps and semantic top-k
 Finer file-kind scopes and expanded source provenance remain open; typed terminal
 semantic outcomes are described above.
 
+The standalone CLI exposes the same extension selection with repeatable
+`--extension <ext>` / `-e <ext>` or `--extension=<ext>` arguments:
+
+```powershell
+winsearch-cli search invoice --mode files --extension pdf -e .docx --json
+```
+
+Repeated values are alternatives; they intersect the selected search mode and
+the engine's existing source/root policy. Invalid or excessive values fail before
+connecting. Filtered queries require `search.filters`; an older peer cannot
+silently run an unfiltered search. Every correlated result batch is checked for
+the selected extensions before the CLI publishes its final JSON array. Unknown
+long options are rejected; use `--` before literal query text beginning with
+`--`. Omitted extensions preserve the existing unfiltered/legacy behavior.
+
 `related(RelatedQuery)` requires a current bound indexed source and the separate
 `search.related`, `search.semantic` and `search.outcomes` capabilities. Code seeds
 also require `code`; extension filters require `search.filters`. It obtains bounded

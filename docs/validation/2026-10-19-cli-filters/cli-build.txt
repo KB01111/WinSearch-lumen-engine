@@ -1,0 +1,6 @@
+rtk :     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.46s
+At line:1 char:1
++ rtk proxy cargo build -p winsearch-cli --bin winsearch-cli *> ..\..\a ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Finished `d...get(s) in 0.46s:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError

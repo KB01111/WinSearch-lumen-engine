@@ -366,11 +366,16 @@ The connection-local request scope does not alter native source/root admission o
 metadata/preview access. A subsequent search replaces its previous request scope.
 Candidate/result bounds, model space, ranking and semantic thresholds are unchanged.
 
-Rust/C# clients reject nonempty extension filters on peers without the capability,
+Rust/C#/CLI clients reject nonempty extension filters on peers without the capability,
 validate request budgets and reject replies outside the selected extensions.
 C# snapshots the query and its lists before awaiting writes. Omitted extension
 fields remain compatible with older clients. Finer file-kind
 scopes remain separate unfinished contracts.
+
+The CLI accepts repeatable `--extension <ext>` / `-e <ext>` and
+`--extension=<ext>` arguments. Repeated extensions are alternatives. Invalid
+values fail before connecting; the final JSON result array is published only
+after every received batch passes extension and terminal-outcome validation.
 
 ### Related content search
 

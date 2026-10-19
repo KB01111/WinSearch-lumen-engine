@@ -584,3 +584,25 @@ An additional blocked seed-lookup control prevents an old failure from rejecting
 a reused request ID; final native profiles include that delivery fix.
 Independent review, consumer/installed behavior and required scale/resource/GPU
 calibration remain open; this is not full v1 acceptance.
+
+## 2026-10-19 CLI extension argument parity
+
+[CLI evidence and commands](validation/2026-10-19-cli-filters/README.md) record42
+passing CLI all-target test executions, including actual CLI subprocesses against
+controlled public-pipe frames. These are scoped checks; the preceding broad
+workspace/.NET/WinUI/model-reference totals were not rerun for this CLI change.
+
+The actual owned daemon passes10 public/seven offline original cases without a
+model and21 public/17 offline on managed CPU. Nine/11 separate extension cases now
+compare full ordered CLI and pipe DTOs, including two repeated PDF/text filter
+cases. No-model total7.996s/index1.176s; CPU total99.365s/index73.146s. Both jobs
+end empty and both profiles share executable/DLL/harness/helper hashes, with no
+Rust build between them. Daemon/inference/extraction binaries, native DLLs and
+model artifacts match the preceding Related checkpoint byte-for-byte.
+
+Original CPU quality remains .90/.85 Recall@5/MRR; expanded .9091/.8636 and ten
+empty controls FP0, with screenshot miss/audio rank2 retained. Added filter cases
+do not change those denominators. Extra CLI work and uncontrolled timing prevent
+causal speed comparisons; these samples do not establish scale/GPU/idle or
+installed-consumer acceptance. Finer file-kind scopes, Lumen integration and full
+v1 acceptance remain open.
