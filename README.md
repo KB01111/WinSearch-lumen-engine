@@ -65,6 +65,9 @@ outside-checkout package test still fails. Lumen's package pin must wait for a
 coherent rebuilt payload to pass that test with its existing deadlines.
 The [extraction-claim checkpoint](docs/validation/2026-10-20-extraction-claims/README.md)
 reduces repeated policy work in the queue; rebuilt-package acceptance remains open.
+The latest outside-checkout replay passes text/PDF and folder-policy readiness,
+but reaches the unchanged 90-second watchdog before the 1,100-result stream
+finishes. Large-result latency remains a blocker to advancing Lumen's payload.
 
 ### Lumen integration and native contract
 
@@ -73,8 +76,8 @@ reduces repeated policy work in the queue; rebuilt-package acceptance remains op
   exclusion policies before candidate limits, and reconcile consumer result
   limits without silently truncating them. Resolve indexing/search stalls in the
   expanded outside-checkout package test, verify current metadata/source
-  identities and pass its unchanged readiness and 1,000-result checks before
-  advancing Lumen's pinned payload.
+  identities and pass its unchanged readiness, 1,000/1,100-result and 90-second
+  watchdog checks before advancing Lumen's pinned payload.
 - [ ] Consume and verify the engine's terminal outcomes in Lumen and the
   standalone UI, preserving complete/superseded/canceled/failed and semantic
   disabled/ready/degraded states, exact results on optional failure and legacy
