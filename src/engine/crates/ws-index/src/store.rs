@@ -26,6 +26,8 @@ pub enum StoreError {
     InvalidVector(String),
     #[error("invalid engine config: {0}")]
     InvalidConfig(String),
+    #[error("invalid durable index identity")]
+    InvalidIdentity,
 }
 
 /// A configured indexing root.
@@ -67,6 +69,7 @@ pub struct EntryRow {
 
 pub struct IndexStore {
     conn: Connection,
+    database_id: String,
 }
 
 #[derive(Clone)]
@@ -965,7 +968,12 @@ COMMIT;
                 return Err(StoreError::UnsupportedSchemaVersion(other.to_string()));
             }
         }
-        let store=Self { conn };
+        conn.execute("INSERT OR IGNORE INTO meta(key,value) VALUES('database_id',lower(hex(randomblob(16))))", [])?;
+        let database_id: String = conn.query_row("SELECT value FROM meta WHERE key='database_id'", [], |row| row.get(0))?;
+        if database_id.len() != 32 || !database_id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+            return Err(StoreError::InvalidIdentity);
+        }
+        let store=Self { conn, database_id };
         store.set_query_source_guard(|_,_,_|true)?;
         store.conn.execute_batch("CREATE TEMP VIEW IF NOT EXISTS query_entries AS SELECT * FROM visible_entries WHERE query_source_allowed(path,NULL,is_app); CREATE TEMP VIEW IF NOT EXISTS query_content_rows AS SELECT f.rowid AS id FROM content_fts f JOIN query_entries e ON e.id=CAST(f.entry_id AS INTEGER) LEFT JOIN content_chunks c ON c.id=f.rowid AND c.entry_id=e.id LEFT JOIN content_revisions r ON r.entry_id=e.id LEFT JOIN content_progress p ON p.entry_id=c.entry_id AND p.kind=c.job_kind AND p.revision=r.revision WHERE query_source_allowed(e.path,COALESCE(p.source,''),e.is_app);")?;
         store.set_search_request_filter(&crate::model::SearchRequest::default())?;
@@ -981,6 +989,11 @@ COMMIT;
             |r| r.get(0),
         )?;
         Ok(v)
+    }
+
+    /// Non-secret database incarnation, stable across process restarts.
+    pub fn database_id(&self) -> &str {
+        &self.database_id
     }
 
     fn ensure_extract_jobs_priority_column(conn: &Connection) -> Result<(), StoreError> {
@@ -2605,6 +2618,33 @@ fn fts_keywords(rec: &EntryRecord) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn database_identity_survives_reopen_and_changes_for_a_recreated_index() {
+        let path = std::env::temp_dir().join(format!("winsearch-index-identity-{}-{}.db",
+            std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let first = IndexStore::open(&path).unwrap();
+        let identity = first.meta_get("database_id").unwrap().expect("durable index identity");
+        assert_eq!(identity.len(), 32);
+        assert!(identity.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
+        drop(first);
+        let reopened = IndexStore::open(&path).unwrap();
+        assert_eq!(reopened.meta_get("database_id").unwrap().as_ref(), Some(&identity));
+        assert_ne!(IndexStore::open_in_memory().unwrap().meta_get("database_id").unwrap().as_ref(), Some(&identity));
+        drop(reopened);
+        std::fs::remove_file(&path).unwrap();
+        let recreated = IndexStore::open(&path).unwrap();
+        assert_ne!(recreated.meta_get("database_id").unwrap().as_ref(), Some(&identity));
+        drop(recreated);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn database_identity_corruption_is_rejected_without_rotating_existing_bindings() {
+        let store = IndexStore::open_in_memory().unwrap();
+        store.conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('database_id','invalid')", []).unwrap();
+        assert!(IndexStore::init(store.conn).is_err());
+    }
     fn batch_fixture() -> (IndexStore, ExtractJob, crate::model::ContentProgress) {
         let mut store = IndexStore::open_in_memory().unwrap();
         let root = store.ensure_root(r"C:\task2").unwrap();

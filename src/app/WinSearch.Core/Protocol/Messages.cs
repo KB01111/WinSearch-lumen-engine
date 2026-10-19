@@ -383,6 +383,8 @@ public sealed class MatchingMoment
 
 public sealed class EngineStatus
 {
+    public string? IndexId { get; set; }
+    public string? CodeIndexId { get; set; }
     public EngineRunState State { get; set; }
     public string CurrentActivity { get; set; } = "";
     public ulong FilesDiscovered { get; set; }

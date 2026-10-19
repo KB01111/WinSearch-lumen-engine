@@ -1,0 +1,42 @@
+{
+  "date": "2026-10-19",
+  "scope": "Durable ordinary/code database identity and non-reusing code file IDs; not full v1 acceptance",
+  "rust": {
+    "command": "cargo test --locked --workspace --exclude ws-embed --all-targets -- --test-threads=1",
+    "passed": 633,
+    "failed": 0,
+    "ignored": 1
+  },
+  "dotnet": {
+    "command": "dotnet test WinSearch.slnx --nologo",
+    "passed": 153,
+    "failed": 0,
+    "skipped": 0
+  },
+  "winui": {
+    "command": "dotnet build src/app/WinSearch.App/WinSearch.App.csproj -p:Platform=x64 --nologo",
+    "warnings": 0,
+    "errors": 0
+  },
+  "sourceSha256": {
+    "src/engine/crates/ws-index/src/store.rs": "d59ed811c26abd764922870b30a759f140abfae7157a6b584075d5390518430f",
+    "src/engine/crates/ws-code/src/store.rs": "666a1b17de88372209aaf3457669cc13715b0a0b7b19b79b26f6b7bc6240b13a",
+    "src/engine/crates/ws-protocol/src/messages.rs": "853757686247073693e73d3607fac8c4da5d590f563ebd5c69df9d1d7b9feb1c",
+    "src/engine/bins/winsearchd/src/engine.rs": "ec6fb2f47301697d88096ff15662d8473b3538f9a6fa7ba21f1aef349b39911c",
+    "src/engine/bins/winsearchd/src/server.rs": "09655cc25c9dad7f1f317681cfe5f34f1514c99058b4408ffce12f2482e004b1",
+    "src/app/WinSearch.Core/Protocol/Messages.cs": "3115ab6048be3f88e2b70aa13215902106515580dd315817edaa6e8b348f0e40",
+    "src/app/WinSearch.Tests/IndexingContractTests.cs": "4232a45a0c6eda7c2e982725d9124cf061422d0bfee34c45c03b46e676d9d5b9"
+  },
+  "localLogSha256": {
+    "index-identity-red.log": "5a7cefe2fa77262e9eb1c2e9cffa610f4ba1fb65d1cbdc013cb57d9e754786d5",
+    "index-identity-contract-red.log": "3e8d0da6304f2fa0d4a93c184ae1a725d148a0b4cf22bf8407e29987cf6b1e69",
+    "index-identity-green.log": "db2334a7334a51fce236005444171e64e903b8c2db412ddd178ddfa6d7beb053",
+    "index-identity-final-regression.log": "c75214f34c10f011933811e8b147887c85afa4dbce3f6324e78db27e9fa3685f"
+  },
+  "limits": [
+    "The real-model worker case remains ignored in this workspace invocation; ws-embed and actual model/retrieval gates were not rerun for this storage change.",
+    "No new staged payload or installed Lumen consumer uses this contract yet.",
+    "Independent reviewer dispatch failed with agent thread limit; author review only.",
+    "Snapshot rollback, cloning, older writers and manual database edits need explicit host-binding reconciliation."
+  ]
+}

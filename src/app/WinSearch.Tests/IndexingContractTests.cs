@@ -7,6 +7,20 @@ namespace WinSearch.Tests;
 public class IndexingContractTests
 {
     [Fact]
+    public void DatabaseIdentitiesRoundTripWithoutInventingLegacyValues()
+    {
+        const string json = """{"index_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","code_index_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}""";
+        var status = JsonSerializer.Deserialize<EngineStatus>(json, ProtocolJson.Options)!;
+        using var encoded = JsonDocument.Parse(JsonSerializer.Serialize(status, ProtocolJson.Options));
+        Assert.Equal(new string('a', 32), encoded.RootElement.GetProperty("index_id").GetString());
+        Assert.Equal(new string('b', 32), encoded.RootElement.GetProperty("code_index_id").GetString());
+        var legacy = JsonSerializer.Deserialize<EngineStatus>("{}", ProtocolJson.Options)!;
+        using var legacyEncoded = JsonDocument.Parse(JsonSerializer.Serialize(legacy, ProtocolJson.Options));
+        Assert.False(legacyEncoded.RootElement.TryGetProperty("index_id", out _));
+        Assert.False(legacyEncoded.RootElement.TryGetProperty("code_index_id", out _));
+    }
+
+    [Fact]
     public void RelatedUsesIndexedSourceAndCannotSmugglePathsOrOrdinaryQueryText()
     {
         var request = new RelatedMessage { Id = 9, Query = new() {

@@ -178,6 +178,38 @@ Breaking wire changes bump `PROTOCOL_VERSION`. Both sides refuse mismatched
 versions at handshake with `error: protocol_version_mismatch` and disconnect.
 Additive fields use `#[serde(default)]` semantics and do not bump the version.
 
+## Durable index identities
+
+Peers advertising `index.identity` include optional `index_id` and
+`code_index_id` in `EngineStatus`. Each is a non-secret, lowercase 32-character
+hex database incarnation generated once in that database's `meta.database_id`.
+The ordinary and code databases have separate identities. Reopening the same
+database preserves its ID; recreating a deleted database generates a different
+one. Missing legacy fields and an unavailable code store remain unknown/absent.
+
+Consumers must bind an ordinary `eN` or code `cN` identity to the corresponding
+database ID and their own host profile. Never use a PID, hit ID, source revision
+or content hash as a durable database namespace. An index ID is bookkeeping,
+not a source hash, permission, or replacement for fresh entry resolution and
+current root/source checks. Existing source references still expire on process
+restart according to the separate reference-incarnation contract.
+
+Ordinary entry IDs already use SQLite AUTOINCREMENT. Code file IDs now use a
+durable high-water mark updated in the same savepoint as inserts. Deletion,
+repository removal and process restart cannot recycle a committed code file ID.
+Initialization seeds the mark from existing rows without renumbering files or
+rewriting content. Counter overflow fails the insertion; rollback cannot publish
+a partially assigned identity. Opening a store with an invalid persisted database
+ID returns an error instead of silently rotating existing bindings.
+
+These IDs do not detect arbitrary rollback, cloning or manual modification of a
+database file. A future restore/import operation must explicitly reconcile host
+bindings and its database incarnation; restoring an old snapshot is not proven
+safe by an unchanged ID. Older binaries without this allocator must not write a
+database used for persistent host bindings; a downgrade needs binding
+reconciliation. Lumen's host migration and consumer wiring remain open.
+Protocol version remains 1; old peers may omit the fields.
+
 ## Indexed entry resolution
 
 Peers advertising `entry.resolve` support a metadata-only operation for native

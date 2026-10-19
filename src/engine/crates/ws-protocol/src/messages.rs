@@ -386,6 +386,12 @@ pub enum EngineRunState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(default)]
 pub struct EngineStatus {
+    /// Non-secret ordinary-index incarnation, not a content hash or grant.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index_id: Option<String>,
+    /// Separate code-index incarnation; absent when unavailable or legacy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code_index_id: Option<String>,
     pub state: EngineRunState,
     /// Short human-readable activity line ("Indexing Pictures", "Paused").
     pub current_activity: String,
@@ -402,6 +408,19 @@ pub struct EngineStatus {
 mod tests {
     use super::*;
     use ws_modelmgr::ModelState;
+
+    #[test]
+    fn database_identity_status_round_trips_and_keeps_legacy_unknown() {
+        let value = serde_json::json!({"index_id":"a".repeat(32),"code_index_id":"b".repeat(32)});
+        let status: EngineStatus = serde_json::from_value(value.clone()).unwrap();
+        let encoded = serde_json::to_value(status).unwrap();
+        assert_eq!(encoded["index_id"], value["index_id"]);
+        assert_eq!(encoded["code_index_id"], value["code_index_id"]);
+        let legacy: EngineStatus = serde_json::from_str("{}").unwrap();
+        let legacy = serde_json::to_value(legacy).unwrap();
+        assert!(legacy.get("index_id").is_none());
+        assert!(legacy.get("code_index_id").is_none());
+    }
 
     #[test]
     fn file_kind_selection_round_trips_closed_codes_and_keeps_legacy_requests_unchanged() {

@@ -30,11 +30,19 @@ The [file-kind checkpoint](docs/validation/2026-10-19-file-kinds/README.md)
 adds typed source classifications before candidate limits, including PDF,
 spreadsheet, presentation, source and unknown kinds.
 The [owned-startup checkpoint](docs/validation/2026-10-19-owned-startup/README.md)
-adds process-bound Rust connections and deferred folder admission. Wiring these
-controls into Lumen's owned engine lifecycle remains open below.
+adds process-bound Rust connections and deferred folder admission.
+[Lumen PR #27](https://github.com/KB01111/Lumen/pull/27) now wires verified owned
+startup, PID authentication, deferred admission and shutdown into the Rust host;
+its real two-profile native test passes. Search/root-policy forwarding, migration
+and installed-consumer acceptance remain open below.
 The [engine-only package guide](docs/engine-payload.md) covers verified local
 assembly and Lumen staging. Release binaries, native consumer wiring and
 installed acceptance remain open.
+The [database-identity checkpoint](docs/validation/2026-10-19-index-identity/README.md)
+adds durable ordinary/code index namespaces and prevents deleted code file IDs
+from being recycled. Lumen still needs to consume these identities in its host
+ledger and search adapter; its current staged engine remains pinned to the
+earlier verified payload.
 
 ### Lumen integration and native contract
 

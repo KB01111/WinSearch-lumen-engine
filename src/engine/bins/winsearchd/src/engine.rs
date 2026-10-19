@@ -176,11 +176,13 @@ impl EngineService {
         if let Ok(cfg) = indexer.get_engine_config() {
             embed.set_preferred_backend(cfg.preferred_backend.as_str());
         }
+        let index_id = indexer.store_lock().database_id().to_owned();
         Arc::new(Self {
             reference_incarnation: unsafe {windows::Win32::System::Com::CoCreateGuid()}.ok(),
             code:Mutex::new(None),
             power:Mutex::new(None),
             status: Mutex::new(EngineStatus {
+                index_id: Some(index_id),
                 state: EngineRunState::Idle,
                 current_activity: String::new(),
                 ..Default::default()
@@ -242,6 +244,9 @@ impl EngineService {
         // weights resident, or stub vectors flowing in test setups). Reading
         // the cache never spawns a worker.
         status.model_loaded = self.embed.model_loaded();
+        status.code_index_id = self.code_service().map(|code| {
+            code.store.lock().unwrap_or_else(|p| p.into_inner()).database_id().to_owned()
+        });
         // Indexing counters are live; the stored snapshot only carries the
         // broadcast state.
         if let Ok(s) = self.indexer.status() {
@@ -2449,6 +2454,8 @@ mod tests {
 
         let s = engine.status();
         assert_eq!(s.segments_indexed, 0);
+        assert_eq!(s.index_id.as_deref(), Some(engine.indexer.store_lock().database_id()));
+        assert!(s.code_index_id.is_none(), "an unavailable code store has no invented identity");
         assert!(!s.model_loaded, "fresh supervisor spawns nothing");
         assert_eq!(s.current_activity, "Embedding names…");
         assert_eq!(s.state, EngineRunState::Indexing);

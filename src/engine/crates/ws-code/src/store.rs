@@ -23,6 +23,8 @@ pub enum CodeStoreError {
     UnsupportedSchemaVersion(String),
     #[error("invalid code chunk: {0}")]
     InvalidChunk(String),
+    #[error("invalid durable code identity")]
+    InvalidIdentity,
 }
 
 /// Aggregate counters for `code.db`.
@@ -38,6 +40,7 @@ pub struct CodeIndexStats {
 
 pub struct CodeStore {
     conn: Connection,
+    database_id: String,
 }
 
 pub struct PendingVectorPage {
@@ -522,7 +525,21 @@ impl CodeStore {
         } else if matches!(version.as_deref(),Some("1"|"2"|"3")) {
             conn.execute("UPDATE meta SET value=?1 WHERE key='schema_version'",[CODE_SCHEMA_VERSION])?;
         }
-        Ok(Self { conn })
+        conn.execute("INSERT OR IGNORE INTO meta(key,value) VALUES('database_id',lower(hex(randomblob(16))))", [])?;
+        let database_id: String = conn.query_row("SELECT value FROM meta WHERE key='database_id'", [], |row| row.get(0))?;
+        if database_id.len() != 32 || !database_id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+            return Err(CodeStoreError::InvalidIdentity);
+        }
+        let maximum: i64 = conn.query_row("SELECT COALESCE(MAX(id),0) FROM code_files", [], |row| row.get(0))?;
+        let watermark: Option<String> = conn.query_row("SELECT value FROM meta WHERE key='file_id_high_water'", [], |row| row.get(0)).optional()?;
+        let watermark = watermark.as_deref().unwrap_or("0").parse::<i64>().ok().filter(|value| *value >= 0).ok_or(CodeStoreError::InvalidIdentity)?;
+        conn.execute("INSERT INTO meta(key,value) VALUES('file_id_high_water',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE CAST(meta.value AS INTEGER)<CAST(excluded.value AS INTEGER)", [watermark.max(maximum).to_string()])?;
+        Ok(Self { conn, database_id })
+    }
+
+    /// Non-secret database incarnation; never a source-byte hash or grant.
+    pub fn database_id(&self) -> &str {
+        &self.database_id
     }
 
     pub fn schema_version(&self) -> Result<String, CodeStoreError> {
@@ -700,8 +717,8 @@ impl CodeStore {
             let mut insert = tx.prepare_cached(
                 "INSERT INTO code_files(
                      repo_id, path, rel_path, name, name_lower, ext, language,
-                     size, mtime, volume_serial, file_id, scan_generation
-                 ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                     size, mtime, volume_serial, file_id, scan_generation, id
+                 ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             )?;
             let mut update = tx.prepare_cached(
                 "UPDATE code_files SET
@@ -735,7 +752,8 @@ impl CodeStore {
                 if let Some((id, size, mtime, old_name_lower, old_rel_path,volume,file)) = existing_path {
                     if rec.volume_serial!=0 && rec.file_id!=0 && (volume!=rec.volume_serial as i64 || file!=rec.file_id as i64) {
                         tx.execute("UPDATE code_files SET path='replaced:'||id||':'||path WHERE id=?1",[id])?;
-                        insert.execute(params![repo_id,rec.path,rec.rel_path,rec.name,name_lower,rec.ext,rec.language,rec.size as i64,rec.mtime,rec.volume_serial as i64,rec.file_id as i64,scan_generation])?;
+                        let next_id = allocate_file_id(&tx)?;
+                        insert.execute(params![repo_id,rec.path,rec.rel_path,rec.name,name_lower,rec.ext,rec.language,rec.size as i64,rec.mtime,rec.volume_serial as i64,rec.file_id as i64,scan_generation,next_id])?;
                         let replacement=tx.last_insert_rowid();
                         delete_fts_for_file(&tx,id)?;
                         tx.execute("DELETE FROM code_files WHERE id=?1",[id])?;
@@ -823,6 +841,7 @@ impl CodeStore {
                     ])?;
                     outcomes[index] = Some(FileUpsertOutcome::Renamed { id });
                 } else {
+                    let next_id = allocate_file_id(&tx)?;
                     insert.execute(params![
                         repo_id,
                         rec.path,
@@ -836,6 +855,7 @@ impl CodeStore {
                         rec.volume_serial as i64,
                         rec.file_id as i64,
                         scan_generation,
+                        next_id,
                     ])?;
                     let id = tx.last_insert_rowid();
                     outcomes[index] = Some(FileUpsertOutcome::Inserted { id });
@@ -1311,6 +1331,15 @@ impl CodeStore {
     }
 }
 
+fn allocate_file_id(conn: &Connection) -> Result<i64, CodeStoreError> {
+    // Keep the high-water mark in the same savepoint as inserts and deletions.
+    let previous: String = conn.query_row("SELECT value FROM meta WHERE key='file_id_high_water'", [], |row| row.get(0))?;
+    let next = previous.parse::<i64>().ok().filter(|value| *value >= 0)
+        .and_then(|value| value.checked_add(1)).ok_or(CodeStoreError::InvalidIdentity)?;
+    conn.execute("UPDATE meta SET value=?1 WHERE key='file_id_high_water'", [next.to_string()])?;
+    Ok(next)
+}
+
 fn valid_source_sha256(value:&str)->bool {
     value.len()==64 && value.bytes().all(|b|b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
@@ -1445,6 +1474,80 @@ pub fn dot_fp16_row_vs_normalized(stored_fp16: &[u8], normed_query: &[f32]) -> f
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn database_identity_survives_code_reopen_and_changes_for_a_recreated_index() {
+        let dir = TempDir::new("database-identity");
+        let path = dir.0.join("code.db");
+        let first = CodeStore::open(&path).unwrap();
+        let identity = first.meta_get("database_id").unwrap().expect("durable code identity");
+        assert_eq!(identity.len(), 32);
+        assert!(identity.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
+        drop(first);
+        let reopened = CodeStore::open(&path).unwrap();
+        assert_eq!(reopened.meta_get("database_id").unwrap().as_ref(), Some(&identity));
+        assert_ne!(CodeStore::open_in_memory().unwrap().meta_get("database_id").unwrap().as_ref(), Some(&identity));
+        drop(reopened);
+        std::fs::remove_file(&path).unwrap();
+        let recreated = CodeStore::open(&path).unwrap();
+        assert_ne!(recreated.meta_get("database_id").unwrap().as_ref(), Some(&identity));
+    }
+
+    #[test]
+    fn database_identity_corruption_is_rejected_without_rotating_code_bindings() {
+        let store = CodeStore::open_in_memory().unwrap();
+        store.conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('database_id','invalid')", []).unwrap();
+        assert!(CodeStore::init(store.conn).is_err());
+    }
+
+    #[test]
+    fn file_ids_never_reuse_deleted_code_identity_even_after_reopen() {
+        let dir = TempDir::new("non-reusing-file-ids");
+        let path = dir.0.join("code.db");
+        let mut store = CodeStore::open(&path).unwrap();
+        let repo = store.ensure_repo(&DetectedRepo {root_path:"C:/code".into(), name:"code".into(), has_git:false}).unwrap();
+        let record = |name:&str, file_id:u64| CodeFileRecord {path:format!("C:/code/{name}.rs"),rel_path:format!("{name}.rs"),
+            name:format!("{name}.rs"), ext:"rs".into(),language:"rust".into(),size:10,mtime:1,volume_serial:7,file_id};
+        let first = store.apply_file_batch(repo,1,&[record("first",101)]).unwrap()[0].file_id();
+        store.sweep_generation(repo,2).unwrap();
+        assert!(store.get_file(first).unwrap().is_none());
+        drop(store);
+        let mut store = CodeStore::open(&path).unwrap();
+        let second = store.apply_file_batch(repo,3,&[record("second",102)]).unwrap()[0].file_id();
+        assert!(second > first, "deleted code IDs must never authorize a different source");
+    }
+
+    #[test]
+    fn database_identity_migration_preserves_legacy_code_and_seeds_the_id_watermark() {
+        let (store, file, repo) = code_preview_fixture(crate::parse_source("fn retained() {}", "rust"));
+        let chunks = store.list_chunks_for_file(file).unwrap();
+        store.conn.execute("DELETE FROM meta WHERE key IN ('database_id','file_id_high_water')", []).unwrap();
+        let mut migrated = CodeStore::init(store.conn).unwrap();
+        assert!(migrated.get_file(file).unwrap().is_some());
+        assert_eq!(migrated.list_chunks_for_file(file).unwrap(), chunks);
+        assert_eq!(migrated.database_id().len(), 32);
+        migrated.sweep_generation(repo,2).unwrap();
+        let record = CodeFileRecord {path:"C:/code/new.rs".into(),rel_path:"new.rs".into(),name:"new.rs".into(),
+            ext:"rs".into(),language:"rust".into(),size:10,mtime:1,volume_serial:7,file_id:100};
+        assert!(migrated.apply_file_batch(repo,3,&[record]).unwrap()[0].file_id() > file);
+    }
+
+    #[test]
+    fn file_id_allocation_rolls_back_with_a_failed_batch_and_refuses_overflow() {
+        let (mut store, file, repo) = code_preview_fixture(crate::parse_source("fn retained() {}", "rust"));
+        let record = |name:&str, identity:u64| CodeFileRecord {path:format!("C:/code/{name}.rs"),rel_path:format!("{name}.rs"),
+            name:format!("{name}.rs"),ext:"rs".into(),language:"rust".into(),size:10,mtime:1,volume_serial:7,file_id:identity};
+        let before = store.meta_get("file_id_high_water").unwrap();
+        store.conn.execute_batch("CREATE TRIGGER reject_identity_fixture BEFORE INSERT ON code_files WHEN NEW.name='poison.rs' BEGIN SELECT RAISE(ABORT,'fixture insert failure'); END;").unwrap();
+        assert!(store.apply_file_batch(repo,2,&[record("valid",101),record("poison",102)]).is_err());
+        assert_eq!(store.meta_get("file_id_high_water").unwrap(), before);
+        assert_eq!(store.list_files_for_repo(repo).unwrap().len(), 1);
+        assert!(store.get_file(file).unwrap().is_some());
+        store.meta_set("file_id_high_water", &i64::MAX.to_string()).unwrap();
+        assert!(store.apply_file_batch(repo,3,&[record("overflow",103)]).is_err());
+        assert_eq!(store.list_files_for_repo(repo).unwrap().len(), 1);
+        assert_eq!(store.meta_get("file_id_high_water").unwrap().unwrap(), i64::MAX.to_string());
+    }
 
     fn code_preview_fixture(parsed:crate::ParsedCodeFile)->(CodeStore,i64,i64) {
         let mut store=CodeStore::open_in_memory().unwrap();

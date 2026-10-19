@@ -111,6 +111,13 @@ Capability presence is not semantic/model readiness. Existing
 `EngineStatus.model_loaded` and `ModelStatus` are returned unchanged; the richer
 semantic outcome/provenance contract remains part of the unfinished Lumen work.
 
+Peers with `index.identity` expose independent ordinary/code database IDs through
+`status()`. Bind `eN`/`cN` with the appropriate database ID and host profile before
+persisting pins/history; omitted legacy IDs remain unknown. IDs survive process
+restart, while bound source references do not. They are not content hashes or
+grants. See [durable index identities](ipc-protocol.md#durable-index-identities)
+for deletion, migration and restore limits.
+
 `resolve_entry` checks the requested identity/source proof, nonempty metadata,
 positive optional index revision, canonical optional SHA-256 and lexical local-disk root containment before
 returning a reply. The [source proof](ipc-protocol.md#indexed-entry-resolution)
