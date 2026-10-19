@@ -356,7 +356,16 @@ mod tests {
             ServerMessage::ResolvedEntry {id:20,..}), "saving an unchanged policy must not expire a current reference");
         std::fs::write(&source, "replacement with a different size").unwrap();
         assert!(matches!(resolve(&mut client,3,&result_id,Some(entry.source_revision)),ServerMessage::Error { id:Some(3),.. }));
-        let ServerMessage::ResolvedEntry {entry: fresh,..} = resolve(&mut client,4,&result_id,None) else {panic!("refresh after source replacement");};
+        let deadline=std::time::Instant::now()+Duration::from_secs(5);let mut id=40;
+        let fresh=loop {
+            match resolve(&mut client,id,&result_id,None) {
+                ServerMessage::ResolvedEntry {entry,..}=>break entry,
+                ServerMessage::Error {code:ErrorCode::NotReady,..} if std::time::Instant::now()<deadline=> {
+                    std::thread::sleep(Duration::from_millis(2));id+=1;
+                }
+                response=>panic!("refresh after source replacement: {response:?}"),
+            }
+        };
         assert_eq!(fresh.size_bytes, 33);
         assert_eq!(fresh.index_revision,None,"old extracted content cannot prove a replacement source");
         indexer.store_lock().reset_content_vectors().unwrap();

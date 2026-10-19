@@ -475,13 +475,16 @@ impl EngineService {
             (entry, root.path, revision, generation, indexed,identity,content_sha256)
         };
         let path = std::path::Path::new(&entry.path);
-        if !self.indexer.content_path_allowed(path) || ws_platform::identity::file_identity(path)!=Some(identity) {
+        let path_allowed=||if indexed {self.indexer.content_path_allowed(path)} else {
+            self.indexer.name_path_allowed(path) && crate::policy::metadata_safe(path,true)
+        };
+        if !path_allowed() || ws_platform::identity::file_identity(path)!=Some(identity) {
             return Err(ErrorCode::NotReady);
         }
         let snapshot = crate::extract::source_snapshot(path);
         if snapshot.is_empty() { return Err(ErrorCode::NotReady); }
         let metadata = std::fs::metadata(path).map_err(|_| ErrorCode::NotReady)?;
-        let proof = format!("{incarnation:?}:{policy_epoch}:{generation}:{revision}:{snapshot}");
+        let proof = format!("{incarnation:?}:{policy_epoch}:{generation}:{revision}:{indexed}:{snapshot}");
         if proof.len()>64*1024 {return Err(ErrorCode::NotReady);}
         if reference.source_revision.as_ref().is_some_and(|expected| expected != &proof) {
             return Err(ErrorCode::NotReady);
@@ -495,7 +498,7 @@ impl EngineService {
                 || store.content_sha256(entry_id).map_err(|_|ErrorCode::Internal)?!=content_sha256
                 || store.entry_identity(entry_id).map_err(|_|ErrorCode::Internal)?!=Some(identity)
                 || !store.entry_visible(entry_id).map_err(|_| ErrorCode::Internal)?
-                || !self.indexer.content_path_allowed(path) || ws_platform::identity::file_identity(path)!=Some(identity)
+                || !path_allowed() || ws_platform::identity::file_identity(path)!=Some(identity)
                 || crate::extract::source_snapshot(path) != snapshot {
                 return Err(ErrorCode::NotReady);
             }
@@ -2087,6 +2090,27 @@ mod tests {
         assert_eq!(engine.resolve_entry_snapshot(&request).unwrap_err(),ErrorCode::NotReady);
         let delivered=engine.validate_delivery(results,&sources);
         assert_eq!(delivered.len(),1);assert!(delivered[0].entry_reference.is_none());
+    }
+
+    #[test]
+    fn entry_reference_keeps_metadata_only_project_files_bound_without_reviving_content() {
+        let tree=TempTree::new();
+        fs::write(tree.0.join("metadata.txt"),b"Generated searchable document content for metadata identity.").unwrap();
+        let engine=service_with(&tree,&[]);
+        engine.indexer.extract_once_with(&crate::extract::ExtractorRegistry::default(),|_|Err("no model".into())).unwrap();
+        let path=tree.0.join("metadata.txt");
+        let id=engine.indexer.store_lock().find_by_path(&path.to_string_lossy()).unwrap().unwrap().id;
+        let initial=ws_protocol::EntryReference {result_id:format!("e{id}"),source_revision:None};
+        let before=engine.resolve_entry_snapshot(&initial).unwrap();
+        assert!(before.index_revision.is_some(),"fixture must have admitted indexed content");
+        let previous=ws_protocol::EntryReference {result_id:initial.result_id.clone(),source_revision:Some(before.source_revision)};
+        fs::write(tree.0.join("Cargo.toml"),b"new project marker").unwrap();
+        assert_eq!(engine.resolve_entry_snapshot(&previous).unwrap_err(),ErrorCode::NotReady,
+            "a content-bearing proof must expire when ordinary content admission is revoked");
+        let metadata=engine.resolve_entry_snapshot(&initial).expect("an admitted filename still needs metadata-only identity");
+        assert!(metadata.index_revision.is_none() && metadata.content_sha256.is_none());
+        let bound=ws_protocol::EntryReference {result_id:initial.result_id,source_revision:Some(metadata.source_revision.clone())};
+        assert_eq!(engine.resolve_entry_snapshot(&bound).unwrap(),metadata);
     }
 
     #[test]

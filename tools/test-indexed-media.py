@@ -100,6 +100,7 @@ class Pipe:
         self.sequence = 0
         reply = self.request('hello', protocol_version=1, client='indexed-media-acceptance', client_version='1.0')
         assert reply['type'] == 'hello_ack' and reply['protocol_version'] == 1, reply
+        self.features = reply.get('features', [])
 
     def exact(self, count):
         result = bytearray()

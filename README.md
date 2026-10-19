@@ -56,7 +56,9 @@ payload remain open.
 - [ ] Complete remaining provenance contracts and verify finer file-kind scopes
   through Lumen's native adapter. Preserve per-folder hidden-file, size and
   exclusion policies before candidate limits, and reconcile consumer result
-  limits without silently truncating them.
+  limits without silently truncating them. Resolve the rebuilt package's
+  1,000-result search timeout and verify its current metadata/source identities
+  before advancing Lumen's pinned payload.
 - [ ] Consume and verify the engine's terminal outcomes in Lumen and the
   standalone UI, preserving complete/superseded/canceled/failed and semantic
   disabled/ready/degraded states, exact results on optional failure and legacy
