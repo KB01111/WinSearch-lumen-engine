@@ -43,6 +43,10 @@ spreadsheet, presentation, source and unknown kinds.
   source fences and retained failure evidence.
 - [ ] Implement the typed WinSearch adapter behind Lumen's existing SearchService.
   Keep secured IPC, filesystem grants and native actions in Lumen's Rust host.
+- [ ] Authenticate every pipe connection against the engine process owned by
+  Lumen before sending the handshake or requests.
+- [ ] Defer scanning persisted roots until Lumen admits its current folder
+  policy, including explicitly empty roots and revoked access.
 - [ ] Consolidate to one authoritative crawler, index and embedding lifecycle;
   migrate identities and metadata without losing existing user data.
 - [ ] Preserve Recent/Related results, pins, history and answer-context admission,
