@@ -699,6 +699,8 @@ impl Indexer {
                 && (source_snapshot(path) != snapshot
                     || !self.content_path_allowed(path)
                     || self.indexing_pause_reason().is_some())
+                // An unavailable model must not erase already committed, unchanged exact text.
+                && (!matches!(&result,Err(EmbedError::ModelNotAvailable(_))) || source_snapshot(path)!=snapshot)
             {
                 store.invalidate_content_source(entry.id)?;
                 store.enqueue_extract_job(entry.id, &chunks[0].job_kind)?;
@@ -969,6 +971,38 @@ mod tests {
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
         indexer
+    }
+
+    #[test]
+    fn unavailable_embedding_preserves_committed_exact_cache_across_policy_changes() {
+        for change in ["pause","root","source"] {
+            let tree=TempTree::new();let path=tree.0.join("cached.txt");
+            fs::write(&path,"committedexactcachetoken").unwrap();let indexer=seeded_indexer(&tree);
+            let registry=ExtractorRegistry::default();
+            let unavailable=|_:&[String]|Err(EmbedError::ModelNotAvailable("no model".into()));
+            indexer.extract_once_inputs(&registry,unavailable,|_|panic!("text source")).unwrap();
+            let entry=indexer.store_lock().find_by_path(&path.to_string_lossy()).unwrap().unwrap();
+            let before=indexer.store_lock().content_progress(entry.id,"doc").unwrap().unwrap();assert!(before.complete);
+            let query=SearchRequest {text:"committedexactcachetoken".into(),limit:5,..Default::default()};
+            assert_eq!(indexer.search(&query).unwrap().len(),1);
+            let original=indexer.get_indexing_config().unwrap();
+            let result=indexer.embed_content_pending(&registry,&|_| {
+                if change=="source" {fs::write(&path,"replacement bytes").unwrap();}
+                else {
+                    let mut policy=original.clone();if change=="pause" {policy.paused=true;} else {policy.roots.clear();}
+                    indexer.set_indexing_config(&policy).unwrap();
+                    if change=="root" {assert!(indexer.search(&query).unwrap().is_empty(),"revocation must still hide the cache immediately");}
+                }
+                Err(EmbedError::ModelNotAvailable("no model during policy transition".into()))
+            },&|_|panic!("text source"),Some(entry.id)).unwrap();
+            assert_eq!(result.segments_stored,0);
+            indexer.set_indexing_config(&original).unwrap();
+            if change=="source" {assert!(indexer.search(&query).unwrap().is_empty(),"changed bytes must never retain exact cache");}
+            else {
+                assert_eq!(indexer.search(&query).unwrap().len(),1,"{change}: unavailable inference must not erase committed exact text");
+                assert_eq!(indexer.store_lock().content_progress(entry.id,"doc").unwrap().as_ref(),Some(&before),"{change}: no reparse or revision reset");
+            }
+        }
     }
 
     #[test]
