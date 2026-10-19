@@ -32,6 +32,9 @@ spreadsheet, presentation, source and unknown kinds.
 The [owned-startup checkpoint](docs/validation/2026-10-19-owned-startup/README.md)
 adds process-bound Rust connections and deferred folder admission. Wiring these
 controls into Lumen's owned engine lifecycle remains open below.
+The [engine-only package guide](docs/engine-payload.md) covers verified local
+assembly and Lumen staging. Release binaries, native consumer wiring and
+installed acceptance remain open.
 
 ### Lumen integration and native contract
 

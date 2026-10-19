@@ -144,3 +144,13 @@ WinSearch incorporates or references the following third-party software.
               files missing from published crate archives were fetched at those
               crates' recorded VCS commits; their URLs/hashes are retained.
               Redistribute this file with the extraction-worker payload.
+
+20. Microsoft Visual C++ v14 runtime (x64 release CRT), 14.51.36231
+    Project:  https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files
+    Copyright: Microsoft Corporation. All rights reserved.
+    License:  Applicable Microsoft Visual Studio license/redistribution terms.
+    Usage:    Application-local dependencies of the engine and llama.cpp DLLs.
+    Pin/hash: src/engine/third_party/msvc-runtime.json; the engine-only assembler
+              verifies the Microsoft redistributable archive before copying.
+    Notices:  Retain notices/msvc/REDISTRIBUTION.md; final release redistribution
+              eligibility remains a separate release-review requirement.

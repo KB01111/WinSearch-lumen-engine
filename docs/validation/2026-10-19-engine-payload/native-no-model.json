@@ -1,0 +1,15 @@
+{
+  "scope": "Run the actual pinned payload outside the checkout, with only Windows on PATH.\n\nThis is no-model package acceptance, not installed Lumen or model-quality evidence.\n",
+  "manifestSha256": "6865b4bf80fd97b761d71affe186104ec6c2e150b942ab5532c12da9a1ec7fc6",
+  "engineCommit": "de3d18645dca3a47e4e5bbb6167c3165b7678093",
+  "checks": [
+    "ffmpeg.exe starts outside checkout with System32-only PATH",
+    "ffprobe.exe starts outside checkout with System32-only PATH",
+    "winsearch-embed.exe starts outside checkout with System32-only PATH",
+    "actual confined text/PDF extraction and public exact search: notes.txt",
+    "actual confined text/PDF extraction and public exact search: pages.pdf",
+    "deferred startup admits only explicit generated root"
+  ],
+  "ownedJobEmpty": true,
+  "files": 62
+}
