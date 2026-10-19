@@ -36,24 +36,32 @@ controls into Lumen's owned engine lifecycle remains open below.
 ### Lumen integration and native contract
 
 - [ ] Complete remaining provenance contracts and verify finer file-kind scopes
-  through Lumen's native adapter.
+  through Lumen's native adapter. Preserve per-folder hidden-file, size and
+  exclusion policies before candidate limits, and reconcile consumer result
+  limits without silently truncating them.
 - [ ] Consume and verify the engine's terminal outcomes in Lumen and the
   standalone UI, preserving complete/superseded/canceled/failed and semantic
   disabled/ready/degraded states, exact results on optional failure and legacy
-  peers' unknown state. Complete independent review and installed acceptance.
+  peers' unknown state. Validate the closed outcome/reason codes, then complete
+  independent review and installed acceptance.
 - [ ] Verify consumer handling of empty/superseded results and the full
   pause/resume/revoke matrix after the cache-retention fix; preserve current
   source fences and retained failure evidence.
 - [ ] Implement the typed WinSearch adapter behind Lumen's existing SearchService.
-  Keep secured IPC, filesystem grants and native actions in Lumen's Rust host.
+  Forward accumulated streaming snapshots through the catalogue wrapper and
+  launcher controller; preserve latest-request selection, cancellation and empty
+  Recent queries. Keep secured IPC, grants and actions in Lumen's Rust host.
 - [ ] Integrate and verify process-bound pipe authentication in Lumen's owned
   engine lifecycle, retaining the verified process handle through every connection.
 - [ ] Launch Lumen's engine with deferred root admission and verify current
   folder grants on startup/restart, including empty roots and revoked access.
 - [ ] Consolidate to one authoritative crawler, index and embedding lifecycle;
-  migrate identities and metadata without losing existing user data.
+  transactionally migrate identities, metadata, pins and history with bindings
+  that distinguish engine profiles and index rebuilds. Metadata-only entries
+  must remain pinnable without fabricated content hashes or extraction records.
 - [ ] Preserve Recent/Related results, pins, history and answer-context admission,
-  with current source/root checks before previews, actions and answers.
+  with current source/root checks before previews, actions and answers. Preserve
+  consented OCR/transcription enrichment in the authoritative engine path.
 - [ ] Integrate owned engine startup/shutdown, streaming, cancellation, status,
   indexing progress, model management and recoverable errors. Verify launcher
   input, result selection and native Stop remain responsive.
@@ -112,6 +120,9 @@ controls into Lumen's owned engine lifecycle remains open below.
 
 - [ ] Produce self-contained standalone and engine-only payloads containing the
   required workers, native DLLs, pinned dependencies, notices and hash manifests.
+  Complete assembly and fixed-path Lumen staging, independently pin the manifest
+  hash, validate staged bytes at build/startup and reject incomplete release
+  packages. Fixture-only verifier tests do not establish a runnable payload.
 - [ ] Implement the per-user installer, startup registration, data-preserving
   upgrades, update checks and uninstall lifecycle; document signing/WinGet steps.
 - [ ] Test outside the checkout and through clean install/upgrade/uninstall on
