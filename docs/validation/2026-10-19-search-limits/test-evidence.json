@@ -1,0 +1,57 @@
+{
+  "date": "2026-10-19",
+  "scope": "Requested search totals and bounded streaming; not full v1 acceptance",
+  "rust": {
+    "command": "cargo test --locked --workspace --exclude ws-embed --all-targets -- --test-threads=1",
+    "passed": 652,
+    "failed": 0,
+    "ignored": 1
+  },
+  "dotnet": {
+    "command": "dotnet test WinSearch.slnx --nologo",
+    "passed": 160,
+    "failed": 0,
+    "skipped": 0
+  },
+  "winui": {
+    "command": "dotnet build src/app/WinSearch.App/WinSearch.App.csproj -p:Platform=x64 --nologo",
+    "warnings": 0,
+    "errors": 0
+  },
+  "sourceSha256": {
+    "src/app/WinSearch.Core/Ipc/EngineClient.cs": "a44d74bac97cda3ba06ef84b36b6fed679a74760e516434194ef3398f07ce202",
+    "src/app/WinSearch.Tests/IndexingPipeTests.cs": "b5ed950248bfe915d6a447969d0961a4cea76e26408b3e89b45e9d4e23dddd5c",
+    "src/engine/bins/winsearchd/src/engine.rs": "e94124983dbd0124755bbb8e33c2df4182ea83981fe03d8f650b93b40827b609",
+    "src/engine/bins/winsearchd/src/search_budget.rs": "4d4193d91799dd593dc3da79a59ae7265e65f56f866048c3594b796d8d3996ef",
+    "src/engine/bins/winsearchd/src/server.rs": "cf5a9341b4f1f8f0214ee5c608006aa1583e09dc290ad52b0fc1a473fe3879d6",
+    "src/engine/crates/ws-client/src/client.rs": "d493277725ae2349e4346ef92516bec624ed16b496c7695d646cd5c262c795cc",
+    "src/engine/crates/ws-client/src/lib.rs": "598224672a5f28631f638624c6006e0db08060588cc80483bade11dd18d5195d",
+    "src/engine/crates/ws-client/src/transport.rs": "b0eff7fa3ffd33b33af47e68f4fe8d9d29e05c187e311700d02bc8ea4c90ee18",
+    "src/engine/crates/ws-index/src/search.rs": "14d7e6702730835a93f7d772d8d19145c956b276fc40689fdca30d7cdfcb6725",
+    "src/engine/crates/ws-protocol/src/lib.rs": "8f59ed7efcd7451839b556074e96df7435ce61bf1dc1600a21b7cad3ae600b3c",
+    "src/engine/crates/ws-protocol/src/limits.rs": "3db48e5465a765c931222f677ce79feee3e9adcae2aefdc5ff76fadb87f6cfea"
+  },
+  "localLogSha256": {
+    "search-limits-red.log": "c6a43745bc105a6aaa6ae9dcf2f3ab1606631c9111150289143ae723e3861e0d",
+    "search-limits-client-red.log": "b0c8f6fa2fbc5b9189327d10eb1534240dd773381a372e9d050d7414f52c8f52",
+    "search-limits-additional-red.log": "6bfc703371b9cf7c4f8cba7fb08af7c2e56694af1baadcf08da58ee44ed99b76",
+    "search-limits-focused-green.log": "df51df54c582a2dd14c8ba83088eae76d1cad02b4ada9dde2f6a14dba2d595ad",
+    "search-limits-daemon-green.log": "4d5822bae00c4095b98a99ec934b69a76b2c3a5293000be0173d312f8fe5eb07",
+    "search-limits-focused-final.log": "851f0aa00296f433274327a13d8271be50161da8589b84269ed6426ef2fb9957",
+    "search-limits-final-regression.log": "e5fe0613bf43945d0602092bc4f1003107ae58fdf69386f126cc01022bca5412",
+    "search-limits-final-regression-replay.log": "00f9096f6e7adc62f6d94f1bc693bf9246564ab3882f030bd7c8fcf6a407b68f"
+  },
+  "redNotes": [
+    "Initial client test helper compile errors and the daemon sizing-helper dependency error are not functional REDs.",
+    "Functional failures include old120 and intermediate500 exact caps, shared-count/byte violations and paused-consumer disposal accounting.",
+    "The first complete run retained an outdated4097 input assertion; the new boundary is10001, with unsupported legacy dispatch tested separately. No retrieval/performance threshold changed.",
+    "Focused/replay tests are not added again to the final workspace total."
+  ],
+  "review": "Author review only; independent final review remains open after the earlier agent thread-limit rejection.",
+  "limitations": [
+    "Actual-model worker case remains ignored in this workspace command; ws-embed and real-model/reference/retrieval gates were not rerun for this checkpoint.",
+    "Native filesystem and pipe fixtures do not establish final 1k/10k/50k/200k latency/resource or installed consumer acceptance.",
+    "Synchronous raw server writes still have no deadline.",
+    "Lumen still pins the earlier de3d186 development client/payload; native adapter and one-index cutover remain open."
+  ]
+}

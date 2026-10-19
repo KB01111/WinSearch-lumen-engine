@@ -49,6 +49,12 @@ no crawling, model loading or process startup. See
 [headless client](headless-client.md) for APIs, native fixture checks and the
 remaining Lumen consumer/security responsibilities.
 
+With `search.limits`, ordinary search shares a requested total (up to 10,000)
+across exact and semantic stages. The daemon splits delivery by count and byte
+size while rechecking current request/source fences. Rust bounds actual received
+bytes; C# admits correlated result frames before queueing. See the
+[budget contract](ipc-protocol.md#search-result-budgets).
+
 ### `ws-platform` (crates/ws-platform)
 
 Win32 plumbing: named pipe with a per-user DACL and
@@ -71,7 +77,9 @@ The search index — no Windows dependencies, fully unit-tested anywhere.
   fallback (for mid-word matches like `code` → `VSCode`), merged and ranked
   deterministically (exact name > prefix > substring > path; small boosts for
   apps and recency; small penalty for deep paths). Every hit carries its match
-  explanation.
+  explanation. Each source retains its 500-candidate baseline for small requests;
+  larger requests can raise that bound up to 10,000. A set deduplicates IDs while
+  preserving candidate insertion order before deterministic ranking.
 - **Calculator** (`calc.rs`): recursive-descent arithmetic evaluator
   (+ - * / % ^, functions, constants). Only arithmetic syntax is accepted —
   nothing is ever executed. Queries like `report-2.pdf` are recognized as

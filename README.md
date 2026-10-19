@@ -45,8 +45,11 @@ ledger and search adapter; its current staged engine remains pinned to the
 earlier verified payload.
 The [per-folder policy checkpoint](docs/validation/2026-10-19-root-policies/README.md)
 adds hidden/size/relative exclusion admission before lexical/vector limits,
-including code traversal and capability checks. The Lumen mapper, result-limit
-parity and rebuilt consumer payload remain open.
+including code traversal and capability checks. The
+[search-limit checkpoint](docs/validation/2026-10-19-search-limits/README.md)
+adds capability-gated totals up to 10,000, progressive bounded batches and
+receive budgets. The Lumen mapper, native forwarding and rebuilt consumer
+payload remain open.
 
 ### Lumen integration and native contract
 

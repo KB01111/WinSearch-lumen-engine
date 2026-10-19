@@ -11,6 +11,13 @@ cargo run -p winsearch-cli -- eval names                  # retrieval eval suite
 target\release\winsearchd.exe --bench-crawl 20000         # crawl pipeline
 ```
 
+The [2026-10-19 search-limit checkpoint](validation/2026-10-19-search-limits/README.md)
+verifies result counts and bounded delivery, including a 1,000-result search over
+1,100 actual files. It is a functional regression fixture, not a controlled
+latency benchmark. The measurements below predate the current search-limit,
+source-policy and consumer integration work; they do not establish final-source
+1k/10k/50k/200k performance or installed acceptance.
+
 - Date: 2026-10-13
 - Machine: AMD64 Family 26 (Zen 5), 24 logical CPUs, Windows
 - Build: `cargo build --release` (LTO thin, codegen-units 1)

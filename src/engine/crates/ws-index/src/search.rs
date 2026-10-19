@@ -13,8 +13,7 @@ use rusqlite::params;
 use crate::model::{HitKind, SearchHit, SearchRequest};
 use crate::store::{EntryRow, IndexStore, StoreError};
 
-/// Hard cap on rows pulled from each candidate source before ranking. Keeps
-/// worst-case query cost bounded on very large indexes.
+/// Baseline per-source budget; larger requests may raise it up to the wire maximum.
 const CANDIDATE_CAP: usize = 500;
 
 struct Candidate {
@@ -61,10 +60,12 @@ impl IndexStore {
         }
         self.set_search_request_filter(req)?;
 
+        let candidate_limit = req.limit.clamp(CANDIDATE_CAP, ws_protocol::MAX_SEARCH_RESULTS as usize);
         let mut candidates = Vec::new();
+        let mut seen = std::collections::HashSet::new();
         let mut push_unique = |rows: Vec<EntryRow>, via_fts: bool, via_content_fts: bool| {
             for row in rows {
-                if !candidates.iter().any(|c: &Candidate| c.row.id == row.id) {
+                if seen.insert(row.id) {
                     candidates.push(Candidate {
                         row,
                         via_fts,
@@ -74,11 +75,11 @@ impl IndexStore {
             }
         };
         push_unique(self.exact_candidates(&query_lower)?, false, false);
-        push_unique(self.prefix_candidates(&query_lower)?, false, false);
-        push_unique(self.substring_candidates(&query_lower)?, false, false);
-        push_unique(self.fts_candidates(&tokens)?, true, false);
-        push_unique(self.content_fts_candidates(&tokens)?, false, true);
-        push_unique(self.path_candidates(&query_lower)?, false, false);
+        push_unique(self.prefix_candidates(&query_lower, candidate_limit)?, false, false);
+        push_unique(self.substring_candidates(&query_lower, candidate_limit)?, false, false);
+        push_unique(self.fts_candidates(&tokens, candidate_limit)?, true, false);
+        push_unique(self.content_fts_candidates(&tokens, candidate_limit)?, false, true);
+        push_unique(self.path_candidates(&query_lower, candidate_limit)?, false, false);
 
         let depth = |path: &str| path.matches('\\').count().max(path.matches('/').count());
         let mut hits: Vec<SearchHit> = candidates
@@ -224,7 +225,7 @@ impl IndexStore {
     /// Name prefix: a range seek on the name index. A `>= / <` pair (rather
     /// than `LIKE 'x%'`) keeps the query index-eligible regardless of LIKE
     /// optimization rules and wildcard characters in the query.
-    fn prefix_candidates(&self, query_lower: &str) -> Result<Vec<EntryRow>, StoreError> {
+    fn prefix_candidates(&self, query_lower: &str, limit: usize) -> Result<Vec<EntryRow>, StoreError> {
         let Some(end) = prefix_upper_bound(query_lower) else {
             return Ok(Vec::new());
         };
@@ -234,7 +235,7 @@ impl IndexStore {
              FROM search_entries
              WHERE missing = 0 AND name_lower >= ?1 AND name_lower < ?2
              LIMIT ?3",
-            params![query_lower, end, CANDIDATE_CAP as i64],
+            params![query_lower, end, limit as i64],
         )
     }
 
@@ -242,7 +243,7 @@ impl IndexStore {
     /// trigram FTS index. Trigrams need three characters; shorter queries rely
     /// on prefix/token sources (mid-word two-character noise is excluded on
     /// purpose).
-    fn substring_candidates(&self, query_lower: &str) -> Result<Vec<EntryRow>, StoreError> {
+    fn substring_candidates(&self, query_lower: &str, limit: usize) -> Result<Vec<EntryRow>, StoreError> {
         if query_lower.chars().count() < 3 {
             return Ok(Vec::new());
         }
@@ -255,14 +256,14 @@ impl IndexStore {
                  SELECT rowid FROM entries_tri WHERE entries_tri MATCH ?1
                  AND EXISTS (SELECT 1 FROM search_entries v WHERE v.id = entries_tri.rowid) LIMIT ?2
              )",
-            params![format!("\"{escaped}\""), CANDIDATE_CAP as i64],
+            params![format!("\"{escaped}\""), limit as i64],
         )
     }
 
     /// All query tokens present as word prefixes (name or keywords column).
     /// No ORDER BY rank here: the rank sort is the expensive part and our own
     /// ranking decides the order anyway.
-    fn fts_candidates(&self, tokens: &[String]) -> Result<Vec<EntryRow>, StoreError> {
+    fn fts_candidates(&self, tokens: &[String], limit: usize) -> Result<Vec<EntryRow>, StoreError> {
         let match_expr = tokens
             .iter()
             .map(|t| format!("\"{t}\"*"))
@@ -276,12 +277,12 @@ impl IndexStore {
                  SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?1
                  AND EXISTS (SELECT 1 FROM search_entries v WHERE v.id = entries_fts.rowid) LIMIT ?2
              )",
-            params![match_expr, CANDIDATE_CAP as i64],
+            params![match_expr, limit as i64],
         )
     }
 
     /// All query tokens present as word prefixes in extracted content (`content_fts`).
-    fn content_fts_candidates(&self, tokens: &[String]) -> Result<Vec<EntryRow>, StoreError> {
+    fn content_fts_candidates(&self, tokens: &[String], limit: usize) -> Result<Vec<EntryRow>, StoreError> {
         let match_expr = tokens
             .iter()
             .map(|t| format!("\"{t}\"*"))
@@ -297,14 +298,14 @@ impl IndexStore {
                  AND EXISTS (SELECT 1 FROM query_content_rows v WHERE v.id = content_fts.rowid)
                  AND EXISTS (SELECT 1 FROM search_entries e WHERE e.id = CAST(content_fts.entry_id AS INTEGER)) LIMIT ?2
              )",
-            params![match_expr, CANDIDATE_CAP as i64],
+            params![match_expr, limit as i64],
         )
     }
 
     /// Substring match against `entries.path` (for queries matching a parent
     /// directory substring or multi-segment path fragment of length >= 3).
     /// Backed by the `entries_path_tri` trigram FTS index over lowercased paths.
-    fn path_candidates(&self, query_lower: &str) -> Result<Vec<EntryRow>, StoreError> {
+    fn path_candidates(&self, query_lower: &str, limit: usize) -> Result<Vec<EntryRow>, StoreError> {
         if query_lower.chars().count() < 3 {
             return Ok(Vec::new());
         }
@@ -317,7 +318,7 @@ impl IndexStore {
                  SELECT rowid FROM entries_path_tri WHERE entries_path_tri MATCH ?1
                  AND EXISTS (SELECT 1 FROM search_entries v WHERE v.id = entries_path_tri.rowid) LIMIT ?2
              )",
-            params![escaped, CANDIDATE_CAP as i64],
+            params![escaped, limit as i64],
         )
     }
 
@@ -585,11 +586,11 @@ mod tests {
         assert_eq!(hits[0].path,wanted);
         for (source,rows) in [
             ("exact",store.exact_candidates("needle.pdf").unwrap()),
-            ("prefix",store.prefix_candidates("needle").unwrap()),
-            ("substring",store.substring_candidates("needle").unwrap()),
-            ("tokens",store.fts_candidates(&["needle".into()]).unwrap()),
-            ("content",store.content_fts_candidates(&["contentneedle".into()]).unwrap()),
-            ("path",store.path_candidates("needle").unwrap()),
+            ("prefix",store.prefix_candidates("needle",CANDIDATE_CAP).unwrap()),
+            ("substring",store.substring_candidates("needle",CANDIDATE_CAP).unwrap()),
+            ("tokens",store.fts_candidates(&["needle".into()],CANDIDATE_CAP).unwrap()),
+            ("content",store.content_fts_candidates(&["contentneedle".into()],CANDIDATE_CAP).unwrap()),
+            ("path",store.path_candidates("needle",CANDIDATE_CAP).unwrap()),
         ] {
             assert_eq!(rows.len(),1,"{source} must filter before its own cap");
             assert_eq!(rows[0].path,wanted,"{source}");

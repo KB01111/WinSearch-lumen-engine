@@ -14,7 +14,7 @@ use ws_protocol::{
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(35);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-const MAX_SEARCH_RESULTS: usize = 4096;
+const LEGACY_MAX_SEARCH_RESULTS: usize = 4096;
 const MAX_SEARCH_FRAMES: usize = 64;
 
 struct Inner {
@@ -73,6 +73,7 @@ pub struct SearchStream {
     operation: Option<Operation>,
     results: usize,
     frames: usize,
+    byte_start: usize,
     mode: ws_protocol::SearchMode,
     extensions: Vec<String>,
     file_kinds: Vec<ws_protocol::FileKind>,
@@ -91,6 +92,9 @@ impl SearchStream {
         let result = async {
             loop {
                 let message = operation.session.recv(Some(operation.deadline)).await?;
+                if operation.session.received_bytes.saturating_sub(self.byte_start) > ws_protocol::MAX_SEARCH_RESPONSE_BYTES {
+                    return Err(Error::Protocol("search stream exceeded its byte budget"));
+                }
                 if is_push(&message) {
                     continue;
                 }
@@ -495,11 +499,16 @@ impl Client {
     }
 
     pub async fn search(&self, query: SearchQuery) -> Result<SearchStream, Error> {
-        if query.limit as usize > MAX_SEARCH_RESULTS || query.text.len() > 64 * 1024
-            || !ws_protocol::valid_search_extensions(&query.extensions) || !ws_protocol::valid_search_file_kinds(&query.file_kinds) {
+        if !ws_protocol::valid_search_query(&query) {
             return Err(Error::InvalidInput("search exceeds its request budget"));
         }
         let mut operation = self.open(false, Some("search.exact")).await?;
+        let limit_aware = operation.session.info.supports("search.limits");
+        if query.limit as usize > LEGACY_MAX_SEARCH_RESULTS && !limit_aware {
+            return Err(Error::Unsupported("search.limits"));
+        }
+        let max_results = if limit_aware {query.limit.max(1) as usize} else {LEGACY_MAX_SEARCH_RESULTS};
+        let byte_start = operation.session.received_bytes;
         for feature in [
             (query.include_semantic, "search.semantic"),
             (query.mode == ws_protocol::SearchMode::Code, "code"),
@@ -529,12 +538,13 @@ impl Client {
             operation: Some(operation),
             results: 0,
             frames: 0,
+            byte_start,
             mode,
             extensions,
             file_kinds,
             require_outcome,
             requested_semantic,
-            max_results:MAX_SEARCH_RESULTS,
+            max_results,
             related_source:None,
             related_categories:Vec::new(),
         })
@@ -551,8 +561,9 @@ impl Client {
         }
         let extensions=query.extensions.clone();let categories=query.categories.clone();let limit=query.limit as usize;
         let file_kinds=query.file_kinds.clone();
+        let byte_start=operation.session.received_bytes;
         operation.session.send(&ClientMessage::Related {id:operation.id,query},operation.deadline).await?;
-        Ok(SearchStream {operation:Some(operation),results:0,frames:0,
+        Ok(SearchStream {operation:Some(operation),results:0,frames:0,byte_start,
             mode:if code {ws_protocol::SearchMode::Code} else {ws_protocol::SearchMode::Files},
             extensions,file_kinds,require_outcome:true,requested_semantic:true,max_results:limit,
             related_source:Some(source),related_categories:categories})
@@ -849,6 +860,107 @@ mod tests {
                 if matches!(e.kind(), std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset)));
         });
         assert!(matches!(wrong.clone().status().await, Err(Error::ServerIdentityMismatch)));
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn search_limits_bound_aggregate_bytes_before_the_frame_count_limit() {
+        let (client, mut peer) = fixture();
+        let task = tokio::spawn(async move {
+            peer.connect().await.unwrap();
+            assert!(matches!(read_client(&mut peer).await,ClientMessage::Hello {..}));
+            let mut response = ack();
+            if let ServerMessage::HelloAck {features,..} = &mut response {features.push("search.limits".into());}
+            send_server(&mut peer, &response).await;
+            let ClientMessage::Search {id,..} = read_client(&mut peer).await else {panic!("missing search")};
+            for n in 0..8 {
+                send_server(&mut peer, &ServerMessage::Results {id,batch:vec![SearchResult {
+                    id:format!("large-{n}"),title:"x".repeat(9*1024*1024),..Default::default()}],
+                    done:n==7,outcome:None}).await;
+            }
+        });
+        let mut stream = client.search(SearchQuery {text:"fixture".into(),limit:20,..Default::default()}).await.unwrap();
+        let mut rejected = false;
+        loop {
+            match stream.next().await {
+                Ok(Some(batch)) if !batch.done => (),
+                Err(Error::Protocol(_)) => {rejected=true;break;},
+                _ => break,
+            }
+        }
+        assert!(rejected,"a few valid frames must not bypass the aggregate byte budget");
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn search_limits_count_ignored_fields_and_interleaved_push_bytes() {
+        use tokio::io::AsyncWriteExt;
+        let (client,mut peer)=fixture();
+        let task=tokio::spawn(async move {
+            hello(&mut peer).await;
+            let ClientMessage::Search {..}=read_client(&mut peer).await else {panic!("missing search")};
+            let mut push=serde_json::to_value(ServerMessage::Status {id:None,status:Default::default()}).unwrap();
+            push["ignored_padding"]=serde_json::Value::String("x".repeat(9*1024*1024));
+            let bytes=serde_json::to_vec(&push).unwrap();
+            for _ in 0..8 {
+                peer.write_all(&(bytes.len() as u32).to_le_bytes()).await.unwrap();
+                peer.write_all(&bytes).await.unwrap();
+            }
+        });
+        let mut stream=client.search(SearchQuery::default()).await.unwrap();
+        assert!(matches!(stream.next().await,Err(Error::Protocol("search stream exceeded its byte budget"))));
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn search_limits_large_request_requires_capability_before_dispatch() {
+        use tokio::io::AsyncReadExt;
+        let (client,mut peer)=fixture();
+        let task=tokio::spawn(async move {
+            hello(&mut peer).await;
+            assert_eq!(peer.read(&mut [0]).await.unwrap(),0,"legacy peer must not receive an unsupported result budget");
+        });
+        let result=client.search(SearchQuery {limit:5000,..Default::default()}).await;
+        assert!(matches!(result,Err(Error::Unsupported("search.limits"))));
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn search_limits_accept_ten_thousand_results_from_a_capable_peer() {
+        let (client, mut peer) = fixture();
+        let task = tokio::spawn(async move {
+            peer.connect().await.unwrap();
+            assert!(matches!(read_client(&mut peer).await,ClientMessage::Hello {..}));
+            let mut response = ack();
+            if let ServerMessage::HelloAck {features,..} = &mut response {features.push("search.limits".into());}
+            send_server(&mut peer, &response).await;
+            let ClientMessage::Search {id,query} = read_client(&mut peer).await else {panic!("missing search")};
+            assert_eq!(query.limit, 10_000);
+            send_server(&mut peer, &ServerMessage::Results {id,batch:(0..10_000).map(|n|SearchResult {
+                id:format!("fixture-{n}"),title:format!("fixture-{n}.txt"),..Default::default()}).collect(),
+                done:true,outcome:None}).await;
+        });
+        let mut stream = client.search(SearchQuery {text:"fixture".into(),limit:10_000,..Default::default()}).await.unwrap();
+        let batch = stream.next().await.unwrap().unwrap();
+        assert_eq!(batch.batch.len(), 10_000);
+        assert!(batch.done);
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn search_limits_reject_a_capable_peer_exceeding_the_requested_total() {
+        let (client, mut peer) = fixture();
+        let task = tokio::spawn(async move {
+            peer.connect().await.unwrap();
+            assert!(matches!(read_client(&mut peer).await,ClientMessage::Hello {..}));
+            let mut response = ack();
+            if let ServerMessage::HelloAck {features,..} = &mut response {features.push("search.limits".into());}
+            send_server(&mut peer, &response).await;
+            let ClientMessage::Search {id,..} = read_client(&mut peer).await else {panic!("missing search")};
+            send_server(&mut peer, &ServerMessage::Results {id,batch:vec![SearchResult::default();2],done:true,outcome:None}).await;
+        });
+        let mut stream = client.search(SearchQuery {text:"fixture".into(),limit:1,..Default::default()}).await.unwrap();
+        assert!(matches!(stream.next().await,Err(Error::Protocol(_))));
         task.await.unwrap();
     }
 
@@ -1734,7 +1846,7 @@ mod tests {
         assert!(matches!(
             client
                 .search(SearchQuery {
-                    limit: 4097,
+                    limit: 10_001,
                     ..Default::default()
                 })
                 .await,

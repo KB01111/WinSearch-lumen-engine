@@ -753,6 +753,108 @@ public class IndexingPipeTests
     }
 
     [Fact]
+    public async Task SearchLimitsDisposeClearsBudgetsWhileTheConsumerIsPaused()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10)); var token = timeout.Token;
+        var pipe = "winsearch-search-dispose-budget-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        async Task Serve()
+        {
+            await server.WaitForConnectionAsync(token); await ReadAsync(server, token);
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1, Features = ["search.exact", "search.limits"] }, token);
+            var request = Assert.IsType<SearchMessage>(await ReadAsync(server, token));
+            await WriteAsync(server, new ResultsMessage { Id = request.Id, Batch = [new()] }, token);
+        }
+        var serving = Serve(); await using var client = new EngineClient(pipe); await client.ConnectAsync(token);
+        await using var iterator = client.SearchAsync(new() { Text = "fixture", Limit = 2 }, token).GetAsyncEnumerator(token);
+        Assert.True(await iterator.MoveNextAsync()); await serving;
+        Assert.Equal(1, Pending(client, "_streamBudgets"));
+        await client.DisposeAsync();
+        Assert.Equal(0, Pending(client, "_streams"));
+        Assert.Equal(0, Pending(client, "_streamBudgets"));
+    }
+
+    [Fact]
+    public async Task SearchLimitsBoundAggregateBytesBeforeQueuedFramesGrowWithoutLimit()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var token = timeout.Token;
+        var pipe = "winsearch-search-byte-limit-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        async Task Serve()
+        {
+            await server.WaitForConnectionAsync(token);
+            Assert.IsType<HelloMessage>(await ReadAsync(server, token));
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1, Features = ["search.exact", "search.limits"] }, token);
+            var request = Assert.IsType<SearchMessage>(await ReadAsync(server, token));
+            var text = new string('x', 9 * 1024 * 1024);
+            for (var i = 0; i < 8; i++)
+                await WriteAsync(server, new ResultsMessage { Id = request.Id, Batch = [new() { Id = $"large-{i}", Title = text }], Done = i == 7 }, token);
+        }
+        var serving = Serve();
+        await using var client = new EngineClient(pipe);
+        await client.ConnectAsync(token);
+        await Assert.ThrowsAsync<EngineException>(async () => { await foreach (var _ in client.SearchAsync(new() { Text = "fixture", Limit = 20 }, token)) { } });
+        Assert.Equal(0, Pending(client, "_streams"));
+        await serving;
+    }
+
+    [Fact]
+    public async Task SearchLimitsCapablePeerMustHonorTheRequestedTotal()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = timeout.Token;
+        var pipe = "winsearch-search-limit-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        async Task Serve()
+        {
+            await server.WaitForConnectionAsync(token);
+            Assert.IsType<HelloMessage>(await ReadAsync(server, token));
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1, Features = ["search.exact", "search.limits"] }, token);
+            var request = Assert.IsType<SearchMessage>(await ReadAsync(server, token));
+            await WriteAsync(server, new ResultsMessage { Id = request.Id, Batch = [new(), new()], Done = true }, token);
+        }
+        var serving = Serve();
+        await using var client = new EngineClient(pipe);
+        await client.ConnectAsync(token);
+        await Assert.ThrowsAsync<EngineException>(async () => { await foreach (var _ in client.SearchAsync(new() { Text = "fixture", Limit = 1 }, token)) { } });
+        Assert.Equal(0, Pending(client, "_streams"));
+        await serving;
+    }
+
+    [Theory]
+    [InlineData(10001u)]
+    [InlineData(5000u)]
+    public async Task SearchLimitsRejectInvalidOrUnsupportedLargeRequests(uint limit)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = timeout.Token;
+        var pipe = "winsearch-search-limit-legacy-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        async Task Serve()
+        {
+            await server.WaitForConnectionAsync(token);
+            Assert.IsType<HelloMessage>(await ReadAsync(server, token));
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1 }, token);
+            var request = await ReadAsync(server, token);
+            if (request is SearchMessage unexpected)
+            {
+                await WriteAsync(server, new ResultsMessage { Id = unexpected.Id, Done = true }, token);
+                return;
+            }
+            var status = Assert.IsType<GetStatusMessage>(request);
+            await WriteAsync(server, new StatusMessage { Id = status.Id, Status = new() }, token);
+        }
+        var serving = Serve();
+        await using var client = new EngineClient(pipe);
+        await client.ConnectAsync(token);
+        await Assert.ThrowsAsync<EngineException>(async () => { await foreach (var _ in client.SearchAsync(new() { Text = "fixture", Limit = limit }, token)) { } });
+        await client.GetStatusAsync(token);
+        Assert.Equal(0, Pending(client, "_streams"));
+        await serving;
+    }
+
+    [Fact]
     public async Task RootPoliciesRequireCapabilityBeforeSendingConfiguration()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));

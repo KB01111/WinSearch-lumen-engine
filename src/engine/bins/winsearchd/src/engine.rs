@@ -107,7 +107,11 @@ pub type SharedEngine = Arc<EngineService>;
 #[derive(Clone,Copy)]
 struct SearchRevision {source:u64,code:Option<u64>,model:Option<i64>}
 
-struct SentSearchBatch {ids:HashSet<i64>,done:bool}
+#[path = "search_budget.rs"]
+mod search_budget;
+use search_budget::SearchUsage;
+
+struct SentSearchBatch {ids:HashSet<i64>,done:bool,usage:SearchUsage}
 
 struct SearchDelivery<'a> {
     query:&'a SearchQuery,
@@ -955,7 +959,7 @@ impl EngineService {
     /// client can retire it.
     pub fn search(self: &Arc<Self>, client: &ClientHandle, id: RequestId, query: SearchQuery) {
         let cancel = self.begin_request_for_client(client.id(), id);
-        if !ws_protocol::valid_search_extensions(&query.extensions) || !ws_protocol::valid_search_file_kinds(&query.file_kinds) {
+        if !ws_protocol::valid_search_query(&query) {
             let _=self.send_search_failure(client,id,&cancel,ErrorCode::InvalidRequest);
             self.end_request_for_client(client.id(),id,&cancel);
             return;
@@ -1070,7 +1074,7 @@ impl EngineService {
         let code_epoch=self.code_service().filter(|_|query.mode==SearchMode::Code).map(|c|c.query_epoch());
         let revision=SearchRevision {source:self.indexer.search_epoch(),code:code_epoch,model:self.indexer.store_lock().model_generation().ok()};
         let mut sources=HashMap::new();
-        let results=match self.try_plan_results_with_sources(&query,&mut sources) {
+        let mut results=match self.try_plan_results_with_sources(&query,&mut sources) {
             Ok(results)=>results,
             Err(code)=> {
                 let outcome=self.send_search_failure(client,id,&cancel,code);
@@ -1079,21 +1083,12 @@ impl EngineService {
             }
         };
         let delivery=SearchDelivery {query:&query,revision,cancel:&cancel,sources:&sources,related_source:None};
-        let unavailable=self.semantic_unavailable(&query);
+        results.truncate(query.limit.max(1) as usize);
+        let unavailable=if results.len()>=query.limit.max(1) as usize {Some(SemanticOutcome::DISABLED)}
+            else {self.semantic_unavailable(&query)};
         let terminal=unavailable.map(SearchOutcome::complete);
-
-        // Progressive response: the first batch is what the overlay shows;
-        // overflow streams after so typing stays responsive.
-        let limit = (query.limit.max(1) as usize).min(results.len());
-        let (first, rest) = results.split_at(limit);
-        let first=self.send_results(client,id,first.to_vec(),if rest.is_empty() {terminal} else {None},&delivery)?;
-        let mut done=first.done;
-        let mut exact_ids=first.ids;
-        if !done && !rest.is_empty() {
-            let sent=self.send_results(client,id,rest.to_vec(),terminal,&delivery)?;
-            done=sent.done;exact_ids.extend(sent.ids);
-        }
-        if done {
+        let first=self.send_results(client,id,results,terminal,&delivery)?;
+        if first.done {
             self.end_request_for_client(client.id(), id, &cancel);
             return Ok(());
         }
@@ -1109,7 +1104,7 @@ impl EngineService {
             .name("winsearch-semantic".into())
             .spawn(move || {
                 let outcome =
-                    this.run_semantic_stage(&thread_client, id, &thread_query, &exact_ids, &thread_cancel,revision);
+                    this.run_semantic_stage(&thread_client, id, &thread_query, &first, &thread_cancel,revision);
                 this.end_request_for_client(thread_client.id(), id, &thread_cancel);
                 if let Err(err) = outcome {
                     warn!(id,error=%err,"semantic result transport failed");
@@ -1137,34 +1132,59 @@ impl EngineService {
             && delivery.related_source.is_none_or(|source|self.resolve_entry_snapshot(source).is_ok())
     }
 
-    fn send_results(&self,client:&ClientHandle,id:RequestId,batch:Vec<SearchResult>,mut outcome:Option<SearchOutcome>,delivery:&SearchDelivery<'_>)
+    fn send_results(&self,client:&ClientHandle,id:RequestId,batch:Vec<SearchResult>,outcome:Option<SearchOutcome>,delivery:&SearchDelivery<'_>)
         ->Result<SentSearchBatch,FrameError> {
-        let mut stream=client.stream.lock().unwrap_or_else(|p|p.into_inner());
-        let current=||self.cancels.lock().unwrap_or_else(|p|p.into_inner()).get(&(client.id(),id))
-            .is_some_and(|token|Arc::ptr_eq(token,delivery.cancel));
-        if !current() {return Ok(SentSearchBatch {ids:HashSet::new(),done:true});}
-        let count=batch.len();
-        let mut interrupted=delivery.cancel.load(Ordering::Acquire) || !self.delivery_current(delivery);
-        let mut batch=if interrupted {
-            tracing::debug!(id,expected_epoch=delivery.revision.source,current_epoch=self.indexer.search_epoch(),
-                canceled=delivery.cancel.load(Ordering::Acquire),"discarded outdated search batch before delivery");
-            Vec::new()
-        } else {self.validate_delivery(batch,delivery.sources)};
-        if !current() {return Ok(SentSearchBatch {ids:HashSet::new(),done:true});}
-        interrupted|=batch.len()!=count || delivery.cancel.load(Ordering::Acquire) || !self.delivery_current(delivery);
-        if interrupted {
-            tracing::debug!(id,expected_epoch=delivery.revision.source,current_epoch=self.indexer.search_epoch(),
-                canceled=delivery.cancel.load(Ordering::Acquire),"discarded outdated search batch after validation");
-            batch.clear();
-            outcome=Some(SearchOutcome::interrupted(if delivery.cancel.load(Ordering::Acquire) {
-                SearchDisposition::Canceled
-            } else {SearchDisposition::Superseded}));
+        self.send_results_after(client,id,batch,outcome,delivery,SearchUsage::default())
+    }
+
+    fn send_results_after(&self,client:&ClientHandle,id:RequestId,batch:Vec<SearchResult>,outcome:Option<SearchOutcome>,
+        delivery:&SearchDelivery<'_>,mut usage:SearchUsage)->Result<SentSearchBatch,FrameError> {
+        let mut pending=std::collections::VecDeque::from([batch]);
+        let mut ids=HashSet::new();
+        while let Some(mut batch)=pending.pop_front() {
+            if batch.len()>ws_protocol::MAX_SEARCH_BATCH_ITEMS {
+                let tail=batch.split_off(ws_protocol::MAX_SEARCH_BATCH_ITEMS);
+                pending.push_front(tail);
+            }
+            let mut terminal=if pending.is_empty() {outcome} else {None};
+            let mut stream=client.stream.lock().unwrap_or_else(|p|p.into_inner());
+            let current=||self.cancels.lock().unwrap_or_else(|p|p.into_inner()).get(&(client.id(),id))
+                .is_some_and(|token|Arc::ptr_eq(token,delivery.cancel));
+            if !current() {return Ok(SentSearchBatch {ids,done:true,usage});}
+            let count=batch.len();
+            let mut interrupted=delivery.cancel.load(Ordering::Acquire) || !self.delivery_current(delivery);
+            batch=if interrupted {Vec::new()} else {self.validate_delivery(batch,delivery.sources)};
+            if !current() {return Ok(SentSearchBatch {ids,done:true,usage});}
+            interrupted|=batch.len()!=count || delivery.cancel.load(Ordering::Acquire) || !self.delivery_current(delivery);
+            if interrupted {
+                batch.clear();pending.clear();
+                terminal=Some(SearchOutcome::interrupted(if delivery.cancel.load(Ordering::Acquire) {
+                    SearchDisposition::Canceled
+                } else {SearchDisposition::Superseded}));
+            }
+            let sent=exact_entry_ids(&batch);
+            let count=batch.len();
+            let done=terminal.is_some();
+            let message=ServerMessage::Results {id,batch,done,outcome:terminal};
+            let bytes=search_budget::serialized_size(&message)?;
+            if bytes>ws_protocol::MAX_SEARCH_BATCH_BYTES && count>1 && !interrupted {
+                let ServerMessage::Results {mut batch,..}=message else {unreachable!()};
+                let tail=batch.split_off(count/2);
+                pending.push_front(tail);pending.push_front(batch);
+                continue;
+            }
+            if bytes>ws_protocol::MAX_SEARCH_BATCH_BYTES || !usage.allows(count,bytes,delivery.query.limit) {
+                drop(stream);
+                self.send_search_failure_checked(client,id,delivery.cancel,ErrorCode::Internal,Some(delivery))?;
+                return Ok(SentSearchBatch {ids,done:true,usage});
+            }
+            if !current() {return Ok(SentSearchBatch {ids,done:true,usage});}
+            write_message(&mut *stream,&message)?;
+            usage.results+=count;usage.bytes+=bytes;usage.frames+=1;
+            ids.extend(sent);
+            if done {return Ok(SentSearchBatch {ids,done:true,usage});}
         }
-        let sent=exact_entry_ids(&batch);
-        let done=outcome.is_some();
-        if !current() {return Ok(SentSearchBatch {ids:HashSet::new(),done:true});}
-        write_message(&mut *stream,&ServerMessage::Results {outcome,id,batch,done})?;
-        Ok(SentSearchBatch {ids:sent,done})
+        Ok(SentSearchBatch {ids,done:false,usage})
     }
 
     fn run_semantic_stage(
@@ -1172,17 +1192,18 @@ impl EngineService {
         client: &ClientHandle,
         id: RequestId,
         query: &SearchQuery,
-        exact_ids: &HashSet<i64>,
+        first: &SentSearchBatch,
         cancel: &Arc<AtomicBool>,
         revision:SearchRevision,
     ) -> Result<(), FrameError> {
         let mut sources=HashMap::new();
         let (mut hits,mut semantic)=if cancel.load(Ordering::Acquire) || !self.query_current(query,revision) {
             (Vec::new(),SemanticOutcome::degraded(SemanticIssue::IndexChanged))
-        } else {self.plan_semantic_outcome(query,exact_ids,&mut sources)};
+        } else {self.plan_semantic_outcome(query,&first.ids,&mut sources)};
         if let Some(unavailable)=self.semantic_unavailable(query) {hits.clear();semantic=unavailable;}
-        self.send_results(client,id,hits,Some(SearchOutcome::complete(semantic)),&SearchDelivery {
-            query,revision,cancel,sources:&sources,related_source:None}).map(|_|())
+        hits.truncate((query.limit.max(1) as usize).saturating_sub(first.usage.results));
+        self.send_results_after(client,id,hits,Some(SearchOutcome::complete(semantic)),&SearchDelivery {
+            query,revision,cancel,sources:&sources,related_source:None},first.usage).map(|_|())
     }
 
     /// Computes the ranked result list for one query (no IPC). Split from
@@ -1317,7 +1338,7 @@ impl EngineService {
                 apps_only: query.mode == SearchMode::Apps,
                 files_only: query.mode == SearchMode::Files,
                 kinds,
-                limit: (query.limit.max(1) as usize).saturating_mul(3).clamp(20, 120),
+                limit: (query.limit.max(1) as usize).saturating_mul(3).max(20).min(ws_protocol::MAX_SEARCH_RESULTS as usize),
             };
             match self.indexer.search(&request) {
                 Ok(hits) => {
@@ -1565,6 +1586,117 @@ mod tests {
         config.respect_battery_saver=false;
         store.set_indexing_config(&config).unwrap();
         store
+    }
+
+    #[test]
+    fn search_limit_returns_large_exact_sets_in_bounded_progressive_frames() {
+        let tree = TempTree::new();
+        let names = (0..1100).map(|n|format!("budget-needle-{n:04}.txt")).collect::<Vec<_>>();
+        let names = names.iter().map(String::as_str).collect::<Vec<_>>();
+        let engine = service_with(&tree, &names);
+        let request = SearchQuery {text:"budget-needle".into(),mode:SearchMode::Files,limit:1000,..Default::default()};
+        let pipe = unique_pipe();
+        serve_search(engine, &pipe, 127, request);
+        let mut peer = connect_retry(&pipe);
+        let mut total = 0;
+        let mut frames = 0;
+        loop {
+            let Some(ServerMessage::Results {batch,done,..}) = ws_protocol::read_message(&mut peer).unwrap() else {panic!("missing search results")};
+            assert!(batch.len() <= 512, "large exact replies must not be one unbounded UI update");
+            total += batch.len();
+            frames += 1;
+            if done {break;}
+        }
+        assert_eq!(total, 1000, "an internal120-candidate cap must not truncate the requested result set");
+        assert!(frames >= 2);
+    }
+
+    #[test]
+    fn search_limit_caps_exact_and_semantic_results_together() {
+        let (engine, _tree) = semantic_service();
+        let mut request = semantic_query("meeting");
+        request.limit = 1;
+        let pipe = unique_pipe();
+        serve_search(engine, &pipe, 128, request);
+        let mut peer = connect_retry(&pipe);
+        let mut total = 0;
+        loop {
+            let Some(ServerMessage::Results {batch,done,..}) = ws_protocol::read_message(&mut peer).unwrap() else {panic!("missing terminal search frame")};
+            total += batch.len();
+            if done {break;}
+        }
+        assert_eq!(total, 1, "optional semantic results must share the requested total budget");
+    }
+
+    #[test]
+    fn search_limit_full_exact_budget_does_not_start_optional_inference() {
+        let (engine, _tree) = semantic_service();
+        let invoked = Arc::new(AtomicBool::new(false));
+        let observed = Arc::clone(&invoked);
+        engine.set_query_embed_hook(Arc::new(move |_| {
+            observed.store(true, Ordering::Release);
+            Ok(vec![1.0,0.0,0.0])
+        }));
+        let mut request = semantic_query("meeting"); request.limit = 1;
+        let pipe = unique_pipe(); serve_search(engine, &pipe, 130, request);
+        let mut peer = connect_retry(&pipe);
+        loop {
+            let Some(ServerMessage::Results {done,..}) = ws_protocol::read_message(&mut peer).unwrap() else {panic!("missing search results")};
+            if done {break;}
+        }
+        assert!(!invoked.load(Ordering::Acquire), "a full exact result set must not start unused inference");
+    }
+
+    #[test]
+    fn search_limit_stream_splits_bytes_and_fails_before_exceeding_aggregate_budget() {
+        for (count, title_mib, expected_total, expected_failure) in [(3,3,3,false),(10,7,9,true),(1,9,0,true)] {
+            let tree = TempTree::new(); let engine = service_with(&tree, &[]);
+            let pipe = unique_pipe(); let serving = pipe.clone(); let this = Arc::clone(&engine);
+            let (finished, completion) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {let _=ws_platform::pipe::serve(&serving,move |stream| {
+                let client=this.register_client(Arc::new(Mutex::new(stream)));
+                let cancel=this.begin_request_for_client(client.id(),131);
+                let request=SearchQuery {limit:20,..Default::default()};
+                let revision=SearchRevision {source:this.indexer.search_epoch(),code:None,model:this.indexer.store_lock().model_generation().ok()};
+                let sources=HashMap::new();
+                let delivery=SearchDelivery {query:&request,revision,cancel:&cancel,sources:&sources,related_source:None};
+                let batch=(0..count).map(|n|SearchResult {id:format!("budget-{n}"),title:"x".repeat(title_mib*1024*1024),..Default::default()}).collect();
+                let result=this.send_results(&client,131,batch,Some(SearchOutcome::complete(SemanticOutcome::DISABLED)),&delivery);
+                this.end_request_for_client(client.id(),131,&cancel);this.unregister_client(&client);
+                let _=finished.send(result.is_ok());
+            });});
+            let mut peer=connect_retry(&pipe); let mut total=0; let mut bytes=0; let mut failed=false;
+            loop {
+                let message:ServerMessage=ws_protocol::read_message(&mut peer).unwrap().unwrap();
+                let size=search_budget::serialized_size(&message).unwrap(); bytes+=size;
+                match message {
+                    ServerMessage::Results {batch,done,outcome,..}=> {
+                        assert!(size<=ws_protocol::MAX_SEARCH_BATCH_BYTES);
+                        total+=batch.len();
+                        if done {
+                            assert_eq!(outcome.unwrap().disposition,if expected_failure {SearchDisposition::Failed} else {SearchDisposition::Complete});
+                            break;
+                        }
+                    }
+                    ServerMessage::Error {code:ErrorCode::Internal,..}=>failed=true,
+                    _=>panic!("unexpected budget response"),
+                }
+            }
+            assert_eq!(total,expected_total);assert_eq!(failed,expected_failure);
+            assert!(bytes<=ws_protocol::MAX_SEARCH_RESPONSE_BYTES);
+            assert!(completion.recv_timeout(Duration::from_secs(10)).unwrap());
+        }
+    }
+
+    #[test]
+    fn search_limit_rejects_oversized_raw_requests_before_searching() {
+        let tree = TempTree::new();
+        let engine = service_with(&tree, &["budget-needle.txt"]);
+        let pipe = unique_pipe();
+        serve_search(engine, &pipe, 129, SearchQuery {text:"budget-needle".into(),limit:10_001,..Default::default()});
+        let mut peer = connect_retry(&pipe);
+        assert!(matches!(ws_protocol::read_message::<_,ServerMessage>(&mut peer).unwrap(),
+            Some(ServerMessage::Error {code:ErrorCode::InvalidRequest,..})));
     }
 
     fn service_with(tree: &TempTree, files: &[&str]) -> SharedEngine {

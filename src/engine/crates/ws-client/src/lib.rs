@@ -67,7 +67,12 @@ impl EngineInfo {
     }
 }
 
+#[cfg(test)]
 async fn read_frame(stream: &mut (impl AsyncRead + Unpin)) -> Result<ServerMessage, Error> {
+    read_frame_counted(stream).await.map(|(message, _)| message)
+}
+
+async fn read_frame_counted(stream: &mut (impl AsyncRead + Unpin)) -> Result<(ServerMessage, usize), Error> {
     let mut header = [0; 4];
     if stream.read(&mut header[..1]).await? == 0 {
         return Err(Error::Closed);
@@ -81,7 +86,8 @@ async fn read_frame(stream: &mut (impl AsyncRead + Unpin)) -> Result<ServerMessa
         }
         let mut bytes = vec![0; length as usize];
         stream.read_exact(&mut bytes).await?;
-        serde_json::from_slice(&bytes).map_err(|error| FrameError::Malformed(error).into())
+        serde_json::from_slice(&bytes).map(|message| (message, length as usize + 4))
+            .map_err(|error| FrameError::Malformed(error).into())
     })
     .await
     .map_err(|_| Error::Timeout)?

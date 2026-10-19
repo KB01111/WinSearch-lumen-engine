@@ -54,6 +54,7 @@ public sealed class EngineClient : IEngineClient
     private readonly SemaphoreSlim _previewSlots = new(2, 2);
     private readonly ConcurrentDictionary<ulong, TaskCompletionSource<ServerMessage>> _unary = new();
     private readonly ConcurrentDictionary<ulong, Channel<SearchBatch>> _streams = new();
+    private readonly ConcurrentDictionary<ulong, SearchReceiveBudget> _streamBudgets = new();
     private readonly string _clientName;
 
     private NamedPipeClientStream? _pipe;
@@ -64,6 +65,21 @@ public sealed class EngineClient : IEngineClient
     private string[] _features = [];
     private bool _disposed;
     private bool _oneShot;
+
+    private sealed class SearchReceiveBudget(long maximum)
+    {
+        private int _frames;
+        private long _results;
+        private long _bytes;
+
+        public bool Admit(ResultsMessage message, int bytes)
+        {
+            _frames++;
+            _results += message.Batch?.Count ?? 0;
+            _bytes += bytes;
+            return message.Batch is not null && _frames <= 64 && _results <= maximum && _bytes <= 64L * 1024 * 1024;
+        }
+    }
 
     public string PipeName { get; }
     public string ClientVersion { get; }
@@ -377,10 +393,14 @@ public sealed class EngineClient : IEngineClient
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
-        if (query is null || query.Categories is null || !SearchExtensionsValid(query.Extensions) || !FileKinds.Valid(query.FileKinds))
-            throw new EngineException(ErrorCode.InvalidRequest, "invalid search extension filter");
+        if (query is null || query.Text is null || query.Text.Contains('\0') || Encoding.UTF8.GetByteCount(query.Text) > 64 * 1024
+            || query.Limit > 10000 || !Enum.IsDefined(query.Mode) || query.Categories is null || query.Categories.Count > 32
+            || query.Categories.Any(kind => !Enum.IsDefined(kind)) || !SearchExtensionsValid(query.Extensions) || !FileKinds.Valid(query.FileKinds))
+            throw new EngineException(ErrorCode.InvalidRequest, "invalid search request budget or filters");
         var snapshot = new SearchQuery { Text = query.Text, Mode = query.Mode, Limit = query.Limit,
             IncludeSemantic = query.IncludeSemantic, Categories = query.Categories.ToList(), Extensions = query.Extensions.ToList(), FileKinds = query.FileKinds.ToList() };
+        if (snapshot.Limit > 4096 && !_features.Contains("search.limits", StringComparer.Ordinal))
+            throw new EngineException(ErrorCode.Unsupported, "engine does not support search.limits");
         if (snapshot.Extensions.Count > 0 && IsConnected && !_features.Contains("search.filters", StringComparer.Ordinal))
             throw new EngineException(ErrorCode.Unsupported, "engine does not support search filters");
         if (snapshot.FileKinds.Count > 0 && IsConnected && !_features.Contains("search.file_kinds", StringComparer.Ordinal))
@@ -416,6 +436,8 @@ public sealed class EngineClient : IEngineClient
         var id = NextRequestId();
         var mode = snapshot.Mode;
         var requireOutcome = relatedSource is not null || _features.Contains("search.outcomes", StringComparer.Ordinal);
+        var maxResults = relatedSource is not null || _features.Contains("search.limits", StringComparer.Ordinal)
+            ? Math.Max(1u, snapshot.Limit) : 4096u;
         var channel = relatedSource is not null ? Channel.CreateBounded<SearchBatch>(new BoundedChannelOptions(2)
         { SingleReader = true, SingleWriter = true }) : Channel.CreateUnbounded<SearchBatch>(new UnboundedChannelOptions
         {
@@ -423,6 +445,7 @@ public sealed class EngineClient : IEngineClient
             SingleWriter = true,
         });
         _streams[id] = channel;
+        _streamBudgets[id] = new SearchReceiveBudget(maxResults);
         var frames = 0;
         long results = 0;
         var terminal = false;
@@ -440,8 +463,8 @@ public sealed class EngineClient : IEngineClient
             {
                 frames++;
                 results += batch.Results?.Count ?? 0;
-                if (relatedSource is not null && (frames > 64 || results > snapshot.Limit))
-                    throw new EngineException(ErrorCode.InvalidRequest, "Related exceeded its result budget");
+                if (frames > 64 || results > maxResults)
+                    throw new EngineException(ErrorCode.InvalidRequest, "search exceeded its result budget");
                 if ((batch.Done && requireOutcome && batch.Outcome is null) || (batch.Outcome is { } outcome
                     && !outcome.ValidFor(batch.Done, batch.Results is { Count: 0 }, snapshot.IncludeSemantic)))
                     throw new EngineException(ErrorCode.InvalidRequest, "search returned an invalid or missing terminal outcome");
@@ -462,6 +485,7 @@ public sealed class EngineClient : IEngineClient
         finally
         {
             _streams.TryRemove(id, out _);
+            _streamBudgets.TryRemove(id, out _);
             if (relatedSource is not null && !terminal) _ = TryCancelAsync(id);
         }
     }
@@ -554,12 +578,12 @@ public sealed class EngineClient : IEngineClient
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                var message = await ReadFrameAsync(pipe, cancellationToken);
-                if (message is null)
+                var frame = await ReadFrameAsync(pipe, cancellationToken);
+                if (frame.Message is not { } message)
                 {
                     break;
                 }
-                Dispatch(message);
+                Dispatch(message, frame.Bytes);
             }
         }
         catch (OperationCanceledException)
@@ -577,13 +601,13 @@ public sealed class EngineClient : IEngineClient
         }
     }
 
-    private async Task<ServerMessage?> ReadFrameAsync(NamedPipeClientStream pipe, CancellationToken cancellationToken)
+    private async Task<(ServerMessage? Message, int Bytes)> ReadFrameAsync(NamedPipeClientStream pipe, CancellationToken cancellationToken)
     {
         var lengthBuffer = new byte[4];
         var read = await ReadAtLeastAsync(pipe, lengthBuffer, cancellationToken);
         if (read == 0)
         {
-            return null; // clean disconnect
+            return (null, 0); // clean disconnect
         }
         if (read < 4)
         {
@@ -602,7 +626,7 @@ public sealed class EngineClient : IEngineClient
             throw new IOException("stream ended mid-frame");
         }
 
-        return (ServerMessage?)JsonSerializer.Deserialize(payload, typeof(ServerMessage), ProtocolJson.Options);
+        return ((ServerMessage?)JsonSerializer.Deserialize(payload, typeof(ServerMessage), ProtocolJson.Options), length + 4);
     }
 
     /// <summary>Reads until the buffer is full; returns 0 only for a clean EOF before any byte.</summary>
@@ -622,7 +646,7 @@ public sealed class EngineClient : IEngineClient
         return filled;
     }
 
-    private void Dispatch(ServerMessage message)
+    private void Dispatch(ServerMessage message, int bytes)
     {
         switch (message)
         {
@@ -653,6 +677,14 @@ public sealed class EngineClient : IEngineClient
             case ResultsMessage results:
                 if (_streams.TryGetValue(results.Id, out var channel))
                 {
+                    if (!_streamBudgets.TryGetValue(results.Id, out var budget) || !budget.Admit(results, bytes))
+                    {
+                        channel.Writer.TryComplete(new EngineException(ErrorCode.InvalidRequest, "search stream exceeded its receive budget"));
+                        _streams.TryRemove(results.Id, out _);
+                        _streamBudgets.TryRemove(results.Id, out _);
+                        _ = TryCancelAsync(results.Id);
+                        break;
+                    }
                     if (!channel.Writer.TryWrite(new SearchBatch
                     {
                         Results = results.Batch,
@@ -700,6 +732,7 @@ public sealed class EngineClient : IEngineClient
                     }
                     if (_streams.TryRemove(errorId, out var errorChannel))
                     {
+                        _streamBudgets.TryRemove(errorId, out _);
                         errorChannel.Writer.TryComplete(exception);
                     }
                 }
@@ -732,6 +765,7 @@ public sealed class EngineClient : IEngineClient
         {
             if (_streams.TryRemove(key, out var channel))
             {
+                _streamBudgets.TryRemove(key, out _);
                 channel.Writer.TryComplete(exception);
             }
         }

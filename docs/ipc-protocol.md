@@ -78,7 +78,7 @@ All messages carry a `type` discriminator (snake_case). Requests carry `id`
 ### Payload models
 
 - `SearchQuery`: `text`, `mode` (`auto|apps|files|code`), `limit`,
-  `include_semantic`, `categories[]`, `extensions[]`.
+  `include_semantic`, `categories[]`, `extensions[]`, `file_kinds[]`.
 - `RelatedQuery`: bound `source` (`EntryReference`), `limit` (default 20,
   range 1..10000), `categories[]` (at most 32), `extensions[]` (same search filter bounds).
 - `SearchResult`: `id`, `kind`, `title`, `subtitle`, `match_explanation`,
@@ -101,6 +101,36 @@ All messages carry a `type` discriminator (snake_case). Requests carry `id`
   true, hours 60 and 420. Missing fields use these defaults; protocol stays v1.
 - `ErrorCode`: `protocol_version_mismatch`, `invalid_request`, `internal`,
   `not_ready`, `cancelled`, `unsupported`.
+
+### Search result budgets
+
+The additive `search.limits` capability makes ordinary `SearchQuery.limit` a
+total budget shared by exact and optional semantic results. Requests accept up
+to 10,000 results; zero retains the effective minimum of one. Query text permits
+at most 64 KiB of UTF-8 without NUL, and categories permit at most 32 values.
+Invalid raw requests fail before retrieval. Source/root and selected-kind
+restrictions still apply before candidate limits.
+
+The engine keeps exact results first and streams at most 512 results and 8 MiB
+per batch, including the four-byte frame prefix. If exact results fill the
+budget, optional inference is not started and the semantic phase is `disabled`.
+Otherwise semantic results share the remaining capacity. This contract does
+not promise that every request has enough eligible matches to fill its limit.
+
+Search streams have a 64 MiB aggregate receive budget and at most 64 result
+frames. The engine reserves two frames and 1 KiB for a bounded error/terminal
+response; a result that cannot fit fails explicitly instead of reporting
+complete. Splitting rechecks current request identity, cancellation and source
+policy before each delivered batch. Existing frame-size and transport deadlines
+are unchanged.
+
+The Rust client counts actual received frame bytes, including additive fields
+and interleaved pushes after dispatch. The C# client checks correlated result
+bytes, frames and count before enqueueing them, bounding a paused consumer's
+pending results. Both enforce the requested total for capable peers. Legacy
+ordinary peers retain the client's 4,096-result compatibility ceiling; requests
+above that require `search.limits` before dispatch. Related already enforces
+its requested total and now shares the stream byte/frame bounds.
 
 Indexing minutes range from 0 through 1439; windows include the start and
 exclude the end. Overnight windows wrap; equal endpoints mean all day.

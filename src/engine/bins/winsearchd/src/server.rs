@@ -13,7 +13,7 @@ use crate::engine::SharedEngine;
 pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn features() -> Vec<String> {
-    vec!["index.root_policies".to_string(), "index.identity".to_string(), "search.exact".to_string(), "search.semantic".to_string(), "search.filters".to_string(), "search.file_kinds".to_string(), "search.outcomes".to_string(), "search.related".to_string(), "code".to_string(), "entry.resolve".to_string(), "entry.resolve.code".to_string(), "search.entry_references".to_string(), "entry.preview.text".to_string(), "entry.preview.code".to_string()]
+    vec!["search.limits".to_string(), "index.root_policies".to_string(), "index.identity".to_string(), "search.exact".to_string(), "search.semantic".to_string(), "search.filters".to_string(), "search.file_kinds".to_string(), "search.outcomes".to_string(), "search.related".to_string(), "code".to_string(), "entry.resolve".to_string(), "entry.resolve.code".to_string(), "search.entry_references".to_string(), "entry.preview.text".to_string(), "entry.preview.code".to_string()]
 }
 
 pub fn handle_connection(stream: PipeStream, engine: SharedEngine) {

@@ -196,8 +196,13 @@ Missing text/model or disabled policy fails explicitly. Source media without tex
 is unavailable, preserving Lumen's existing text-based Related behavior.
 
 Related uses the same `SearchStream`, cancellation, owned read connection and
-35second total deadline. Requests permit1..10000 results; delivery cannot exceed
-the requested limit or64frames. Ordinary search retains its existing4096 budget.
+35-second total deadline. Requests permit 1..10000 results; delivery cannot exceed
+the requested limit, 64 frames or 64 MiB of received frames. Ordinary search also
+accepts up to 10,000 results with `search.limits`, enforcing a shared exact and
+semantic total. Older ordinary peers retain the 4,096-result compatibility bound;
+larger requests fail before dispatch. New engine batches contain at most 512
+results and 8 MiB, with room reserved for failure termination. See the
+[search budget contract](ipc-protocol.md#search-result-budgets).
 The client rejects a returned seed, missing bound references, mismatched domains
 or filters and ordinary disabled-semantic fallback. Zero valid above-threshold
 results can still be complete/ready; absent eligible vectors are explicitly

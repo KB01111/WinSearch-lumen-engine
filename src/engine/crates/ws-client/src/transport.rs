@@ -2,7 +2,7 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::time::{timeout_at, Instant};
 use ws_protocol::{ClientMessage, ServerMessage, PROTOCOL_VERSION};
 
-use crate::{read_frame, EngineInfo, Error};
+use crate::{read_frame_counted, EngineInfo, Error};
 
 trait Io: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> Io for T {}
@@ -10,6 +10,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> Io for T {}
 pub(crate) struct Session {
     io: Option<Box<dyn Io>>,
     pub(crate) info: EngineInfo,
+    pub(crate) received_bytes: usize,
 }
 
 // Cancelling read_exact/write_all can leave partial frames. Close that stream.
@@ -31,6 +32,7 @@ impl Session {
         Self {
             io: Some(Box::new(io)),
             info: EngineInfo::default(),
+            received_bytes: 0,
         }
     }
 
@@ -94,13 +96,15 @@ impl Session {
         }
         let io = pending.slot.as_mut().ok_or(Error::Closed)?;
         let result = match deadline {
-            Some(deadline) => timeout_at(deadline, read_frame(io))
+            Some(deadline) => timeout_at(deadline, read_frame_counted(io))
                 .await
                 .map_err(|_| Error::Timeout)?,
-            None => read_frame(io).await,
+            None => read_frame_counted(io).await,
         };
         pending.complete = result.is_ok();
-        result
+        let (message, bytes) = result?;
+        self.received_bytes = self.received_bytes.saturating_add(bytes);
+        Ok(message)
     }
 
     pub(crate) async fn send(
