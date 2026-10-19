@@ -77,6 +77,16 @@ pub fn scan_directory(
     parent_id: Option<i64>,
     depth: usize,
 ) -> io::Result<DirScan> {
+    scan_directory_with_hidden(root_id, dir_path, parent_id, depth, false)
+}
+
+pub fn scan_directory_with_hidden(
+    root_id: i64,
+    dir_path: &str,
+    parent_id: Option<i64>,
+    depth: usize,
+    include_hidden: bool,
+) -> io::Result<DirScan> {
     let mut scan = DirScan {
         entries: Vec::new(),
         subdirs: Vec::new(),
@@ -92,7 +102,7 @@ pub fn scan_directory(
                 let attrs = meta.file_attributes();
                 // Reject reparse-point, hidden, or system directories queued via
                 // watcher events so scanning never escapes the configured root.
-                if (attrs & 0x400) != 0 || (attrs & (0x2 | 0x4)) != 0 {
+                if (attrs & (0x400 | 0x4)) != 0 || (!include_hidden && attrs & 0x2 != 0) {
                     return Ok(scan);
                 }
             }
@@ -144,7 +154,7 @@ pub fn scan_directory(
         }
         // Hidden and system items are excluded by policy (also covers
         // junctions such as "Application Data").
-        if attrs & (0x2 | 0x4) != 0 {
+        if attrs & 0x4 != 0 || (!include_hidden && attrs & 0x2 != 0) {
             // FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM
             continue;
         }
@@ -277,10 +287,20 @@ pub fn file_identity(path: &Path, is_dir: bool) -> (u32, u64) {
 
 /// Builds the record for a single path (used by the watcher for point
 /// updates). Returns `None` for excluded or vanished paths.
+#[cfg(test)]
 pub fn record_for_path(
     root_id: i64,
     parent_id: Option<i64>,
     path: &Path,
+) -> io::Result<Option<EntryRecord>> {
+    record_for_path_with_hidden(root_id, parent_id, path, false)
+}
+
+pub fn record_for_path_with_hidden(
+    root_id: i64,
+    parent_id: Option<i64>,
+    path: &Path,
+    include_hidden: bool,
 ) -> io::Result<Option<EntryRecord>> {
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(m) => m,
@@ -293,7 +313,7 @@ pub fn record_for_path(
         return Ok(None);
     }
     let attrs = metadata.file_attributes();
-    if attrs & (0x2 | 0x4) != 0 {
+    if attrs & 0x4 != 0 || (!include_hidden && attrs & 0x2 != 0) {
         return Ok(None);
     }
     let (volume_serial, file_id) = file_identity(path, is_dir);

@@ -252,6 +252,7 @@ public enum IndexingMode { Always, Scheduled, Manual }
 public sealed class IndexingConfig
 {
     public List<string> Roots { get; set; } = new();
+    public List<RootPolicy> RootPolicies { get; set; } = new();
     public List<string> ExcludedPaths { get; set; } = new();
     public List<string> ExcludedExtensions { get; set; } = new();
     public bool CodeEnabled { get; set; }
@@ -262,6 +263,15 @@ public sealed class IndexingConfig
     public bool RespectBatterySaver { get; set; } = true;
     public ushort HoursStart { get; set; } = 60;
     public ushort HoursEnd { get; set; } = 420;
+}
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed class RootPolicy
+{
+    public string Root { get; set; } = "";
+    public List<string> Exclusions { get; set; } = new();
+    public bool IncludeHidden { get; set; }
+    public ulong MaxFileSizeBytes { get; set; }
 }
 
 public sealed class ErrorMessage : ServerMessage

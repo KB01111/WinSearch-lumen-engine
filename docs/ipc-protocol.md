@@ -178,6 +178,35 @@ Breaking wire changes bump `PROTOCOL_VERSION`. Both sides refuse mismatched
 versions at handshake with `error: protocol_version_mismatch` and disconnect.
 Additive fields use `#[serde(default)]` semantics and do not bump the version.
 
+## Per-root source policy
+
+The additive `index.root_policies` capability supports
+`IndexingConfig.root_policies`, a list of `{root, exclusions, include_hidden,
+max_file_size_bytes}` objects. Rules name selected ordinary or code roots; the
+most specific normalized root owns its policy. Size must be positive. Duplicate
+normalized/unselected roots, absolute/traversing/NUL exclusions, unknown rule
+fields, more than 256 rules or 512 aggregate patterns, and patterns over 1,024
+UTF-8 bytes are rejected. Omitted policies retain legacy behavior.
+
+Relative exclusions match a subtree/component, or a suffix when prefixed by `*`,
+matching Lumen's existing policy semantics. They are not general glob syntax.
+Hidden rules cover relative dot components and native hidden attributes beneath
+the root; directory size is not a file-size budget. Current metadata restrictions
+apply to crawling, point updates, extraction and lexical/FTS/vector admission
+before result caps. Sensitive/system/generated and reparse/residency guards
+remain independent. Hidden opt-in does not grant access to credential stores.
+
+Code traversal has separately fenced fixed ignore-control reads, retaining its
+existing 2 MiB bound. Hidden controls can govern traversal without becoming
+indexed hidden sources. Explicitly excluding a required control fails traversal
+instead of disabling its ignore rules. Saved rules remain persisted but omitted
+from effective deferred configuration until current host admission.
+
+Rust and C# clients require the capability before sending nonempty rules. An
+older engine must not silently accept a source policy it cannot enforce.
+Protocol version remains 1. [Scoped validation and remaining consumer work](validation/2026-10-19-root-policies/README.md)
+distinguish engine support from the pending Lumen adapter and installed gates.
+
 ## Durable index identities
 
 Peers advertising `index.identity` include optional `index_id` and

@@ -154,6 +154,7 @@ impl Indexer {
             .clone();
         if !admitted {
             config.roots.clear();
+            config.root_policies.clear();
             config.code_roots.clear();
             config.code_enabled = false;
             config.paused = true;
@@ -212,10 +213,12 @@ impl Indexer {
         crate::policy::native_pause_reason(&self.policy.read().unwrap_or_else(|p| p.into_inner()))
     }
     pub(crate) fn name_path_allowed(&self, path: &Path) -> bool {
+        let policy = self.policy.read().unwrap_or_else(|p| p.into_inner());
         self.policy_admitted.load(Ordering::Acquire) && crate::policy::path_allowed(
-            &self.policy.read().unwrap_or_else(|p| p.into_inner()),
+            &policy,
             &path.to_string_lossy(),
         ) && crate::policy::metadata_safe(path, false)
+            && crate::policy::metadata_allowed(&policy, path, false)
     }
     pub fn content_path_allowed(&self, path: &Path) -> bool {
         self.name_path_allowed(path)
@@ -728,7 +731,8 @@ impl Indexer {
             .map(|e| e.id);
 
         let mut scan_failed = false;
-        let mut scan = match crawl::scan_directory(root_id, dir_path, parent_id, depth) {
+        let include_hidden = crate::policy::include_hidden(&self.policy.read().unwrap_or_else(|p| p.into_inner()), dir_path, false);
+        let mut scan = match crawl::scan_directory_with_hidden(root_id, dir_path, parent_id, depth, include_hidden) {
             Ok(s) => s,
             Err(e) => {
                 warn!(dir = %dir_path, error = %e, "scan error");
@@ -1000,7 +1004,8 @@ impl Indexer {
             })
             .map(|e| e.id);
 
-        let record = match crawl::record_for_path(root_id, parent_id, path) {
+        let include_hidden = crate::policy::include_hidden(&self.policy.read().unwrap_or_else(|p| p.into_inner()), &path.to_string_lossy(), false);
+        let record = match crawl::record_for_path_with_hidden(root_id, parent_id, path, include_hidden) {
             Ok(Some(r)) => r,
             Ok(None) => return Ok(()), // excluded or vanished
             Err(e) => {
@@ -1501,6 +1506,7 @@ fn query_source_allowed(policy:&ws_protocol::IndexingConfig,path:&str,source:Opt
     let path=Path::new(path);
     crate::policy::path_allowed(policy,&path.to_string_lossy())
         && crate::policy::metadata_safe(path,source.is_some())
+        && crate::policy::metadata_allowed(policy,path,false)
         && source.is_none_or(|saved| !saved.is_empty()
             && crate::policy::ordinary_content_allowed(policy,path)
             && crate::extract::source_snapshot(path)==saved)
@@ -1521,6 +1527,10 @@ impl Drop for Indexer {
         watchers.clear(); // each Watcher::drop cancels I/O and joins its thread
     }
 }
+
+#[cfg(test)]
+#[path = "root_policy_tests.rs"]
+mod root_policy_tests;
 
 #[cfg(test)]
 mod tests {

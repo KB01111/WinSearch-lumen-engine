@@ -123,7 +123,13 @@ impl CodeService {
         self.indexer.get_indexing_config().unwrap_or_default()
     }
     pub fn allowed(&self, path: &Path) -> bool {
-        crate::policy::code_path_allowed(&self.policy(), &path.to_string_lossy())
+        let policy = self.policy();
+        crate::policy::code_path_allowed(&policy, &path.to_string_lossy())
+            && ws_platform::content::metadata_path_allowed(path, false)
+            && crate::policy::metadata_allowed(&policy, path, true)
+    }
+    fn control_allowed(&self, path: &Path) -> bool {
+        crate::policy::code_control_path_allowed(&self.policy(), &path.to_string_lossy())
             && ws_platform::content::metadata_path_allowed(path, false)
     }
     fn visible(&self, file: &CodeFileRow, stored: Option<&str>) -> bool {
@@ -530,12 +536,15 @@ impl CodeService {
     fn scan_step(&self, state: &mut ScanState) -> anyhow::Result<bool> {
         let valid =
             |p: &Path| self.fence(&state.job, state.epoch, &state.policy) && self.allowed(p);
+        // Fixed ignore controls govern traversal even when hidden sources are not indexed.
+        let control_valid =
+            |p: &Path| self.fence(&state.job, state.epoch, &state.policy) && self.control_allowed(p);
         anyhow::ensure!(valid(Path::new(&state.job.path)), "code policy changed");
         if state.active.is_none() {
             let Some(repo) = state.repos.pop_front() else {
                 return Ok(true);
             };
-            let crawler = ws_code::crawl::CodeCrawler::open(Path::new(&repo.root_path), &valid)?;
+            let crawler = ws_code::crawl::CodeCrawler::open_with_control(Path::new(&repo.root_path), &valid, &control_valid)?;
             let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
             let id = store.ensure_repo(&repo)?;
             let generation = store.begin_generation(id)?;
@@ -550,7 +559,7 @@ impl CodeService {
         }
         let active = state.active.as_mut().unwrap();
         if !active.walk_done {
-            let (records, done) = active.crawler.next_batch(512, &valid)?;
+            let (records, done) = active.crawler.next_batch_with_control(512, &valid, &control_valid)?;
             anyhow::ensure!(valid(Path::new(&state.job.path)), "code policy changed");
             self.store
                 .lock()
@@ -806,6 +815,33 @@ impl CodeService {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn per_root_code_policy_keeps_ignore_controls_without_indexing_hidden_or_oversize_sources() {
+        let (code, root) = fixture();
+        std::fs::write(root.join(".gitignore"), "ignored.rs\n").unwrap();
+        for name in ["allowed.rs", "ignored.rs", ".hidden.rs"] {
+            std::fs::write(root.join(name), "fn item() {}\n").unwrap();
+        }
+        std::fs::write(root.join("oversize.rs"), "x".repeat(65)).unwrap();
+        let mut policy = code.policy();
+        policy.root_policies = vec![ws_protocol::RootPolicy { root:root.to_string_lossy().into_owned(),
+            include_hidden:false, max_file_size_bytes:64, exclusions:vec![] }];
+        code.indexer.set_indexing_config(&policy).unwrap();
+        let mut crawler = ws_code::crawl::CodeCrawler::open_with_control(&root,
+            &|path| code.allowed(path), &|path| code.control_allowed(path)).unwrap();
+        let (records, done) = crawler.next_batch_with_control(512,
+            &|path| code.allowed(path), &|path| code.control_allowed(path)).unwrap();
+        assert!(done);
+        assert_eq!(records.iter().map(|record|record.name.as_str()).collect::<Vec<_>>(), vec!["allowed.rs"]);
+        policy.root_policies[0].exclusions = vec![".gitignore".into()];
+        code.indexer.set_indexing_config(&policy).unwrap();
+        assert!(ws_code::crawl::CodeCrawler::open_with_control(&root,
+            &|path| code.allowed(path), &|path| code.control_allowed(path)).is_err(),
+            "an explicitly revoked ignore control cannot silently disable ignore rules");
+        drop(code);
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
 
     fn occupy_parser_capacity(root: &Path) -> Vec<crate::extract_client::tests::CleanupFixture> {
         (0..2).map(|number| {

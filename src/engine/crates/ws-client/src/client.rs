@@ -401,9 +401,10 @@ impl Client {
         &self,
         config: IndexingConfig,
     ) -> Result<IndexingConfig, Error> {
+        let feature = (!config.root_policies.is_empty()).then_some("index.root_policies");
         self.unary(
             true,
-            None,
+            feature,
             |id| ClientMessage::SetIndexingConfig { id, config },
             indexing_reply,
         )
@@ -848,6 +849,21 @@ mod tests {
                 if matches!(e.kind(), std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset)));
         });
         assert!(matches!(wrong.clone().status().await, Err(Error::ServerIdentityMismatch)));
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn root_policies_require_capability_before_any_configuration_mutation() {
+        use tokio::io::AsyncReadExt;
+        let (client, mut peer) = fixture();
+        let task = tokio::spawn(async move {
+            hello(&mut peer).await;
+            assert_eq!(peer.read(&mut [0]).await.unwrap(), 0, "legacy peer must not receive unenforceable folder restrictions");
+        });
+        let config = serde_json::from_value(serde_json::json!({"roots":["C:/source"],
+            "root_policies":[{"root":"C:/source","include_hidden":false,"max_file_size_bytes":1024,"exclusions":[]}]})).unwrap();
+        let result = client.set_indexing_config(config).await;
+        assert!(matches!(result, Err(Error::Unsupported("index.root_policies"))), "{result:?}");
         task.await.unwrap();
     }
 

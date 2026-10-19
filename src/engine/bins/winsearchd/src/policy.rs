@@ -2,6 +2,10 @@ use std::path::Path;
 use ws_index::StoreError;
 use ws_protocol::{IndexingConfig, IndexingMode};
 
+#[path = "root_rules.rs"]
+mod root_rules;
+pub use root_rules::{include_hidden, metadata_allowed};
+
 /// Callback contexts are integer registry keys, never dereferenced pointers.
 /// Removal before unregister makes late callbacks harmless even if native
 /// unregistration fails; weak values do not extend the indexer's lifetime.
@@ -95,6 +99,7 @@ pub fn validate(config: &IndexingConfig) -> Result<IndexingConfig, StoreError> {
             return Err(bad("invalid extension rule"));
         }
     }
+    root_rules::validate(&mut c)?;
     Ok(c)
 }
 fn normalized(p: &str) -> String {
@@ -106,14 +111,18 @@ pub fn contains(root: &str, path: &str) -> bool {
     p == r || p.strip_prefix(&r).is_some_and(|s| s.starts_with('\\'))
 }
 pub fn path_allowed(c: &IndexingConfig, path: &str) -> bool {
+    path_allowed_with_visibility(c, path, true)
+}
+fn path_allowed_with_visibility(c: &IndexingConfig, path: &str, filter_hidden: bool) -> bool {
     let root = c
         .roots
         .iter()
         .filter(|r| contains(r, path))
-        .max_by_key(|r| r.len());
+        .max_by_key(|r| normalized(r).len());
     let Some(root) = root else {
         return false;
     };
+    if !root_rules::relative_allowed(c, root, path, filter_hidden) { return false; }
     if c.excluded_paths
         .iter()
         .any(|e| contains(e, path) && normalized(e).len() >= normalized(root).len())
@@ -133,6 +142,12 @@ pub fn code_path_allowed(c: &IndexingConfig, path: &str) -> bool {
     let mut code=c.clone();
     code.roots=c.code_roots.clone();
     path_allowed(&code,path)
+}
+pub fn code_control_path_allowed(c: &IndexingConfig, path: &str) -> bool {
+    if !c.code_enabled {return false;}
+    let mut code=c.clone();
+    code.roots=c.code_roots.clone();
+    path_allowed_with_visibility(&code,path,false)
 }
 pub fn pause_reason(
     c: &IndexingConfig,

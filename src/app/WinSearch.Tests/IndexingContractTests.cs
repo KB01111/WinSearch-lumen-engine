@@ -7,6 +7,19 @@ namespace WinSearch.Tests;
 public class IndexingContractTests
 {
     [Fact]
+    public void RootPoliciesRoundTripWithoutDroppingNativeFolderRestrictions()
+    {
+        const string json = """{"roots":["C:/Data"],"root_policies":[{"root":"C:/Data","include_hidden":false,"max_file_size_bytes":1048576,"exclusions":["cache","*.tmp"]}]}""";
+        var config = JsonSerializer.Deserialize<IndexingConfig>(json, ProtocolJson.Options)!;
+        using var encoded = JsonDocument.Parse(JsonSerializer.Serialize(config, ProtocolJson.Options));
+        var policy = Assert.Single(encoded.RootElement.GetProperty("root_policies").EnumerateArray());
+        Assert.Equal("C:/Data", policy.GetProperty("root").GetString());
+        Assert.False(policy.GetProperty("include_hidden").GetBoolean());
+        Assert.Equal(1048576UL, policy.GetProperty("max_file_size_bytes").GetUInt64());
+        Assert.Equal(2, policy.GetProperty("exclusions").GetArrayLength());
+    }
+
+    [Fact]
     public void DatabaseIdentitiesRoundTripWithoutInventingLegacyValues()
     {
         const string json = """{"index_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","code_index_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}""";

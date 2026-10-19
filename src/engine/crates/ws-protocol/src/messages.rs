@@ -166,9 +166,22 @@ pub enum IndexingMode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RootPolicy {
+    pub root: String,
+    #[serde(default)]
+    pub exclusions: Vec<String>,
+    #[serde(default)]
+    pub include_hidden: bool,
+    pub max_file_size_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct IndexingConfig {
     pub roots: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub root_policies: Vec<RootPolicy>,
     pub excluded_paths: Vec<String>,
     pub excluded_extensions: Vec<String>,
     pub code_enabled: bool,
@@ -184,6 +197,7 @@ impl Default for IndexingConfig {
     fn default() -> Self {
         Self {
             roots: vec![],
+            root_policies: vec![],
             excluded_paths: vec![],
             excluded_extensions: vec![],
             code_enabled: false,

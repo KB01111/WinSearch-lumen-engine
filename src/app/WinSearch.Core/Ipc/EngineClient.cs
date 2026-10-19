@@ -82,7 +82,11 @@ public sealed class EngineClient : IEngineClient
     public Task<IndexingConfig> GetIndexingConfigAsync(CancellationToken cancellationToken = default)
         => UnaryAsync(static id => new GetIndexingConfigMessage { Id = id }, static m => ((IndexingConfigMessage)m).Config, cancellationToken);
     public Task<IndexingConfig> SetIndexingConfigAsync(IndexingConfig config, CancellationToken cancellationToken = default)
-        => UnaryAsync(id => new SetIndexingConfigMessage { Id = id, Config = config }, static m => ((IndexingConfigMessage)m).Config, cancellationToken);
+    {
+        if (config.RootPolicies.Count > 0 && !_features.Contains("index.root_policies", StringComparer.Ordinal))
+            throw new EngineException(ErrorCode.Unsupported, "engine does not support per-folder source policies");
+        return UnaryAsync(id => new SetIndexingConfigMessage { Id = id, Config = config }, static m => ((IndexingConfigMessage)m).Config, cancellationToken);
+    }
 
     /// <summary>Raised when the pipe drops and reconnect attempts begin.</summary>
     public event EventHandler? Disconnected;

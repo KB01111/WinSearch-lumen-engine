@@ -76,8 +76,12 @@ The integration's build hook verifies the staged package and provides
 `resource_dir/binaries/winsearch`. Missing/empty development resources produce
 an empty anchor and an unavailable engine; corrupt staged resources fail.
 Release verification requires a complete package. These changes are isolated
-integration work; Lumen's running search adapter still needs its owned native
-runtime, startup validation, migration and streaming wiring.
+integration work. [Lumen PR #27](https://github.com/KB01111/Lumen/pull/27) now
+owns verified lazy startup/status, retained process/PID authentication, deferred
+root admission and job shutdown. Its running SearchService still uses its
+existing backend. Root-policy forwarding, migration, streaming and the
+single-index cutover remain open; the staged payload/client still uses the
+earlier pinned checkpoint.
 
 Before release, replace the development binary pin with verified final release
 artifacts, finish runtime validation and single-index ownership, and run clean

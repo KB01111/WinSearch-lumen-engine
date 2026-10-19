@@ -118,6 +118,14 @@ restart, while bound source references do not. They are not content hashes or
 grants. See [durable index identities](ipc-protocol.md#durable-index-identities)
 for deletion, migration and restore limits.
 
+Use `IndexingConfig.root_policies` for each host-admitted folder's hidden, size
+and relative exclusion rules. `set_indexing_config` requires
+`index.root_policies` before transmitting nonempty rules. The engine applies
+those restrictions before lexical/vector candidate limits; filtering a capped
+reply in the host cannot supply equivalent admission. Keep the host's canonical
+root/grant checks and required generated/data-path exclusions. See
+[per-root source policy](ipc-protocol.md#per-root-source-policy).
+
 `resolve_entry` checks the requested identity/source proof, nonempty metadata,
 positive optional index revision, canonical optional SHA-256 and lexical local-disk root containment before
 returning a reply. The [source proof](ipc-protocol.md#indexed-entry-resolution)

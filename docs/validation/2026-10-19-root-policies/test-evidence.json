@@ -1,0 +1,55 @@
+{
+  "date": "2026-10-19",
+  "scope": "Per-folder source policies before result limits; not full v1 acceptance",
+  "rust": {
+    "command": "cargo test --locked --workspace --exclude ws-embed --all-targets -- --test-threads=1",
+    "passed": 642,
+    "failed": 0,
+    "ignored": 1
+  },
+  "dotnet": {
+    "command": "dotnet test WinSearch.slnx --nologo",
+    "passed": 155,
+    "failed": 0,
+    "skipped": 0
+  },
+  "winui": {
+    "command": "dotnet build src/app/WinSearch.App/WinSearch.App.csproj -p:Platform=x64 --nologo",
+    "warnings": 0,
+    "errors": 0
+  },
+  "sourceSha256": {
+    "src/app/WinSearch.Core/Ipc/EngineClient.cs": "3b2104706e9c5e74e3eb4e0c9edad120eb28f55508fd7453242fa4e344c83c10",
+    "src/app/WinSearch.Core/Protocol/Messages.cs": "df29d88c8709a26dcb642eb77368c4e5fc9ffeeffb8342b57e35549e94d31922",
+    "src/app/WinSearch.Tests/IndexingContractTests.cs": "98108855d8af2506d9246c98d12245c4ea3b9487dbd534cdef5ae7c2a956b798",
+    "src/app/WinSearch.Tests/IndexingPipeTests.cs": "c1c6b22d6d36f9b12455795239db9b64cfe75fd3cc951b23cad1f9207f659b3b",
+    "src/engine/bins/winsearchd/src/code.rs": "a910388996ed5a09818df2676329d138207a043b956525b39278728f5ba55c76",
+    "src/engine/bins/winsearchd/src/crawl.rs": "d5cee6ab1259f9caddf91f01fc588cbd1c04f338c030c796817c8f9751f7a4d0",
+    "src/engine/bins/winsearchd/src/indexer.rs": "458596a634122a85772bfe38834137fe45e0a879e8704e686004d24579ec6a24",
+    "src/engine/bins/winsearchd/src/policy.rs": "b21f90f168dfd49813035f89789259761b10dd317b0b4d61ad94d65605ddacf8",
+    "src/engine/bins/winsearchd/src/root_policy_tests.rs": "38ee4ae7f856a663f01837812e5366d9c9af8c7039c2e4a760bd21f67e1fe058",
+    "src/engine/bins/winsearchd/src/root_rules.rs": "3fd8b6f0c3290a6a9bf98f9e47bf5dd1632e3ebd6de975523190073db7f0c0ba",
+    "src/engine/bins/winsearchd/src/server.rs": "b5f088b3648b641fc4600d4477385b6398fb64cafc9cb9d2785371583a785fc2",
+    "src/engine/crates/ws-client/src/client.rs": "754ddeaa6c670db0d20481c6aaa6b2ca286718f0af5832b3207d261deba7fa60",
+    "src/engine/crates/ws-code/src/crawl.rs": "b4d67698bbc355efdcba45d351817edf5c7bcb268a7324cbf07f3861f370063d",
+    "src/engine/crates/ws-protocol/src/messages.rs": "0aaa73495b2fd4e8be3376bd280d2a4042607eca49b7f4cff3bdfc0bcc0aab64",
+    "src/engine/crates/ws-protocol/tests/indexing_config.rs": "3281bb59e06f51eef7cff6eefbe820c1d6051cdf89de4c1b4ce322e83538ad1b"
+  },
+  "localLogSha256": {
+    "root-policy-red.log": "87cc893f0bb7cf9d382cc3eab724fa01fc29f000dfd49ee6a498791c4d2bdc10",
+    "root-policy-red-replay.log": "a5ed50ecbf4212668c4224f70a899be177f58c505f11f1e02e91aa4862516007",
+    "root-policy-client-red.log": "a0ab04165587b38a721399bb121d04e2601df69b0b1be54516275247c88fc357",
+    "root-policy-focused-green.log": "ac3cddee3fc51eca838a375bdca854fccdd2cd856297fbedcda97e84e2d158cb",
+    "root-policy-final-regression.log": "ce569a2193efdaefea18100afa85266ec7e3ae554925a734217860af2d557319"
+  },
+  "redNotes": [
+    "The first daemon test compile used ScoredSegment.entry_id; corrected to segment.entry_id before functional RED replay.",
+    "Functional daemon/protocol/C# round-trip and Rust capability REDs are retained in local logs.",
+    "C# capability, saved-rule deferral and normalized nested-root REDs were also observed in tool output before their fixes."
+  ],
+  "limits": [
+    "Author review only; independent final review remains pending.",
+    "Real-model worker remains ignored; ws-embed/reference/retrieval, controlled scale/resource and installed gates were not rerun for this policy change.",
+    "Lumen mapper, result-limit parity, rebuilt staged client/payload and search/data migration remain open."
+  ]
+}

@@ -753,6 +753,37 @@ public class IndexingPipeTests
     }
 
     [Fact]
+    public async Task RootPoliciesRequireCapabilityBeforeSendingConfiguration()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = timeout.Token;
+        var pipe = "winsearch-root-policy-legacy-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        async Task Serve()
+        {
+            await server.WaitForConnectionAsync(token);
+            Assert.IsType<HelloMessage>(await ReadAsync(server, token));
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1 }, token);
+            var request = await ReadAsync(server, token);
+            if (request is SetIndexingConfigMessage unexpected)
+            {
+                await WriteAsync(server, new IndexingConfigMessage { Id = unexpected.Id, Config = unexpected.Config }, token);
+                return;
+            }
+            var status = Assert.IsType<GetStatusMessage>(request);
+            await WriteAsync(server, new StatusMessage { Id = status.Id, Status = new() }, token);
+        }
+        var serving = Serve();
+        await using var client = new EngineClient(pipe);
+        await client.ConnectAsync(token);
+        var config = JsonSerializer.Deserialize<IndexingConfig>("""{"roots":["C:/source"],"root_policies":[{"root":"C:/source","max_file_size_bytes":1024,"exclusions":[]}]}""", ProtocolJson.Options)!;
+        await Assert.ThrowsAsync<EngineException>(() => client.SetIndexingConfigAsync(config, token));
+        await client.GetStatusAsync(token);
+        Assert.Equal(0, Pending(client, "_unary"));
+        await serving;
+    }
+
+    [Fact]
     public async Task EntryResolutionRequiresTheAdvertisedEngineCapability()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));

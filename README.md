@@ -43,6 +43,10 @@ adds durable ordinary/code index namespaces and prevents deleted code file IDs
 from being recycled. Lumen still needs to consume these identities in its host
 ledger and search adapter; its current staged engine remains pinned to the
 earlier verified payload.
+The [per-folder policy checkpoint](docs/validation/2026-10-19-root-policies/README.md)
+adds hidden/size/relative exclusion admission before lexical/vector limits,
+including code traversal and capability checks. The Lumen mapper, result-limit
+parity and rebuilt consumer payload remain open.
 
 ### Lumen integration and native contract
 

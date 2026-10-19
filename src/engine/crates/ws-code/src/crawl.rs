@@ -286,6 +286,9 @@ pub fn crawl_repo_while(repo_root: &Path, allowed: &dyn Fn(&Path)->bool) -> io::
 pub struct CodeCrawler { root:std::path::PathBuf, stack:Vec<CrawlFrame> }
 impl CodeCrawler {
 pub fn open(repo_root:&Path,allowed:&dyn Fn(&Path)->bool)->io::Result<Self> {
+    Self::open_with_control(repo_root, allowed, allowed)
+}
+pub fn open_with_control(repo_root:&Path,allowed:&dyn Fn(&Path)->bool,control_allowed:&dyn Fn(&Path)->bool)->io::Result<Self> {
     if !repo_root.is_absolute() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -299,12 +302,15 @@ pub fn open(repo_root:&Path,allowed:&dyn Fn(&Path)->bool)->io::Result<Self> {
         return Ok(Self {root:repo_root.into(),stack:Vec::new()});
     }
     let mut inherited = Vec::new();
-    if let Some(rule) = guarded_ignore(repo_root, &repo_root.join(".git/info/exclude"), allowed)? {
+    if let Some(rule) = guarded_ignore(repo_root, &repo_root.join(".git/info/exclude"), control_allowed)? {
         inherited.push(rule);
     }
-    Ok(Self {root:repo_root.into(),stack:vec![CrawlFrame::open(repo_root,0,inherited,Vec::new(),allowed)?]})
+    Ok(Self {root:repo_root.into(),stack:vec![CrawlFrame::open(repo_root,0,inherited,Vec::new(),control_allowed)?]})
 }
 pub fn next_batch(&mut self,max_entries:usize,allowed:&dyn Fn(&Path)->bool)->io::Result<(Vec<CodeFileRecord>,bool)> {
+    self.next_batch_with_control(max_entries, allowed, allowed)
+}
+pub fn next_batch_with_control(&mut self,max_entries:usize,allowed:&dyn Fn(&Path)->bool,control_allowed:&dyn Fn(&Path)->bool)->io::Result<(Vec<CodeFileRecord>,bool)> {
     let repo_root=&self.root;
     let stack=&mut self.stack;
     let mut records = Vec::new();
@@ -346,7 +352,7 @@ pub fn next_batch(&mut self,max_entries:usize,allowed:&dyn Fn(&Path)->bool)->io:
                 frame.depth + 1,
                 frame.git_rules.clone(),
                 frame.ignore_rules.clone(),
-                allowed,
+                control_allowed,
             )?;
             stack.push(child);
         } else if metadata.is_file() {
