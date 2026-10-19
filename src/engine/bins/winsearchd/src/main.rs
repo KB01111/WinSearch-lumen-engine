@@ -67,7 +67,11 @@ fn main() -> anyhow::Result<()> {
     };
 
     let store = IndexStore::open(&paths::index_db_path())?;
-    let indexer = Indexer::open(store, &[])?;
+    let indexer = if args.iter().any(|arg| arg == "--defer-root-admission") {
+        Indexer::open_deferred(store)?
+    } else {
+        Indexer::open(store, &[])?
+    };
     indexer.start_background()?;
 
     let pipe_name = identity::pipe_name()?;

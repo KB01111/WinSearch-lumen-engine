@@ -287,7 +287,9 @@ async fn main() -> Result<()> {
             && std::path::Path::new(&data).is_absolute(),
         "this fixture only operates on the harness's explicit isolated instance"
     );
-    let client = Client::new(pipe)?;
+    let process_id = std::num::NonZeroU32::new(std::env::var("WS_ENGINE_PID")?.parse()?)
+        .ok_or("owned engine PID must be nonzero")?;
+    let client = Client::for_process(pipe, process_id)?;
     let original = client.indexing_config().await?;
     assert!(
         !original.roots.is_empty(),
@@ -295,8 +297,10 @@ async fn main() -> Result<()> {
     );
     let result = exercise(&client, &original).await;
     let restored = client.set_indexing_config(original.clone()).await;
-    let report = result?;
+    let mut report = result?;
     assert_eq!(restored?, original, "restore the original fixture policy");
+    report["process_identity_checks"] = serde_json::json!(["host_supplied_owned_pid", "same_connection_before_every_handshake"]);
+    report["engine_process_id"] = serde_json::json!(process_id.get());
     println!("{}", serde_json::to_string(&report)?);
     Ok(())
 }

@@ -9,14 +9,32 @@ The native host must verify and own the daemon/workers and their Job Object,
 derive its own user SID and instance, and supply the local pipe name. The client
 accepts `\\.\pipe\winsearch-S-1-…` names; remote paths, worker pipes and unrelated
 namespaces are rejected. Namespace validation does not authenticate a server
-process. The host must preserve executable and instance ownership; the engine
-retains its per-user pipe DACL. Tokio's `SECURITY_IDENTIFICATION` default is kept.
+process. Owned hosts use `Client::for_process(pipe, owned_process_id)`, which
+checks `GetNamedPipeServerProcessId` on every connected pipe before sending Hello
+or any request. A mismatch fails closed; the client never adopts a discovered
+PID. Keep the verified child's process handle and Job Object alive for the
+client's lifetime to prevent PID reuse. `Client::new` retains namespace-only
+behavior for existing callers. The engine retains its per-user pipe DACL.
+Tokio's `SECURITY_IDENTIFICATION` default is kept. Windows documents the
+[connected-server PID API](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getnamedpipeserverprocessid)
+and [process-object/PID lifetime](https://devblogs.microsoft.com/oldnewthing/20110107-00/?p=11803).
+
+Start an owned daemon with `--defer-root-admission`. Saved folder policy is not
+current host consent: this mode starts with no admitted roots, code search or
+catalog work and reports `paused` / `Awaiting host folder policy`. Persisted
+policy, entries, vectors and durable jobs remain intact. The effective indexing
+config has empty roots, code disabled and `paused: true`; this temporary denial
+is not saved as a revocation. After assigning the child to its Job Object, the
+host sends its validated current `IndexingConfig`, including explicitly empty
+roots and the intended pause state. Only a successful policy update releases
+admission. Invalid updates keep the gate closed. Normal standalone startup
+continues to use saved policy.
 
 ```rust,no_run
 use ws_client::{Client, protocol::{SearchMode, SearchQuery}};
 
-async fn example(pipe_name: String) -> Result<(), ws_client::Error> {
-let client = Client::new(pipe_name)?;
+async fn example(pipe_name: String, owned_process_id: std::num::NonZeroU32) -> Result<(), ws_client::Error> {
+let client = Client::for_process(pipe_name, owned_process_id)?;
 let mut search = client.search(SearchQuery {
     text: "invoice".into(),
     mode: SearchMode::Files,

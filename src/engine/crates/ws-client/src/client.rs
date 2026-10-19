@@ -1,4 +1,5 @@
 use crate::{transport::Session, EngineInfo, Error};
+use std::num::NonZeroU32;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
@@ -18,6 +19,7 @@ const MAX_SEARCH_FRAMES: usize = 64;
 
 struct Inner {
     pipe: String,
+    expected_process_id: Option<NonZeroU32>,
     ids: AtomicU64,
     reads: Arc<Semaphore>,
     controls: Arc<Semaphore>,
@@ -196,8 +198,18 @@ impl StatusSubscription {
 }
 
 impl Client {
-    /// The native host supplies its per-user/instance engine pipe.
+    /// Validates only the local pipe namespace. Owned hosts use `for_process`.
     pub fn new(pipe: impl Into<String>) -> Result<Self, Error> {
+        Self::with_process(pipe, None)
+    }
+
+    /// Connect only to the host-owned process. Keep its process handle alive for
+    /// this client's lifetime so an exited process's PID cannot be reused.
+    pub fn for_process(pipe: impl Into<String>, process_id: NonZeroU32) -> Result<Self, Error> {
+        Self::with_process(pipe, Some(process_id))
+    }
+
+    fn with_process(pipe: impl Into<String>, expected_process_id: Option<NonZeroU32>) -> Result<Self, Error> {
         let pipe = pipe.into();
         let suffix = pipe.strip_prefix(r"\\.\pipe\winsearch-S-1-");
         if pipe.len() > 256
@@ -214,6 +226,7 @@ impl Client {
         }
         Ok(Self(Arc::new(Inner {
             pipe,
+            expected_process_id,
             ids: AtomicU64::new(1),
             reads: Arc::new(Semaphore::new(4)),
             controls: Arc::new(Semaphore::new(1)),
@@ -278,7 +291,12 @@ impl Client {
                 }
                 // Keep Tokio's SECURITY_IDENTIFICATION default; never allow impersonation.
                 match ClientOptions::new().open(&self.0.pipe) {
-                    Ok(io) => return Session::handshake(io, deadline).await,
+                    Ok(io) => {
+                        if let Some(expected) = self.0.expected_process_id {
+                            verify_server_process(&io, expected)?;
+                        }
+                        return Session::handshake(io, deadline).await;
+                    }
                     Err(error)
                         if error.kind() == std::io::ErrorKind::NotFound
                             || error.raw_os_error() == Some(231) =>
@@ -546,6 +564,29 @@ impl Client {
     }
 }
 
+#[cfg(windows)]
+fn verify_server_process(
+    pipe: &tokio::net::windows::named_pipe::NamedPipeClient,
+    expected: NonZeroU32,
+) -> Result<(), Error> {
+    use std::os::windows::io::{AsRawHandle, RawHandle};
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetNamedPipeServerProcessId(pipe: RawHandle, process_id: *mut u32) -> i32;
+    }
+
+    let mut actual = 0;
+    // Borrow the same live connection that will carry Hello; a probe is racy.
+    if unsafe { GetNamedPipeServerProcessId(pipe.as_raw_handle(), &mut actual) } == 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    if actual != expected.get() {
+        return Err(Error::ServerIdentityMismatch);
+    }
+    Ok(())
+}
+
 fn config_reply(message: ServerMessage) -> Result<EngineConfig, Error> {
     match message {
         ServerMessage::Config { config, .. } => Ok(config),
@@ -750,6 +791,64 @@ mod tests {
             }
         ));
         send_server(peer, &ack()).await;
+    }
+
+    #[tokio::test]
+    async fn process_identity_rejects_every_lane_before_sending_hello() {
+        use tokio::io::AsyncReadExt;
+        for lane in 0..4 {
+            let (unbound, mut peer) = fixture();
+            let different_process = if std::process::id() == 1 { 2 } else { 1 };
+            let client = Client::for_process(
+                unbound.0.pipe.clone(), NonZeroU32::new(different_process).unwrap(),
+            ).unwrap().clone();
+            let task = tokio::spawn(async move {
+                peer.connect().await.unwrap();
+                let read = peer.read(&mut [0u8; 1]).await;
+                assert!(matches!(read, Ok(0)) || matches!(read, Err(ref e)
+                    if matches!(e.kind(), std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset)),
+                    "untrusted peer received protocol bytes: {read:?}");
+            });
+            let result = match lane {
+                0 => client.info().await.map(|_| ()),
+                1 => client.status().await.map(|_| ()),
+                2 => client.set_config(EngineConfig::default()).await.map(|_| ()),
+                _ => client.subscribe().await.map(|_| ()),
+            };
+            assert!(matches!(result, Err(Error::ServerIdentityMismatch)), "lane {lane}: {result:?}");
+            task.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn process_identity_accepts_the_connected_server_and_rechecks_cloned_clients() {
+        let (unbound, mut peer) = fixture();
+        let pipe = unbound.0.pipe.clone();
+        let client = Client::for_process(
+            pipe.clone(), NonZeroU32::new(std::process::id()).unwrap(),
+        ).unwrap();
+        let task = tokio::spawn(async move {
+            hello(&mut peer).await;
+            let ClientMessage::GetStatus { id } = read_client(&mut peer).await else { panic!("expected status"); };
+            send_server(&mut peer, &ServerMessage::Status { id: Some(id),
+                status: EngineStatus { files_indexed: 17, ..Default::default() } }).await;
+        });
+        assert_eq!(client.clone().status().await.unwrap().files_indexed, 17);
+        task.await.unwrap();
+
+        // A later connection must run the check again, before it can dispatch.
+        let mut peer = ServerOptions::new().first_pipe_instance(true).create(&pipe).unwrap();
+        let other_process = if std::process::id() == 1 { 2 } else { 1 };
+        let wrong = Client::for_process(pipe, NonZeroU32::new(other_process).unwrap()).unwrap();
+        let task = tokio::spawn(async move {
+            use tokio::io::AsyncReadExt;
+            peer.connect().await.unwrap();
+            let read = peer.read(&mut [0u8; 1]).await;
+            assert!(matches!(read, Ok(0)) || matches!(read, Err(ref e)
+                if matches!(e.kind(), std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset)));
+        });
+        assert!(matches!(wrong.clone().status().await, Err(Error::ServerIdentityMismatch)));
+        task.await.unwrap();
     }
 
     #[tokio::test]

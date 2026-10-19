@@ -1,0 +1,34 @@
+{
+  "docs/headless-client.md": {
+    "raw_sha256": "8b8aa76bb0d1740e2ef2e3317b440c63bfc021b9e6c6227fb038c278b8098605",
+    "git_lf_sha256": "8b8aa76bb0d1740e2ef2e3317b440c63bfc021b9e6c6227fb038c278b8098605"
+  },
+  "src/engine/bins/winsearchd/src/code.rs": {
+    "raw_sha256": "e8f51cad48abaf4d730136a24d29c91730562d2069676d521cc4c36f3c6db735",
+    "git_lf_sha256": "e8f51cad48abaf4d730136a24d29c91730562d2069676d521cc4c36f3c6db735"
+  },
+  "src/engine/bins/winsearchd/src/indexer.rs": {
+    "raw_sha256": "36286cafaf13539d90f71221a7911bc546f242494fd23805cf2022dc6f575635",
+    "git_lf_sha256": "36286cafaf13539d90f71221a7911bc546f242494fd23805cf2022dc6f575635"
+  },
+  "src/engine/bins/winsearchd/src/main.rs": {
+    "raw_sha256": "d6efa0d33865338d76d51935b8e03df34e29f2ddad8ec8365c69df03082290bb",
+    "git_lf_sha256": "0cc60b5ce57276ca2b38c796a9863944056c652c8228a48f9977662e6a2106f6"
+  },
+  "src/engine/crates/ws-client/examples/native-client-smoke.rs": {
+    "raw_sha256": "43c55ed36f374023571574b66693caa3dce3d1271f9406a9fcaab097d9eddae0",
+    "git_lf_sha256": "43c55ed36f374023571574b66693caa3dce3d1271f9406a9fcaab097d9eddae0"
+  },
+  "src/engine/crates/ws-client/src/client.rs": {
+    "raw_sha256": "27a639e333b51e9e7d1c171b8584e13f8b754ff5a07f09854a0f6c7c35329f84",
+    "git_lf_sha256": "27a639e333b51e9e7d1c171b8584e13f8b754ff5a07f09854a0f6c7c35329f84"
+  },
+  "src/engine/crates/ws-client/src/lib.rs": {
+    "raw_sha256": "f9c9cb13d0c895578ccae20278a568131682ea0c55be16dfa4e58d9eac4ed877",
+    "git_lf_sha256": "f9c9cb13d0c895578ccae20278a568131682ea0c55be16dfa4e58d9eac4ed877"
+  },
+  "tools/test-search-parity.py": {
+    "raw_sha256": "b31b3047f2439414aef80ccf52720db79d692968fa4aa7e5779f89b413716bc7",
+    "git_lf_sha256": "b31b3047f2439414aef80ccf52720db79d692968fa4aa7e5779f89b413716bc7"
+  }
+}

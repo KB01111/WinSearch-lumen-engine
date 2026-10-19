@@ -53,8 +53,11 @@ include Lumen integration and the final native/installed acceptance gates.
       mismatch rejection implemented; larger-source/legacy recovery, unsupported
       notification coverage and final device/review acceptance remain open
 - [~] Query scopes/filters — app/file/category filters precede candidate caps;
-      typed ordinary/code extension filters and semantic pre-top-k admission work;
-      finer file-kind scopes and Related remain open
+      typed ordinary/code/Related extension and source-kind selectors work before
+      candidate limits; consumer scope intersections and installed acceptance remain open
+- [~] Owned-host startup — process-bound Rust pipe connections and deferred
+      source/code/catalog admission verified locally; Lumen lifecycle wiring,
+      payload ownership and installed acceptance remain open
 - [~] Terminal source/semantic outcomes — daemon, Rust/C# clients and CLI now
       distinguish completion/interruption and disabled/ready/degraded with closed
       reasons; legacy remains unknown. [Local native/model evidence](validation/2026-10-18-search-outcomes/README.md)

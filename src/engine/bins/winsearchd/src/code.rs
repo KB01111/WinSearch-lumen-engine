@@ -1119,6 +1119,10 @@ pub(crate) mod tests {
         std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
     }
     fn fixture() -> (Arc<CodeService>, PathBuf) {
+        fixture_with_admission(false)
+    }
+
+    fn fixture_with_admission(deferred: bool) -> (Arc<CodeService>, PathBuf) {
         let root = std::env::temp_dir().join(format!(
             "winsearch-code-service-{}-{:?}",
             std::process::id(),
@@ -1132,7 +1136,7 @@ pub(crate) mod tests {
         policy.respect_battery_saver = false;
         policy.index_on_battery = true;
         store.set_indexing_config(&policy).unwrap();
-        let indexer = Indexer::open(store, &[]).unwrap();
+        let indexer = if deferred { Indexer::open_deferred(store) } else { Indexer::open(store, &[]) }.unwrap();
         let models = ModelService::new(root.join("models"), Arc::clone(&indexer));
         let worker = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../target/debug/winsearch-extract.exe");
@@ -1144,6 +1148,31 @@ pub(crate) mod tests {
             ExtractClient::new(worker, root.join("cache")),
         );
         (code, root.join("repo"))
+    }
+
+    #[test]
+    fn deferred_admission_keeps_saved_code_jobs_and_watchers_inactive() {
+        let (code, root) = fixture_with_admission(true);
+        let path = root.join("lib.rs");
+        std::fs::write(&path, "fn current_host_consent() {}\n").unwrap();
+        let mut selected = code.indexer.store_lock().get_or_migrate_indexing_config().unwrap();
+        assert!(selected.code_enabled && !selected.code_roots.is_empty());
+        code.store.lock().unwrap().enqueue_job(&root.to_string_lossy(), &root.to_string_lossy(), true, now()).unwrap();
+        let due = code.store.lock().unwrap().next_job_due().unwrap();
+        code.configure().unwrap();
+        assert!(code.watchers.lock().unwrap().is_empty());
+        assert!(!code.allowed(&path));
+        assert!(!code.turn().unwrap());
+        assert!(!code.embed_turn().unwrap());
+        assert_eq!(code.store.lock().unwrap().next_job_due().unwrap(), due);
+        assert_eq!(code.indexer.store_lock().get_or_migrate_indexing_config().unwrap(), selected);
+        selected.paused = true;
+        code.indexer.set_indexing_config(&selected).unwrap();
+        code.configure().unwrap();
+        assert!(code.allowed(&path));
+        assert!(code.indexer.get_indexing_config().unwrap().code_enabled);
+        drop(code);
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
     }
 
     pub(crate) fn indexed_fixture() -> (Arc<CodeService>, Arc<Indexer>, PathBuf) {

@@ -1,0 +1,82 @@
+{
+  "owned-process-auth-red.log": {
+    "sha256": "8dd9d35dd3f096af0635f63abfe82c644a29b82b03636065fd10bd0f5def47c8",
+    "bytes": 2406
+  },
+  "owned-process-auth-green.log": {
+    "sha256": "cb5134afd86ce0fed3322e5d1a14dc0f6e247f2ba6f4647318491bf862800920",
+    "bytes": 5427
+  },
+  "host-admission-red.log": {
+    "sha256": "02b23c7eaa563fc3b7ac1ec004530f09f8e148533e407184c374196eabb238bc",
+    "bytes": 1409
+  },
+  "host-admission-failure-order-red.log": {
+    "sha256": "c9df64a0ea3a262ab6aba8e7922a6ea977ffad8aad0de38544eaad2fcc427406",
+    "bytes": 1105
+  },
+  "host-admission-final-focused.log": {
+    "sha256": "d5f701a7647b10d69cabcad3bc8a136dedd5de17a5517eecfe600c593239db20",
+    "bytes": 813
+  },
+  "host-admission-workspace.log": {
+    "sha256": "def68e70f0cfa42e38971e682b5ed7d4c573296d8b23394b7041e3ef276bda07",
+    "bytes": 53579
+  },
+  "host-admission-workspace-serial.log": {
+    "sha256": "f7e111f0c00509cf1bcd9a3269ac0e47dc469fcffb50154c079f55f2b0129f62",
+    "bytes": 55715
+  },
+  "host-admission-final-workspace.log": {
+    "sha256": "c92259cc07e774003e4c6fe0add57cc272b32ead1d7e6acb73e55a589d48cd23",
+    "bytes": 56030
+  },
+  "host-admission-final-daemon.log": {
+    "sha256": "51cc867867baf9d89b2dea0a0efac4dd1e1bd4597e1b81d6fba1cc989967cd3b",
+    "bytes": 20656
+  },
+  "owned-startup-client-doc.log": {
+    "sha256": "67d361ac34edf8a2717535a8698ea1779ec04f4b0d14e672d68f4372e7ab46d5",
+    "bytes": 384
+  },
+  "owned-startup-model-references.log": {
+    "sha256": "375586a8e05f8b7b25bbf4ed4ac90785a9db2130ce3dd5ae2befcabdeb9d8590",
+    "bytes": 1314953
+  },
+  "owned-startup-worker-build.log": {
+    "sha256": "e1491a64b7ae8c2ca9c3893ebad1f8ca83b846bc3ad07f2e2607c0bc2b1ea5c4",
+    "bytes": 4117
+  },
+  "owned-startup-actual-worker.log": {
+    "sha256": "805cfcf3d426d64bd7a8c0fdd3b117d28c312c4f3caa8e5cb75416582927d55e",
+    "bytes": 290494
+  },
+  "owned-startup-coherent-build.log": {
+    "sha256": "0ef47018e85203a05fe5bd95ab8b3c379a7c42445fcdce0877b4fa9165d157b0",
+    "bytes": 3887
+  },
+  "owned-startup-dotnet-tests.log": {
+    "sha256": "da7a44a5386f7792cf6a06a69de4260b587fc548a24f2f0e761a39d3a0d57256",
+    "bytes": 923
+  },
+  "owned-startup-winui-build.log": {
+    "sha256": "2734cee147decfd9c0f9a1094aa61b62c7b11c9e6c56a4475363c31139c2a5c5",
+    "bytes": 660
+  },
+  "owned-startup-native-no-model.log": {
+    "sha256": "a21ad518016aba79da0dea260157eed52ca7c39f3b3c8bd9bd90ef9500aaa86a",
+    "bytes": 1331
+  },
+  "owned-startup-native-cpu.log": {
+    "sha256": "0ba426c79f39a51a5a44c815122e80db5ae04ecf10e9b5af4823716ee51982c2",
+    "bytes": 1646
+  },
+  "owned-startup-native-no-model/results.json": {
+    "sha256": "77c420559785ffd3804dce61c5ed75da6c8ac80d4f768e485d40e4e2058c1d64",
+    "bytes": 105277
+  },
+  "owned-startup-native-cpu/results.json": {
+    "sha256": "56835474e61b9a1cd832fe313be8d2cb538a8727503056387cca6a54d36de223",
+    "bytes": 262835
+  }
+}

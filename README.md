@@ -29,6 +29,9 @@ adds repeated extension arguments and rejects unsupported peers and mismatched r
 The [file-kind checkpoint](docs/validation/2026-10-19-file-kinds/README.md)
 adds typed source classifications before candidate limits, including PDF,
 spreadsheet, presentation, source and unknown kinds.
+The [owned-startup checkpoint](docs/validation/2026-10-19-owned-startup/README.md)
+adds process-bound Rust connections and deferred folder admission. Wiring these
+controls into Lumen's owned engine lifecycle remains open below.
 
 ### Lumen integration and native contract
 
@@ -43,10 +46,10 @@ spreadsheet, presentation, source and unknown kinds.
   source fences and retained failure evidence.
 - [ ] Implement the typed WinSearch adapter behind Lumen's existing SearchService.
   Keep secured IPC, filesystem grants and native actions in Lumen's Rust host.
-- [ ] Authenticate every pipe connection against the engine process owned by
-  Lumen before sending the handshake or requests.
-- [ ] Defer scanning persisted roots until Lumen admits its current folder
-  policy, including explicitly empty roots and revoked access.
+- [ ] Integrate and verify process-bound pipe authentication in Lumen's owned
+  engine lifecycle, retaining the verified process handle through every connection.
+- [ ] Launch Lumen's engine with deferred root admission and verify current
+  folder grants on startup/restart, including empty roots and revoked access.
 - [ ] Consolidate to one authoritative crawler, index and embedding lifecycle;
   migrate identities and metadata without losing existing user data.
 - [ ] Preserve Recent/Related results, pins, history and answer-context admission,

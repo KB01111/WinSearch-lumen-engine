@@ -134,21 +134,31 @@ pub struct Indexer {
     shutdown: AtomicBool,
     roots: std::sync::RwLock<Vec<Arc<RootInfo>>>,
     policy: Arc<std::sync::RwLock<ws_protocol::IndexingConfig>>,
+    policy_admitted: Arc<AtomicBool>,
     watchers: Mutex<Vec<Watcher>>,
     configuration_change: Mutex<()>,
 }
 
 impl Indexer {
     fn root_snapshot(&self) -> Vec<Arc<RootInfo>> {
+        if !self.policy_admitted.load(Ordering::Acquire) { return Vec::new(); }
         self.roots.read().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
     pub fn get_indexing_config(&self) -> Result<ws_protocol::IndexingConfig, StoreError> {
-        Ok(self
+        let admitted = self.policy_admitted.load(Ordering::Acquire);
+        let mut config = self
             .policy
             .read()
             .unwrap_or_else(|p| p.into_inner())
-            .clone())
+            .clone();
+        if !admitted {
+            config.roots.clear();
+            config.code_roots.clear();
+            config.code_enabled = false;
+            config.paused = true;
+        }
+        Ok(config)
     }
     pub fn set_indexing_config(
         self: &Arc<Self>,
@@ -159,7 +169,8 @@ impl Indexer {
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let config = crate::policy::validate(config)?;
-        let policy_changed = *self.policy.read().unwrap_or_else(|p| p.into_inner()) != config;
+        let policy_changed = !self.policy_admitted.load(Ordering::Acquire)
+            || *self.policy.read().unwrap_or_else(|p| p.into_inner()) != config;
         let mut store = self.store_lock();
         store.set_indexing_config(&config)?;
         if policy_changed { self.policy_epoch.fetch_add(1, Ordering::AcqRel); }
@@ -188,16 +199,20 @@ impl Indexer {
         let old = std::mem::take(&mut *self.watchers.lock().unwrap_or_else(|p| p.into_inner()));
         drop(old);
         let watchers: Vec<_> = roots.iter().filter_map(|r| self.spawn_watcher(r)).collect();
+        self.enqueue_scans_for_roots(&roots)?;
         *self.watchers.lock().unwrap_or_else(|p| p.into_inner()) = watchers;
-        self.enqueue_initial_scan()?;
+        self.policy_admitted.store(true, Ordering::Release);
         self.notify_work();
         Ok(())
     }
     pub fn indexing_pause_reason(&self) -> Option<String> {
+        if !self.policy_admitted.load(Ordering::Acquire) {
+            return Some("Awaiting host folder policy".into());
+        }
         crate::policy::native_pause_reason(&self.policy.read().unwrap_or_else(|p| p.into_inner()))
     }
     pub(crate) fn name_path_allowed(&self, path: &Path) -> bool {
-        crate::policy::path_allowed(
+        self.policy_admitted.load(Ordering::Acquire) && crate::policy::path_allowed(
             &self.policy.read().unwrap_or_else(|p| p.into_inner()),
             &path.to_string_lossy(),
         ) && crate::policy::metadata_safe(path, false)
@@ -219,8 +234,18 @@ impl Indexer {
             .unwrap_or_else(|p| p.into_inner());
     }
 
+    /// Opens saved data without admitting saved folders or starting source work.
+    /// Only a successful current host policy releases this gate.
+    pub fn open_deferred(store: IndexStore) -> Result<Arc<Self>, StoreError> {
+        Self::open_with_admission(store, &[], false)
+    }
+
     /// Opens the index and registers the given roots (idempotent).
     pub fn open(store: IndexStore, roots: &[PathBuf]) -> Result<Arc<Self>, StoreError> {
+        Self::open_with_admission(store, roots, true)
+    }
+
+    fn open_with_admission(store: IndexStore, roots: &[PathBuf], admitted: bool) -> Result<Arc<Self>, StoreError> {
         let mut store = store;
         // Claims left by a crashed run become work again (crawl queue and
         // embed queue alike: a crash mid-batch re-runs the idempotent work).
@@ -237,11 +262,14 @@ impl Indexer {
         }
         let config = crate::policy::validate(&config)?;
         let policy=Arc::new(std::sync::RwLock::new(config.clone()));
+        let policy_admitted = Arc::new(AtomicBool::new(admitted));
+        let query_admitted = policy_admitted.clone();
         let query_policy=policy.clone();
         store.set_query_source_guard(move |path,source,is_app| {
-            query_source_allowed(&query_policy.read().unwrap_or_else(|p|p.into_inner()),path,source,is_app)
+            query_admitted.load(Ordering::Acquire)
+                && query_source_allowed(&query_policy.read().unwrap_or_else(|p|p.into_inner()),path,source,is_app)
         })?;
-        let selected: Vec<PathBuf> = config.roots.iter().map(PathBuf::from).collect();
+        let selected: Vec<PathBuf> = if admitted { config.roots.iter().map(PathBuf::from).collect() } else { Vec::new() };
         let mut infos = Vec::new();
         for root in &selected {
             let path = root.to_string_lossy().into_owned();
@@ -268,6 +296,7 @@ impl Indexer {
             shutdown: AtomicBool::new(false),
             roots: std::sync::RwLock::new(infos),
             policy,
+            policy_admitted,
             watchers: Mutex::new(Vec::new()),
             configuration_change: Mutex::new(()),
         }))
@@ -312,8 +341,13 @@ impl Indexer {
 
     /// Enqueues a full scan of every root (first run, reconnect, or rescan).
     pub fn enqueue_initial_scan(&self) -> Result<(), StoreError> {
+        if !self.policy_admitted.load(Ordering::Acquire) { return Ok(()); }
+        self.enqueue_scans_for_roots(&self.root_snapshot())
+    }
+
+    fn enqueue_scans_for_roots(&self, roots: &[Arc<RootInfo>]) -> Result<(), StoreError> {
         let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
-        for root in &self.root_snapshot() {
+        for root in roots {
             if !root.path.is_dir() {
                 continue; // disconnected volume: preserved until it returns
             }
@@ -344,7 +378,7 @@ impl Indexer {
         filter: Option<&VectorFilter>,
     ) -> Result<Vec<ScoredSegment>, StoreError> {
         let epoch=self.search_epoch();
-        if top_k == 0 || query.is_empty() {
+        if !self.policy_admitted.load(Ordering::Acquire) || top_k == 0 || query.is_empty() {
             return Ok(Vec::new());
         }
         let (_, query_norm) = ws_index::vectors::normalize_vector(query);
@@ -1012,6 +1046,10 @@ impl Indexer {
             if self.shutdown.load(Ordering::SeqCst) {
                 return;
             }
+            if !self.policy_admitted.load(Ordering::Acquire) {
+                self.wait_for_work();
+                continue;
+            }
             if let Err(e) = self.refresh_catalog() {
                 warn!(error = %e, "catalog refresh failed");
             }
@@ -1026,6 +1064,7 @@ impl Indexer {
     }
 
     fn refresh_catalog(&self) -> Result<(), StoreError> {
+        if !self.policy_admitted.load(Ordering::Acquire) { return Ok(()); }
         let scan = catalog::scan_catalog_full(&catalog::app_roots());
         let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
         let root_id = store.ensure_root(CATALOG_ROOT)?;
@@ -1487,6 +1526,128 @@ impl Drop for Indexer {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn deferred_admission_preserves_saved_policy_entries_and_jobs_without_authorizing_them() {
+        let tree = TempTree::new();
+        let root = tree.0.join("selected");
+        fs::create_dir(&root).unwrap();
+        let path = root.join("saved-admission.txt");
+        fs::write(&path, "saved source must wait for current host consent").unwrap();
+        let database = tree.0.join("engine.sqlite3");
+        let mut selected = ws_protocol::IndexingConfig {
+            roots: vec![root.to_string_lossy().into_owned()],
+            code_enabled: true, code_roots: vec![root.to_string_lossy().into_owned()],
+            ..Default::default()
+        };
+        let id = {
+            let mut store = IndexStore::open(&database).unwrap();
+            store.set_indexing_config(&selected).unwrap();
+            let root_id = store.ensure_root(&root.to_string_lossy()).unwrap();
+            let generation = store.begin_generation(root_id).unwrap();
+            let record = crawl::record_for_path(root_id, None, &path).unwrap().unwrap();
+            store.apply_batch(root_id, generation, &[record]).unwrap();
+            let id = store.find_by_path(&path.to_string_lossy()).unwrap().unwrap().id;
+            store.enqueue_dir(root_id, &root.to_string_lossy()).unwrap();
+            store.enqueue_extract_job_with_priority(id, "name", EXTRACT_PRIORITY_NEW).unwrap();
+            store.enqueue_extract_job_with_priority(id, "doc", EXTRACT_PRIORITY_NEW).unwrap();
+            store.upsert_segment(NewSegment { entry_id:id, kind:"name", chunk_index:0,
+                text:"saved-admission.txt", page:None, start_ms:None, end_ms:None, line:None,
+                vector:&[1.0, 0.0] }).unwrap();
+            id
+        };
+        let indexer = Indexer::open_deferred(IndexStore::open(&database).unwrap()).unwrap();
+        let effective = indexer.get_indexing_config().unwrap();
+        assert!(effective.roots.is_empty(), "saved folders are not current host consent");
+        assert!(effective.paused && !effective.code_enabled && effective.code_roots.is_empty());
+        assert_eq!(indexer.indexing_pause_reason().as_deref(), Some("Awaiting host folder policy"));
+        assert!(indexer.root_snapshot().is_empty());
+        assert!(!indexer.name_path_allowed(&path) && !indexer.content_path_allowed(&path));
+        assert!(indexer.search(&SearchRequest { text:"saved-admission".into(), limit:10,
+            ..Default::default() }).unwrap().is_empty());
+        assert!(indexer.search_vectors(&[1.0,0.0], 10, None).unwrap().is_empty());
+        indexer.enqueue_initial_scan().unwrap();
+        indexer.reconcile_drives();
+        assert_eq!(indexer.scan_available(64), 0);
+        assert_eq!(indexer.embed_once_with(|_| panic!("embedding before admission")).unwrap().claimed, 0);
+        let extracted = indexer.extract_once_with(&crate::extract::ExtractorRegistry::default(),
+            |_| panic!("content extraction before admission")).unwrap();
+        assert!(!extracted.claimed);
+        {
+            let mut store = indexer.store_lock();
+            assert_eq!(store.get_or_migrate_indexing_config().unwrap(), selected);
+            assert_eq!(store.queue_depth().unwrap(), 1);
+            assert_eq!(store.extract_queue_depth_for_kind("name").unwrap(), 1);
+            assert_eq!(store.content_extract_queue_depth().unwrap(), 1);
+            assert_eq!(store.get_entry(id).unwrap().unwrap().id, id);
+            assert_eq!(store.count_segments_by_kind("name").unwrap(), 1);
+        }
+        // A valid current policy may admit saved folders, without a background
+        // crawl racing this test's explicit empty-root revocation afterward.
+        selected.paused = true;
+        indexer.set_indexing_config(&selected).unwrap();
+        assert_eq!(indexer.get_indexing_config().unwrap(), selected);
+        assert_eq!(indexer.search(&SearchRequest { text:"saved-admission".into(), limit:10,
+            ..Default::default() }).unwrap().len(), 1);
+        selected.roots.clear(); selected.code_enabled = false; selected.code_roots.clear();
+        indexer.set_indexing_config(&selected).unwrap();
+        assert!(indexer.search(&SearchRequest { text:"saved-admission".into(), limit:10,
+            ..Default::default() }).unwrap().is_empty());
+        assert_eq!(indexer.store_lock().get_entry(id).unwrap().unwrap().id, id);
+    }
+
+    #[test]
+    fn deferred_admission_invalid_policy_does_not_unlock_catalog_or_acceptance() {
+        let indexer = Indexer::open_deferred(IndexStore::open_in_memory().unwrap()).unwrap();
+        let invalid = ws_protocol::IndexingConfig { roots:vec!["relative-folder".into()], ..Default::default() };
+        assert!(indexer.set_indexing_config(&invalid).is_err());
+        indexer.refresh_catalog().unwrap();
+        assert!(indexer.store_lock().roots().unwrap().is_empty(), "catalog must wait for host admission");
+        assert_eq!(indexer.indexing_pause_reason().as_deref(), Some("Awaiting host folder policy"));
+        let empty = ws_protocol::IndexingConfig::default();
+        indexer.set_indexing_config(&empty).unwrap();
+        assert_eq!(indexer.get_indexing_config().unwrap(), empty);
+        assert!(indexer.root_snapshot().is_empty());
+        assert_ne!(indexer.indexing_pause_reason().as_deref(), Some("Awaiting host folder policy"));
+    }
+
+    #[test]
+    fn deferred_admission_scan_setup_failure_keeps_sources_blocked_until_successful_retry() {
+        for trigger in [
+            "BEFORE UPDATE OF current_generation ON roots",
+            "BEFORE INSERT ON crawl_queue",
+            "BEFORE INSERT ON checkpoints",
+        ] {
+            let tree = TempTree::new();
+            let root = tree.0.join("selected");
+            fs::create_dir(&root).unwrap();
+            let path = root.join("current-consent.txt");
+            fs::write(&path, "host-selected source").unwrap();
+            let database = tree.0.join("engine.sqlite3");
+            let indexer = Indexer::open_deferred(IndexStore::open(&database).unwrap()).unwrap();
+            let fault = rusqlite::Connection::open(&database).unwrap();
+            fault.execute_batch(&format!("CREATE TRIGGER fail_scan_setup {trigger} BEGIN
+                SELECT RAISE(ABORT, 'forced scan setup write failure'); END;")).unwrap();
+            let selected = ws_protocol::IndexingConfig {
+                roots:vec![root.to_string_lossy().into_owned()], ..Default::default()
+            };
+            assert!(indexer.set_indexing_config(&selected).is_err(), "{trigger}");
+            assert_eq!(indexer.indexing_pause_reason().as_deref(), Some("Awaiting host folder policy"), "{trigger}");
+            assert!(indexer.get_indexing_config().unwrap().roots.is_empty());
+            assert!(indexer.root_snapshot().is_empty());
+            assert!(indexer.watchers.lock().unwrap().is_empty());
+            assert!(!indexer.name_path_allowed(&path));
+            indexer.refresh_catalog().unwrap();
+            assert!(!indexer.store_lock().roots().unwrap().iter().any(|row| row.path == CATALOG_ROOT));
+            assert_eq!(indexer.scan_available(10), 0);
+            fault.execute_batch("DROP TRIGGER fail_scan_setup").unwrap();
+            indexer.set_indexing_config(&selected).unwrap();
+            assert_eq!(indexer.get_indexing_config().unwrap(), selected);
+            assert_ne!(indexer.indexing_pause_reason().as_deref(), Some("Awaiting host folder policy"));
+            assert!(indexer.scan_available(10) > 0);
+        }
+    }
+
     #[test]
     fn watcher_point_commit_rechecks_exclusions_after_metadata_collection() {
         for extension_rule in [false, true] {

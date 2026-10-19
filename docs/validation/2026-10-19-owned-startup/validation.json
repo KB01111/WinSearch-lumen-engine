@@ -1,0 +1,194 @@
+{
+  "scope": "Local Windows/debug owned-startup prerequisite; not installed Lumen or full v1 acceptance",
+  "workspace_before_final_watcher_order": {
+    "passed": 625,
+    "ignored": 1
+  },
+  "final_daemon_replay": {
+    "passed": 238,
+    "ignored": 0,
+    "replaces_pre_order_daemon_tests": 238
+  },
+  "unchanged_non_daemon_tests": {
+    "passed": 387,
+    "includes_client_tests": 53
+  },
+  "actual_model_references": {
+    "passed": 25,
+    "ignored": 0
+  },
+  "explicit_actual_worker": {
+    "passed": 1,
+    "ignored": 0
+  },
+  "executed_rust_tests_disjoint": 651,
+  "additional_client_doctest": {
+    "passed": 1,
+    "ignored": 0
+  },
+  "dotnet": {
+    "passed": 152,
+    "failed": 0,
+    "skipped": 0
+  },
+  "winui_x64": {
+    "warnings": 0,
+    "errors": 0
+  },
+  "numerical_reference_lines": [
+    "screen/photo cosine=0.6594047315",
+    "screen-280 reference cosine=0.9999420468",
+    "synthetic-speech reference cosine=0.9997505007",
+    "photo-140 reference cosine=0.9998148076",
+    "frame-70 reference cosine=0.9996982675",
+    "reference check: 10 cases, worst drift 1.32e-4 (\"function that retries with exponential backoff\")"
+  ],
+  "gpu": "CUDA compiled; initialization reported unavailable; reference and retrieval execution used CPU. No GPU calibration claim.",
+  "retained_failures": [
+    "Wrong-PID named-pipe peer received a handshake byte before authentication was implemented: two functional test failures.",
+    "Deferred open admitted saved roots and catalog work before current host policy: two functional test failures.",
+    "SQLite generation-write fault returned an error after admission had opened: one functional test failure; final test covers generation, queue and checkpoint writes plus successful retries.",
+    "An unprescribed parallel workspace run failed 57 daemon tests, mainly AdmissionUnavailable against two process-wide parser slots. The pre-existing documented serial command passed; parser quotas and assertions were unchanged."
+  ],
+  "review": "Scoped independent GPT-6.1 Sol source review found admission-on-error and watcher-order races. Both fixed; final ordering re-reviewed without remaining findings. Broad final review remains open.",
+  "native": {
+    "no-model": {
+      "public_queries": 10,
+      "raw_kind_queries": 11,
+      "typed_kind_queries": 6,
+      "index_seconds": 3.461,
+      "elapsed_seconds": 11.122,
+      "quality": {
+        "positive_queries": 4,
+        "Recall@5": 1.0,
+        "MRR": 1.0,
+        "minimum_recall_at_5": 0.9,
+        "minimum_mrr": 0.85,
+        "maximum_negative_fp_rate": 0,
+        "original_positive_cases": {
+          "positive_queries": 4,
+          "Recall@5": 1.0,
+          "MRR": 1.0
+        },
+        "empty_result_controls": 6,
+        "empty_control_fp_rate": 0.0,
+        "empty_control_scope": "all declared empty-result cases, including code isolation and root revocation",
+        "by_modality": {
+          "code": {
+            "positive_queries": 2,
+            "Recall@5": 1.0,
+            "MRR": 1.0
+          },
+          "document": {
+            "positive_queries": 2,
+            "Recall@5": 1.0,
+            "MRR": 1.0
+          }
+        }
+      },
+      "checks": [
+        "deferred_startup_and_invalid_policy_remain_unadmitted",
+        "native_ordinary_document_media_byte_sha256_and_resolved_metadata",
+        "native_file_kind_exact_code_notebook_union_intersection_and_synthetic_controls",
+        "native_extension_filters_before_results_and_invalid_request_rejection",
+        "native_indexed_entry_resolution_with_current_source_proof",
+        "native_code_and_notebook_exact_byte_sha256_provenance",
+        "native_extraction_exact_code_opt_in_and_payload_parity",
+        "typed_client_bound_code_notebook_refs_and_actual_sha256",
+        "typed_async_client_native_dto_status_pause_revoke_restore_reconnect",
+        "committed_exact_cache_revisions_and_hashes_survive_consumer_policy_lifecycle",
+        "native_code_exact_with_zero_model_vectors",
+        "shared_offline_ranker_native_snapshot_ordered_ids_and_locations",
+        "raw_related_bound_seed_domain_budget_outcomes_and_unavailable_controls",
+        "native_entry_reference_rejected_after_root_revocation",
+        "live_root_revocation_public_cli_and_pipe",
+        "unchanged_overall_recall_mrr_and_zero_negative_controls"
+      ],
+      "process_identity_checks": [
+        "host_supplied_owned_pid",
+        "same_connection_before_every_handshake"
+      ],
+      "owned_job_empty": true,
+      "failures": []
+    },
+    "cpu": {
+      "public_queries": 21,
+      "raw_kind_queries": 13,
+      "typed_kind_queries": 6,
+      "index_seconds": 82.073,
+      "elapsed_seconds": 98.175,
+      "quality": {
+        "positive_queries": 11,
+        "Recall@5": 0.9090909090909091,
+        "MRR": 0.8636363636363636,
+        "minimum_recall_at_5": 0.9,
+        "minimum_mrr": 0.85,
+        "maximum_negative_fp_rate": 0,
+        "original_positive_cases": {
+          "positive_queries": 10,
+          "Recall@5": 0.9,
+          "MRR": 0.85
+        },
+        "empty_result_controls": 10,
+        "empty_control_fp_rate": 0.0,
+        "empty_control_scope": "all declared empty-result cases, including code isolation and root revocation",
+        "by_modality": {
+          "audio": {
+            "positive_queries": 1,
+            "Recall@5": 1.0,
+            "MRR": 0.5
+          },
+          "code": {
+            "positive_queries": 4,
+            "Recall@5": 1.0,
+            "MRR": 1.0
+          },
+          "document": {
+            "positive_queries": 4,
+            "Recall@5": 1.0,
+            "MRR": 1.0
+          },
+          "image": {
+            "positive_queries": 1,
+            "Recall@5": 0.0,
+            "MRR": 0.0
+          },
+          "video": {
+            "positive_queries": 1,
+            "Recall@5": 1.0,
+            "MRR": 1.0
+          }
+        }
+      },
+      "checks": [
+        "deferred_startup_and_invalid_policy_remain_unadmitted",
+        "pinned_model_import_ready_and_staged_artifact_hashes",
+        "native_code_index_has_complete_768d_vectors",
+        "native_ordinary_document_media_byte_sha256_and_resolved_metadata",
+        "native_file_kind_exact_code_notebook_union_intersection_and_synthetic_controls",
+        "native_extension_filters_before_results_and_invalid_request_rejection",
+        "native_indexed_entry_resolution_with_current_source_proof",
+        "native_code_and_notebook_exact_byte_sha256_provenance",
+        "native_extraction_exact_code_opt_in_and_payload_parity",
+        "typed_client_bound_code_notebook_refs_and_actual_sha256",
+        "typed_async_client_native_dto_status_pause_revoke_restore_reconnect",
+        "committed_exact_cache_revisions_and_hashes_survive_consumer_policy_lifecycle",
+        "raw_related_bound_seed_domain_budget_outcomes_and_unavailable_controls",
+        "native_semantic_only_code_function_and_caller_source_lines",
+        "shared_offline_ranker_native_snapshot_ordered_ids_and_locations",
+        "real_in_flight_cancel_empty_terminal_transport_live",
+        "real_in_flight_root_revocation_empty_terminal",
+        "actual_cpu_related_document_positive_after_original_quality_queries",
+        "native_entry_reference_rejected_after_root_revocation",
+        "live_root_revocation_public_cli_and_pipe",
+        "unchanged_overall_recall_mrr_and_zero_negative_controls"
+      ],
+      "process_identity_checks": [
+        "host_supplied_owned_pid",
+        "same_connection_before_every_handshake"
+      ],
+      "owned_job_empty": true,
+      "failures": []
+    }
+  }
+}

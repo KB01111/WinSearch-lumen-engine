@@ -291,14 +291,27 @@ def main():
 
         try:
             with (output/'daemon.log').open('wb') as log:
-                child = subprocess.Popen([str(binary/'winsearchd.exe'), '--test-stdin-gate'],
+                child = subprocess.Popen([str(binary/'winsearchd.exe'), '--test-stdin-gate', '--defer-root-admission'],
                     env=environment, stdin=subprocess.PIPE, stdout=log, stderr=log,
                     creationflags=subprocess.CREATE_NO_WINDOW)
             owner.assign(child)
+            environment['WS_ENGINE_PID'] = str(child.pid)
             timer.start()
             child.stdin.write(b'\1'); child.stdin.close()
             control = harness.Pipe(pipe_name, child)
             client = Frames(pipe_name, child)
+            waiting = control.request('get_indexing_config')['config']
+            assert waiting['roots'] == [] and waiting['code_roots'] == [] and not waiting['code_enabled'] and waiting['paused'], waiting
+            status = control.request('get_status')['status']
+            assert status['state'] == 'paused' and status['current_activity'] == 'Awaiting host folder policy', status
+            client.sequence += 1
+            client.send({'type':'set_indexing_config', 'id':client.sequence, 'config':{**waiting, 'roots':['relative-folder']}})
+            while True:
+                rejected = client.read()
+                if rejected.get('id') == client.sequence: break
+            assert rejected['type'] == 'error' and rejected['code'] == 'invalid_request', rejected
+            assert control.request('get_indexing_config')['config'] == waiting
+            summary['checks'].append('deferred_startup_and_invalid_policy_remain_unadmitted')
             compare('code_disabled', 'parityneedle', mode='code', empty=True)
             if options.real_model:
                 # Exercise the production model manager as well as the worker;
@@ -318,7 +331,7 @@ def main():
             control.request('set_config', config={'semantic_enabled': options.real_model, 'preferred_backend': 'cpu'})
             config = control.request('get_indexing_config')['config']
             config.update(roots=[str(documents), str(code)], code_enabled=True, code_roots=[str(code)],
-                respect_battery_saver=False, index_on_battery=True)
+                respect_battery_saver=False, index_on_battery=True, paused=False)
             control.request('set_indexing_config', config=config)
             db = output/'data/db/index.db'
             def ready():

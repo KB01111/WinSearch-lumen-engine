@@ -5,8 +5,9 @@
 //!
 //! ```no_run
 //! use ws_client::{Client, protocol::{SearchMode, SearchQuery}};
-//! # async fn example(pipe: String) -> Result<(), ws_client::Error> {
-//! let client = Client::new(pipe)?;
+//! # async fn example(pipe: String, owned_process_id: std::num::NonZeroU32) -> Result<(), ws_client::Error> {
+//! // Keep the verified child/process handle alive for the client's lifetime.
+//! let client = Client::for_process(pipe, owned_process_id)?;
 //! let mut search = client.search(SearchQuery {
 //!     text: "invoice".into(), mode: SearchMode::Files, limit: 20,
 //!     ..Default::default()
@@ -35,6 +36,8 @@ pub enum Error {
     Frame(#[from] FrameError),
     #[error("engine connection closed")]
     Closed,
+    #[error("engine server process does not match the host-owned process")]
+    ServerIdentityMismatch,
     #[error("engine protocol violation: {0}")]
     Protocol(&'static str),
     #[error("engine request timed out")]
