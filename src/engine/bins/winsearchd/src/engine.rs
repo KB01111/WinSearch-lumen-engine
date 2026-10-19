@@ -80,6 +80,7 @@ pub struct EngineService {
     /// Cancellation flags for in-flight search requests, keyed by `(client_id, request_id)`.
     cancels: Mutex<HashMap<(u64, RequestId), Arc<AtomicBool>>>,
     preview_jobs: Arc<std::sync::atomic::AtomicUsize>,
+    related_jobs: std::sync::atomic::AtomicUsize,
     next_client_id: std::sync::atomic::AtomicU64,
     indexer: Arc<Indexer>,
     extractors: Arc<crate::extract::ExtractorRegistry>,
@@ -113,6 +114,7 @@ struct SearchDelivery<'a> {
     revision:SearchRevision,
     cancel:&'a Arc<AtomicBool>,
     sources:&'a HashMap<String,ResultSource>,
+    related_source:Option<&'a ws_protocol::EntryReference>,
 }
 
 struct PreviewWork {
@@ -125,6 +127,14 @@ impl Drop for PreviewWork {
     fn drop(&mut self) {
         self.engine.end_request_for_client(self.client_id,self.id,&self.cancel);
         self.engine.preview_jobs.fetch_sub(1,Ordering::AcqRel);
+    }
+}
+
+struct RelatedWork {engine:SharedEngine,client_id:u64,id:RequestId,cancel:Arc<AtomicBool>}
+impl Drop for RelatedWork {
+    fn drop(&mut self) {
+        self.engine.end_request_for_client(self.client_id,self.id,&self.cancel);
+        self.engine.related_jobs.fetch_sub(1,Ordering::AcqRel);
     }
 }
 
@@ -178,6 +188,7 @@ impl EngineService {
             clients: Mutex::new(Vec::new()),
             cancels: Mutex::new(HashMap::new()),
             preview_jobs: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            related_jobs: std::sync::atomic::AtomicUsize::new(0),
             next_client_id: std::sync::atomic::AtomicU64::new(1),
             indexer,
             extractors: Arc::new(crate::extract::ExtractorRegistry::production()),
@@ -748,6 +759,11 @@ impl EngineService {
     }
 
     fn plan_semantic_checked(&self, query: &SearchQuery, exact_entry_ids: &HashSet<i64>, sources:&mut HashMap<String,ResultSource>) -> Result<Vec<SearchResult>,SemanticIssue> {
+        self.plan_semantic_excluding_checked(query,exact_entry_ids,sources,None)
+    }
+
+    fn plan_semantic_excluding_checked(&self, query: &SearchQuery, exact_entry_ids: &HashSet<i64>, sources:&mut HashMap<String,ResultSource>,
+        exclude:Option<ws_protocol::IndexedEntryId>) -> Result<Vec<SearchResult>,SemanticIssue> {
         use SemanticIssue::{EmbeddingFailed,IndexChanged,NoVectors,RetrievalFailed};
         if query.mode==SearchMode::Code {
             let code=self.code_service().ok_or(NoVectors)?;
@@ -757,11 +773,18 @@ impl EngineService {
                 ws_modelmgr::recipe::search_query(&query.text),
             ]).map_err(|_|EmbeddingFailed)?;
             if code.query_epoch()!=epoch {return Err(IndexChanged);}
-            let exact=code.exact_filtered_checked(&query.text,query.limit.max(1) as usize,&query.extensions).map_err(|_|RetrievalFailed)?;
+            let exact=if exclude.is_some() {Vec::new()} else {
+                code.exact_filtered_checked(&query.text,query.limit.max(1) as usize,&query.extensions).map_err(|_|RetrievalFailed)?};
             let candidates=(query.limit as usize).max(SEMANTIC_TOP_K).saturating_mul(8);
-            let (candidates,eligible)=code.semantic_filtered_checked(&vectors[0],&vectors[1],candidates,&query.extensions)?;
+            let excluded=match exclude {Some(ws_protocol::IndexedEntryId::Code(id))=>Some(id),_=>None};
+            let (candidates,eligible)=code.semantic_excluding_checked(&vectors[0],&vectors[1],candidates,&query.extensions,excluded)?;
             if !eligible {return Err(NoVectors);}
-            let mut hits=candidates.into_iter().filter(|h|!exact.iter().any(|e|e.file.id==h.file.id && e.start_line>=h.start_line && e.start_line<=h.end_line)).map(|h|{let score=hybrid_score(h.score,&query.text,&h.file.name_lower,h.file.mtime,crate::code::now()/1000);let mut r=code_result(h);r.score=score;r}).collect::<Vec<_>>();
+            let mut hits=candidates.into_iter().filter(|h|!exact.iter().any(|e|e.file.id==h.file.id && e.start_line>=h.start_line && e.start_line<=h.end_line)).map(|h| {
+                let score=if exclude.is_some() {f64::from(h.score)} else {hybrid_score(h.score,&query.text,&h.file.name_lower,h.file.mtime,crate::code::now()/1000)};
+                let mut result=code_result(h);result.score=score;
+                if exclude.is_some() {result.match_explanation=format!("Related code ({:.0}% similarity)",score*100.0);}
+                result
+            }).collect::<Vec<_>>();
             hits.sort_by(|a,b|b.score.total_cmp(&a.score));hits.truncate(query.limit.max(1) as usize);
             if code.query_epoch()!=epoch {return Err(IndexChanged);}
             return Ok(hits);
@@ -786,10 +809,10 @@ impl EngineService {
         let candidate_limit = (query.limit.max(1) as usize)
             .max(SEMANTIC_TOP_K)
             .saturating_mul(8);
-        let filter = if query.mode == SearchMode::Auto && kinds.is_empty() && query.extensions.is_empty() {
+        let filter = if exclude.is_none() && query.mode == SearchMode::Auto && kinds.is_empty() && query.extensions.is_empty() {
             None
         } else {
-            let matching_ids = match self.indexer.matching_entry_ids_with_extensions(
+            let mut matching_ids = match self.indexer.matching_entry_ids_with_extensions(
                 query.mode == SearchMode::Apps,
                 query.mode == SearchMode::Files,
                 &kinds,
@@ -801,11 +824,12 @@ impl EngineService {
                     return Err(RetrievalFailed);
                 }
             };
+            if let Some(ws_protocol::IndexedEntryId::File(source))=exclude {matching_ids.retain(|id|*id!=source);}
             if matching_ids.is_empty() {
                 return Err(NoVectors);
             }
             Some(ws_index::VectorFilter {
-                kinds: Vec::new(),
+                kinds: if exclude.is_some() {ws_index::model::CONTENT_SEGMENT_KINDS.iter().map(|kind|(*kind).into()).collect()} else {Vec::new()},
                 entry_ids: matching_ids,
             })
         };
@@ -885,8 +909,8 @@ impl EngineService {
                 kind: to_result_kind(kind),
                 title: entry.name.clone(),
                 subtitle: entry.path.clone(),
-                match_explanation: semantic_explanation_for_kind(seg_kind, cosine),
-                score: hybrid_score(cosine, text, &entry.name_lower, entry.mtime, now),
+                match_explanation: if exclude.is_some() {format!("Related content ({:.0}% similarity)",cosine*100.0)} else {semantic_explanation_for_kind(seg_kind, cosine)},
+                score: if exclude.is_some() {f64::from(cosine)} else {hybrid_score(cosine, text, &entry.name_lower, entry.mtime, now)},
                 path: Some(entry.path),
                 location,
                 thumbnail_path,
@@ -936,18 +960,98 @@ impl EngineService {
         }
     }
 
+    fn related_query(&self,request:&ws_protocol::RelatedQuery,cancel:&Arc<AtomicBool>)->Result<SearchQuery,ErrorCode> {
+        if !request.is_valid() {return Err(ErrorCode::InvalidRequest);}
+        let preview=self.preview_snapshot(&ws_protocol::PreviewRequest {reference:request.source.clone(),location:None},cancel)?;
+        let mut text=String::new();
+        for part in preview.parts {
+            if !text.is_empty() && text.len()<ws_protocol::MAX_PREVIEW_TEXT_BYTES {text.push('\n');}
+            let mut bytes=part.text.len().min(ws_protocol::MAX_PREVIEW_TEXT_BYTES-text.len());
+            while !part.text.is_char_boundary(bytes) {bytes-=1;}
+            text.push_str(&part.text[..bytes]);
+            if text.len()==ws_protocol::MAX_PREVIEW_TEXT_BYTES {break;}
+        }
+        if text.trim().is_empty() {return Err(ErrorCode::NotReady);}
+        let query=SearchQuery {text,mode:if matches!(request.source.indexed_id(),Some(ws_protocol::IndexedEntryId::Code(_))) {
+            SearchMode::Code } else {SearchMode::Files},limit:request.limit,include_semantic:true,
+            categories:request.categories.clone(),extensions:request.extensions.clone()};
+        if self.semantic_unavailable(&query).is_some() {return Err(ErrorCode::NotReady);}
+        Ok(query)
+    }
+
+    pub fn related(self:&Arc<Self>,client:&ClientHandle,id:RequestId,request:ws_protocol::RelatedQuery) {
+        let cancel=self.begin_request_for_client(client.id(),id);
+        let reject=if !request.is_valid() {Some(ErrorCode::InvalidRequest)} else if self.related_jobs
+            .fetch_update(Ordering::AcqRel,Ordering::Acquire,|jobs|(jobs<2).then(||jobs+1)).is_err() {Some(ErrorCode::NotReady)} else {None};
+        if let Some(code)=reject {
+            let _=self.send_search_failure(client,id,&cancel,code);self.end_request_for_client(client.id(),id,&cancel);return;
+        }
+        let work=Arc::new(RelatedWork {engine:Arc::clone(self),client_id:client.id(),id,cancel});
+        let worker=Arc::clone(&work);let thread_client=client.clone();
+        let source=self.indexer.search_epoch();
+        if std::thread::Builder::new().name("winsearch-related".into()).spawn(move || {
+            let revision=SearchRevision {source,
+                code:worker.engine.code_service().filter(|_|matches!(request.source.indexed_id(),Some(ws_protocol::IndexedEntryId::Code(_)))).map(|code|code.query_epoch()),
+                model:worker.engine.indexer.store_lock().model_generation().ok()};
+            if let Err(error)=worker.engine.run_related(&thread_client,id,&request,&worker.cancel,revision) {
+                warn!(id,error=%error,"Related transport failed");
+            }
+        }).is_err() {let _=self.send_search_failure(client,id,&work.cancel,ErrorCode::Internal);}
+    }
+
+    fn run_related(&self,client:&ClientHandle,id:RequestId,request:&ws_protocol::RelatedQuery,cancel:&Arc<AtomicBool>,revision:SearchRevision)
+        ->Result<(),FrameError> {
+        let mut query=SearchQuery {mode:if matches!(request.source.indexed_id(),Some(ws_protocol::IndexedEntryId::Code(_))) {
+            SearchMode::Code } else {SearchMode::Files},..Default::default()};
+        let mut sources=HashMap::new();
+        let planned=(|| {
+            if revision.model.is_none() {return Err(ErrorCode::Internal);}
+            query=self.related_query(request,cancel)?;
+            if cancel.load(Ordering::Acquire) || !self.query_current(&query,revision) {
+                return Ok((Vec::new(),SearchOutcome::interrupted(SearchDisposition::Superseded)));
+            }
+            match self.plan_semantic_excluding_checked(&query,&HashSet::new(),&mut sources,request.source.indexed_id()) {
+                Ok(hits)=>Ok((hits,SearchOutcome::complete(SemanticOutcome::READY))),
+                Err(SemanticIssue::NoVectors)=>Ok((Vec::new(),SearchOutcome::complete(SemanticOutcome::degraded(SemanticIssue::NoVectors)))),
+                Err(SemanticIssue::IndexChanged)=>Ok((Vec::new(),SearchOutcome::interrupted(SearchDisposition::Superseded))),
+                Err(_)=>Err(ErrorCode::Internal),
+            }
+        })();
+        let delivery=SearchDelivery {query:&query,revision,cancel,sources:&sources,related_source:Some(&request.source)};
+        match planned {
+            Ok((hits,outcome))=>self.send_results(client,id,hits,Some(outcome),&delivery).map(|_|()),
+            Err(code)=>self.send_search_failure_checked(client,id,cancel,code,Some(&delivery)),
+        }
+    }
+
     fn send_search_failure(&self,client:&ClientHandle,id:RequestId,cancel:&Arc<AtomicBool>,code:ErrorCode)->Result<(),FrameError> {
+        self.send_search_failure_checked(client,id,cancel,code,None)
+    }
+
+    fn send_search_failure_checked(&self,client:&ClientHandle,id:RequestId,cancel:&Arc<AtomicBool>,code:ErrorCode,
+        delivery:Option<&SearchDelivery<'_>>)->Result<(),FrameError> {
         let mut stream=client.stream.lock().unwrap_or_else(|p|p.into_inner());
-        if !self.cancels.lock().unwrap_or_else(|p|p.into_inner()).get(&(client.id(),id))
-            .is_some_and(|token|Arc::ptr_eq(token,cancel)) {return Ok(());}
+        let current=||self.cancels.lock().unwrap_or_else(|p|p.into_inner()).get(&(client.id(),id))
+            .is_some_and(|token|Arc::ptr_eq(token,cancel));
+        if !current() {return Ok(());}
+        let stale=delivery.is_some_and(|delivery|!self.delivery_current(delivery));
+        if !current() {return Ok(());}
         let canceled=cancel.load(Ordering::Acquire);
+        if stale {
+            return write_message(&mut *stream,&ServerMessage::Results {id,batch:Vec::new(),done:true,
+                outcome:Some(SearchOutcome::interrupted(if canceled {SearchDisposition::Canceled} else {SearchDisposition::Superseded}))});
+        }
         if !canceled {
             write_message(&mut *stream,&ServerMessage::Error {id:Some(id),code,message:"search request failed".into()})?;
         }
-        if !self.cancels.lock().unwrap_or_else(|p|p.into_inner()).get(&(client.id(),id))
-            .is_some_and(|token|Arc::ptr_eq(token,cancel)) {return Ok(());}
+        if !current() {return Ok(());}
+        let stale=delivery.is_some_and(|delivery|!self.delivery_current(delivery));
+        if !current() {return Ok(());}
+        let disposition=if cancel.load(Ordering::Acquire) {SearchDisposition::Canceled}
+            else if stale {SearchDisposition::Superseded}
+            else {SearchDisposition::Failed};
         write_message(&mut *stream,&ServerMessage::Results {id,batch:Vec::new(),done:true,
-            outcome:Some(SearchOutcome::interrupted(if canceled {SearchDisposition::Canceled} else {SearchDisposition::Failed}))})
+            outcome:Some(SearchOutcome::interrupted(disposition))})
     }
 
     fn run_search(
@@ -968,7 +1072,7 @@ impl EngineService {
                 return outcome;
             }
         };
-        let delivery=SearchDelivery {query:&query,revision,cancel:&cancel,sources:&sources};
+        let delivery=SearchDelivery {query:&query,revision,cancel:&cancel,sources:&sources,related_source:None};
         let unavailable=self.semantic_unavailable(&query);
         let terminal=unavailable.map(SearchOutcome::complete);
 
@@ -1022,6 +1126,11 @@ impl EngineService {
         source && revision.model.is_none_or(|model|self.indexer.store_lock().model_generation().ok()==Some(model))
     }
 
+    fn delivery_current(&self,delivery:&SearchDelivery<'_>)->bool {
+        self.query_current(delivery.query,delivery.revision)
+            && delivery.related_source.is_none_or(|source|self.resolve_entry_snapshot(source).is_ok())
+    }
+
     fn send_results(&self,client:&ClientHandle,id:RequestId,batch:Vec<SearchResult>,mut outcome:Option<SearchOutcome>,delivery:&SearchDelivery<'_>)
         ->Result<SentSearchBatch,FrameError> {
         let mut stream=client.stream.lock().unwrap_or_else(|p|p.into_inner());
@@ -1029,14 +1138,14 @@ impl EngineService {
             .is_some_and(|token|Arc::ptr_eq(token,delivery.cancel));
         if !current() {return Ok(SentSearchBatch {ids:HashSet::new(),done:true});}
         let count=batch.len();
-        let mut interrupted=delivery.cancel.load(Ordering::Acquire) || !self.query_current(delivery.query,delivery.revision);
+        let mut interrupted=delivery.cancel.load(Ordering::Acquire) || !self.delivery_current(delivery);
         let mut batch=if interrupted {
             tracing::debug!(id,expected_epoch=delivery.revision.source,current_epoch=self.indexer.search_epoch(),
                 canceled=delivery.cancel.load(Ordering::Acquire),"discarded outdated search batch before delivery");
             Vec::new()
         } else {self.validate_delivery(batch,delivery.sources)};
         if !current() {return Ok(SentSearchBatch {ids:HashSet::new(),done:true});}
-        interrupted|=batch.len()!=count || delivery.cancel.load(Ordering::Acquire) || !self.query_current(delivery.query,delivery.revision);
+        interrupted|=batch.len()!=count || delivery.cancel.load(Ordering::Acquire) || !self.delivery_current(delivery);
         if interrupted {
             tracing::debug!(id,expected_epoch=delivery.revision.source,current_epoch=self.indexer.search_epoch(),
                 canceled=delivery.cancel.load(Ordering::Acquire),"discarded outdated search batch after validation");
@@ -1047,6 +1156,7 @@ impl EngineService {
         }
         let sent=exact_entry_ids(&batch);
         let done=outcome.is_some();
+        if !current() {return Ok(SentSearchBatch {ids:HashSet::new(),done:true});}
         write_message(&mut *stream,&ServerMessage::Results {outcome,id,batch,done})?;
         Ok(SentSearchBatch {ids:sent,done})
     }
@@ -1066,7 +1176,7 @@ impl EngineService {
         } else {self.plan_semantic_outcome(query,exact_ids,&mut sources)};
         if let Some(unavailable)=self.semantic_unavailable(query) {hits.clear();semantic=unavailable;}
         self.send_results(client,id,hits,Some(SearchOutcome::complete(semantic)),&SearchDelivery {
-            query,revision,cancel,sources:&sources}).map(|_|())
+            query,revision,cancel,sources:&sources,related_source:None}).map(|_|())
     }
 
     /// Computes the ranked result list for one query (no IPC). Split from
@@ -1469,6 +1579,237 @@ mod tests {
         }
     }
 
+    fn related_fixture()->(SharedEngine,TempTree,ws_protocol::RelatedQuery) {
+        related_fixture_with_chunks(SEMANTIC_TOP_K*8+9)
+    }
+
+    fn related_fixture_with_chunks(source_chunks:usize)->(SharedEngine,TempTree,ws_protocol::RelatedQuery) {
+        use ws_index::model::{ContentChunk,ContentMatch,DraftEmbeddingInput,NewSegment};
+        let tree=TempTree::new();let engine=service_with(&tree,&["seed.txt","target.txt"]);
+        let mut seed=0;
+        {
+            let mut store=engine.indexer.store_lock();
+            let jobs=store.claim_extract_jobs_batch_for_kind("doc",2).unwrap();assert_eq!(jobs.len(),2);
+            for job in jobs {
+                let entry=store.get_entry(job.entry_id).unwrap().unwrap();
+                let source=entry.name=="seed.txt";if source {seed=entry.id;}
+                let progress=store.begin_content_batch(entry.id,"doc",&crate::extract::source_snapshot(std::path::Path::new(&entry.path))).unwrap();
+                let chunks=(0..if source {source_chunks} else {1}).map(|index|ContentChunk {
+                    id:0,entry_id:entry.id,job_kind:"doc".into(),kind:"doc".into(),chunk_index:index as i64,
+                    text:if source {"Bound cached seed text".into()} else {"Related target content".into()},
+                    location:ContentMatch {line:Some(index as u32+1),..Default::default()},
+                    embed:true,visual:false,attempts:0,embedding_input:DraftEmbeddingInput::Text,
+                }).collect::<Vec<_>>();
+                store.commit_content_batch(&job,&progress,&chunks,None).unwrap();
+                let vector=if source {vec![1.0,0.0]} else {vec![0.8,0.6]};
+                for chunk in chunks {
+                    store.upsert_segment(NewSegment {entry_id:entry.id,kind:"doc",chunk_index:chunk.chunk_index,text:&chunk.text,
+                        page:None,start_ms:None,end_ms:None,line:chunk.location.line.map(|line|line as i64),vector:&vector}).unwrap();
+                }
+            }
+        }
+        engine.set_model_ready_override(Some(true));engine.set_query_embed_hook(Arc::new(|_|Ok(vec![1.0,0.0])));
+        let entry=engine.resolve_entry_snapshot(&ws_protocol::EntryReference {result_id:format!("e{seed}"),source_revision:None}).unwrap();
+        let request=ws_protocol::RelatedQuery {source:ws_protocol::EntryReference {result_id:entry.result_id,source_revision:Some(entry.source_revision)},
+            limit:1,categories:Vec::new(),extensions:Vec::new()};
+        (engine,tree,request)
+    }
+
+    #[test]
+    fn related_uses_current_cached_text_without_filename_or_unbound_seed() {
+        let (engine,tree,mut related)=related_fixture();let cancel=Arc::new(AtomicBool::new(false));
+        let request=engine.related_query(&related,&cancel).unwrap();
+        assert!(request.text.starts_with("Bound cached seed text"));assert!(!request.text.contains("seed.txt"));
+        assert!(request.text.len()<=ws_protocol::MAX_PREVIEW_TEXT_BYTES);assert!(request.include_semantic);
+        assert_eq!(request.mode,SearchMode::Files);assert_eq!(request.limit,1);
+        let proof=related.source.source_revision.take();
+        assert_eq!(engine.related_query(&related,&cancel).unwrap_err(),ErrorCode::InvalidRequest);
+        related.source.source_revision=proof;
+        engine.set_model_ready_override(Some(false));
+        assert_eq!(engine.related_query(&related,&cancel).unwrap_err(),ErrorCode::NotReady);
+        engine.set_model_ready_override(Some(true));cancel.store(true,Ordering::Release);
+        assert_eq!(engine.related_query(&related,&cancel).unwrap_err(),ErrorCode::Cancelled);
+        cancel.store(false,Ordering::Release);fs::write(tree.0.join("seed.txt"),b"replacement source").unwrap();
+        assert_eq!(engine.related_query(&related,&cancel).unwrap_err(),ErrorCode::NotReady);
+    }
+
+    #[test]
+    fn related_excludes_every_seed_chunk_before_vector_topk_and_name_only_candidates() {
+        let (engine,_tree,related)=related_fixture();
+        let request=semantic_query("Bound cached seed text");
+        let hits=engine.plan_semantic_excluding_checked(&SearchQuery {limit:1,mode:SearchMode::Files,..request},
+            &HashSet::new(),&mut HashMap::new(),related.source.indexed_id()).unwrap();
+        assert_eq!(hits.len(),1);assert_eq!(hits[0].title,"target.txt","seed chunks cannot consume candidate limits");
+        let (names,_tree)=semantic_service();
+        let outcome=names.plan_semantic_excluding_checked(&semantic_query("indirect banquet"),&HashSet::new(),&mut HashMap::new(),
+            Some(ws_protocol::IndexedEntryId::File(1)));
+        assert!(matches!(outcome,Err(SemanticIssue::NoVectors)),"Related must never retrieve filename-only vectors: {outcome:?}");
+    }
+
+    #[test]
+    fn related_empty_delivery_rechecks_seed_after_waiting_for_writer() {
+        for change in ["source","policy","model","cancel","reuse"] {
+            let (engine,tree,related)=related_fixture();let query=semantic_query("cached seed");
+            let pipe=unique_pipe();let serving=pipe.clone();let (send,receive)=std::sync::mpsc::channel();
+            std::thread::spawn(move || {let _=ws_platform::pipe::serve(&serving,move |stream| {let _=send.send(Arc::new(Mutex::new(stream)));});});
+            let mut peer=connect_retry(&pipe);let client=engine.register_client(receive.recv_timeout(Duration::from_secs(30)).unwrap());
+            let cancel=engine.begin_request_for_client(client.id(),91);
+            let revision=SearchRevision {source:engine.indexer.search_epoch(),code:None,model:engine.indexer.store_lock().model_generation().ok()};
+            let sources=HashMap::new();
+            std::thread::scope(|scope| {
+                let writer=client.stream.lock().unwrap();let (started,waiting)=std::sync::mpsc::channel();
+                let delivery=SearchDelivery {query:&query,revision,cancel:&cancel,sources:&sources,related_source:Some(&related.source)};
+                let this=&engine;let client=&client;
+                let sender=scope.spawn(move || {started.send(()).unwrap();this.send_results(client,91,Vec::new(),Some(SearchOutcome::complete(SemanticOutcome::READY)),&delivery)});
+                waiting.recv_timeout(Duration::from_secs(5)).unwrap();
+                let current=if change=="reuse" {Some(engine.begin_request_for_client(client.id(),91))} else {
+                    if change=="source" {fs::write(tree.0.join("seed.txt"),b"replacement source bytes").unwrap();}
+                    else if change=="model" {engine.indexer.store_lock().reset_content_vectors().unwrap();}
+                    else if change=="cancel" {engine.cancel_for_client(client.id(),91);}
+                    else {let mut policy=engine.indexer.get_indexing_config().unwrap();policy.roots.clear();engine.indexer.set_indexing_config(&policy).unwrap();}
+                    None
+                };
+                drop(writer);assert!(sender.join().unwrap().unwrap().done);
+                if let Some(current)=current {engine.end_request_for_client(client.id(),91,&current);}
+            });
+            if change=="reuse" {assert_eq!(peer.peek_available().unwrap(),Some(0));}
+            else {
+                let message=ws_protocol::read_message::<_,ServerMessage>(&mut peer).unwrap().unwrap();
+                let ServerMessage::Results {batch,done,outcome,..}=message else {panic!("unexpected {message:?}")};
+                assert!(done && batch.is_empty());assert_eq!(outcome,Some(SearchOutcome::interrupted(
+                    if change=="cancel" {SearchDisposition::Canceled} else {SearchDisposition::Superseded})),"{change}");
+                engine.end_request_for_client(client.id(),91,&cancel);
+            }
+            engine.unregister_client(&client);
+        }
+    }
+
+    #[test]
+    fn related_failure_rechecks_request_identity_after_blocked_seed_lookup() {
+        let (engine,_tree,related)=related_fixture_with_chunks(1);let query=semantic_query("cached seed");
+        let pipe=unique_pipe();let serving=pipe.clone();let (send,receive)=std::sync::mpsc::channel();
+        std::thread::spawn(move || {let _=ws_platform::pipe::serve(&serving,move |stream| {let _=send.send(Arc::new(Mutex::new(stream)));});});
+        let peer=connect_retry(&pipe);let client=engine.register_client(receive.recv_timeout(Duration::from_secs(30)).unwrap());
+        let cancel=engine.begin_request_for_client(client.id(),92);
+        let revision=SearchRevision {source:engine.indexer.search_epoch(),code:None,model:engine.indexer.store_lock().model_generation().ok()};
+        let (entered,waiting)=std::sync::mpsc::channel();let (release,resume)=std::sync::mpsc::channel();
+        let resume=Arc::new(Mutex::new(resume));let blocked=AtomicBool::new(false);
+        engine.indexer.store_lock().set_query_source_guard(move |_,_,_| {
+            if !blocked.swap(true,Ordering::AcqRel) {
+                entered.send(()).unwrap();resume.lock().unwrap().recv_timeout(Duration::from_secs(5)).unwrap();
+            }
+            true
+        }).unwrap();
+        let sources=HashMap::new();
+        std::thread::scope(|scope| {
+            let this=&engine;let client=&client;
+            let delivery=SearchDelivery {query:&query,revision,cancel:&cancel,sources:&sources,related_source:Some(&related.source)};
+            let sender=scope.spawn(move ||this.send_search_failure_checked(client,92,delivery.cancel,ErrorCode::Internal,Some(&delivery)));
+            waiting.recv_timeout(Duration::from_secs(5)).unwrap();
+            let current=engine.begin_request_for_client(client.id(),92);release.send(()).unwrap();
+            sender.join().unwrap().unwrap();
+            assert_eq!(peer.peek_available().unwrap(),Some(0),"old work cannot reject the reused request after seed validation");
+            assert!(engine.cancels.lock().unwrap().get(&(client.id(),92)).is_some_and(|token|Arc::ptr_eq(token,&current)));
+            engine.end_request_for_client(client.id(),92,&current);
+        });
+        engine.unregister_client(&client);
+    }
+
+    #[test]
+    fn related_public_pipe_bounds_work_keeps_controls_live_and_reports_actual_lookup_state() {
+        use ws_protocol::{ClientMessage,SemanticPhase};
+        let (engine,tree,related)=related_fixture_with_chunks(1);let pipe=unique_pipe();let serving=pipe.clone();let this=Arc::clone(&engine);
+        std::thread::spawn(move || {let _=ws_platform::pipe::serve(&serving,move |stream|crate::server::handle_connection(stream,Arc::clone(&this)));});
+        let mut peer=connect_retry(&pipe);
+        fn reply(peer:&mut PipeStream)->ServerMessage {
+            let deadline=std::time::Instant::now()+Duration::from_secs(5);
+            loop {
+                while peer.peek_available().unwrap()==Some(0) {
+                    assert!(std::time::Instant::now()<deadline,"Related blocked control/result delivery");
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                let response=ws_protocol::read_message::<_,ServerMessage>(peer).unwrap().unwrap();
+                if !matches!(response,ServerMessage::Status {..}) {return response;}
+            }
+        }
+        write_message(&mut peer,&ClientMessage::Hello {protocol_version:1,client:"related-test".into(),client_version:"1".into()}).unwrap();
+        let ServerMessage::HelloAck {features,..}=reply(&mut peer) else {panic!("missing handshake")};
+        assert!(features.iter().any(|feature|feature=="search.related"));
+        assert!(matches!(ws_protocol::read_message::<_,ServerMessage>(&mut peer).unwrap(),Some(ServerMessage::Status {..})),
+            "finish the initial status snapshot before holding the store");
+        eprintln!("Related public stage: blocked-store controls");
+        let blocked=engine.indexer.store_lock();
+        for id in [10,11] {write_message(&mut peer,&ClientMessage::Related {id,query:related.clone()}).unwrap();}
+        write_message(&mut peer,&ClientMessage::Ping {id:12}).unwrap();
+        assert!(matches!(reply(&mut peer),ServerMessage::Pong {id:12}),"Related reads must run outside the connection loop");
+        write_message(&mut peer,&ClientMessage::Related {id:13,query:related.clone()}).unwrap();
+        assert!(matches!(reply(&mut peer),ServerMessage::Error {id:Some(13),code:ErrorCode::NotReady,..}));
+        assert!(matches!(reply(&mut peer),ServerMessage::Results {id:13,done:true,outcome:Some(SearchOutcome {disposition:SearchDisposition::Failed,..}),..}));
+        write_message(&mut peer,&ClientMessage::Ping {id:14}).unwrap();assert!(matches!(reply(&mut peer),ServerMessage::Pong {id:14}));
+        drop(blocked);
+        eprintln!("Related public stage: cancelled workers");
+        let mut canceled=HashSet::new();
+        for _ in 0..2 {
+            let ServerMessage::Results {id,batch,done,outcome}=reply(&mut peer) else {panic!("cancelled work delivered a nonterminal reply")};
+            assert!(batch.is_empty() && done && [10,11].contains(&id));
+            assert_eq!(outcome,Some(SearchOutcome::interrupted(SearchDisposition::Canceled)));canceled.insert(id);
+        }
+        assert_eq!(canceled.len(),2);
+        let deadline=std::time::Instant::now()+Duration::from_secs(5);
+        while engine.related_jobs.load(Ordering::Acquire)>0 {
+            assert!(std::time::Instant::now()<deadline,"Related slots did not retire");std::thread::sleep(Duration::from_millis(1));
+        }
+        for (id,scenario) in [(20,"ready"),(21,"no_model"),(22,"embed_failure"),(23,"below_threshold"),(24,"no_vectors"),(25,"source_change_on_error")] {
+            eprintln!("Related public stage: {scenario}");
+            *engine.query_cache.lock().unwrap()=QueryEmbeddingCache::new(QUERY_CACHE_CAP);
+            engine.set_model_ready_override(Some(scenario!="no_model"));
+            let seed_path=tree.0.join("seed.txt");
+            engine.set_query_embed_hook(Arc::new(move |_| {
+                if scenario=="source_change_on_error" {fs::write(&seed_path,b"replacement seed bytes").unwrap();return Err("PRIVATE changed-source diagnostic".into());}
+                if scenario=="embed_failure" {Err("PRIVATE embedding diagnostic".into())}
+                else {Ok(if scenario=="below_threshold" {vec![0.0,-1.0]} else {vec![1.0,0.0]})}
+            }));
+            let mut request=related.clone();if scenario=="no_vectors" {request.extensions=vec!["pdf".into()];}
+            write_message(&mut peer,&ClientMessage::Related {id,query:request}).unwrap();
+            if scenario=="no_model" || scenario=="embed_failure" {
+                let ServerMessage::Error {id:Some(actual),code,message}=reply(&mut peer) else {panic!("unavailable Related must fail explicitly")};
+                assert_eq!(actual,id);assert_eq!(code,if scenario=="no_model" {ErrorCode::NotReady} else {ErrorCode::Internal});
+                assert_eq!(message,"search request failed");
+            }
+            let message=reply(&mut peer);
+            let ServerMessage::Results {id:actual,batch,done,outcome}=message else {panic!("missing terminal Related: {message:?}")};
+            assert_eq!(actual,id);assert!(done);
+            if scenario=="ready" {
+                assert_eq!(batch.len(),1);assert_eq!(batch[0].title,"target.txt");
+                assert!(batch[0].entry_reference.as_ref().is_some_and(|reference|reference.is_bound() && reference.result_id!=related.source.result_id));
+            } else {assert!(batch.is_empty(),"Related must never append ordinary exact results");}
+            if scenario=="source_change_on_error" {assert_eq!(outcome,Some(SearchOutcome::interrupted(SearchDisposition::Superseded)));}
+            else if scenario=="no_model" || scenario=="embed_failure" {assert_eq!(outcome,Some(SearchOutcome::interrupted(SearchDisposition::Failed)));}
+            else {
+                let semantic=outcome.unwrap().semantic.unwrap();
+                assert_eq!(semantic.phase,if scenario=="no_vectors" {SemanticPhase::Degraded} else {SemanticPhase::Ready});
+                assert_eq!(semantic.reason,if scenario=="no_vectors" {Some(SemanticIssue::NoVectors)} else {None});
+            }
+        }
+    }
+
+    #[test]
+    fn related_code_uses_current_parsed_cache_and_keeps_exact_identifier_targets() {
+        let (engine,code,root)=code_search_service();crate::code::tests::stop_fixture_watchers(&code);
+        let file=code.exact("needle",20)[0].file.id;
+        let entry=engine.resolve_entry_snapshot(&ws_protocol::EntryReference {result_id:format!("c{file}"),source_revision:None}).unwrap();
+        let related=ws_protocol::RelatedQuery {source:ws_protocol::EntryReference {result_id:entry.result_id,source_revision:Some(entry.source_revision)},
+            limit:1,categories:vec![ResultKind::Code],extensions:vec!["rs".into()]};
+        let mut query=engine.related_query(&related,&Arc::new(AtomicBool::new(false))).unwrap();
+        assert!(query.text.contains("fn needle"));assert_eq!(query.mode,SearchMode::Code);
+        query.text="resolve_record".into();
+        let hits=engine.plan_semantic_excluding_checked(&query,&HashSet::new(),&mut HashMap::new(),related.source.indexed_id()).unwrap();
+        assert_eq!(hits.len(),1);assert_eq!(hits[0].title,"resolve_record");assert_eq!(hits[0].kind,ResultKind::Code);
+        assert!(hits[0].path.as_ref().is_some_and(|path|path.ends_with("candidate.rs")));
+        assert!(hits[0].entry_reference.as_ref().is_some_and(|reference|reference.result_id!=related.source.result_id));
+        drop(code);drop(engine);fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
     #[test]
     fn extension_filter_excludes_synthetic_results() {
         let tree=TempTree::new();let engine=service_with(&tree,&[]);
@@ -1599,7 +1940,7 @@ mod tests {
                 let writer=client.stream.lock().unwrap();
                 let (started,waiting)=std::sync::mpsc::channel();
                 let (finished,completion)=std::sync::mpsc::channel();
-                let delivery=SearchDelivery {query:&request,revision,cancel:&cancel,sources:&sources};
+                let delivery=SearchDelivery {query:&request,revision,cancel:&cancel,sources:&sources,related_source:None};
                 let sending_engine=&engine;let sending_client=&client;
                 let sender=scope.spawn(move || {
                     started.send(()).unwrap();

@@ -54,6 +54,13 @@ semantic outcomes. Recent/pin/history policy can stay host-owned; do not create
 another copy without need. Configuration and read lanes must not deadlock each
 other or permit stale root admission.
 
+The [2026-10-19 Related/cache checkpoint](../../validation/2026-10-19-related/README.md)
+records the distinct bound-source operation, typed Rust/C# clients and current
+native CPU/no-model checks. It also retains a native failure and the regression
+for unavailable inference erasing committed exact cache during policy changes.
+Finer file-kind scopes, CLI filter arguments, independent review and the consumer/
+installed gates below remain open; this does not complete Task1.
+
 - [ ] RED malformed/version/ID/frame/timeout/disconnect and cancellation cases.
 - [ ] Real isolated rebuilt daemon queries/configuration/pause/revoke/reconnect,
   exact without a model, actual semantic/code locations and preview cancellation.

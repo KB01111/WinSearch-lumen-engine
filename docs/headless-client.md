@@ -118,7 +118,7 @@ entries reject notebook locations; code entries reject page/timestamp locations.
 Code parts require real locations and notebook ranges cannot exceed returned text.
 A trailing line terminator does not expose a following line. Full-byte code hashes
 include notebook outputs, while preview text excludes them. Raster/media/uncached
-preview, larger-source/legacy provenance recovery, Related and expanded filters
+preview, larger-source/legacy provenance recovery and expanded filters
 remain open.
 
 `SearchQuery.extensions` selects source-file extensions in ordinary/code exact
@@ -128,7 +128,25 @@ matching. An empty list preserves existing behavior. Nonempty filters require
 `search.filters`; the client rejects unsupported peers before sending a query,
 malformed input, mismatched reply extensions and folder/null-path replies.
 Mode/category/extension filters precede engine candidate caps and semantic top-k.
-Finer file-kind scopes, Related and explicit source/semantic outcomes remain open.
+Finer file-kind scopes and expanded source provenance remain open; typed terminal
+semantic outcomes are described above.
+
+`related(RelatedQuery)` requires a current bound indexed source and the separate
+`search.related`, `search.semantic` and `search.outcomes` capabilities. Code seeds
+also require `code`; extension filters require `search.filters`. It obtains bounded
+cached indexed text through the engine and uses its existing local inference.
+No caller paths, query text, vectors or implicit model downloads are accepted.
+Missing text/model or disabled policy fails explicitly. Source media without text
+is unavailable, preserving Lumen's existing text-based Related behavior.
+
+Related uses the same `SearchStream`, cancellation, owned read connection and
+35second total deadline. Requests permit1..10000 results; delivery cannot exceed
+the requested limit or64frames. Ordinary search retains its existing4096 budget.
+The client rejects a returned seed, missing bound references, mismatched domains
+or filters and ordinary disabled-semantic fallback. Zero valid above-threshold
+results can still be complete/ready; absent eligible vectors are explicitly
+degraded. See the [Related wire contract](ipc-protocol.md#related-content-search).
+Lumen's adapter, identity migration and installed Related acceptance remain open.
 
 From `src/engine`, `cargo test -p ws-client --all-targets` runs framing and real
 Windows-pipe transport fixtures without models or a daemon. The

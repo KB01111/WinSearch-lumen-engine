@@ -13,7 +13,7 @@ use crate::engine::SharedEngine;
 pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn features() -> Vec<String> {
-    vec!["search.exact".to_string(), "search.semantic".to_string(), "search.filters".to_string(), "search.outcomes".to_string(), "code".to_string(), "entry.resolve".to_string(), "entry.resolve.code".to_string(), "search.entry_references".to_string(), "entry.preview.text".to_string(), "entry.preview.code".to_string()]
+    vec!["search.exact".to_string(), "search.semantic".to_string(), "search.filters".to_string(), "search.outcomes".to_string(), "search.related".to_string(), "code".to_string(), "entry.resolve".to_string(), "entry.resolve.code".to_string(), "search.entry_references".to_string(), "entry.preview.text".to_string(), "entry.preview.code".to_string()]
 }
 
 pub fn handle_connection(stream: PipeStream, engine: SharedEngine) {
@@ -110,6 +110,12 @@ pub fn handle_connection(stream: PipeStream, engine: SharedEngine) {
                     }
                 }
                 engine.search(&client, id, query);
+            }
+            ClientMessage::Related { id, query } => {
+                if let Some(prev)=active_search.replace(id) {
+                    if prev!=id {engine.cancel_for_client(client.id(),prev);}
+                }
+                engine.related(&client,id,query);
             }
             ClientMessage::Cancel { id } => {
                 engine.cancel_for_client(client.id(), id);

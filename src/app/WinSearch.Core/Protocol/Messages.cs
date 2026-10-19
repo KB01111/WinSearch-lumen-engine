@@ -12,6 +12,7 @@ namespace WinSearch.Core.Protocol;
 [JsonDerivedType(typeof(ResolveEntryMessage), "resolve_entry")]
 [JsonDerivedType(typeof(PreviewEntryMessage), "preview_entry")]
 [JsonDerivedType(typeof(SearchMessage), "search")]
+[JsonDerivedType(typeof(RelatedMessage), "related")]
 [JsonDerivedType(typeof(CancelMessage), "cancel")]
 [JsonDerivedType(typeof(GetStatusMessage), "get_status")]
 [JsonDerivedType(typeof(ModelDownloadStartMessage), "model_download_start")]
@@ -47,6 +48,12 @@ public sealed class PreviewEntryMessage : ClientMessage
 {
     public ulong Id { get; set; }
     public PreviewRequest Request { get; set; } = new();
+}
+
+public sealed class RelatedMessage : ClientMessage
+{
+    public ulong Id { get; set; }
+    public RelatedQuery Query { get; set; } = new();
 }
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]

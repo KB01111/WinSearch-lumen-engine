@@ -44,7 +44,7 @@ async fn search_query(client:&Client,query:SearchQuery)->Result<Vec<SearchResult
 
 async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_json::Value> {
     let info = client.info().await?;
-    for feature in ["search.entry_references","entry.resolve.code","entry.preview.code","search.filters","search.outcomes"] {assert!(info.supports(feature));}
+    for feature in ["search.entry_references","entry.resolve.code","entry.preview.code","search.filters","search.outcomes","search.related"] {assert!(info.supports(feature));}
     let status = client.status().await?;
     let model = client.model_status().await?;
     let engine_config = client.config().await?;
@@ -154,6 +154,30 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
         && matches!(part.location,Some(ws_client::protocol::MatchLocation::Notebook {cell_ordinal:1,line:1,end_line:2}))));
     assert!(notebook_preview.parts.iter().all(|part|!part.text.contains("PRIVATE_OUTPUT_SENTINEL")));
 
+    let mut related_checks=Vec::new();
+    for source in [&reference,&code_reference] {
+        let mut stream=client.related(ws_client::protocol::RelatedQuery {source:source.clone(),limit:5,
+            categories:Vec::new(),extensions:Vec::new()}).await?;
+        if engine_config.semantic_enabled {
+            let mut frames=Vec::new();
+            while let Some(frame)=stream.next().await? {
+                assert!(frame.batch.iter().all(|hit|hit.entry_reference.as_ref().is_some_and(|target|
+                    target.is_bound() && target.result_id!=source.result_id && target.result_id.as_bytes()[0]==source.result_id.as_bytes()[0])));
+                if frame.done {
+                    let outcome=frame.outcome.unwrap();assert_eq!(outcome.disposition,SearchDisposition::Complete);
+                    assert_eq!(outcome.semantic.unwrap().phase,SemanticPhase::Ready);
+                }
+                frames.push(serde_json::json!({"results":frame.batch,"done":frame.done,"outcome":frame.outcome}));
+            }
+            assert!(frames.last().is_some_and(|frame|frame["done"]==true));
+            related_checks.push(serde_json::json!({"source":source,"frames":frames}));
+        } else {
+            assert!(matches!(stream.next().await,Err(ws_client::Error::Remote {code:ErrorCode::NotReady,..})),
+                "Related must not become ordinary exact search without semantic inference");
+            related_checks.push(serde_json::json!({"source":source,"error":"not_ready"}));
+        }
+    }
+
     // Disconnect before consuming results, then reconnect for an independent operation.
     drop(
         client
@@ -204,6 +228,7 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
         })
     ));
     let fresh_hits=search(client,"amberparitytoken",SearchMode::Files,false).await?;
+    assert!(!fresh_hits.is_empty(),"root restoration must preserve committed exact document text without a model or a retry");
     let fresh=client.resolve_entry(fresh_hits[0].entry_reference.clone().unwrap()).await?;
     assert_ne!(
         fresh.source_revision, entry.source_revision,
@@ -216,6 +241,7 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
         "extension_filters":extension_filters,
         "extension_checks":["pdf_extension_and_case", "excluded_document_extension", "code_extension", "excluded_code_extension"],
         "outcome_checks":["advertised_terminal_state_required", "completed_snapshot_without_retry", "actual_semantic_phase"],
+        "related_checks":related_checks,
         "notebook":notebook,"code_entries":code_entries,
         "reference_checks":["bound_document_and_pdf_refs", "bound_code_and_notebook_refs",
             "resolved_code_hashes", "code_proof_stays_invalid_after_restore"],

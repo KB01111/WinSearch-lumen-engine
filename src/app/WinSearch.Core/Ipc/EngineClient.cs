@@ -34,6 +34,8 @@ public interface IEngineClient : IAsyncDisposable
     Task<EngineConfig> GetConfigAsync(CancellationToken cancellationToken = default);
     Task<EngineConfig> SetConfigAsync(EngineConfig config, CancellationToken cancellationToken = default);
     IAsyncEnumerable<SearchBatch> SearchAsync(SearchQuery query, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<SearchBatch> RelatedAsync(RelatedQuery query, CancellationToken cancellationToken = default)
+        => throw new EngineException(ErrorCode.Unsupported, "Related search is unavailable");
 }
 
 /// <summary>
@@ -377,15 +379,47 @@ public sealed class EngineClient : IEngineClient
             IncludeSemantic = query.IncludeSemantic, Categories = query.Categories.ToList(), Extensions = query.Extensions.ToList() };
         if (snapshot.Extensions.Count > 0 && IsConnected && !_features.Contains("search.filters", StringComparer.Ordinal))
             throw new EngineException(ErrorCode.Unsupported, "engine does not support search filters");
+        await foreach (var batch in SearchStreamAsync(id => new SearchMessage { Id = id, Query = snapshot }, snapshot, null, cancellationToken))
+            yield return batch;
+    }
+
+    public async IAsyncEnumerable<SearchBatch> RelatedAsync(RelatedQuery query,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        if (query is null || !ReferenceValid(query.Source, bound: true) || query.Limit is < 1 or > 10000
+            || query.Categories is null || query.Categories.Count > 32 || query.Categories.Any(kind => !Enum.IsDefined(kind))
+            || !SearchExtensionsValid(query.Extensions))
+            throw new EngineException(ErrorCode.InvalidRequest, "invalid Related source or request budget");
+        var snapshot = new RelatedQuery { Source = new() { ResultId = query.Source.ResultId, SourceRevision = query.Source.SourceRevision },
+            Limit = query.Limit, Categories = query.Categories.ToList(), Extensions = query.Extensions.ToList() };
+        var code = snapshot.Source.ResultId[0] == 'c';
+        foreach (var (required, feature) in new[] { (true, "search.related"), (true, "search.semantic"),
+            (true, "search.outcomes"), (code, "code"), (snapshot.Extensions.Count > 0, "search.filters") })
+            if (required && !_features.Contains(feature, StringComparer.Ordinal))
+                throw new EngineException(ErrorCode.Unsupported, $"engine does not support {feature}");
+        var context = new SearchQuery { Mode = code ? SearchMode.Code : SearchMode.Files, IncludeSemantic = true,
+            Limit = snapshot.Limit, Categories = snapshot.Categories, Extensions = snapshot.Extensions };
+        await foreach (var batch in SearchStreamAsync(id => new RelatedMessage { Id = id, Query = snapshot }, context,
+            snapshot.Source.ResultId, cancellationToken)) yield return batch;
+    }
+
+    private async IAsyncEnumerable<SearchBatch> SearchStreamAsync(Func<ulong, ClientMessage> request, SearchQuery snapshot,
+        string? relatedSource, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
         var id = NextRequestId();
         var mode = snapshot.Mode;
-        var requireOutcome = _features.Contains("search.outcomes", StringComparer.Ordinal);
-        var channel = Channel.CreateUnbounded<SearchBatch>(new UnboundedChannelOptions
+        var requireOutcome = relatedSource is not null || _features.Contains("search.outcomes", StringComparer.Ordinal);
+        var channel = relatedSource is not null ? Channel.CreateBounded<SearchBatch>(new BoundedChannelOptions(2)
+        { SingleReader = true, SingleWriter = true }) : Channel.CreateUnbounded<SearchBatch>(new UnboundedChannelOptions
         {
             SingleReader = true,
             SingleWriter = true,
         });
         _streams[id] = channel;
+        var frames = 0;
+        long results = 0;
+        var terminal = false;
 
         using var registration = cancellationToken.Register(() =>
         {
@@ -395,23 +429,34 @@ public sealed class EngineClient : IEngineClient
 
         try
         {
-            await WriteAsync(new SearchMessage { Id = id, Query = snapshot }, cancellationToken);
+            await WriteAsync(request(id), cancellationToken);
             await foreach (var batch in channel.Reader.ReadAllAsync(cancellationToken))
             {
+                frames++;
+                results += batch.Results?.Count ?? 0;
+                if (relatedSource is not null && (frames > 64 || results > snapshot.Limit))
+                    throw new EngineException(ErrorCode.InvalidRequest, "Related exceeded its result budget");
                 if ((batch.Done && requireOutcome && batch.Outcome is null) || (batch.Outcome is { } outcome
                     && !outcome.ValidFor(batch.Done, batch.Results is { Count: 0 }, snapshot.IncludeSemantic)))
                     throw new EngineException(ErrorCode.InvalidRequest, "search returned an invalid or missing terminal outcome");
+                if (relatedSource is not null && ((batch.Outcome is { Disposition: SearchDisposition.Complete,
+                    Semantic.Phase: SemanticPhase.Disabled }) || batch.Results is null || batch.Results.Any(hit => hit is null
+                    || hit.EntryReference is null || hit.EntryReference.ResultId == relatedSource
+                    || (snapshot.Categories.Count > 0 && !snapshot.Categories.Contains(hit.Kind)))))
+                    throw new EngineException(ErrorCode.InvalidRequest, "Related returned its source, an unbound result or ordinary fallback state");
                 if (batch.Results is null || batch.Results.Any(hit => hit is null || (snapshot.Extensions.Count > 0 && hit.Kind == ResultKind.Folder)
                     || !SearchExtensionMatches(snapshot.Extensions, hit.Path) || (hit.EntryReference is { } reference
                     && (!ReferenceValid(reference, bound: true) || !ReferenceKindMatches(reference, hit.Kind)
                         || ((reference.ResultId[0] == 'c') != (mode == SearchMode.Code))))))
                     throw new EngineException(ErrorCode.InvalidRequest, "search returned an invalid reference or filtered result");
+                terminal = batch.Done;
                 yield return batch;
             }
         }
         finally
         {
             _streams.TryRemove(id, out _);
+            if (relatedSource is not null && !terminal) _ = TryCancelAsync(id);
         }
     }
 
@@ -602,12 +647,12 @@ public sealed class EngineClient : IEngineClient
             case ResultsMessage results:
                 if (_streams.TryGetValue(results.Id, out var channel))
                 {
-                    channel.Writer.TryWrite(new SearchBatch
+                    if (!channel.Writer.TryWrite(new SearchBatch
                     {
                         Results = results.Batch,
                         Done = results.Done,
                         Outcome = results.Outcome,
-                    });
+                    })) channel.Writer.TryComplete(new EngineException(ErrorCode.InvalidRequest, "search stream exceeded its pending frame budget"));
                     if (results.Done)
                     {
                         channel.Writer.TryComplete();

@@ -7,6 +7,25 @@ namespace WinSearch.Tests;
 public class IndexingContractTests
 {
     [Fact]
+    public void RelatedUsesIndexedSourceAndCannotSmugglePathsOrOrdinaryQueryText()
+    {
+        var request = new RelatedMessage { Id = 9, Query = new() {
+            Source = new() { ResultId = "e1", SourceRevision = "current-source-proof" },
+            Limit = 25, Extensions = [".PDF"] } };
+        var encoded = JsonSerializer.Serialize<ClientMessage>(request, ProtocolJson.Options);
+        using var document = JsonDocument.Parse(encoded);
+        Assert.Equal("related", document.RootElement.GetProperty("type").GetString());
+        var decoded = Assert.IsType<RelatedMessage>(JsonSerializer.Deserialize<ClientMessage>(encoded, ProtocolJson.Options));
+        Assert.Equal("e1", decoded.Query.Source.ResultId);
+        Assert.Equal("current-source-proof", decoded.Query.Source.SourceRevision);
+        Assert.Equal(25u, decoded.Query.Limit);
+        Assert.Equal(".PDF", Assert.Single(decoded.Query.Extensions));
+        foreach (var field in new[] { "path", "text", "embedding" })
+            Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<RelatedQuery>(
+                "{\"source\":{\"result_id\":\"e1\",\"source_revision\":\"proof\"},\"" + field + "\":\"private\"}", ProtocolJson.Options));
+    }
+
+    [Fact]
     public void SearchOutcomesValidateTerminalStateAndRetainLegacyUnknown()
     {
         var legacy = JsonSerializer.Deserialize<ResultsMessage>("""{"id":1,"batch":[],"done":true}""", ProtocolJson.Options)!;

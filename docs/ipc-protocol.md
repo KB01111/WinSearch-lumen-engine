@@ -49,6 +49,7 @@ All messages carry a `type` discriminator (snake_case). Requests carry `id`
 | `hello` | `protocol_version`, `client`, `client_version` | Must be the first message. Version mismatch → `error` + disconnect. |
 | `ping` | `id` | Heartbeat; answered by `pong`. |
 | `search` | `id`, `query` | Execute a search; results stream as `results` frames. |
+| `related` | `id`, `query` | Find content related to a current bound indexed source; requires `search.related`, `search.semantic` and `search.outcomes`. |
 | `cancel` | `id` | Cancels the in-flight request with this id. |
 | `get_status` | `id` | Snapshot request; answered by `status` with `id` set. |
 | `model_download_start` | `id` | Begin (or resume) the embedding-model download; answered by `model_status` with `id` set. Idempotent while running. |
@@ -78,6 +79,8 @@ All messages carry a `type` discriminator (snake_case). Requests carry `id`
 
 - `SearchQuery`: `text`, `mode` (`auto|apps|files|code`), `limit`,
   `include_semantic`, `categories[]`, `extensions[]`.
+- `RelatedQuery`: bound `source` (`EntryReference`), `limit` (default 20,
+  range 1..10000), `categories[]` (at most 32), `extensions[]` (same search filter bounds).
 - `SearchResult`: `id`, `kind`, `title`, `subtitle`, `match_explanation`,
   `score`, `path?`, `location?`, `thumbnail_path?`.
 - `MatchLocation` (discriminator `kind`):
@@ -366,8 +369,53 @@ Candidate/result bounds, model space, ranking and semantic thresholds are unchan
 Rust/C# clients reject nonempty extension filters on peers without the capability,
 validate request budgets and reject replies outside the selected extensions.
 C# snapshots the query and its lists before awaiting writes. Omitted extension
-fields remain compatible with older clients. Related search and finer file-kind
+fields remain compatible with older clients. Finer file-kind
 scopes remain separate unfinished contracts.
+
+### Related content search
+
+`search.related` adds a separate `related` request; it never sends an empty or
+filename query through ordinary `search`. The caller supplies a current bound
+`EntryReference`, not a path, query text, vector or model override. Unknown query
+fields are rejected. Code sources additionally require `code`; nonempty extension
+filters require `search.filters`. Capability support does not establish model or
+source-text availability.
+
+```json
+{"type":"related","id":8,"query":{"source":{"result_id":"e42","source_revision":"current-proof"},"limit":20,"categories":["document"],"extensions":["pdf"]}}
+```
+
+The engine obtains admitted indexed text through the existing cached preview
+contract, bounded to 64 KiB and 64 parts. It preserves Lumen's text-based Related
+behavior: sources without indexed text are unavailable, including media without
+OCR/text. It does not parse or hydrate source content, seed with a filename,
+download a model or start a second inference runtime. Cached text can be partial;
+this operation does not claim a whole-source embedding. Code/notebook sources
+use current parsed code text and the existing corroborated code-query recipe.
+
+Source exclusion and category/extension/source-policy admission precede vector
+top-k or code candidate limits. Ordinary candidates use content vectors, not
+name-only vectors. Code remains in its isolated scope. Related has no exact
+stage or exact-hit suppression and ranks admitted candidates by similarity,
+retaining existing semantic thresholds and model-space requirements.
+
+The daemon admits at most two Related workers. Cached lookup and inference run
+outside the connection read loop so controls and cancellation remain readable.
+Missing model/text, disabled policy and unavailable resources produce a fixed
+public error plus a failed empty terminal outcome. Inference/SQL failures do not
+fall back to ordinary results. No eligible scoped vectors produce complete /
+degraded(`no_vectors`); a healthy below-threshold lookup is complete / ready with
+zero hits. Current request identity, cancellation, index/model epochs and the
+bound seed are rechecked under the final writer, even for an empty result.
+Superseded/canceled requests terminate empty; reused request IDs cannot receive
+the old worker's terminal frame.
+
+Both typed clients require outcomes and semantic support, reject a returned seed,
+unbound references, wrong domains/filters and disabled semantic completion, and
+bound delivery to the requested limit and 64 frames. The .NET client also bounds
+pending Related frames to two and reports overflow instead of dropping a frame.
+The Rust client retains its owned read lane and a total deadline of 35 seconds. Installed
+consumer migration and native performance acceptance remain separate gates.
 
 ### Terminal search outcomes
 

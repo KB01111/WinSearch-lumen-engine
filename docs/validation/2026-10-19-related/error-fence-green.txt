@@ -1,0 +1,23 @@
+cargo :    Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearc
+hd)
+At line:1 char:1
++ cargo test -p winsearchd engine::tests::related_public_pipe_bounds_wo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling wi...ins\winsearchd):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.88s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-950b3e8f0455252c.exe)
+
+running 1 test
+Related public stage: blocked-store controls
+Related public stage: cancelled workers
+Related public stage: ready
+Related public stage: no_model
+Related public stage: embed_failure
+Related public stage: below_threshold
+Related public stage: no_vectors
+Related public stage: source_change_on_error
+test engine::tests::related_public_pipe_bounds_work_keeps_controls_live_and_reports_actual_lookup_state ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 226 filtered out; finished in 0.65s

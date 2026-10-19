@@ -1,0 +1,30 @@
+cargo :    Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-pr
+otocol)
+At line:1 char:1
++ cargo test -p ws-protocol related::tests -- --test-threads=1 *> ../.. ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.54s
+     Running unittests src\lib.rs (target\debug\deps\ws_protocol-560893df34112aa1.exe)
+
+running 2 tests
+test related::tests::related_is_a_separate_typed_operation_without_caller_paths_or_query_text ... ok
+test related::tests::related_requires_bound_indexed_source_and_bounded_native_query ... FAILED
+
+failures:
+
+---- related::tests::related_requires_bound_indexed_source_and_bounded_native_query stdout ----
+
+thread 'related::tests::related_requires_bound_indexed_source_and_bounded_native_query' (127964) panicked at crates\ws-protocol\src\related.rs:32:27:
+assertion failed: valid.is_valid()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    related::tests::related_requires_bound_indexed_source_and_bounded_native_query
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 15 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p ws-protocol --lib`

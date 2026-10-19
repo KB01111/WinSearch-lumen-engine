@@ -1,0 +1,815 @@
+{
+  "scope": "Actual daemon/public CLI DTO parity, optionally including offline-ranker snapshots.\n\nDefault: native document/PDF/code extraction without a model. --real-model\nimports the pinned artifacts through ModelManager, requires real 768-dimensional\ncode vectors, and checks semantic code/image/audio/video on generated fixtures.\nBoth modes use an isolated data directory and a kill-on-close Windows job.\nThe snapshot option compares query code on the same native indexed vectors;\nfixture seeding and native extraction remain separately classified evidence.\n",
+  "real_model_requested": false,
+  "queries": [
+    {
+      "name": "code_disabled",
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": true,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "document_exact",
+      "query": {
+        "text": "amberparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": false,
+      "expected_name": "item-a.txt",
+      "expected_max_rank": 1,
+      "modality": "document",
+      "relevant_rank": 1,
+      "result_count": 1,
+      "cli_structural_sha256": "77672aa6ddfdfce05d4ef0fe92daf7995234d952af7606193999933ae6c0f99c",
+      "pipe_structural_sha256": "77672aa6ddfdfce05d4ef0fe92daf7995234d952af7606193999933ae6c0f99c",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "pdf_exact",
+      "query": {
+        "text": "pdfparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": false,
+      "expected_name": "item-b.pdf",
+      "expected_max_rank": 1,
+      "modality": "document",
+      "relevant_rank": 1,
+      "result_count": 1,
+      "cli_structural_sha256": "6b595af278ff344886dbc34edc79c0febdad9bdb03c6e14177327a289efec3a0",
+      "pipe_structural_sha256": "6b595af278ff344886dbc34edc79c0febdad9bdb03c6e14177327a289efec3a0",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "code_definition_reference",
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": false,
+      "expected_name": "源 code.rs",
+      "expected_max_rank": 1,
+      "modality": "code",
+      "relevant_rank": 1,
+      "result_count": 2,
+      "cli_structural_sha256": "6346a2571acf265eab2e700d125146c51550bba8f4a5c756a0d94cb5eed600d2",
+      "pipe_structural_sha256": "6346a2571acf265eab2e700d125146c51550bba8f4a5c756a0d94cb5eed600d2",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "notebook",
+      "query": {
+        "text": "notebookparity",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": false,
+      "expected_name": "cells.ipynb",
+      "expected_max_rank": 1,
+      "modality": "code",
+      "relevant_rank": 1,
+      "result_count": 1,
+      "cli_structural_sha256": "2c0d3b5f313b82ff2d200ebc1a2e7382b5954d3081204409a89f669b067ca6f7",
+      "pipe_structural_sha256": "2c0d3b5f313b82ff2d200ebc1a2e7382b5954d3081204409a89f669b067ca6f7",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "code_isolation",
+      "query": {
+        "text": "parityneedle",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": true,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "absent_exact",
+      "query": {
+        "text": "unfindableparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": true,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "code_absent_exact",
+      "query": {
+        "text": "unfindableparitytoken",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": true,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "revoked_document",
+      "query": {
+        "text": "amberparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": true,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "revoked_code",
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": true,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    }
+  ],
+  "checks": [
+    "native_ordinary_document_media_byte_sha256_and_resolved_metadata",
+    "native_extension_filters_before_results_and_invalid_request_rejection",
+    "native_indexed_entry_resolution_with_current_source_proof",
+    "native_code_and_notebook_exact_byte_sha256_provenance",
+    "native_extraction_exact_code_opt_in_and_payload_parity",
+    "typed_client_bound_code_notebook_refs_and_actual_sha256",
+    "typed_async_client_native_dto_status_pause_revoke_restore_reconnect",
+    "committed_exact_cache_revisions_and_hashes_survive_consumer_policy_lifecycle",
+    "native_code_exact_with_zero_model_vectors",
+    "shared_offline_ranker_native_snapshot_ordered_ids_and_locations",
+    "raw_related_bound_seed_domain_budget_outcomes_and_unavailable_controls",
+    "native_entry_reference_rejected_after_root_revocation",
+    "live_root_revocation_public_cli_and_pipe",
+    "unchanged_overall_recall_mrr_and_zero_negative_controls"
+  ],
+  "failures": [],
+  "quality_misses": [],
+  "owned_job_empty": true,
+  "harness_sha256": "cb88e28259611eec2688aceff4199081c3628b28d56d9b2c91f4c85a4ea5f4d1",
+  "expected_pipeline_version": 2,
+  "expected_semantic_floor": 0.65,
+  "expected_code_query_policy": "code-and-search-task-corroboration-v1",
+  "binary_sha256": {
+    "winsearchd.exe": "c346f43c494ae24ab46497ac93ba3b81062e160bf189565649b126463c06acd9",
+    "winsearch-cli.exe": "f435f9258fbc6d77b868aedac1216c15e20d8d59eb164abb03c6a1cf66b504f8",
+    "winsearch-embed.exe": "c070e77136a507eba18789d7e0756e8a0148d031e31eaa30882902855bceae2c",
+    "winsearch-extract.exe": "fb7db8c48972590df55703b4f5a51742e1af321ce065b548261bba66bd9ce205"
+  },
+  "adjacent_native_dll_sha256": {
+    "ggml-base.dll": "1fef4fe44a9a0ba54e04ae58c651ecce330cf425463041cc407b42be62b56962",
+    "ggml-cpu-alderlake.dll": "6f335fe79a35276fcef8ed098d4e2b5952a6cce036549e6547ed7c9b08ac3147",
+    "ggml-cpu-cannonlake.dll": "8a78dfa98d6f6621f96041805227ed78a2a18e0459ba3446d4912cb9aa9e0511",
+    "ggml-cpu-cascadelake.dll": "26cb79d301458ab48143c6634ff4b9a17b247c8bd3203add4e9e3d90b93deed7",
+    "ggml-cpu-haswell.dll": "ea84ecaeab37d2fd794032dd6c7e441b6329abba5835f8ddcbdd9ffde7f4eb5e",
+    "ggml-cpu-icelake.dll": "d60448a478c6029c7e4f7abbb4343ecb2c1b4dea99b6e409028202a85aff0a4a",
+    "ggml-cpu-sandybridge.dll": "777f1172ff889dce5c2baf1bdb3313af7a7f04f213b7e783177d4692b90fad2a",
+    "ggml-cpu-skylakex.dll": "987007c231607c71e92c578c51efe05b263f4558983017446f38a86a7a967328",
+    "ggml-cpu-sse42.dll": "916bf899d3dd80d886ed604059a6ed9693eb37ac4734997ffeb625ce66c6fa1a",
+    "ggml-cpu-x64.dll": "e12f726dce960488ec911e7a0e0a99c67fe32986facbddd49c35ed49120a3656",
+    "ggml-cuda.dll": "8bf0d44ebdb60df7e398b9fddcc4ef5a7aeb63adfbcb85764db2e43e507edf1c",
+    "ggml.dll": "7516e5d871d1fe0e31897f6ee0f3aaf4c6471ce9016472285e65b19a42443f1a",
+    "llama.dll": "a66c29aa35f7301977b24389cc38f2c9c07a04a0cb49349cd2f5055b891f61e5",
+    "mtmd.dll": "4abc3e9e8ce9a378a76a2c885fd5078a251389b36dd6ecaed3811d48e1baef30",
+    "pdfium.dll": "1f2aee4286b8cf0413ab4562b7121aa454f9cfd9afd6ca8609bcef80927b3f80"
+  },
+  "offline_comparator_sha256": "2b46a0644c573ecbe705fbb000b4c94a79b90371669b902a05ff39e37b56fbe0",
+  "headless_client_sha256": "dbd763361f9817e4be3729ff5b7174fec9ba07588e65f66eb8585dfdddba2445",
+  "generated_source_sha256": {
+    "code\\cells.ipynb": "39ff523217cbec65301238ccb92d04677898eba2ebc5c860baad13c1c25061b9",
+    "code\\源 code.rs": "e91ca6326352f465dabbe4bc67d4271714e226c0a09cc36fdecc9f45c2e80bef",
+    "documents\\item-a.txt": "9fc1db8e72de0275279a18f08a76e43fbbeae6fbde7b9924c4d1f351eb4652d1",
+    "documents\\item-b.pdf": "028cfcb54c84c18f5351445f7edeb6d2651e9e4950714c61042cdd911870671e"
+  },
+  "index_seconds": 2.417,
+  "ordinary_provenance": [
+    {
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-cseghd3_\\documents\\item-a.txt",
+      "revision": 1,
+      "hash_revision": 1,
+      "sha256": "9fc1db8e72de0275279a18f08a76e43fbbeae6fbde7b9924c4d1f351eb4652d1",
+      "resolved": {
+        "result_id": "e1",
+        "root_path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-cseghd3_\\documents",
+        "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-cseghd3_\\documents\\item-a.txt",
+        "name": "item-a.txt",
+        "kind": "document",
+        "size_bytes": 85,
+        "modified_unix_seconds": 1792414483,
+        "index_revision": 1,
+        "source_revision": "<opaque identity redacted>",
+        "content_sha256": "9fc1db8e72de0275279a18f08a76e43fbbeae6fbde7b9924c4d1f351eb4652d1"
+      }
+    },
+    {
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-cseghd3_\\documents\\item-b.pdf",
+      "revision": 1,
+      "hash_revision": 1,
+      "sha256": "028cfcb54c84c18f5351445f7edeb6d2651e9e4950714c61042cdd911870671e",
+      "resolved": {
+        "result_id": "e2",
+        "root_path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-cseghd3_\\documents",
+        "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-cseghd3_\\documents\\item-b.pdf",
+        "name": "item-b.pdf",
+        "kind": "document",
+        "size_bytes": 924,
+        "modified_unix_seconds": 1792414483,
+        "index_revision": 1,
+        "source_revision": "<opaque identity redacted>",
+        "content_sha256": "028cfcb54c84c18f5351445f7edeb6d2651e9e4950714c61042cdd911870671e"
+      }
+    }
+  ],
+  "extension_filters": [
+    {
+      "query": {
+        "text": "pdfparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          ".PDF"
+        ]
+      },
+      "expected_name": "item-b.pdf",
+      "result_count": 1,
+      "results_structural_sha256": "6b595af278ff344886dbc34edc79c0febdad9bdb03c6e14177327a289efec3a0",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "pdfparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "txt"
+        ]
+      },
+      "expected_name": null,
+      "result_count": 0,
+      "results_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "amberparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "txt"
+        ]
+      },
+      "expected_name": "item-a.txt",
+      "result_count": 1,
+      "results_structural_sha256": "77672aa6ddfdfce05d4ef0fe92daf7995234d952af7606193999933ae6c0f99c",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "rs"
+        ]
+      },
+      "expected_name": "源 code.rs",
+      "result_count": 2,
+      "results_structural_sha256": "6346a2571acf265eab2e700d125146c51550bba8f4a5c756a0d94cb5eed600d2",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "py"
+        ]
+      },
+      "expected_name": null,
+      "result_count": 0,
+      "results_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "notebookparity",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "ipynb"
+        ]
+      },
+      "expected_name": "cells.ipynb",
+      "result_count": 1,
+      "results_structural_sha256": "2c0d3b5f313b82ff2d200ebc1a2e7382b5954d3081204409a89f669b067ca6f7",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "1+2",
+        "mode": "auto",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "txt"
+        ]
+      },
+      "expected_name": null,
+      "result_count": 0,
+      "results_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    }
+  ],
+  "invalid_extension_filter": {
+    "type": "error",
+    "id": 2,
+    "code": "invalid_request",
+    "message": "search request failed"
+  },
+  "entry_resolution": {
+    "admitted": {
+      "type": "resolved_entry",
+      "id": 8,
+      "entry": {
+        "result_id": "e1",
+        "root_path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-cseghd3_\\documents",
+        "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-cseghd3_\\documents\\item-a.txt",
+        "name": "item-a.txt",
+        "kind": "document",
+        "size_bytes": 85,
+        "modified_unix_seconds": 1792414483,
+        "index_revision": 1,
+        "source_revision": "<opaque identity redacted>",
+        "content_sha256": "9fc1db8e72de0275279a18f08a76e43fbbeae6fbde7b9924c4d1f351eb4652d1"
+      }
+    },
+    "revoked": {
+      "type": "error",
+      "id": 20,
+      "code": "not_ready",
+      "message": "entry is unavailable or changed"
+    }
+  },
+  "code_provenance": [
+    {
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-cseghd3_\\code\\cells.ipynb",
+      "revision": 1,
+      "sha256": "39ff523217cbec65301238ccb92d04677898eba2ebc5c860baad13c1c25061b9"
+    },
+    {
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-cseghd3_\\code\\源 code.rs",
+      "revision": 1,
+      "sha256": "e91ca6326352f465dabbe4bc67d4271714e226c0a09cc36fdecc9f45c2e80bef"
+    }
+  ],
+  "headless_client": {
+    "checks": [
+      "typed_status_and_configuration",
+      "paused_policy_pushed_subscription",
+      "native_document_and_code_locations",
+      "current_entry_source_proof",
+      "drop_disconnect_then_reconnect",
+      "root_revocation_hides_results",
+      "revoked_proof_stays_invalid_after_restore",
+      "fresh_reference_after_restore"
+    ],
+    "code_preview_checks": [
+      "actual_cached_code",
+      "actual_notebook_cell_and_no_outputs",
+      "code_preview_rejects_revoked_root",
+      "code_preview_proof_stays_invalid_after_restore"
+    ],
+    "engine_config": {
+      "preferred_backend": "cpu",
+      "semantic_enabled": false
+    },
+    "engine_version": "0.1.0",
+    "entry_index_revision": 1,
+    "entry_size_bytes": 85,
+    "extension_checks": [
+      "pdf_extension_and_case",
+      "excluded_document_extension",
+      "code_extension",
+      "excluded_code_extension"
+    ],
+    "features": [
+      "search.exact",
+      "search.semantic",
+      "search.filters",
+      "search.outcomes",
+      "search.related",
+      "code",
+      "entry.resolve",
+      "entry.resolve.code",
+      "search.entry_references",
+      "entry.preview.text",
+      "entry.preview.code"
+    ],
+    "initial_status": {
+      "current_activity": "",
+      "files_discovered": 4,
+      "files_indexed": 4,
+      "index_size_bytes": 229376,
+      "model_loaded": false,
+      "queue_depth": 0,
+      "segments_indexed": 0,
+      "state": "idle"
+    },
+    "model_status": {
+      "bytes": 0,
+      "error": null,
+      "state": "not_downloaded",
+      "total_bytes": 864676480
+    },
+    "outcome_checks": [
+      "advertised_terminal_state_required",
+      "completed_snapshot_without_retry",
+      "actual_semantic_phase"
+    ],
+    "preview_checks": [
+      "current_metadata_bound_document_text",
+      "actual_pdf_page_two",
+      "preview_rejects_revoked_root",
+      "preview_proof_stays_invalid_after_restore"
+    ],
+    "reference_checks": [
+      "bound_document_and_pdf_refs",
+      "bound_code_and_notebook_refs",
+      "resolved_code_hashes",
+      "code_proof_stays_invalid_after_restore"
+    ],
+    "related_checks": [
+      {
+        "error": "not_ready",
+        "source": {
+          "result_id": "e1",
+          "source_revision": "<opaque identity redacted>"
+        }
+      },
+      {
+        "error": "not_ready",
+        "source": {
+          "result_id": "c2",
+          "source_revision": "<opaque identity redacted>"
+        }
+      }
+    ],
+    "semantic_checks": [],
+    "full_dto_structural_sha256": "0b3259ceafc98e5ce15d3a3bc24e5763ad441efa767ff91cf6c42a98c64e8be5"
+  },
+  "offline_input_sha256": "0f7b780c23d843f3f117dd8db032e84904c02cf0f74d1deea26b05415dc9db4d",
+  "offline_snapshot_sha256": {
+    "index": "e679a355f7e521fafcb3ea5da150065454410d6f858b5dccc33845505f424f57",
+    "code": "0029380d9e15335499594dea72cf8ab2095e530db4eb3940c62d9b044ac5ad3c"
+  },
+  "offline_parity": {
+    "cases": [
+      {
+        "equal": true,
+        "name": "document_exact",
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "files",
+          "text": "amberparitytoken"
+        },
+        "native_structural_sha256": "bb0950e2927771b15bd3e41728bd757d219aa559bdadd9012896ecdc1d606bf9",
+        "offline_structural_sha256": "bb0950e2927771b15bd3e41728bd757d219aa559bdadd9012896ecdc1d606bf9"
+      },
+      {
+        "equal": true,
+        "name": "pdf_exact",
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "files",
+          "text": "pdfparitytoken"
+        },
+        "native_structural_sha256": "a025133c9e984aaf967c404b5706e20607252f98a49be2c4f377747e909236ad",
+        "offline_structural_sha256": "a025133c9e984aaf967c404b5706e20607252f98a49be2c4f377747e909236ad"
+      },
+      {
+        "equal": true,
+        "name": "code_definition_reference",
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "code",
+          "text": "parityneedle"
+        },
+        "native_structural_sha256": "4d0e1b87f4c1980074bc02cef5fbe50eb3ba2e7e1ce8cedf08f0e632b6c805b7",
+        "offline_structural_sha256": "4d0e1b87f4c1980074bc02cef5fbe50eb3ba2e7e1ce8cedf08f0e632b6c805b7"
+      },
+      {
+        "equal": true,
+        "name": "notebook",
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "code",
+          "text": "notebookparity"
+        },
+        "native_structural_sha256": "2f56fed134316acf4a02ec177f8c8f64750fcc0a3eb5f0a190ac5b135b60092b",
+        "offline_structural_sha256": "2f56fed134316acf4a02ec177f8c8f64750fcc0a3eb5f0a190ac5b135b60092b"
+      },
+      {
+        "equal": true,
+        "name": "code_isolation",
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "files",
+          "text": "parityneedle"
+        },
+        "native_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "offline_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+        "equal": true,
+        "name": "absent_exact",
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "files",
+          "text": "unfindableparitytoken"
+        },
+        "native_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "offline_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+        "equal": true,
+        "name": "code_absent_exact",
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "code",
+          "text": "unfindableparitytoken"
+        },
+        "native_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "offline_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      }
+    ],
+    "embedder": "ConceptStubEmbedder (pipeline smoke test; deterministic 768d CI fallback)",
+    "equal": true,
+    "scope": "shared offline query functions versus public daemon results on native DB snapshots; no re-extraction"
+  },
+  "related_checks": [
+    {
+      "name": "ordinary_bound_cached_source",
+      "source": {
+        "result_id": "e1",
+        "source_revision": "<opaque identity redacted>"
+      },
+      "frames": [
+        {
+          "type": "error",
+          "id": 17,
+          "code": "not_ready",
+          "message": "search request failed"
+        },
+        {
+          "type": "results",
+          "id": 17,
+          "batch": [],
+          "done": true,
+          "outcome": {
+            "disposition": "failed",
+            "semantic": null
+          }
+        }
+      ],
+      "expected_name": null
+    },
+    {
+      "name": "code_bound_cached_source",
+      "source": {
+        "result_id": "c2",
+        "source_revision": "<opaque identity redacted>"
+      },
+      "frames": [
+        {
+          "type": "error",
+          "id": 18,
+          "code": "not_ready",
+          "message": "search request failed"
+        },
+        {
+          "type": "results",
+          "id": 18,
+          "batch": [],
+          "done": true,
+          "outcome": {
+            "disposition": "failed",
+            "semantic": null
+          }
+        }
+      ],
+      "expected_name": null
+    },
+    {
+      "name": "reject_unbound_source",
+      "source": {
+        "result_id": "e1",
+        "source_revision": null
+      },
+      "frames": [
+        {
+          "type": "error",
+          "id": 19,
+          "code": "invalid_request",
+          "message": "search request failed"
+        },
+        {
+          "type": "results",
+          "id": 19,
+          "batch": [],
+          "done": true,
+          "outcome": {
+            "disposition": "failed",
+            "semantic": null
+          }
+        }
+      ],
+      "expected_name": null
+    }
+  ],
+  "quality": {
+    "positive_queries": 4,
+    "Recall@5": 1.0,
+    "MRR": 1.0,
+    "minimum_recall_at_5": 0.9,
+    "minimum_mrr": 0.85,
+    "maximum_negative_fp_rate": 0,
+    "original_positive_cases": {
+      "positive_queries": 4,
+      "Recall@5": 1.0,
+      "MRR": 1.0
+    },
+    "empty_result_controls": 6,
+    "empty_control_fp_rate": 0.0,
+    "empty_control_scope": "all declared empty-result cases, including code isolation and root revocation",
+    "by_modality": {
+      "code": {
+        "positive_queries": 2,
+        "Recall@5": 1.0,
+        "MRR": 1.0
+      },
+      "document": {
+        "positive_queries": 2,
+        "Recall@5": 1.0,
+        "MRR": 1.0
+      }
+    }
+  },
+  "pids": [],
+  "elapsed_seconds": 5.628,
+  "published_scope": "Condensed: Related frames, provenance/lifecycle and original query parity hashes; full raw JSON SHA is in evidence-hashes.json."
+}

@@ -1,0 +1,29 @@
+cargo :    Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearc
+hd)
+At line:1 char:1
++ cargo test -p winsearchd engine::tests::related_public_pipe_bounds_wo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling wi...ins\winsearchd):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.74s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-950b3e8f0455252c.exe)
+
+running 1 test
+test engine::tests::related_public_pipe_bounds_work_keeps_controls_live_and_reports_actual_lookup_state ... FAILED
+
+failures:
+
+---- engine::tests::related_public_pipe_bounds_work_keeps_controls_live_and_reports_actual_lookup_state stdout ----
+
+thread 'engine::tests::related_public_pipe_bounds_work_keeps_controls_live_and_reports_actual_lookup_state' (38008) panicked at bins\winsearchd\src\engine.rs:1665:21:
+Related blocked control/result delivery
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    engine::tests::related_public_pipe_bounds_work_keeps_controls_live_and_reports_actual_lookup_state
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 226 filtered out; finished in 5.14s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

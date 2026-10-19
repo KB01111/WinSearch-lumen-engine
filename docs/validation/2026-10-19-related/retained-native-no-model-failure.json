@@ -1,0 +1,917 @@
+{
+  "scope": "Actual daemon/public CLI DTO parity, optionally including offline-ranker snapshots.\n\nDefault: native document/PDF/code extraction without a model. --real-model\nimports the pinned artifacts through ModelManager, requires real 768-dimensional\ncode vectors, and checks semantic code/image/audio/video on generated fixtures.\nBoth modes use an isolated data directory and a kill-on-close Windows job.\nThe snapshot option compares query code on the same native indexed vectors;\nfixture seeding and native extraction remain separately classified evidence.\n",
+  "real_model_requested": false,
+  "queries": [
+    {
+      "name": "code_disabled",
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 2,
+          "batch": [],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "cli": [],
+      "expect_empty": true
+    },
+    {
+      "name": "document_exact",
+      "query": {
+        "text": "amberparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 10,
+          "batch": [
+            {
+              "id": "e1",
+              "kind": "document",
+              "title": "item-a.txt",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents\\item-a.txt",
+              "match_explanation": "Matches extracted content",
+              "score": 0.41,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents\\item-a.txt",
+              "location": {
+                "kind": "line",
+                "line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+              "matching_moments": [
+                {
+                  "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+                  "location": {
+                    "kind": "line",
+                    "line": 2
+                  },
+                  "thumbnail_path": null
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e1",
+                "source_revision": "<opaque identity redacted>"
+              }
+            }
+          ],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "cli": [
+        {
+          "id": "e1",
+          "kind": "document",
+          "title": "item-a.txt",
+          "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents\\item-a.txt",
+          "match_explanation": "Matches extracted content",
+          "score": 0.41,
+          "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents\\item-a.txt",
+          "location": {
+            "kind": "line",
+            "line": 2
+          },
+          "thumbnail_path": null,
+          "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+          "matching_moments": [
+            {
+              "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+              "location": {
+                "kind": "line",
+                "line": 2
+              },
+              "thumbnail_path": null
+            }
+          ],
+          "entry_reference": {
+            "result_id": "e1",
+            "source_revision": "<opaque identity redacted>"
+          }
+        }
+      ],
+      "expect_empty": false,
+      "expected_name": "item-a.txt",
+      "expected_max_rank": 1,
+      "modality": "document",
+      "relevant_rank": 1
+    },
+    {
+      "name": "pdf_exact",
+      "query": {
+        "text": "pdfparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 11,
+          "batch": [
+            {
+              "id": "e2",
+              "kind": "document",
+              "title": "item-b.pdf",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents\\item-b.pdf",
+              "match_explanation": "Matches extracted content",
+              "score": 0.41,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents\\item-b.pdf",
+              "location": {
+                "kind": "page",
+                "page": 2
+              },
+              "thumbnail_path": "<checkout>\\artifacts\\related-native\\data\\cache\\thumbs\\extract-132852-1792349998808472100-3-0.png",
+              "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+              "matching_moments": [
+                {
+                  "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+                  "location": {
+                    "kind": "page",
+                    "page": 2
+                  },
+                  "thumbnail_path": "<checkout>\\artifacts\\related-native\\data\\cache\\thumbs\\extract-132852-1792349998808472100-3-1.png"
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e2",
+                "source_revision": "<opaque identity redacted>"
+              }
+            }
+          ],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "cli": [
+        {
+          "id": "e2",
+          "kind": "document",
+          "title": "item-b.pdf",
+          "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents\\item-b.pdf",
+          "match_explanation": "Matches extracted content",
+          "score": 0.41,
+          "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents\\item-b.pdf",
+          "location": {
+            "kind": "page",
+            "page": 2
+          },
+          "thumbnail_path": "<checkout>\\artifacts\\related-native\\data\\cache\\thumbs\\extract-132852-1792349998808472100-3-0.png",
+          "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+          "matching_moments": [
+            {
+              "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+              "location": {
+                "kind": "page",
+                "page": 2
+              },
+              "thumbnail_path": "<checkout>\\artifacts\\related-native\\data\\cache\\thumbs\\extract-132852-1792349998808472100-3-1.png"
+            }
+          ],
+          "entry_reference": {
+            "result_id": "e2",
+            "source_revision": "<opaque identity redacted>"
+          }
+        }
+      ],
+      "expect_empty": false,
+      "expected_name": "item-b.pdf",
+      "expected_max_rank": 1,
+      "modality": "document",
+      "relevant_rank": 1
+    },
+    {
+      "name": "code_definition_reference",
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 12,
+          "batch": [
+            {
+              "id": "code:2:1:true:parityneedle",
+              "kind": "code",
+              "title": "parityneedle",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code\\源 code.rs",
+              "match_explanation": "function · line 1",
+              "score": 1.0,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code\\源 code.rs",
+              "location": {
+                "kind": "line",
+                "line": 1
+              },
+              "thumbnail_path": null,
+              "excerpt": "pub fn parityneedle() {}",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c2",
+                "source_revision": "<opaque identity redacted>"
+              }
+            },
+            {
+              "id": "code:2:2:false:parityneedle",
+              "kind": "code",
+              "title": "parityneedle",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code\\源 code.rs",
+              "match_explanation": "reference · line 2",
+              "score": 0.949999988079071,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code\\源 code.rs",
+              "location": {
+                "kind": "line",
+                "line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "parityneedle",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c2",
+                "source_revision": "<opaque identity redacted>"
+              }
+            }
+          ],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "cli": [
+        {
+          "id": "code:2:1:true:parityneedle",
+          "kind": "code",
+          "title": "parityneedle",
+          "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code\\源 code.rs",
+          "match_explanation": "function · line 1",
+          "score": 1.0,
+          "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code\\源 code.rs",
+          "location": {
+            "kind": "line",
+            "line": 1
+          },
+          "thumbnail_path": null,
+          "excerpt": "pub fn parityneedle() {}",
+          "matching_moments": [],
+          "entry_reference": {
+            "result_id": "c2",
+            "source_revision": "<opaque identity redacted>"
+          }
+        },
+        {
+          "id": "code:2:2:false:parityneedle",
+          "kind": "code",
+          "title": "parityneedle",
+          "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code\\源 code.rs",
+          "match_explanation": "reference · line 2",
+          "score": 0.949999988079071,
+          "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code\\源 code.rs",
+          "location": {
+            "kind": "line",
+            "line": 2
+          },
+          "thumbnail_path": null,
+          "excerpt": "parityneedle",
+          "matching_moments": [],
+          "entry_reference": {
+            "result_id": "c2",
+            "source_revision": "<opaque identity redacted>"
+          }
+        }
+      ],
+      "expect_empty": false,
+      "expected_name": "源 code.rs",
+      "expected_max_rank": 1,
+      "modality": "code",
+      "relevant_rank": 1
+    },
+    {
+      "name": "notebook",
+      "query": {
+        "text": "notebookparity",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 13,
+          "batch": [
+            {
+              "id": "code:1:2:true:notebookparity",
+              "kind": "code",
+              "title": "notebookparity",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code\\cells.ipynb",
+              "match_explanation": "function · cell 2, line 1",
+              "score": 1.0,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code\\cells.ipynb",
+              "location": {
+                "kind": "notebook",
+                "cell_ordinal": 1,
+                "line": 1,
+                "end_line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "def notebookparity():\n    return 1",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c1",
+                "source_revision": "<opaque identity redacted>"
+              }
+            }
+          ],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "cli": [
+        {
+          "id": "code:1:2:true:notebookparity",
+          "kind": "code",
+          "title": "notebookparity",
+          "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code\\cells.ipynb",
+          "match_explanation": "function · cell 2, line 1",
+          "score": 1.0,
+          "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code\\cells.ipynb",
+          "location": {
+            "kind": "notebook",
+            "cell_ordinal": 1,
+            "line": 1,
+            "end_line": 2
+          },
+          "thumbnail_path": null,
+          "excerpt": "def notebookparity():\n    return 1",
+          "matching_moments": [],
+          "entry_reference": {
+            "result_id": "c1",
+            "source_revision": "<opaque identity redacted>"
+          }
+        }
+      ],
+      "expect_empty": false,
+      "expected_name": "cells.ipynb",
+      "expected_max_rank": 1,
+      "modality": "code",
+      "relevant_rank": 1
+    },
+    {
+      "name": "code_isolation",
+      "query": {
+        "text": "parityneedle",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 14,
+          "batch": [],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "cli": [],
+      "expect_empty": true
+    },
+    {
+      "name": "absent_exact",
+      "query": {
+        "text": "unfindableparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 15,
+          "batch": [],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "cli": [],
+      "expect_empty": true
+    },
+    {
+      "name": "code_absent_exact",
+      "query": {
+        "text": "unfindableparitytoken",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 16,
+          "batch": [],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "cli": [],
+      "expect_empty": true
+    }
+  ],
+  "checks": [
+    "native_ordinary_document_media_byte_sha256_and_resolved_metadata",
+    "native_extension_filters_before_results_and_invalid_request_rejection",
+    "native_indexed_entry_resolution_with_current_source_proof",
+    "native_code_and_notebook_exact_byte_sha256_provenance",
+    "native_extraction_exact_code_opt_in_and_payload_parity"
+  ],
+  "failures": [
+    "AssertionError('typed search outcome: {\"disposition\":\"complete\",\"semantic\":{\"phase\":\"disabled\",\"reason\":null}}\\ntyped search outcome: {\"disposition\":\"complete\",\"semantic\":{\"phase\":\"disabled\",\"reason\":null}}\\ntyped search outcome: {\"disposition\":\"complete\",\"semantic\":{\"phase\":\"disabled\",\"reason\":null}}\\ntyped search outcome: {\"disposition\":\"complete\",\"semantic\":{\"phase\":\"disabled\",\"reason\":null}}\\ntyped search outcome: {\"disposition\":\"complete\",\"semantic\":{\"phase\":\"disabled\",\"reason\":null}}\\ntyped search outcome: {\"disposition\":\"complete\",\"semantic\":{\"phase\":\"disabled\",\"reason\":null}}\\ntyped search outcome: {\"disposition\":\"complete\",\"semantic\":{\"phase\":\"disabled\",\"reason\":null}}\\ntyped search outcome: {\"disposition\":\"complete\",\"semantic\":{\"phase\":\"disabled\",\"reason\":null}}\\ntyped search outcome: {\"disposition\":\"complete\",\"semantic\":{\"phase\":\"disabled\",\"reason\":null}}\\ntyped search outcome: {\"disposition\":\"complete\",\"semantic\":{\"phase\":\"disabled\",\"reason\":null}}\\n\\nthread \\'main\\' (129528) panicked at crates\\\\ws-client\\\\examples\\\\native-client-smoke.rs:231:46:\\nindex out of bounds: the len is 0 but the index is 0\\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\\n')"
+  ],
+  "quality_misses": [],
+  "owned_job_empty": true,
+  "harness_sha256": "5e96cba48b30b57b04beace4a418e24257b17e777dd031db4dcbfa6389c8c309",
+  "expected_pipeline_version": 2,
+  "expected_semantic_floor": 0.65,
+  "expected_code_query_policy": "code-and-search-task-corroboration-v1",
+  "binary_sha256": {
+    "winsearchd.exe": "8973db456fd29b4c31db275685e8c157c3e2dcf99de1f8bd739c5712e3a32fbb",
+    "winsearch-cli.exe": "f435f9258fbc6d77b868aedac1216c15e20d8d59eb164abb03c6a1cf66b504f8",
+    "winsearch-embed.exe": "c070e77136a507eba18789d7e0756e8a0148d031e31eaa30882902855bceae2c",
+    "winsearch-extract.exe": "fb7db8c48972590df55703b4f5a51742e1af321ce065b548261bba66bd9ce205"
+  },
+  "adjacent_native_dll_sha256": {
+    "ggml-base.dll": "1fef4fe44a9a0ba54e04ae58c651ecce330cf425463041cc407b42be62b56962",
+    "ggml-cpu-alderlake.dll": "6f335fe79a35276fcef8ed098d4e2b5952a6cce036549e6547ed7c9b08ac3147",
+    "ggml-cpu-cannonlake.dll": "8a78dfa98d6f6621f96041805227ed78a2a18e0459ba3446d4912cb9aa9e0511",
+    "ggml-cpu-cascadelake.dll": "26cb79d301458ab48143c6634ff4b9a17b247c8bd3203add4e9e3d90b93deed7",
+    "ggml-cpu-haswell.dll": "ea84ecaeab37d2fd794032dd6c7e441b6329abba5835f8ddcbdd9ffde7f4eb5e",
+    "ggml-cpu-icelake.dll": "d60448a478c6029c7e4f7abbb4343ecb2c1b4dea99b6e409028202a85aff0a4a",
+    "ggml-cpu-sandybridge.dll": "777f1172ff889dce5c2baf1bdb3313af7a7f04f213b7e783177d4692b90fad2a",
+    "ggml-cpu-skylakex.dll": "987007c231607c71e92c578c51efe05b263f4558983017446f38a86a7a967328",
+    "ggml-cpu-sse42.dll": "916bf899d3dd80d886ed604059a6ed9693eb37ac4734997ffeb625ce66c6fa1a",
+    "ggml-cpu-x64.dll": "e12f726dce960488ec911e7a0e0a99c67fe32986facbddd49c35ed49120a3656",
+    "ggml-cuda.dll": "8bf0d44ebdb60df7e398b9fddcc4ef5a7aeb63adfbcb85764db2e43e507edf1c",
+    "ggml.dll": "7516e5d871d1fe0e31897f6ee0f3aaf4c6471ce9016472285e65b19a42443f1a",
+    "llama.dll": "a66c29aa35f7301977b24389cc38f2c9c07a04a0cb49349cd2f5055b891f61e5",
+    "mtmd.dll": "4abc3e9e8ce9a378a76a2c885fd5078a251389b36dd6ecaed3811d48e1baef30",
+    "pdfium.dll": "1f2aee4286b8cf0413ab4562b7121aa454f9cfd9afd6ca8609bcef80927b3f80"
+  },
+  "offline_comparator_sha256": "2b46a0644c573ecbe705fbb000b4c94a79b90371669b902a05ff39e37b56fbe0",
+  "headless_client_sha256": "727eb416b8df8a833f064b9aa79b3cc6ef81c4aa71312fdb0288715b3840356e",
+  "generated_source_sha256": {
+    "code\\cells.ipynb": "39ff523217cbec65301238ccb92d04677898eba2ebc5c860baad13c1c25061b9",
+    "code\\源 code.rs": "e91ca6326352f465dabbe4bc67d4271714e226c0a09cc36fdecc9f45c2e80bef",
+    "documents\\item-a.txt": "9fc1db8e72de0275279a18f08a76e43fbbeae6fbde7b9924c4d1f351eb4652d1",
+    "documents\\item-b.pdf": "028cfcb54c84c18f5351445f7edeb6d2651e9e4950714c61042cdd911870671e"
+  },
+  "index_seconds": 3.707,
+  "ordinary_provenance": [
+    {
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents\\item-a.txt",
+      "revision": 1,
+      "hash_revision": 1,
+      "sha256": "9fc1db8e72de0275279a18f08a76e43fbbeae6fbde7b9924c4d1f351eb4652d1",
+      "resolved": {
+        "result_id": "e1",
+        "root_path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents",
+        "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents\\item-a.txt",
+        "name": "item-a.txt",
+        "kind": "document",
+        "size_bytes": 85,
+        "modified_unix_seconds": 1792349995,
+        "index_revision": 1,
+        "source_revision": "<opaque identity redacted>",
+        "content_sha256": "9fc1db8e72de0275279a18f08a76e43fbbeae6fbde7b9924c4d1f351eb4652d1"
+      }
+    },
+    {
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents\\item-b.pdf",
+      "revision": 1,
+      "hash_revision": 1,
+      "sha256": "028cfcb54c84c18f5351445f7edeb6d2651e9e4950714c61042cdd911870671e",
+      "resolved": {
+        "result_id": "e2",
+        "root_path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents",
+        "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents\\item-b.pdf",
+        "name": "item-b.pdf",
+        "kind": "document",
+        "size_bytes": 924,
+        "modified_unix_seconds": 1792349995,
+        "index_revision": 1,
+        "source_revision": "<opaque identity redacted>",
+        "content_sha256": "028cfcb54c84c18f5351445f7edeb6d2651e9e4950714c61042cdd911870671e"
+      }
+    }
+  ],
+  "extension_filters": [
+    {
+      "query": {
+        "text": "pdfparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          ".PDF"
+        ]
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 3,
+          "batch": [
+            {
+              "id": "e2",
+              "kind": "document",
+              "title": "item-b.pdf",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents\\item-b.pdf",
+              "match_explanation": "Matches extracted content",
+              "score": 0.41,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents\\item-b.pdf",
+              "location": {
+                "kind": "page",
+                "page": 2
+              },
+              "thumbnail_path": "<checkout>\\artifacts\\related-native\\data\\cache\\thumbs\\extract-132852-1792349998808472100-3-0.png",
+              "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+              "matching_moments": [
+                {
+                  "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+                  "location": {
+                    "kind": "page",
+                    "page": 2
+                  },
+                  "thumbnail_path": "<checkout>\\artifacts\\related-native\\data\\cache\\thumbs\\extract-132852-1792349998808472100-3-1.png"
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e2",
+                "source_revision": "<opaque identity redacted>"
+              }
+            }
+          ],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "expected_name": "item-b.pdf"
+    },
+    {
+      "query": {
+        "text": "pdfparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "txt"
+        ]
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 4,
+          "batch": [],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "expected_name": null
+    },
+    {
+      "query": {
+        "text": "amberparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "txt"
+        ]
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 5,
+          "batch": [
+            {
+              "id": "e1",
+              "kind": "document",
+              "title": "item-a.txt",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents\\item-a.txt",
+              "match_explanation": "Matches extracted content",
+              "score": 0.41,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents\\item-a.txt",
+              "location": {
+                "kind": "line",
+                "line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+              "matching_moments": [
+                {
+                  "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+                  "location": {
+                    "kind": "line",
+                    "line": 2
+                  },
+                  "thumbnail_path": null
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e1",
+                "source_revision": "<opaque identity redacted>"
+              }
+            }
+          ],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "expected_name": "item-a.txt"
+    },
+    {
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "rs"
+        ]
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 6,
+          "batch": [
+            {
+              "id": "code:2:1:true:parityneedle",
+              "kind": "code",
+              "title": "parityneedle",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code\\源 code.rs",
+              "match_explanation": "function · line 1",
+              "score": 1.0,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code\\源 code.rs",
+              "location": {
+                "kind": "line",
+                "line": 1
+              },
+              "thumbnail_path": null,
+              "excerpt": "pub fn parityneedle() {}",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c2",
+                "source_revision": "<opaque identity redacted>"
+              }
+            },
+            {
+              "id": "code:2:2:false:parityneedle",
+              "kind": "code",
+              "title": "parityneedle",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code\\源 code.rs",
+              "match_explanation": "reference · line 2",
+              "score": 0.949999988079071,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code\\源 code.rs",
+              "location": {
+                "kind": "line",
+                "line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "parityneedle",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c2",
+                "source_revision": "<opaque identity redacted>"
+              }
+            }
+          ],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "expected_name": "源 code.rs"
+    },
+    {
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "py"
+        ]
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 7,
+          "batch": [],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "expected_name": null
+    },
+    {
+      "query": {
+        "text": "notebookparity",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "ipynb"
+        ]
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 8,
+          "batch": [
+            {
+              "id": "code:1:2:true:notebookparity",
+              "kind": "code",
+              "title": "notebookparity",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code\\cells.ipynb",
+              "match_explanation": "function · cell 2, line 1",
+              "score": 1.0,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code\\cells.ipynb",
+              "location": {
+                "kind": "notebook",
+                "cell_ordinal": 1,
+                "line": 1,
+                "end_line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "def notebookparity():\n    return 1",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c1",
+                "source_revision": "<opaque identity redacted>"
+              }
+            }
+          ],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "expected_name": "cells.ipynb"
+    },
+    {
+      "query": {
+        "text": "1+2",
+        "mode": "auto",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "txt"
+        ]
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 9,
+          "batch": [],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "disabled",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "expected_name": null
+    }
+  ],
+  "invalid_extension_filter": {
+    "type": "error",
+    "id": 2,
+    "code": "invalid_request",
+    "message": "search request failed"
+  },
+  "entry_resolution": {
+    "admitted": {
+      "type": "resolved_entry",
+      "id": 8,
+      "entry": {
+        "result_id": "e1",
+        "root_path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents",
+        "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents\\item-a.txt",
+        "name": "item-a.txt",
+        "kind": "document",
+        "size_bytes": 85,
+        "modified_unix_seconds": 1792349995,
+        "index_revision": 1,
+        "source_revision": "<opaque identity redacted>",
+        "content_sha256": "9fc1db8e72de0275279a18f08a76e43fbbeae6fbde7b9924c4d1f351eb4652d1"
+      }
+    }
+  },
+  "code_provenance": [
+    {
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code\\cells.ipynb",
+      "revision": 1,
+      "sha256": "39ff523217cbec65301238ccb92d04677898eba2ebc5c860baad13c1c25061b9"
+    },
+    {
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code\\源 code.rs",
+      "revision": 1,
+      "sha256": "e91ca6326352f465dabbe4bc67d4271714e226c0a09cc36fdecc9f45c2e80bef"
+    }
+  ],
+  "pids": [],
+  "elapsed_seconds": 8.697
+}

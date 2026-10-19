@@ -38,6 +38,10 @@ pub enum ClientMessage {
         id: RequestId,
         query: SearchQuery,
     },
+    Related {
+        id: RequestId,
+        query: crate::RelatedQuery,
+    },
     /// Cancel the in-flight request with this id.
     Cancel {
         id: RequestId,

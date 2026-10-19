@@ -13,28 +13,29 @@ acceleration is optional and outside the current focus.
 
 ## v1.0 TODO
 
-Remaining work as of 2026-10-18. Keep a task open until its implementation and
+Remaining work as of 2026-10-19. Keep a task open until its implementation and
 relevant acceptance checks are complete. The detailed source/test evidence lives
 in the [gap matrix](docs/v1-gap-matrix.md); the
 [approved design](docs/superpowers/specs/2026-10-16-v1-design.md) and
 [Lumen integration plan](docs/superpowers/plans/2026-10-17-v1-lumen-engine.md)
 define the full scope.
 
-The latest [search-outcome checkpoint](docs/validation/2026-10-18-search-outcomes/README.md)
-records verified subsystem behavior and the retained native failure. The tasks
-below still require implementation or final acceptance; they are not release
-completion claims.
+The latest [Related/cache-retention checkpoint](docs/validation/2026-10-19-related/README.md)
+records the typed Related operation, a reproduced exact-cache fix and native
+CPU/no-model checks with retained failures. Consumer integration and the tasks
+below still require implementation or final acceptance.
 
 ### Lumen integration and native contract
 
-- [ ] Complete Related search, finer file-kind scopes and remaining provenance
+- [ ] Complete finer file-kind scopes and remaining provenance
   contracts; expose the existing extension filters through CLI arguments.
 - [ ] Consume and verify the engine's terminal outcomes in Lumen and the
   standalone UI, preserving complete/superseded/canceled/failed and semantic
   disabled/ready/degraded states, exact results on optional failure and legacy
   peers' unknown state. Complete independent review and installed acceptance.
-- [ ] Distinguish superseded queries from genuine empty results and resolve the
-  transient native pause/resume result failure; preserve current source fences.
+- [ ] Verify consumer handling of empty/superseded results and the full
+  pause/resume/revoke matrix after the cache-retention fix; preserve current
+  source fences and retained failure evidence.
 - [ ] Implement the typed WinSearch adapter behind Lumen's existing SearchService.
   Keep secured IPC, filesystem grants and native actions in Lumen's Rust host.
 - [ ] Consolidate to one authoritative crawler, index and embedding lifecycle;

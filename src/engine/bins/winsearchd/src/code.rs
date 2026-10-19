@@ -161,7 +161,12 @@ impl CodeService {
     pub fn semantic_filtered(&self,vector:&[f32],corroboration:&[f32],limit:usize,extensions:&[String])->Vec<CodeSearchHit> {
         self.semantic_filtered_checked(vector,corroboration,limit,extensions).unwrap_or_default().0
     }
+    #[cfg(test)]
     pub fn semantic_filtered_checked(&self, vector: &[f32], corroboration: &[f32], limit: usize,extensions:&[String])
+        ->Result<(Vec<CodeSearchHit>,bool),ws_protocol::SemanticIssue> {
+        self.semantic_excluding_checked(vector,corroboration,limit,extensions,None)
+    }
+    pub fn semantic_excluding_checked(&self, vector: &[f32], corroboration: &[f32], limit: usize,extensions:&[String],excluded:Option<i64>)
         ->Result<(Vec<CodeSearchHit>,bool),ws_protocol::SemanticIssue> {
         use ws_protocol::SemanticIssue::RetrievalFailed;
         let fingerprint=self.fingerprint_checked().map_err(|_|RetrievalFailed)?;
@@ -172,6 +177,7 @@ impl CodeService {
         let failed=std::cell::Cell::new(false);
         let report=store
             .search_semantic_report(vector, corroboration, limit, |file| {
+                if excluded==Some(file.id) {return false;}
                 if !ws_protocol::search_extension_allowed(extensions,&file.ext) {return false;}
                 match store.source_snapshot(file.id) {
                     Ok(source)=>self.visible(file,source.as_deref()),

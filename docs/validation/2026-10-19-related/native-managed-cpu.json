@@ -1,0 +1,1840 @@
+{
+  "scope": "Actual daemon/public CLI DTO parity, optionally including offline-ranker snapshots.\n\nDefault: native document/PDF/code extraction without a model. --real-model\nimports the pinned artifacts through ModelManager, requires real 768-dimensional\ncode vectors, and checks semantic code/image/audio/video on generated fixtures.\nBoth modes use an isolated data directory and a kill-on-close Windows job.\nThe snapshot option compares query code on the same native indexed vectors;\nfixture seeding and native extraction remain separately classified evidence.\n",
+  "real_model_requested": true,
+  "queries": [
+    {
+      "name": "code_disabled",
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": true,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "document_exact",
+      "query": {
+        "text": "amberparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": false,
+      "expected_name": "item-a.txt",
+      "expected_max_rank": 1,
+      "modality": "document",
+      "relevant_rank": 1,
+      "result_count": 1,
+      "cli_structural_sha256": "8addbcb1404dc6466f50b3abdf554e2f253f7517683dcc7bdf962584ebc45ded",
+      "pipe_structural_sha256": "8addbcb1404dc6466f50b3abdf554e2f253f7517683dcc7bdf962584ebc45ded",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "pdf_exact",
+      "query": {
+        "text": "pdfparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": false,
+      "expected_name": "item-b.pdf",
+      "expected_max_rank": 1,
+      "modality": "document",
+      "relevant_rank": 1,
+      "result_count": 1,
+      "cli_structural_sha256": "e57ad2a900a9b817e67ab9c03c099b6cad8bea999be2fb049a6ed4a1ac77854f",
+      "pipe_structural_sha256": "e57ad2a900a9b817e67ab9c03c099b6cad8bea999be2fb049a6ed4a1ac77854f",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "code_definition_reference",
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": false,
+      "expected_name": "源 code.rs",
+      "expected_max_rank": 1,
+      "modality": "code",
+      "relevant_rank": 1,
+      "result_count": 2,
+      "cli_structural_sha256": "089c6486ed33be622c2842a01f17d81a8a8a545cab2ce1629928660ed579c5a0",
+      "pipe_structural_sha256": "089c6486ed33be622c2842a01f17d81a8a8a545cab2ce1629928660ed579c5a0",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "notebook",
+      "query": {
+        "text": "notebookparity",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": false,
+      "expected_name": "cells.ipynb",
+      "expected_max_rank": 1,
+      "modality": "code",
+      "relevant_rank": 1,
+      "result_count": 1,
+      "cli_structural_sha256": "75d97bfca1aa1d86ad973d47e2a9bac0dd3e8c7dd5fc49717b360974051154bd",
+      "pipe_structural_sha256": "75d97bfca1aa1d86ad973d47e2a9bac0dd3e8c7dd5fc49717b360974051154bd",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "code_isolation",
+      "query": {
+        "text": "parityneedle",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": true,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "absent_exact",
+      "query": {
+        "text": "unfindableparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": true,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "code_absent_exact",
+      "query": {
+        "text": "unfindableparitytoken",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": true,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "document_semantic",
+      "query": {
+        "text": "baking a chocolate cake with flour butter eggs and sugar",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": true
+      },
+      "expect_empty": false,
+      "expected_name": "item-a.txt",
+      "expected_max_rank": 5,
+      "modality": "document",
+      "relevant_rank": 1,
+      "result_count": 3,
+      "cli_structural_sha256": "2f18306d41089d478a2d679af9d3bcaa3f00653726e6711b80cfae4891daebab",
+      "pipe_structural_sha256": "2f18306d41089d478a2d679af9d3bcaa3f00653726e6711b80cfae4891daebab",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "ready",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "pdf_semantic",
+      "query": {
+        "text": "railway timetable for trains and departure platforms",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": true
+      },
+      "expect_empty": false,
+      "expected_name": "item-b.pdf",
+      "expected_max_rank": 5,
+      "modality": "document",
+      "relevant_rank": 1,
+      "result_count": 3,
+      "cli_structural_sha256": "2b8a769bd1f8a15545ce342bb0f54784dfac4294295d4e31a6761926905ed82b",
+      "pipe_structural_sha256": "2b8a769bd1f8a15545ce342bb0f54784dfac4294295d4e31a6761926905ed82b",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "ready",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "semantic_negative",
+      "query": {
+        "text": "asteroid orbital mechanics and interstellar propulsion",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": true
+      },
+      "expect_empty": true,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "ready",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "code_semantic_stream",
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": true
+      },
+      "expect_empty": false,
+      "expected_name": "源 code.rs",
+      "expected_max_rank": 1,
+      "modality": "code",
+      "relevant_rank": 1,
+      "result_count": 3,
+      "cli_structural_sha256": "14281c8babc096268380fd6c0db8f014de79fe535474be690b3801539f976ba6",
+      "pipe_structural_sha256": "14281c8babc096268380fd6c0db8f014de79fe535474be690b3801539f976ba6",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "ready",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "code_semantic_only_exact_control",
+      "query": {
+        "text": "a function named parityneedle and its caller",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": true,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "code_semantic_only",
+      "query": {
+        "text": "a function named parityneedle and its caller",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": true
+      },
+      "expect_empty": false,
+      "expected_name": "源 code.rs",
+      "expected_max_rank": 5,
+      "modality": "code",
+      "relevant_rank": 1,
+      "result_count": 3,
+      "cli_structural_sha256": "c9e7a4af281fe43b531e2fd5c6d9adf78030bbd709423fe0a345933167868876",
+      "pipe_structural_sha256": "c9e7a4af281fe43b531e2fd5c6d9adf78030bbd709423fe0a345933167868876",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "ready",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "code_semantic_negative",
+      "query": {
+        "text": "asteroid orbital mechanics and interstellar propulsion",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": true
+      },
+      "expect_empty": true,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "ready",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "image_semantic",
+      "query": {
+        "text": "a computer application screenshot with a red warning and a blue button",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": true
+      },
+      "expect_empty": false,
+      "expected_name": "item-c.png",
+      "expected_max_rank": 5,
+      "modality": "image",
+      "relevant_rank": null,
+      "result_count": 1,
+      "cli_structural_sha256": "64111f4812f7fd5e98f905c8e6bf37455c550b7b53a299a987555e8f5544bb99",
+      "pipe_structural_sha256": "64111f4812f7fd5e98f905c8e6bf37455c550b7b53a299a987555e8f5544bb99",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "ready",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "audio_semantic",
+      "query": {
+        "text": "the spoken explanation of baking chocolate cake in the kitchen",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": true
+      },
+      "expect_empty": false,
+      "expected_name": "item-d.wav",
+      "expected_max_rank": 5,
+      "modality": "audio",
+      "relevant_rank": 2,
+      "result_count": 3,
+      "cli_structural_sha256": "f747149d09a2e2b269e6555ea00a37150c5f404c18bbc3e194dda4e99147ad62",
+      "pipe_structural_sha256": "f747149d09a2e2b269e6555ea00a37150c5f404c18bbc3e194dda4e99147ad62",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "ready",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "video_semantic",
+      "query": {
+        "text": "a screenshot in a video with a red warning and a blue button",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": true
+      },
+      "expect_empty": false,
+      "expected_name": "item-e.mp4",
+      "expected_max_rank": 5,
+      "modality": "video",
+      "relevant_rank": 1,
+      "result_count": 2,
+      "cli_structural_sha256": "2e15eea7a569d74530ff835b06bdcffabfcea1d7917760f2c81fb7044e75fc7c",
+      "pipe_structural_sha256": "2e15eea7a569d74530ff835b06bdcffabfcea1d7917760f2c81fb7044e75fc7c",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "ready",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "revoked_document",
+      "query": {
+        "text": "amberparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": true,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "revoked_code",
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "expect_empty": true,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "revoked_semantic",
+      "query": {
+        "text": "baking a chocolate cake with flour butter eggs and sugar",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": true
+      },
+      "expect_empty": true,
+      "result_count": 0,
+      "cli_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "pipe_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "degraded",
+          "reason": "no_vectors"
+        }
+      }
+    }
+  ],
+  "checks": [
+    "pinned_model_import_ready_and_staged_artifact_hashes",
+    "native_code_index_has_complete_768d_vectors",
+    "native_ordinary_document_media_byte_sha256_and_resolved_metadata",
+    "native_extension_filters_before_results_and_invalid_request_rejection",
+    "native_indexed_entry_resolution_with_current_source_proof",
+    "native_code_and_notebook_exact_byte_sha256_provenance",
+    "native_extraction_exact_code_opt_in_and_payload_parity",
+    "typed_client_bound_code_notebook_refs_and_actual_sha256",
+    "typed_async_client_native_dto_status_pause_revoke_restore_reconnect",
+    "committed_exact_cache_revisions_and_hashes_survive_consumer_policy_lifecycle",
+    "raw_related_bound_seed_domain_budget_outcomes_and_unavailable_controls",
+    "native_semantic_only_code_function_and_caller_source_lines",
+    "shared_offline_ranker_native_snapshot_ordered_ids_and_locations",
+    "real_in_flight_cancel_empty_terminal_transport_live",
+    "real_in_flight_root_revocation_empty_terminal",
+    "actual_cpu_related_document_positive_after_original_quality_queries",
+    "native_entry_reference_rejected_after_root_revocation",
+    "live_root_revocation_public_cli_and_pipe",
+    "unchanged_overall_recall_mrr_and_zero_negative_controls"
+  ],
+  "failures": [],
+  "quality_misses": [
+    "image_semantic"
+  ],
+  "owned_job_empty": true,
+  "harness_sha256": "cb88e28259611eec2688aceff4199081c3628b28d56d9b2c91f4c85a4ea5f4d1",
+  "expected_pipeline_version": 2,
+  "expected_semantic_floor": 0.65,
+  "expected_code_query_policy": "code-and-search-task-corroboration-v1",
+  "binary_sha256": {
+    "winsearchd.exe": "c346f43c494ae24ab46497ac93ba3b81062e160bf189565649b126463c06acd9",
+    "winsearch-cli.exe": "f435f9258fbc6d77b868aedac1216c15e20d8d59eb164abb03c6a1cf66b504f8",
+    "winsearch-embed.exe": "c070e77136a507eba18789d7e0756e8a0148d031e31eaa30882902855bceae2c",
+    "winsearch-extract.exe": "fb7db8c48972590df55703b4f5a51742e1af321ce065b548261bba66bd9ce205"
+  },
+  "adjacent_native_dll_sha256": {
+    "ggml-base.dll": "1fef4fe44a9a0ba54e04ae58c651ecce330cf425463041cc407b42be62b56962",
+    "ggml-cpu-alderlake.dll": "6f335fe79a35276fcef8ed098d4e2b5952a6cce036549e6547ed7c9b08ac3147",
+    "ggml-cpu-cannonlake.dll": "8a78dfa98d6f6621f96041805227ed78a2a18e0459ba3446d4912cb9aa9e0511",
+    "ggml-cpu-cascadelake.dll": "26cb79d301458ab48143c6634ff4b9a17b247c8bd3203add4e9e3d90b93deed7",
+    "ggml-cpu-haswell.dll": "ea84ecaeab37d2fd794032dd6c7e441b6329abba5835f8ddcbdd9ffde7f4eb5e",
+    "ggml-cpu-icelake.dll": "d60448a478c6029c7e4f7abbb4343ecb2c1b4dea99b6e409028202a85aff0a4a",
+    "ggml-cpu-sandybridge.dll": "777f1172ff889dce5c2baf1bdb3313af7a7f04f213b7e783177d4692b90fad2a",
+    "ggml-cpu-skylakex.dll": "987007c231607c71e92c578c51efe05b263f4558983017446f38a86a7a967328",
+    "ggml-cpu-sse42.dll": "916bf899d3dd80d886ed604059a6ed9693eb37ac4734997ffeb625ce66c6fa1a",
+    "ggml-cpu-x64.dll": "e12f726dce960488ec911e7a0e0a99c67fe32986facbddd49c35ed49120a3656",
+    "ggml-cuda.dll": "8bf0d44ebdb60df7e398b9fddcc4ef5a7aeb63adfbcb85764db2e43e507edf1c",
+    "ggml.dll": "7516e5d871d1fe0e31897f6ee0f3aaf4c6471ce9016472285e65b19a42443f1a",
+    "llama.dll": "a66c29aa35f7301977b24389cc38f2c9c07a04a0cb49349cd2f5055b891f61e5",
+    "mtmd.dll": "4abc3e9e8ce9a378a76a2c885fd5078a251389b36dd6ecaed3811d48e1baef30",
+    "pdfium.dll": "1f2aee4286b8cf0413ab4562b7121aa454f9cfd9afd6ca8609bcef80927b3f80"
+  },
+  "model_sha256": "2188ac1deca4b77dffefd603c2776a9d76d9d74ec01841392982ebb840b09135",
+  "projector_sha256": "c4a8a52691ecef40618438928bdf9e68379b854e24166f292592353db0aab64f",
+  "offline_comparator_sha256": "2b46a0644c573ecbe705fbb000b4c94a79b90371669b902a05ff39e37b56fbe0",
+  "headless_client_sha256": "dbd763361f9817e4be3729ff5b7174fec9ba07588e65f66eb8585dfdddba2445",
+  "generated_source_sha256": {
+    "code\\cells.ipynb": "39ff523217cbec65301238ccb92d04677898eba2ebc5c860baad13c1c25061b9",
+    "code\\源 code.rs": "e91ca6326352f465dabbe4bc67d4271714e226c0a09cc36fdecc9f45c2e80bef",
+    "documents\\item-a.txt": "9fc1db8e72de0275279a18f08a76e43fbbeae6fbde7b9924c4d1f351eb4652d1",
+    "documents\\item-b.pdf": "028cfcb54c84c18f5351445f7edeb6d2651e9e4950714c61042cdd911870671e",
+    "documents\\item-c.png": "a8a0c831fe4746d00c95e3ab436d53e4cc9046a774fe4f0f6edb73d1a7d55f9b",
+    "documents\\item-d.wav": "43da34d73ff78e5bff08f8cca36e80a8bc3fca94824c84de9781bbe2ae2d448a",
+    "documents\\item-e.mp4": "9e2c999a84f7c19ebd7600aa37063ac047aac0aaf6a197601e839efd01d98160"
+  },
+  "model_import_status": {
+    "state": "ready",
+    "bytes": 864676480,
+    "total_bytes": 864676480,
+    "error": null
+  },
+  "code_vectors": {
+    "chunks": 4,
+    "embedded": 4,
+    "width_768": 4
+  },
+  "index_seconds": 68.405,
+  "ordinary_provenance": [
+    {
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-a.txt",
+      "revision": 1,
+      "hash_revision": 1,
+      "sha256": "9fc1db8e72de0275279a18f08a76e43fbbeae6fbde7b9924c4d1f351eb4652d1",
+      "resolved": {
+        "result_id": "e567",
+        "root_path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents",
+        "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-a.txt",
+        "name": "item-a.txt",
+        "kind": "document",
+        "size_bytes": 85,
+        "modified_unix_seconds": 1792414489,
+        "index_revision": 1,
+        "source_revision": "<opaque identity redacted>",
+        "content_sha256": "9fc1db8e72de0275279a18f08a76e43fbbeae6fbde7b9924c4d1f351eb4652d1"
+      }
+    },
+    {
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-b.pdf",
+      "revision": 1,
+      "hash_revision": 1,
+      "sha256": "028cfcb54c84c18f5351445f7edeb6d2651e9e4950714c61042cdd911870671e",
+      "resolved": {
+        "result_id": "e568",
+        "root_path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents",
+        "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-b.pdf",
+        "name": "item-b.pdf",
+        "kind": "document",
+        "size_bytes": 924,
+        "modified_unix_seconds": 1792414489,
+        "index_revision": 1,
+        "source_revision": "<opaque identity redacted>",
+        "content_sha256": "028cfcb54c84c18f5351445f7edeb6d2651e9e4950714c61042cdd911870671e"
+      }
+    },
+    {
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-c.png",
+      "revision": 1,
+      "hash_revision": 1,
+      "sha256": "a8a0c831fe4746d00c95e3ab436d53e4cc9046a774fe4f0f6edb73d1a7d55f9b",
+      "resolved": {
+        "result_id": "e569",
+        "root_path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents",
+        "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-c.png",
+        "name": "item-c.png",
+        "kind": "image",
+        "size_bytes": 6406,
+        "modified_unix_seconds": 1792414489,
+        "index_revision": 1,
+        "source_revision": "<opaque identity redacted>",
+        "content_sha256": "a8a0c831fe4746d00c95e3ab436d53e4cc9046a774fe4f0f6edb73d1a7d55f9b"
+      }
+    },
+    {
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-d.wav",
+      "revision": 1,
+      "hash_revision": 1,
+      "sha256": "43da34d73ff78e5bff08f8cca36e80a8bc3fca94824c84de9781bbe2ae2d448a",
+      "resolved": {
+        "result_id": "e570",
+        "root_path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents",
+        "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-d.wav",
+        "name": "item-d.wav",
+        "kind": "audio",
+        "size_bytes": 2080044,
+        "modified_unix_seconds": 1792414489,
+        "index_revision": 1,
+        "source_revision": "<opaque identity redacted>",
+        "content_sha256": "43da34d73ff78e5bff08f8cca36e80a8bc3fca94824c84de9781bbe2ae2d448a"
+      }
+    },
+    {
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-e.mp4",
+      "revision": 1,
+      "hash_revision": 1,
+      "sha256": "9e2c999a84f7c19ebd7600aa37063ac047aac0aaf6a197601e839efd01d98160",
+      "resolved": {
+        "result_id": "e571",
+        "root_path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents",
+        "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-e.mp4",
+        "name": "item-e.mp4",
+        "kind": "video",
+        "size_bytes": 412420,
+        "modified_unix_seconds": 1792414489,
+        "index_revision": 1,
+        "source_revision": "<opaque identity redacted>",
+        "content_sha256": "9e2c999a84f7c19ebd7600aa37063ac047aac0aaf6a197601e839efd01d98160"
+      }
+    }
+  ],
+  "extension_filters": [
+    {
+      "query": {
+        "text": "pdfparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          ".PDF"
+        ]
+      },
+      "expected_name": "item-b.pdf",
+      "result_count": 1,
+      "results_structural_sha256": "e57ad2a900a9b817e67ab9c03c099b6cad8bea999be2fb049a6ed4a1ac77854f",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "pdfparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "txt"
+        ]
+      },
+      "expected_name": null,
+      "result_count": 0,
+      "results_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "amberparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "txt"
+        ]
+      },
+      "expected_name": "item-a.txt",
+      "result_count": 1,
+      "results_structural_sha256": "8addbcb1404dc6466f50b3abdf554e2f253f7517683dcc7bdf962584ebc45ded",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "rs"
+        ]
+      },
+      "expected_name": "源 code.rs",
+      "result_count": 2,
+      "results_structural_sha256": "089c6486ed33be622c2842a01f17d81a8a8a545cab2ce1629928660ed579c5a0",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "py"
+        ]
+      },
+      "expected_name": null,
+      "result_count": 0,
+      "results_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "notebookparity",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "ipynb"
+        ]
+      },
+      "expected_name": "cells.ipynb",
+      "result_count": 1,
+      "results_structural_sha256": "75d97bfca1aa1d86ad973d47e2a9bac0dd3e8c7dd5fc49717b360974051154bd",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "1+2",
+        "mode": "auto",
+        "limit": 5,
+        "include_semantic": false,
+        "extensions": [
+          "txt"
+        ]
+      },
+      "expected_name": null,
+      "result_count": 0,
+      "results_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "disabled",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "baking a chocolate cake with flour butter eggs and sugar",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": true,
+        "extensions": [
+          "txt"
+        ]
+      },
+      "expected_name": "item-a.txt",
+      "result_count": 1,
+      "results_structural_sha256": "94fc8b5f875a7e7963ef5fb26cf77a0f5582bd72f9d7b43930576f2973ff80c6",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "ready",
+          "reason": null
+        }
+      }
+    },
+    {
+      "query": {
+        "text": "a function named parityneedle and its caller",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": true,
+        "extensions": [
+          "rs"
+        ]
+      },
+      "expected_name": "源 code.rs",
+      "result_count": 2,
+      "results_structural_sha256": "c2d5d054efb70990b9a1d7382aa9af027b8666a6148aeb11e25c932bfbed78fc",
+      "terminal_outcome": {
+        "disposition": "complete",
+        "semantic": {
+          "phase": "ready",
+          "reason": null
+        }
+      }
+    }
+  ],
+  "invalid_extension_filter": {
+    "type": "error",
+    "id": 2,
+    "code": "invalid_request",
+    "message": "search request failed"
+  },
+  "entry_resolution": {
+    "admitted": {
+      "type": "resolved_entry",
+      "id": 139,
+      "entry": {
+        "result_id": "e567",
+        "root_path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents",
+        "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-a.txt",
+        "name": "item-a.txt",
+        "kind": "document",
+        "size_bytes": 85,
+        "modified_unix_seconds": 1792414489,
+        "index_revision": 1,
+        "source_revision": "<opaque identity redacted>",
+        "content_sha256": "9fc1db8e72de0275279a18f08a76e43fbbeae6fbde7b9924c4d1f351eb4652d1"
+      }
+    },
+    "revoked": {
+      "type": "error",
+      "id": 38,
+      "code": "not_ready",
+      "message": "entry is unavailable or changed"
+    }
+  },
+  "code_provenance": [
+    {
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\code\\cells.ipynb",
+      "revision": 1,
+      "sha256": "39ff523217cbec65301238ccb92d04677898eba2ebc5c860baad13c1c25061b9"
+    },
+    {
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\code\\源 code.rs",
+      "revision": 1,
+      "sha256": "e91ca6326352f465dabbe4bc67d4271714e226c0a09cc36fdecc9f45c2e80bef"
+    }
+  ],
+  "headless_client": {
+    "checks": [
+      "typed_status_and_configuration",
+      "paused_policy_pushed_subscription",
+      "native_document_and_code_locations",
+      "current_entry_source_proof",
+      "drop_disconnect_then_reconnect",
+      "root_revocation_hides_results",
+      "revoked_proof_stays_invalid_after_restore",
+      "fresh_reference_after_restore"
+    ],
+    "code_preview_checks": [
+      "actual_cached_code",
+      "actual_notebook_cell_and_no_outputs",
+      "code_preview_rejects_revoked_root",
+      "code_preview_proof_stays_invalid_after_restore"
+    ],
+    "engine_config": {
+      "preferred_backend": "cpu",
+      "semantic_enabled": true
+    },
+    "engine_version": "0.1.0",
+    "entry_index_revision": 1,
+    "entry_size_bytes": 85,
+    "extension_checks": [
+      "pdf_extension_and_case",
+      "excluded_document_extension",
+      "code_extension",
+      "excluded_code_extension"
+    ],
+    "features": [
+      "search.exact",
+      "search.semantic",
+      "search.filters",
+      "search.outcomes",
+      "search.related",
+      "code",
+      "entry.resolve",
+      "entry.resolve.code",
+      "search.entry_references",
+      "entry.preview.text",
+      "entry.preview.code"
+    ],
+    "initial_status": {
+      "current_activity": "",
+      "files_discovered": 7,
+      "files_indexed": 7,
+      "index_size_bytes": 2117632,
+      "model_loaded": true,
+      "queue_depth": 0,
+      "segments_indexed": 571,
+      "state": "idle"
+    },
+    "model_status": {
+      "bytes": 864676480,
+      "error": null,
+      "state": "ready",
+      "total_bytes": 864676480
+    },
+    "outcome_checks": [
+      "advertised_terminal_state_required",
+      "completed_snapshot_without_retry",
+      "actual_semantic_phase"
+    ],
+    "preview_checks": [
+      "current_metadata_bound_document_text",
+      "actual_pdf_page_two",
+      "preview_rejects_revoked_root",
+      "preview_proof_stays_invalid_after_restore"
+    ],
+    "reference_checks": [
+      "bound_document_and_pdf_refs",
+      "bound_code_and_notebook_refs",
+      "resolved_code_hashes",
+      "code_proof_stays_invalid_after_restore"
+    ],
+    "related_checks": [
+      {
+        "frames": [
+          {
+            "done": true,
+            "outcome": {
+              "disposition": "complete",
+              "semantic": {
+                "phase": "ready",
+                "reason": null
+              }
+            },
+            "results": [
+              {
+                "entry_reference": {
+                  "result_id": "e571",
+                  "source_revision": "<opaque identity redacted>"
+                },
+                "excerpt": null,
+                "id": "s571",
+                "kind": "video",
+                "location": {
+                  "end_seconds": 65.0,
+                  "kind": "timestamp",
+                  "seconds": 50.0
+                },
+                "match_explanation": "Related content (74% similarity)",
+                "matching_moments": [
+                  {
+                    "excerpt": "",
+                    "location": {
+                      "end_seconds": 65.0,
+                      "kind": "timestamp",
+                      "seconds": 50.0
+                    },
+                    "thumbnail_path": null
+                  },
+                  {
+                    "excerpt": "",
+                    "location": {
+                      "end_seconds": 55.0,
+                      "kind": "timestamp",
+                      "seconds": 25.0
+                    },
+                    "thumbnail_path": null
+                  }
+                ],
+                "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-e.mp4",
+                "score": 0.7428309321403503,
+                "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-e.mp4",
+                "thumbnail_path": null,
+                "title": "item-e.mp4"
+              },
+              {
+                "entry_reference": {
+                  "result_id": "e570",
+                  "source_revision": "<opaque identity redacted>"
+                },
+                "excerpt": null,
+                "id": "s570",
+                "kind": "audio",
+                "location": {
+                  "end_seconds": 65.0,
+                  "kind": "timestamp",
+                  "seconds": 50.0
+                },
+                "match_explanation": "Related content (74% similarity)",
+                "matching_moments": [
+                  {
+                    "excerpt": "",
+                    "location": {
+                      "end_seconds": 65.0,
+                      "kind": "timestamp",
+                      "seconds": 50.0
+                    },
+                    "thumbnail_path": null
+                  },
+                  {
+                    "excerpt": "",
+                    "location": {
+                      "end_seconds": 55.0,
+                      "kind": "timestamp",
+                      "seconds": 25.0
+                    },
+                    "thumbnail_path": null
+                  }
+                ],
+                "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-d.wav",
+                "score": 0.7427802085876465,
+                "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-d.wav",
+                "thumbnail_path": null,
+                "title": "item-d.wav"
+              }
+            ]
+          }
+        ],
+        "source": {
+          "result_id": "e567",
+          "source_revision": "<opaque identity redacted>"
+        }
+      },
+      {
+        "frames": [
+          {
+            "done": true,
+            "outcome": {
+              "disposition": "complete",
+              "semantic": {
+                "phase": "ready",
+                "reason": null
+              }
+            },
+            "results": [
+              {
+                "entry_reference": {
+                  "result_id": "c1",
+                  "source_revision": "<opaque identity redacted>"
+                },
+                "excerpt": "def notebookparity():\n    return 1\n",
+                "id": "code:1:2:false:notebookparity",
+                "kind": "code",
+                "location": {
+                  "cell_ordinal": 1,
+                  "end_line": 2,
+                  "kind": "notebook",
+                  "line": 1
+                },
+                "match_explanation": "Related code (76% similarity)",
+                "matching_moments": [],
+                "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\code\\cells.ipynb",
+                "score": 0.7576958537101746,
+                "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\code\\cells.ipynb",
+                "thumbnail_path": null,
+                "title": "notebookparity"
+              },
+              {
+                "entry_reference": {
+                  "result_id": "c1",
+                  "source_revision": "<opaque identity redacted>"
+                },
+                "excerpt": "Generated notebook",
+                "id": "code:1:1:false:cell_1",
+                "kind": "code",
+                "location": {
+                  "cell_ordinal": 0,
+                  "end_line": 1,
+                  "kind": "notebook",
+                  "line": 1
+                },
+                "match_explanation": "Related code (69% similarity)",
+                "matching_moments": [],
+                "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\code\\cells.ipynb",
+                "score": 0.685534656047821,
+                "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\code\\cells.ipynb",
+                "thumbnail_path": null,
+                "title": "cell_1"
+              }
+            ]
+          }
+        ],
+        "source": {
+          "result_id": "c2",
+          "source_revision": "<opaque identity redacted>"
+        }
+      }
+    ],
+    "semantic_checks": [
+      "exact_only_control_empty",
+      "semantic_only_code",
+      "semantic_negative_empty"
+    ],
+    "full_dto_structural_sha256": "6c127e24d2683afeeaa76c8aef06e2686e02344024c98b07b21bf8a3875e4fc4"
+  },
+  "related_checks": [
+    {
+      "name": "ordinary_bound_cached_source",
+      "source": {
+        "result_id": "e567",
+        "source_revision": "<opaque identity redacted>"
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 17,
+          "batch": [
+            {
+              "id": "s571",
+              "kind": "video",
+              "title": "item-e.mp4",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-e.mp4",
+              "match_explanation": "Related content (74% similarity)",
+              "score": 0.7428309321403503,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-e.mp4",
+              "location": {
+                "kind": "timestamp",
+                "seconds": 50.0,
+                "end_seconds": 65.0
+              },
+              "thumbnail_path": null,
+              "excerpt": null,
+              "matching_moments": [
+                {
+                  "excerpt": "",
+                  "location": {
+                    "kind": "timestamp",
+                    "seconds": 50.0,
+                    "end_seconds": 65.0
+                  },
+                  "thumbnail_path": null
+                },
+                {
+                  "excerpt": "",
+                  "location": {
+                    "kind": "timestamp",
+                    "seconds": 25.0,
+                    "end_seconds": 55.0
+                  },
+                  "thumbnail_path": null
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e571",
+                "source_revision": "<opaque identity redacted>"
+              }
+            },
+            {
+              "id": "s570",
+              "kind": "audio",
+              "title": "item-d.wav",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-d.wav",
+              "match_explanation": "Related content (74% similarity)",
+              "score": 0.7427802085876465,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-d.wav",
+              "location": {
+                "kind": "timestamp",
+                "seconds": 50.0,
+                "end_seconds": 65.0
+              },
+              "thumbnail_path": null,
+              "excerpt": null,
+              "matching_moments": [
+                {
+                  "excerpt": "",
+                  "location": {
+                    "kind": "timestamp",
+                    "seconds": 50.0,
+                    "end_seconds": 65.0
+                  },
+                  "thumbnail_path": null
+                },
+                {
+                  "excerpt": "",
+                  "location": {
+                    "kind": "timestamp",
+                    "seconds": 25.0,
+                    "end_seconds": 55.0
+                  },
+                  "thumbnail_path": null
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e570",
+                "source_revision": "<opaque identity redacted>"
+              }
+            }
+          ],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "ready",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "expected_name": null
+    },
+    {
+      "name": "code_bound_cached_source",
+      "source": {
+        "result_id": "c2",
+        "source_revision": "<opaque identity redacted>"
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 18,
+          "batch": [
+            {
+              "id": "code:1:2:false:notebookparity",
+              "kind": "code",
+              "title": "notebookparity",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\code\\cells.ipynb",
+              "match_explanation": "Related code (76% similarity)",
+              "score": 0.7576958537101746,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\code\\cells.ipynb",
+              "location": {
+                "kind": "notebook",
+                "cell_ordinal": 1,
+                "line": 1,
+                "end_line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "def notebookparity():\n    return 1\n",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c1",
+                "source_revision": "<opaque identity redacted>"
+              }
+            },
+            {
+              "id": "code:1:1:false:cell_1",
+              "kind": "code",
+              "title": "cell_1",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\code\\cells.ipynb",
+              "match_explanation": "Related code (69% similarity)",
+              "score": 0.685534656047821,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\code\\cells.ipynb",
+              "location": {
+                "kind": "notebook",
+                "cell_ordinal": 0,
+                "line": 1,
+                "end_line": 1
+              },
+              "thumbnail_path": null,
+              "excerpt": "Generated notebook",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c1",
+                "source_revision": "<opaque identity redacted>"
+              }
+            }
+          ],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "ready",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "expected_name": null
+    },
+    {
+      "name": "reject_unbound_source",
+      "source": {
+        "result_id": "e567",
+        "source_revision": null
+      },
+      "frames": [
+        {
+          "type": "error",
+          "id": 19,
+          "code": "invalid_request",
+          "message": "search request failed"
+        },
+        {
+          "type": "results",
+          "id": 19,
+          "batch": [],
+          "done": true,
+          "outcome": {
+            "disposition": "failed",
+            "semantic": null
+          }
+        }
+      ],
+      "expected_name": null
+    },
+    {
+      "name": "eligible_scope_has_no_vectors",
+      "source": {
+        "result_id": "e567",
+        "source_revision": "<opaque identity redacted>"
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 20,
+          "batch": [],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "degraded",
+              "reason": "no_vectors"
+            }
+          }
+        }
+      ],
+      "expected_name": null
+    },
+    {
+      "name": "audio_without_indexed_text_has_no_filename_fallback",
+      "source": {
+        "result_id": "e570",
+        "source_revision": "<opaque identity redacted>"
+      },
+      "frames": [
+        {
+          "type": "error",
+          "id": 21,
+          "code": "not_ready",
+          "message": "search request failed"
+        },
+        {
+          "type": "results",
+          "id": 21,
+          "batch": [],
+          "done": true,
+          "outcome": {
+            "disposition": "failed",
+            "semantic": null
+          }
+        }
+      ],
+      "expected_name": null
+    },
+    {
+      "name": "actual_cpu_related_twin_document",
+      "source": {
+        "result_id": "e572",
+        "source_revision": "<opaque identity redacted>"
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 37,
+          "batch": [
+            {
+              "id": "s573",
+              "kind": "document",
+              "title": "related-target.txt",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\related-target.txt",
+              "match_explanation": "Related content (86% similarity)",
+              "score": 0.8558285236358643,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\related-target.txt",
+              "location": {
+                "kind": "line",
+                "line": 1
+              },
+              "thumbnail_path": null,
+              "excerpt": "Railway timetable notes. The railway timetable lists trains and departure platforms. Railway timetable notes. The railway timetable lists trains and departure platforms. Railway timetable notes. The railway timetable lists trains and…",
+              "matching_moments": [
+                {
+                  "excerpt": "Railway timetable notes. The railway timetable lists trains and departure platforms. Railway timetable notes. The railway timetable lists trains and departure platforms. Railway timetable notes. The railway timetable lists trains and…",
+                  "location": {
+                    "kind": "line",
+                    "line": 1
+                  },
+                  "thumbnail_path": null
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e573",
+                "source_revision": "<opaque identity redacted>"
+              }
+            },
+            {
+              "id": "s568",
+              "kind": "document",
+              "title": "item-b.pdf",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-b.pdf",
+              "match_explanation": "Related content (81% similarity)",
+              "score": 0.8107044696807861,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-b.pdf",
+              "location": {
+                "kind": "page",
+                "page": 2
+              },
+              "thumbnail_path": "<checkout>\\artifacts\\related-native-final-cpu\\data\\cache\\thumbs\\extract-148228-1792414517683624300-3-1.png",
+              "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+              "matching_moments": [
+                {
+                  "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+                  "location": {
+                    "kind": "page",
+                    "page": 2
+                  },
+                  "thumbnail_path": "<checkout>\\artifacts\\related-native-final-cpu\\data\\cache\\thumbs\\extract-148228-1792414517683624300-3-1.png"
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e568",
+                "source_revision": "<opaque identity redacted>"
+              }
+            },
+            {
+              "id": "s570",
+              "kind": "audio",
+              "title": "item-d.wav",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-d.wav",
+              "match_explanation": "Related content (73% similarity)",
+              "score": 0.726600706577301,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-d.wav",
+              "location": {
+                "kind": "timestamp",
+                "seconds": 0.0,
+                "end_seconds": 30.0
+              },
+              "thumbnail_path": null,
+              "excerpt": null,
+              "matching_moments": [
+                {
+                  "excerpt": "",
+                  "location": {
+                    "kind": "timestamp",
+                    "seconds": 0.0,
+                    "end_seconds": 30.0
+                  },
+                  "thumbnail_path": null
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e570",
+                "source_revision": "<opaque identity redacted>"
+              }
+            },
+            {
+              "id": "s571",
+              "kind": "video",
+              "title": "item-e.mp4",
+              "subtitle": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-e.mp4",
+              "match_explanation": "Related content (73% similarity)",
+              "score": 0.7251113057136536,
+              "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-rbdbo1sp\\documents\\item-e.mp4",
+              "location": {
+                "kind": "timestamp",
+                "seconds": 0.0,
+                "end_seconds": 30.0
+              },
+              "thumbnail_path": null,
+              "excerpt": null,
+              "matching_moments": [
+                {
+                  "excerpt": "",
+                  "location": {
+                    "kind": "timestamp",
+                    "seconds": 0.0,
+                    "end_seconds": 30.0
+                  },
+                  "thumbnail_path": null
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e571",
+                "source_revision": "<opaque identity redacted>"
+              }
+            }
+          ],
+          "done": true,
+          "outcome": {
+            "disposition": "complete",
+            "semantic": {
+              "phase": "ready",
+              "reason": null
+            }
+          }
+        }
+      ],
+      "expected_name": "related-target.txt"
+    }
+  ],
+  "worker": {
+    "type": "worker_status",
+    "id": 2,
+    "model_loaded": true,
+    "backend": "cpu",
+    "stub": false,
+    "dim": 768,
+    "uptime_secs": 46,
+    "jobs_served": 31
+  },
+  "offline_input_sha256": "96cd5d5eddb1d07a3a922663864e2a201e4c8babf93814e77f1497522a2a5708",
+  "offline_snapshot_sha256": {
+    "index": "5cde5efca6ecac24f5ddef4f9931f544351f35760e2e9630703e831ad924e821",
+    "code": "1742a888eff9ec299820fa519db993b43f0c0be313aaec52789a9b14a1c3df9c"
+  },
+  "offline_parity": {
+    "cases": [
+      {
+        "equal": true,
+        "name": "document_exact",
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "files",
+          "text": "amberparitytoken"
+        },
+        "native_structural_sha256": "7dc6c61577cc52d09cb452a88084fe205aa867c143a03237032df1a46f861a6f",
+        "offline_structural_sha256": "7dc6c61577cc52d09cb452a88084fe205aa867c143a03237032df1a46f861a6f"
+      },
+      {
+        "equal": true,
+        "name": "pdf_exact",
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "files",
+          "text": "pdfparitytoken"
+        },
+        "native_structural_sha256": "d50378d3e998795cdda610d87e4da3a851a3be6c817a1c1b5051b8efb822f9ed",
+        "offline_structural_sha256": "d50378d3e998795cdda610d87e4da3a851a3be6c817a1c1b5051b8efb822f9ed"
+      },
+      {
+        "equal": true,
+        "name": "code_definition_reference",
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "code",
+          "text": "parityneedle"
+        },
+        "native_structural_sha256": "8434d82cffc4c131a436bc167d3fcddc189a698fa6e0fb4e042ddc8133952175",
+        "offline_structural_sha256": "8434d82cffc4c131a436bc167d3fcddc189a698fa6e0fb4e042ddc8133952175"
+      },
+      {
+        "equal": true,
+        "name": "notebook",
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "code",
+          "text": "notebookparity"
+        },
+        "native_structural_sha256": "1109c09ba51acf2d10cc6d39d07db0f22151f13e546830a0c4376795975926aa",
+        "offline_structural_sha256": "1109c09ba51acf2d10cc6d39d07db0f22151f13e546830a0c4376795975926aa"
+      },
+      {
+        "equal": true,
+        "name": "code_isolation",
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "files",
+          "text": "parityneedle"
+        },
+        "native_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "offline_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+        "equal": true,
+        "name": "absent_exact",
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "files",
+          "text": "unfindableparitytoken"
+        },
+        "native_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "offline_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+        "equal": true,
+        "name": "code_absent_exact",
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "code",
+          "text": "unfindableparitytoken"
+        },
+        "native_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "offline_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+        "equal": true,
+        "name": "document_semantic",
+        "query": {
+          "categories": [],
+          "include_semantic": true,
+          "limit": 5,
+          "mode": "files",
+          "text": "baking a chocolate cake with flour butter eggs and sugar"
+        },
+        "native_structural_sha256": "eb4f11d5dd6396e9afa72256f6ee3a231968b24c2347dfa28ffe76e6b788309e",
+        "offline_structural_sha256": "eb4f11d5dd6396e9afa72256f6ee3a231968b24c2347dfa28ffe76e6b788309e"
+      },
+      {
+        "equal": true,
+        "name": "pdf_semantic",
+        "query": {
+          "categories": [],
+          "include_semantic": true,
+          "limit": 5,
+          "mode": "files",
+          "text": "railway timetable for trains and departure platforms"
+        },
+        "native_structural_sha256": "a37b981ad44008e56bfe08af88ed9d61d4701ccf9d5e7c8b0a41b022be96710a",
+        "offline_structural_sha256": "a37b981ad44008e56bfe08af88ed9d61d4701ccf9d5e7c8b0a41b022be96710a"
+      },
+      {
+        "equal": true,
+        "name": "semantic_negative",
+        "query": {
+          "categories": [],
+          "include_semantic": true,
+          "limit": 5,
+          "mode": "files",
+          "text": "asteroid orbital mechanics and interstellar propulsion"
+        },
+        "native_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "offline_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+        "equal": true,
+        "name": "code_semantic_stream",
+        "query": {
+          "categories": [],
+          "include_semantic": true,
+          "limit": 5,
+          "mode": "code",
+          "text": "parityneedle"
+        },
+        "native_structural_sha256": "e08b2616d538516c92bb5a4b293be9804ccffdc01db0d4f12937ab589cfb8f6a",
+        "offline_structural_sha256": "e08b2616d538516c92bb5a4b293be9804ccffdc01db0d4f12937ab589cfb8f6a"
+      },
+      {
+        "equal": true,
+        "name": "code_semantic_only_exact_control",
+        "query": {
+          "categories": [],
+          "include_semantic": false,
+          "limit": 5,
+          "mode": "code",
+          "text": "a function named parityneedle and its caller"
+        },
+        "native_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "offline_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+        "equal": true,
+        "name": "code_semantic_only",
+        "query": {
+          "categories": [],
+          "include_semantic": true,
+          "limit": 5,
+          "mode": "code",
+          "text": "a function named parityneedle and its caller"
+        },
+        "native_structural_sha256": "3150829f52df6261f2ab65dbd65854cd3107ff84cec004c2a54986cb42d8da0a",
+        "offline_structural_sha256": "3150829f52df6261f2ab65dbd65854cd3107ff84cec004c2a54986cb42d8da0a"
+      },
+      {
+        "equal": true,
+        "name": "code_semantic_negative",
+        "query": {
+          "categories": [],
+          "include_semantic": true,
+          "limit": 5,
+          "mode": "code",
+          "text": "asteroid orbital mechanics and interstellar propulsion"
+        },
+        "native_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "offline_structural_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+        "equal": true,
+        "name": "image_semantic",
+        "query": {
+          "categories": [],
+          "include_semantic": true,
+          "limit": 5,
+          "mode": "files",
+          "text": "a computer application screenshot with a red warning and a blue button"
+        },
+        "native_structural_sha256": "160256c8104ecd1b0077ac7dd8a8042fd45ad8eff5840e05383958e56743c291",
+        "offline_structural_sha256": "160256c8104ecd1b0077ac7dd8a8042fd45ad8eff5840e05383958e56743c291"
+      },
+      {
+        "equal": true,
+        "name": "audio_semantic",
+        "query": {
+          "categories": [],
+          "include_semantic": true,
+          "limit": 5,
+          "mode": "files",
+          "text": "the spoken explanation of baking chocolate cake in the kitchen"
+        },
+        "native_structural_sha256": "28693ec2669e3247841ebb4bf09ac1fa91dcf10b14f852e909f8aaae8fca24fb",
+        "offline_structural_sha256": "28693ec2669e3247841ebb4bf09ac1fa91dcf10b14f852e909f8aaae8fca24fb"
+      },
+      {
+        "equal": true,
+        "name": "video_semantic",
+        "query": {
+          "categories": [],
+          "include_semantic": true,
+          "limit": 5,
+          "mode": "files",
+          "text": "a screenshot in a video with a red warning and a blue button"
+        },
+        "native_structural_sha256": "b4a3ef95026f0ba1e8be1296e565a11a58150944b46e400abe351a811e36af81",
+        "offline_structural_sha256": "b4a3ef95026f0ba1e8be1296e565a11a58150944b46e400abe351a811e36af81"
+      }
+    ],
+    "embedder": "WorkerModelEmbedder (real cpu; stub:false; dim:768; model:<checkout>\\artifacts\\test-models\\embeddinggemma-2-Q8_0.gguf)",
+    "equal": true,
+    "scope": "shared offline query functions versus public daemon results on native DB snapshots; no re-extraction"
+  },
+  "cancel_frames": [
+    {
+      "type": "results",
+      "id": 34,
+      "batch": [],
+      "done": false
+    },
+    {
+      "type": "results",
+      "id": 34,
+      "batch": [],
+      "done": true,
+      "outcome": {
+        "disposition": "canceled",
+        "semantic": null
+      }
+    }
+  ],
+  "revocation_frames": [
+    {
+      "type": "results",
+      "id": 36,
+      "batch": [],
+      "done": false
+    },
+    {
+      "type": "results",
+      "id": 36,
+      "batch": [],
+      "done": true,
+      "outcome": {
+        "disposition": "superseded",
+        "semantic": null
+      }
+    }
+  ],
+  "quality": {
+    "positive_queries": 11,
+    "Recall@5": 0.9090909090909091,
+    "MRR": 0.8636363636363636,
+    "minimum_recall_at_5": 0.9,
+    "minimum_mrr": 0.85,
+    "maximum_negative_fp_rate": 0,
+    "original_positive_cases": {
+      "positive_queries": 10,
+      "Recall@5": 0.9,
+      "MRR": 0.85
+    },
+    "empty_result_controls": 10,
+    "empty_control_fp_rate": 0.0,
+    "empty_control_scope": "all declared empty-result cases, including code isolation and root revocation",
+    "by_modality": {
+      "audio": {
+        "positive_queries": 1,
+        "Recall@5": 1.0,
+        "MRR": 0.5
+      },
+      "code": {
+        "positive_queries": 4,
+        "Recall@5": 1.0,
+        "MRR": 1.0
+      },
+      "document": {
+        "positive_queries": 4,
+        "Recall@5": 1.0,
+        "MRR": 1.0
+      },
+      "image": {
+        "positive_queries": 1,
+        "Recall@5": 0.0,
+        "MRR": 0.0
+      },
+      "video": {
+        "positive_queries": 1,
+        "Recall@5": 1.0,
+        "MRR": 1.0
+      }
+    }
+  },
+  "pids": [],
+  "elapsed_seconds": 87.91,
+  "published_scope": "Condensed: Related frames, provenance/lifecycle and original query parity hashes; full raw JSON SHA is in evidence-hashes.json."
+}

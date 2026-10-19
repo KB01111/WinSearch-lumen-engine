@@ -10,6 +10,54 @@ namespace WinSearch.Tests;
 
 public class IndexingPipeTests
 {
+    [Fact]
+    public async Task RelatedRejectsUnboundSourceBeforeConnecting()
+    {
+        await using var client = new EngineClient("unused-related-" + Guid.NewGuid());
+        var failure = await Assert.ThrowsAsync<EngineException>(async () => {
+            await foreach (var _ in client.RelatedAsync(new() { Source = new() { ResultId = "e1" } })) { }
+        });
+        Assert.Equal(ErrorCode.InvalidRequest, failure.Code);
+    }
+
+    [Theory]
+    [InlineData(0)] [InlineData(1)] [InlineData(2)] [InlineData(3)] [InlineData(4)] [InlineData(5)]
+    [InlineData(6)] [InlineData(7)] [InlineData(8)] [InlineData(9)] [InlineData(10)]
+    public async Task RelatedIsDistinctCapabilityGatedAndRejectsSourceOrFallbackReplies(int scenario)
+    {
+        var pipe = "winsearch-related-" + Guid.NewGuid().ToString("N");
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10)); var token = timeout.Token;
+        await using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        async Task Serve()
+        {
+            await server.WaitForConnectionAsync(token); await ReadAsync(server, token);
+            var features = new List<string> { "search.exact", "search.filters" };
+            if (scenario != 6) features.Add("search.semantic");
+            if (scenario != 4) features.Add("search.related");
+            if (scenario != 5) features.Add("search.outcomes");
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1, Features = features }, token);
+            if (scenario is >= 4 and <= 7) return;
+            var request = Assert.IsType<RelatedMessage>(await ReadAsync(server, token));
+            Assert.Equal("e1", request.Query.Source.ResultId); Assert.Equal("source-proof", request.Query.Source.SourceRevision);
+            var target = new SearchResult { Id = "s2", Kind = ResultKind.Document, Path = "C:/Docs/report.txt",
+                EntryReference = scenario == 3 ? null : new() { ResultId = scenario == 1 ? "e1" : "e2", SourceRevision = "target-proof" } };
+            await WriteAsync(server, new ResultsMessage { Id = request.Id, Done = true,
+                Outcome = new() { Disposition = SearchDisposition.Complete, Semantic = new() {
+                    Phase = scenario == 2 ? SemanticPhase.Disabled : SemanticPhase.Ready } },
+                Batch = scenario == 10 ? [target, target] : [target] }, token);
+        }
+        var serving = Serve(); await using var client = new EngineClient(pipe); await client.ConnectAsync(token);
+        SearchBatch? observed = null;
+        var failure = await Record.ExceptionAsync(async () => {
+            await foreach (var batch in client.RelatedAsync(new() { Source = new() { ResultId = scenario == 7 ? "c1" : "e1", SourceRevision = "source-proof" },
+                Limit = scenario == 10 ? 1u : 20u, Categories = scenario == 8 ? [ResultKind.Audio] : [],
+                Extensions = scenario == 9 ? ["pdf"] : [] }, token)) observed = batch;
+        });
+        if (scenario == 0) { Assert.Null(failure); Assert.NotNull(observed); }
+        else Assert.Equal(scenario is >= 4 and <= 7 ? ErrorCode.Unsupported : ErrorCode.InvalidRequest, Assert.IsType<EngineException>(failure).Code);
+        await serving;
+    }
+
     [Theory]
     [InlineData(0)] [InlineData(1)] [InlineData(2)] [InlineData(3)] [InlineData(4)] [InlineData(5)] [InlineData(6)]
     [InlineData(7)] [InlineData(8)] [InlineData(9)] [InlineData(10)] [InlineData(11)] [InlineData(12)] [InlineData(13)]

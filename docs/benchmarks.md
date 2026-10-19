@@ -545,3 +545,42 @@ controls FP0. Screenshot miss and audio rank2 remain. Both owned jobs empty.
 The optional CUDA backend compiled; these model runs explicitly use CPU and
 establish no CUDA/Vulkan calibration or installed acceptance. Independent review,
 consumer integration, resource/scale/release and hosted gates remain open.
+
+## 2026-10-19 Related retrieval and exact-cache retention
+
+[Evidence, retained failures, commands and hashes](validation/2026-10-19-related/README.md).
+The current all-target workspace run passes603 Rust tests, with the default
+model-gated worker recorded as ignored and then passing its explicit real-model
+replay. All25 embedding tests pass with ignored model/reference cases included:
+629 executed Rust tests across those disjoint scopes. The118 .NET tests and x64
+build pass; x64 has zero warnings/errors. Final coherent binaries/examples retain
+seven existing daemon dead-code warnings.
+
+| Final same-binary profile | Original public/offline queries | Whole harness | Initial indexing |
+| --- | --- | --- | --- |
+| No model |10 /7 |5.628s |2.417s |
+| Actual managed CPU |21 /17 |87.910s |68.405s |
+
+Both profiles add two typed Related sources and verify committed cache revisions
+and hashes through the consumer policy lifecycle. Raw transport adds three
+no-model controls and six CPU cases. A separate twin-document positive is added
+after original queries/snapshots: the target ranks first at cosine .855829 and
+the seed is excluded. Source text also retrieves actual audio/video content;
+audio without indexed text remains explicitly unavailable as a seed.
+
+Original quality remains .90/.85 Recall@5/MRR; expanded .9091/.8636, ten empty
+controls FP0, screenshot miss and audio rank2 retained. Related cases do not alter
+those denominators. Model reference tolerances are unchanged; both owned jobs
+finish empty and no Rust build occurs between profiles. Different checks/corpus
+stages and uncontrolled whole-harness timing prevent causal performance claims.
+
+The first no-model run failed after root restoration. A deterministic regression
+reproduced cache loss when unavailable inference overlaps a pause/root change;
+the fix retains current committed exact text while source mutation and root
+visibility fences remain enforced. The failed run/cache diagnostic and RED/green
+logs are retained. Existing media interruption assertions are unchanged and pass.
+The older intermittent failure still lacks a complete historical causal trace.
+An additional blocked seed-lookup control prevents an old failure from rejecting
+a reused request ID; final native profiles include that delivery fix.
+Independent review, consumer/installed behavior and required scale/resource/GPU
+calibration remain open; this is not full v1 acceptance.

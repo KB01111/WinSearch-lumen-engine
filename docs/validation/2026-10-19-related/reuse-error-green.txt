@@ -1,0 +1,15 @@
+cargo :    Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearc
+hd)
+At line:1 char:1
++ cargo test -p winsearchd engine::tests::related_failure_rechecks_requ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling wi...ins\winsearchd):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.69s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-950b3e8f0455252c.exe)
+
+running 1 test
+test engine::tests::related_failure_rechecks_request_identity_after_blocked_seed_lookup ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 228 filtered out; finished in 0.08s

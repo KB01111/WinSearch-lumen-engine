@@ -92,6 +92,21 @@ class Frames(harness.Pipe):
             frames.append(self.next_result(request))
         return frames
 
+    def related_frames(self, query):
+        self.sequence += 1
+        request = self.sequence
+        self.send({'type': 'related', 'id': request, 'query': query})
+        frames = []
+        while True:
+            reply = self.read()
+            if reply.get('id') != request:
+                continue
+            assert reply['type'] in ['error', 'results'], reply
+            frames.append(reply)
+            assert len(frames) <= 64, 'Related exceeded its frame budget'
+            if reply['type'] == 'results' and reply['done']:
+                return frames
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -378,13 +393,54 @@ def main():
                 assert len(native_client['semantic_checks']) == (3 if options.real_model else 0), native_client
                 assert len(native_client['preview_checks']) == 4, native_client
                 assert len(native_client['code_preview_checks']) == 4,native_client
+                assert len(native_client['related_checks']) == 2,native_client
                 summary['headless_client'] = native_client
                 summary['checks'].append('typed_async_client_native_dto_status_pause_revoke_restore_reconnect')
+                with sqlite3.connect(db.as_uri()+'?mode=ro', uri=True) as connection:
+                    retained = connection.execute('SELECT e.path,p.revision,p.complete,p.source_sha256 FROM entries e '
+                        'JOIN content_progress p ON p.entry_id=e.id ORDER BY e.path').fetchall()
+                original_revisions = {entry['path']: (entry['revision'], entry['sha256']) for entry in summary['ordinary_provenance']}
+                assert len(retained) == len(original_revisions) and all(complete and (revision, sha) == original_revisions[path]
+                    for path, revision, complete, sha in retained), ('read-only consumer lifecycle reparsed committed sources', retained)
+                summary['checks'].append('committed_exact_cache_revisions_and_hashes_survive_consumer_policy_lifecycle')
             if not options.real_model:
                 with sqlite3.connect((output/'data/db/code.db').as_uri()+'?mode=ro', uri=True) as connection:
                     assert connection.execute('SELECT count(*) FROM code_chunks WHERE norm>0').fetchone()[0] == 0
                 summary['checks'].append('native_code_exact_with_zero_model_vectors')
                 compare_offline()
+            summary['related_checks'] = []
+
+            def related(name, result_id, *, error=None, extensions=None, unbound=False, expected=None):
+                current = control.request('resolve_entry', reference={'result_id': result_id, 'source_revision': None})['entry']
+                seed = {'result_id': result_id, 'source_revision': None if unbound else current['source_revision']}
+                frames = client.related_frames({'source': seed, 'limit': 5, 'extensions': extensions or []})
+                errors = [frame for frame in frames if frame['type'] == 'error']
+                hits = [hit for frame in frames if frame['type'] == 'results' for hit in frame['batch']]
+                terminal = frames[-1]
+                assert len(hits) <= 5 and all(hit['entry_reference']['source_revision']
+                    and hit['entry_reference']['result_id'] != result_id
+                    and hit['entry_reference']['result_id'][0] == result_id[0] for hit in hits), frames
+                if error:
+                    assert len(errors) == 1 and errors[0]['code'] == error, frames
+                    assert not hits and terminal['outcome'] == {'disposition': 'failed', 'semantic': None}, frames
+                else:
+                    assert not errors and terminal['outcome']['disposition'] == 'complete', frames
+                    assert terminal['outcome']['semantic'] == ({'phase': 'degraded', 'reason': 'no_vectors'}
+                        if extensions == ['zzrelatedvoid'] else {'phase': 'ready', 'reason': None}), frames
+                if expected:
+                    assert any(Path(hit['path']).name == expected for hit in hits), ('missing actual Related target', frames)
+                summary['related_checks'].append({'name': name, 'source': seed, 'frames': frames, 'expected_name': expected})
+
+            related('ordinary_bound_cached_source', reference['result_id'], error=None if options.real_model else 'not_ready')
+            code_source = next(record['cli'][0]['entry_reference']['result_id'] for record in summary['queries']
+                if record['name'] == 'code_definition_reference')
+            related('code_bound_cached_source', code_source, error=None if options.real_model else 'not_ready')
+            related('reject_unbound_source', reference['result_id'], error='invalid_request', unbound=True)
+            if options.real_model:
+                related('eligible_scope_has_no_vectors', reference['result_id'], extensions=['zzrelatedvoid'])
+                audio = next(entry for entry in summary['ordinary_provenance'] if Path(entry['path']).name == 'item-d.wav')
+                related('audio_without_indexed_text_has_no_filename_fallback', audio['resolved']['result_id'], error='not_ready')
+            summary['checks'].append('raw_related_bound_seed_domain_budget_outcomes_and_unavailable_controls')
             if options.real_model:
                 worker = harness.Pipe(r'\\.\pipe\winsearch-embed-'+sid+'-'+instance, child)
                 status = worker.request('status'); worker.stream.close()
@@ -455,6 +511,26 @@ def main():
                 assert terminal['done'] and not terminal['batch'], terminal
                 summary['revocation_frames'] = [first, terminal]
                 summary['checks'].append('real_in_flight_root_revocation_empty_terminal')
+            if options.real_model:
+                # Add a separate Related corpus only after the original quality
+                # queries and snapshots; do not change their cases or denominators.
+                twin_text = 'Railway timetable notes. The railway timetable lists trains and departure platforms. ' * 4
+                for name in ['related-seed.txt', 'related-target.txt']:
+                    (documents/name).write_text(twin_text, encoding='utf-8')
+                config.update(roots=[str(documents)], code_roots=[str(code)])
+                control.request('set_indexing_config', config=config)
+
+                def related_vectors_ready():
+                    with sqlite3.connect(db.as_uri()+'?mode=ro', uri=True) as connection:
+                        rows = connection.execute("SELECT e.id,e.name,count(s.id) FROM entries e JOIN segments s ON s.entry_id=e.id "
+                            "WHERE e.name IN ('related-seed.txt','related-target.txt') AND s.kind='doc' AND s.norm>0 GROUP BY e.id,e.name").fetchall()
+                    return len(rows) == 2 and all(count > 0 for _, _, count in rows) and ready()
+
+                wait_for(related_vectors_ready)
+                with sqlite3.connect(db.as_uri()+'?mode=ro', uri=True) as connection:
+                    seed_id = connection.execute("SELECT id FROM entries WHERE name='related-seed.txt'").fetchone()[0]
+                related('actual_cpu_related_twin_document', f'e{seed_id}', expected='related-target.txt')
+                summary['checks'].append('actual_cpu_related_document_positive_after_original_quality_queries')
             config.update(roots=[], code_roots=[])
             control.request('set_indexing_config', config=config)
             client.sequence+=1

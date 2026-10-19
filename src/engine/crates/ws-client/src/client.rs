@@ -75,6 +75,9 @@ pub struct SearchStream {
     extensions: Vec<String>,
     require_outcome: bool,
     requested_semantic: bool,
+    max_results:usize,
+    related_source:Option<ws_protocol::IndexedEntryId>,
+    related_categories:Vec<ws_protocol::ResultKind>,
 }
 
 impl SearchStream {
@@ -94,12 +97,20 @@ impl SearchStream {
                 };
                 self.frames += 1;
                 self.results = self.results.saturating_add(batch.len());
-                if self.frames > MAX_SEARCH_FRAMES || self.results > MAX_SEARCH_RESULTS {
+                if self.frames > MAX_SEARCH_FRAMES || self.results > self.max_results {
                     return Err(Error::Protocol("search stream exceeded its result budget"));
                 }
                 if (done && self.require_outcome && outcome.is_none()) || outcome.as_ref()
                     .is_some_and(|value|!value.valid_for(done,batch.is_empty(),self.requested_semantic)) {
                     return Err(Error::Protocol("search returned an invalid or missing terminal outcome"));
+                }
+                if let Some(source)=self.related_source {
+                    if outcome.is_some_and(|outcome|outcome.disposition==ws_protocol::SearchDisposition::Complete
+                        && outcome.semantic.is_some_and(|semantic|semantic.phase==ws_protocol::SemanticPhase::Disabled))
+                        || batch.iter().any(|hit|!self.related_categories.is_empty() && !self.related_categories.contains(&hit.kind)
+                            || hit.entry_reference.as_ref().is_none_or(|reference|reference.indexed_id()==Some(source))) {
+                        return Err(Error::Protocol("Related returned its source, an unbound result or ordinary fallback state"));
+                    }
                 }
                 if batch.iter().any(|hit|hit.entry_reference.as_ref().is_some_and(|reference|
                     !reference.is_bound() || !reference_matches_kind(reference,hit.kind)
@@ -497,7 +508,27 @@ impl Client {
             extensions,
             require_outcome,
             requested_semantic,
+            max_results:MAX_SEARCH_RESULTS,
+            related_source:None,
+            related_categories:Vec::new(),
         })
+    }
+
+    pub async fn related(&self,query:ws_protocol::RelatedQuery)->Result<SearchStream,Error> {
+        if !query.is_valid() {return Err(Error::InvalidInput("invalid Related source or request budget"));}
+        let mut operation=self.open(false,Some("search.related")).await?;
+        let source=query.source.indexed_id().expect("validated indexed source");
+        let code=matches!(source,ws_protocol::IndexedEntryId::Code(_));
+        for (required,feature) in [(true,"search.semantic"),(true,"search.outcomes"),(code,"code"),
+            (!query.extensions.is_empty(),"search.filters")] {
+            if required && !operation.session.info.supports(feature) {return Err(Error::Unsupported(feature));}
+        }
+        let extensions=query.extensions.clone();let categories=query.categories.clone();let limit=query.limit as usize;
+        operation.session.send(&ClientMessage::Related {id:operation.id,query},operation.deadline).await?;
+        Ok(SearchStream {operation:Some(operation),results:0,frames:0,
+            mode:if code {ws_protocol::SearchMode::Code} else {ws_protocol::SearchMode::Files},
+            extensions,require_outcome:true,requested_semantic:true,max_results:limit,
+            related_source:Some(source),related_categories:categories})
     }
 
     pub async fn subscribe(&self) -> Result<StatusSubscription, Error> {
@@ -791,6 +822,65 @@ mod tests {
             let result=stream.next().await;
             if case<8 {assert!(matches!(result,Err(Error::Protocol(_))),"case{case}");}
             else {assert_eq!(result.unwrap().unwrap().outcome,expected,"case{case}");}
+            task.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn related_rejects_unbound_source_before_opening_a_connection() {
+        let (client,_peer)=fixture();
+        let result=client.related(ws_protocol::RelatedQuery {source:ws_protocol::EntryReference {
+            result_id:"e1".into(),source_revision:None},limit:20,categories:vec![],extensions:vec![]}).await;
+        assert!(matches!(result,Err(Error::InvalidInput(_))));
+    }
+
+    #[tokio::test]
+    async fn related_requires_each_capability_before_writing_an_unknown_or_downgraded_request() {
+        use tokio::io::AsyncReadExt;
+        for missing in ["search.related","search.semantic","search.outcomes","code","search.filters"] {
+            let (client,mut peer)=fixture();
+            let task=tokio::spawn(async move {
+                peer.connect().await.unwrap();let _=read_client(&mut peer).await;
+                let mut hello=ack();if let ServerMessage::HelloAck {features,..}=&mut hello {
+                    features.extend(["search.related","search.semantic","search.outcomes","code","search.filters"]
+                        .into_iter().filter(|feature|*feature!=missing).map(str::to_owned));
+                }
+                send_server(&mut peer,&hello).await;
+                assert_eq!(peer.read(&mut [0]).await.unwrap(),0,"unsupported Related must never be written");
+            });
+            let result=client.related(ws_protocol::RelatedQuery {source:EntryReference {
+                result_id:"c1".into(),source_revision:Some("proof".into())},limit:1,categories:vec![],extensions:vec!["rs".into()]}).await;
+            assert!(matches!(result,Err(Error::Unsupported(feature)) if feature==missing));task.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn related_stream_uses_distinct_operation_and_rejects_seed_or_ordinary_fallback_replies() {
+        use ws_protocol::{EntryReference,RelatedQuery,SearchOutcome,SemanticOutcome};
+        for case in 0..9 {
+            let (client,mut peer)=fixture();
+            let task=tokio::spawn(async move {
+                peer.connect().await.unwrap();let _=read_client(&mut peer).await;
+                let mut response=ack();if let ServerMessage::HelloAck {features,..}=&mut response {
+                    features.extend(["search.related".into(),"search.outcomes".into(),"search.semantic".into(),"search.filters".into()]);
+                }
+                send_server(&mut peer,&response).await;
+                let ClientMessage::Related {id,query}=read_client(&mut peer).await else {panic!("expected distinct Related operation");};
+                assert_eq!(query.source.result_id,"e1");assert!(query.source.is_bound());
+                let outcome=if case==2 {SemanticOutcome::DISABLED} else {SemanticOutcome::READY};
+                let target=if case==1 {"e1"} else if case==4 {"c2"} else {"e2"};
+                let hit=SearchResult {id:"s2".into(),kind:ws_protocol::ResultKind::Document,path:Some("C:/Docs/report.txt".into()),
+                    entry_reference:(case!=3).then_some(EntryReference {result_id:target.into(),source_revision:(case!=5).then_some("target-proof".into())}),
+                    ..Default::default()};
+                send_server(&mut peer,&ServerMessage::Results {id,done:true,outcome:Some(SearchOutcome::complete(outcome)),
+                    batch:if case==8 {vec![hit.clone(),hit]} else {vec![hit]}}).await;
+            });
+            let mut stream=client.related(RelatedQuery {source:EntryReference {result_id:"e1".into(),source_revision:Some("source-proof".into())},
+                limit:1,categories:if case==6 {vec![ws_protocol::ResultKind::Audio]} else {vec![]},
+                extensions:if case==7 {vec!["pdf".into()]} else {vec![]}}).await.expect("new peer must support Related");
+            let result=stream.next().await;
+            if case==0 {assert_eq!(result.unwrap().unwrap().batch.len(),1);}
+            else {assert!(matches!(result,Err(Error::Protocol(_))),"case{case} must be rejected before delivery");}
             task.await.unwrap();
         }
     }

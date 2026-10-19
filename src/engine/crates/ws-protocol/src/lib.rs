@@ -9,6 +9,8 @@ pub mod entry;
 pub mod framing;
 pub mod messages;
 pub mod outcome;
+pub mod related;
+pub use related::RelatedQuery;
 pub mod preview;
 
 pub use entry::{EntryReference, ResolvedEntry, IndexedEntryId, valid_content_sha256};
