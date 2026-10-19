@@ -13,12 +13,19 @@ acceleration is optional and outside the current focus.
 
 ## v1.0 TODO
 
-Remaining work as of 2026-10-19. Keep a task open until its implementation and
-relevant acceptance checks are complete. The detailed source/test evidence lives
+Remaining work as of 2026-10-20. Keep a task open until its implementation and
+relevant acceptance checks are complete. An unchecked item can include working
+subsystems whose final integration or acceptance is still pending. The detailed
+source/test evidence lives
 in the [gap matrix](docs/v1-gap-matrix.md); the
 [approved design](docs/superpowers/specs/2026-10-16-v1-design.md) and
 [Lumen integration plan](docs/superpowers/plans/2026-10-17-v1-lumen-engine.md)
 define the full scope.
+
+The immediate blockers are the rebuilt package's indexing/search stalls,
+Lumen's search adapter and data migration, the remaining standalone UI, and
+final performance, recovery and installed-app acceptance. NPU support is not a
+release requirement.
 
 The [Related/cache-retention checkpoint](docs/validation/2026-10-19-related/README.md)
 records the typed Related operation, a reproduced exact-cache fix and native
@@ -50,15 +57,22 @@ including code traversal and capability checks. The
 adds capability-gated totals up to 10,000, progressive bounded batches and
 receive budgets. The Lumen mapper, native forwarding and rebuilt consumer
 payload remain open.
+The [metadata-identity checkpoint](docs/validation/2026-10-20-metadata-identity/README.md)
+preserves metadata-only entry references without reviving old content proofs.
+The [rebuilt-runtime checkpoint](docs/validation/2026-10-20-engine-contract/README.md)
+records scoped actual-model, retrieval and native checks; the expanded
+outside-checkout package test still fails. Lumen's package pin must wait for a
+coherent rebuilt payload to pass that test with its existing deadlines.
 
 ### Lumen integration and native contract
 
 - [ ] Complete remaining provenance contracts and verify finer file-kind scopes
   through Lumen's native adapter. Preserve per-folder hidden-file, size and
   exclusion policies before candidate limits, and reconcile consumer result
-  limits without silently truncating them. Resolve the rebuilt package's
-  1,000-result search timeout and verify its current metadata/source identities
-  before advancing Lumen's pinned payload.
+  limits without silently truncating them. Resolve indexing/search stalls in the
+  expanded outside-checkout package test, verify current metadata/source
+  identities and pass its unchanged readiness and 1,000-result checks before
+  advancing Lumen's pinned payload.
 - [ ] Consume and verify the engine's terminal outcomes in Lumen and the
   standalone UI, preserving complete/superseded/canceled/failed and semantic
   disabled/ready/degraded states, exact results on optional failure and legacy
