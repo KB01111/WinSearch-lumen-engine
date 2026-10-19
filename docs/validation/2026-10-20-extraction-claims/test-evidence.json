@@ -1,0 +1,59 @@
+{
+  "scope": "Full serial Rust workspace excluding ws-embed; no installed/package/model acceptance claim",
+  "command": "cargo test --locked --workspace --exclude ws-embed --all-targets -- --test-threads=1",
+  "exitCode": 0,
+  "totals": {
+    "passed": 654,
+    "failed": 0,
+    "ignored": 1,
+    "scopes": 22
+  },
+  "sourceSha256": {
+    "src/engine/crates/ws-index/src/store.rs": "4c9f5dd1a0db6f190c0107f7822b5925d7d2b9066279a0c5c76b399315cd7825",
+    "src/engine/bins/winsearchd/src/engine.rs": "3833c6433c2d195e1d0831cff4cc3a7128f999e21aa262efc84f215b1745bdc7",
+    "src/engine/bins/winsearchd/src/server.rs": "9cbc05a8d25f0a36f64a4339a816691208c3f1ca56610f0f67efb0173190f86b"
+  },
+  "logs": {
+    "extraction-claim-policy-work-red.log": {
+      "sha256": "ec71dbced8e64633ed4f65203aa4611ac5006756ccb0bd8e8fd7d17d6b220777",
+      "result": "functional failure: 13221 policy_fold calls for each claim path"
+    },
+    "extraction-claim-index-green.log": {
+      "sha256": "ee37b955c270b244630c4cef5b3fb1f4b996311bae8216514d8e9ede38f06bea",
+      "result": "99 index tests pass before competing-job fixture expansion"
+    },
+    "extraction-claim-ready-order-red.log": {
+      "sha256": "5bc8953d29b54dfb108f2b087ec77e366f8edb23662eaaaa5404c8467bd77efe",
+      "result": "expanded competing-job regression passes despite historical filename"
+    },
+    "extraction-claim-workspace.log": {
+      "sha256": "df9d4155e695df0d169cd4d92babd82a2788e680e981524c7f64f6770b06d553",
+      "result": "654 pass, one actual-model worker ignored"
+    }
+  },
+  "claimPolicyFoldCounts": {
+    "before": [
+      13221,
+      13221,
+      13221
+    ],
+    "after": [
+      21,
+      21,
+      21
+    ]
+  },
+  "review": {
+    "model": "gpt-6.1-sol",
+    "scope": "read-only three SQL claim paths, visibility, state/order and callers",
+    "findings": [],
+    "testsRunByReviewer": false
+  },
+  "remaining": [
+    "coherent binary/model/native replay",
+    "expanded outside-checkout package acceptance",
+    "Lumen adapter and migration",
+    "controlled scale and resource measurements",
+    "full installed v1 acceptance"
+  ]
+}

@@ -63,6 +63,8 @@ The [rebuilt-runtime checkpoint](docs/validation/2026-10-20-engine-contract/READ
 records scoped actual-model, retrieval and native checks; the expanded
 outside-checkout package test still fails. Lumen's package pin must wait for a
 coherent rebuilt payload to pass that test with its existing deadlines.
+The [extraction-claim checkpoint](docs/validation/2026-10-20-extraction-claims/README.md)
+reduces repeated policy work in the queue; rebuilt-package acceptance remains open.
 
 ### Lumen integration and native contract
 

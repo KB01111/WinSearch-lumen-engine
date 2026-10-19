@@ -2170,7 +2170,7 @@ COMMIT;
             .query_row(
                 "UPDATE extract_jobs SET claimed = 1, state = 'claimed'
                  WHERE id = (SELECT id FROM extract_jobs
-                             WHERE claimed = 0 AND state = 'pending' AND entry_id IN (SELECT id FROM visible_entries)
+                             WHERE claimed = 0 AND state = 'pending' AND EXISTS (SELECT 1 FROM visible_entries v WHERE v.id=extract_jobs.entry_id)
                              ORDER BY priority DESC, id DESC LIMIT 1)
                  RETURNING id, entry_id, kind, state, claimed, attempts, priority",
                 [],
@@ -2210,7 +2210,7 @@ COMMIT;
                 .query_row(
                     "UPDATE extract_jobs SET claimed = 1, state = 'claimed'
                      WHERE id = (SELECT id FROM extract_jobs
-                                 WHERE claimed = 0 AND state = 'pending' AND entry_id IN (SELECT id FROM visible_entries) AND kind = ?1
+                                 WHERE claimed = 0 AND state = 'pending' AND EXISTS (SELECT 1 FROM visible_entries v WHERE v.id=extract_jobs.entry_id) AND kind = ?1
                                  ORDER BY priority DESC, id DESC LIMIT 1)
                      RETURNING id, entry_id, kind, state, claimed, attempts, priority",
                     params![kind],
@@ -2310,7 +2310,7 @@ COMMIT;
             .query_row(
                 "UPDATE extract_jobs SET claimed = 1, state = 'claimed'
                  WHERE id = (SELECT id FROM extract_jobs
-                             WHERE claimed = 0 AND state = 'pending' AND entry_id IN (SELECT id FROM visible_entries) AND kind != ?1
+                             WHERE claimed = 0 AND state = 'pending' AND EXISTS (SELECT 1 FROM visible_entries v WHERE v.id=extract_jobs.entry_id) AND kind != ?1
                              ORDER BY priority DESC, id DESC LIMIT 1)
                  RETURNING id, entry_id, kind, state, claimed, attempts, priority",
                 params![crate::model::SEGMENT_KIND_NAME],
@@ -2618,6 +2618,47 @@ fn fts_keywords(rec: &EntryRecord) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extraction_claims_check_candidate_visibility_without_materializing_the_index() {
+        use rusqlite::functions::FunctionFlags;
+        use std::sync::{Arc,atomic::{AtomicUsize,Ordering}};
+        let mut counts=Vec::new();
+        for mode in 0..3 {
+            let mut store=IndexStore::open_in_memory().unwrap();let root=store.ensure_root("C:/claims").unwrap();
+            let wanted="C:/claims/allowed.txt";let denied="C:/claims/denied.txt";
+            let mut rows=(0..1100).map(|n|rec(&format!("C:/claims/metadata-{n:04}.bin"),
+                &format!("metadata-{n:04}.bin"),1,1)).collect::<Vec<_>>();
+            rows.push(rec(wanted,"allowed.txt",1,1));rows.push(rec(denied,"denied.txt",1,1));
+            store.apply_batch(root,1,&rows).unwrap();
+            store.set_indexing_config(&ws_protocol::IndexingConfig {roots:vec!["C:/claims".into()],
+                excluded_paths:vec![denied.into()],..Default::default()}).unwrap();
+            let allowed=store.find_by_path(wanted).unwrap().unwrap().id;
+            let rejected=store.find_by_path(denied).unwrap().unwrap().id;
+            let kind=if mode==2 {"doc"} else {"name"};
+            for row in &rows[..1100] {
+                let entry=store.find_by_path(&row.path).unwrap().unwrap().id;
+                store.enqueue_extract_job_with_priority(entry,kind,0).unwrap();
+            }
+            store.enqueue_extract_job_with_priority(allowed,kind,10).unwrap();
+            store.enqueue_extract_job_with_priority(rejected,kind,100).unwrap();
+            let calls=Arc::new(AtomicUsize::new(0));let observed=Arc::clone(&calls);
+            store.conn.create_scalar_function("policy_fold",1,
+                FunctionFlags::SQLITE_UTF8|FunctionFlags::SQLITE_DETERMINISTIC,move |ctx| {
+                    observed.fetch_add(1,Ordering::Relaxed);
+                    Ok(ctx.get::<String>(0)?.replace('/',"\\").trim_end_matches('\\').to_lowercase())
+                }).unwrap();
+            let job=match mode {
+                0=>store.claim_extract_job().unwrap().unwrap(),
+                1=>store.claim_extract_jobs_batch_for_kind(kind,1).unwrap().remove(0),
+                _=>store.claim_content_extract_job().unwrap().unwrap(),
+            };
+            assert_eq!(job.entry_id,allowed,"excluded high-priority jobs must not consume the claim limit");
+            counts.push(calls.load(Ordering::Relaxed));
+        }
+        eprintln!("CLAIM_POLICY_FOLDS {counts:?}");
+        assert!(counts.iter().all(|calls|*calls<100),"one claim must check only queued candidates: {counts:?}");
+    }
 
     #[test]
     fn database_identity_survives_reopen_and_changes_for_a_recreated_index() {
