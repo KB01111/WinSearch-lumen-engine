@@ -43,32 +43,35 @@ startup, PID authentication, deferred admission and shutdown into the Rust host;
 its real two-profile native test passes. Search/root-policy forwarding, migration
 and installed-consumer acceptance remain open below.
 The [engine-only package guide](docs/engine-payload.md) covers verified local
-assembly and Lumen staging. Release binaries, native consumer wiring and
+assembly and Lumen staging. Final release delivery, native consumer wiring and
 installed acceptance remain open.
 The [database-identity checkpoint](docs/validation/2026-10-19-index-identity/README.md)
 adds durable ordinary/code index namespaces and prevents deleted code file IDs
 from being recycled. Lumen still needs to consume these identities in its host
-ledger and search adapter; its current staged engine remains pinned to the
-earlier verified payload.
+ledger and search adapter; its staged release engine now exposes the matching
+identity contract.
 The [per-folder policy checkpoint](docs/validation/2026-10-19-root-policies/README.md)
 adds hidden/size/relative exclusion admission before lexical/vector limits,
 including code traversal and capability checks. The
 [search-limit checkpoint](docs/validation/2026-10-19-search-limits/README.md)
 adds capability-gated totals up to 10,000, progressive bounded batches and
-receive budgets. The Lumen mapper, native forwarding and rebuilt consumer
-payload remain open.
+receive budgets. The Lumen mapper, native forwarding and installed consumer
+acceptance remain open.
 The [metadata-identity checkpoint](docs/validation/2026-10-20-metadata-identity/README.md)
 preserves metadata-only entry references without reviving old content proofs.
 The [rebuilt-runtime checkpoint](docs/validation/2026-10-20-engine-contract/README.md)
 retains earlier actual-model, retrieval and native checks, including rejected
 debug packages.
 The [extraction-claim checkpoint](docs/validation/2026-10-20-extraction-claims/README.md)
-reduces repeated policy work in the queue; rebuilt-package acceptance remains open.
+reduces repeated policy work in the queue; the later release checkpoint below
+supplies rebuilt-package evidence.
 The [release-runtime checkpoint](docs/validation/2026-10-20-release-runtime/README.md)
 now passes both native profiles, actual packaged CPU inference, the five frozen
 retrieval suites and the outside-checkout 1,000/1,100-result gate with unchanged
-deadlines. Updating Lumen's package/client pin, consumer integration and controlled
-performance acceptance remain open; the earlier failures are retained.
+deadlines. [Lumen PR #27](https://github.com/KB01111/Lumen/pull/27) now pins and
+stages that release with a passing two-profile native contract/PID/Stop test.
+Consumer integration and controlled performance acceptance remain open; earlier
+failures are retained.
 
 ### Lumen integration and native contract
 
@@ -76,9 +79,9 @@ performance acceptance remain open; the earlier failures are retained.
   through Lumen's native adapter. Preserve per-folder hidden-file, size and
   exclusion policies before candidate limits, and reconcile consumer result
   limits without silently truncating them. Complete large-result latency and
-  concurrent indexing validation, and advance Lumen's pinned client/payload to
-  the verified release checkpoint while preserving current metadata/source
-  identities and the unchanged package gates.
+  concurrent indexing validation, and verify Lumen's native forwarding against
+  its pinned release while preserving current metadata/source identities and
+  the unchanged package gates.
 - [ ] Consume and verify the engine's terminal outcomes in Lumen and the
   standalone UI, preserving complete/superseded/canceled/failed and semantic
   disabled/ready/degraded states, exact results on optional failure and legacy
@@ -91,8 +94,8 @@ performance acceptance remain open; the earlier failures are retained.
   Forward accumulated streaming snapshots through the catalogue wrapper and
   launcher controller; preserve latest-request selection, cancellation and empty
   Recent queries. Keep secured IPC, grants and actions in Lumen's Rust host.
-- [ ] Integrate and verify process-bound pipe authentication in Lumen's owned
-  engine lifecycle, retaining the verified process handle through every connection.
+- [ ] Complete consumer/restart/installed verification of process-bound pipe
+  authentication, retaining the verified process handle through every connection.
 - [ ] Launch Lumen's engine with deferred root admission and verify current
   folder grants on startup/restart, including empty roots and revoked access.
 - [ ] Consolidate to one authoritative crawler, index and embedding lifecycle;

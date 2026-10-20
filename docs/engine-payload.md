@@ -93,8 +93,13 @@ integration work. [Lumen PR #27](https://github.com/KB01111/Lumen/pull/27) now
 owns verified lazy startup/status, retained process/PID authentication, deferred
 root admission and job shutdown. Its running SearchService still uses its
 existing backend. Root-policy forwarding, migration, streaming and the
-single-index cutover remain open; the staged payload/client still uses the
-earlier pinned checkpoint.
+single-index cutover remain open. At consumer commit `79460cc`, the staged
+payload/client use the optimized release checkpoint above. Its actual
+two-profile contract/PID/Stop gate passes; all 62 staged and build-copied files
+match the independently pinned manifest. The
+[consumer report](https://github.com/KB01111/Lumen/blob/codex/winsearch-engine-adapter/docs/reports/2026-10-20-winsearch-release-pin.md)
+records 413 full-suite Rust passes, 27 ignored gates and the separately passed
+owned-native test, plus staging, formatting, Clippy, typecheck and lint checks.
 
 Before final delivery, reconcile any later binary changes, finish single-index
 ownership and final runtime validation, and run clean

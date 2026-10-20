@@ -60,7 +60,8 @@ or acceptance threshold changed for this release checkpoint.
 
 ## Remaining work
 
-Advance Lumen's pinned client/package together, then complete its SearchService
+Lumen now pins the matching client/package at consumer `79460cc`, with the actual
+two-profile contract/PID/Stop gate passing. Complete its SearchService
 adapter, policy forwarding, data migration and single crawler/index/model
 lifecycle. The standalone UI, controlled latency/scale/resource/recovery, GPU
 calibration, signing/licensing review, installer/update/uninstall and installed
