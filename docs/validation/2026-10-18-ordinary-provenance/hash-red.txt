@@ -1,0 +1,37 @@
+failures:
+
+---- source::tests::ordinary_source_hash_changes_for_same_length_binary_bytes stdout ----
+
+thread 'source::tests::ordinary_source_hash_changes_for_same_length_binary_bytes' (17548) panicked at crates\ws-extract\src\source.rs:48:88:
+binary bytes have provenance
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- source::tests::ordinary_source_hash_is_actual_complete_bytes_including_bom_and_crlf stdout ----
+
+thread 'source::tests::ordinary_source_hash_is_actual_complete_bytes_including_bom_and_crlf' (104696) panicked at crates\ws-extract\src\source.rs:41:13:
+assertion `left == right` failed
+  left: None
+ right: Some("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+
+---- source::tests::ordinary_source_hash_large_streaming_media_remains_unknown_without_relaxing_budget stdout ----
+
+thread 'source::tests::ordinary_source_hash_large_streaming_media_remains_unknown_without_relaxing_budget' (77256) panicked at crates\ws-extract\src\source.rs:71:9:
+assertion failed: matches!(source_sha256(&fixture.path(), &ExtractBudget::default()),
+    Err(ExtractError::FileTooLarge { .. }))
+
+---- source::tests::ordinary_source_hash_preserves_input_deadline_and_path_admission stdout ----
+
+thread 'source::tests::ordinary_source_hash_preserves_input_deadline_and_path_admission' (110828) panicked at crates\ws-extract\src\source.rs:58:9:
+assertion failed: matches!(source_sha256(&fixture.path(), &ExtractBudget::with_max_bytes(2)),
+    Err(ExtractError::FileTooLarge { .. }))
+
+
+failures:
+    source::tests::ordinary_source_hash_changes_for_same_length_binary_bytes
+    source::tests::ordinary_source_hash_is_actual_complete_bytes_including_bom_and_crlf
+    source::tests::ordinary_source_hash_large_streaming_media_remains_unknown_without_relaxing_budget
+    source::tests::ordinary_source_hash_preserves_input_deadline_and_path_admission
+
+test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 46 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p ws-extract --lib`

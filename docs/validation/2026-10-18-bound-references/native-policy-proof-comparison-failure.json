@@ -1,0 +1,1709 @@
+{
+  "scope": "Actual daemon/public CLI DTO parity, optionally including offline-ranker snapshots.\n\nDefault: native document/PDF/code extraction without a model. --real-model\nimports the pinned artifacts through ModelManager, requires real 768-dimensional\ncode vectors, and checks semantic code/image/audio/video on generated fixtures.\nBoth modes use an isolated data directory and a kill-on-close Windows job.\nThe snapshot option compares query code on the same native indexed vectors;\nfixture seeding and native extraction remain separately classified evidence.\n",
+  "real_model_requested": true,
+  "queries": [
+    {
+      "name": "code_disabled",
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 2,
+          "batch": [],
+          "done": true
+        }
+      ],
+      "cli": [],
+      "expect_empty": true
+    },
+    {
+      "name": "document_exact",
+      "query": {
+        "text": "amberparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 3,
+          "batch": [
+            {
+              "id": "e567",
+              "kind": "document",
+              "title": "item-a.txt",
+              "subtitle": "<fixture>\\documents\\item-a.txt",
+              "match_explanation": "Matches extracted content",
+              "score": 0.41,
+              "path": "<fixture>\\documents\\item-a.txt",
+              "location": {
+                "kind": "line",
+                "line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+              "matching_moments": [
+                {
+                  "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+                  "location": {
+                    "kind": "line",
+                    "line": 2
+                  },
+                  "thumbnail_path": null
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e567",
+                "source_revision": "<opaque native identity proof redacted>"
+              }
+            }
+          ],
+          "done": true
+        }
+      ],
+      "cli": [
+        {
+          "id": "e567",
+          "kind": "document",
+          "title": "item-a.txt",
+          "subtitle": "<fixture>\\documents\\item-a.txt",
+          "match_explanation": "Matches extracted content",
+          "score": 0.41,
+          "path": "<fixture>\\documents\\item-a.txt",
+          "location": {
+            "kind": "line",
+            "line": 2
+          },
+          "thumbnail_path": null,
+          "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+          "matching_moments": [
+            {
+              "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+              "location": {
+                "kind": "line",
+                "line": 2
+              },
+              "thumbnail_path": null
+            }
+          ],
+          "entry_reference": {
+            "result_id": "e567",
+            "source_revision": "<opaque native identity proof redacted>"
+          }
+        }
+      ],
+      "expect_empty": false,
+      "expected_name": "item-a.txt",
+      "expected_max_rank": 1,
+      "modality": "document",
+      "relevant_rank": 1
+    },
+    {
+      "name": "pdf_exact",
+      "query": {
+        "text": "pdfparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 4,
+          "batch": [
+            {
+              "id": "e568",
+              "kind": "document",
+              "title": "item-b.pdf",
+              "subtitle": "<fixture>\\documents\\item-b.pdf",
+              "match_explanation": "Matches extracted content",
+              "score": 0.41,
+              "path": "<fixture>\\documents\\item-b.pdf",
+              "location": {
+                "kind": "page",
+                "page": 2
+              },
+              "thumbnail_path": "<checkout>\\artifacts\\bound-references-native-cpu\\data\\cache\\thumbs\\extract-73356-1792319399402930400-3-0.png",
+              "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+              "matching_moments": [
+                {
+                  "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+                  "location": {
+                    "kind": "page",
+                    "page": 2
+                  },
+                  "thumbnail_path": "<checkout>\\artifacts\\bound-references-native-cpu\\data\\cache\\thumbs\\extract-73356-1792319399402930400-3-1.png"
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e568",
+                "source_revision": "<opaque native identity proof redacted>"
+              }
+            }
+          ],
+          "done": true
+        }
+      ],
+      "cli": [
+        {
+          "id": "e568",
+          "kind": "document",
+          "title": "item-b.pdf",
+          "subtitle": "<fixture>\\documents\\item-b.pdf",
+          "match_explanation": "Matches extracted content",
+          "score": 0.41,
+          "path": "<fixture>\\documents\\item-b.pdf",
+          "location": {
+            "kind": "page",
+            "page": 2
+          },
+          "thumbnail_path": "<checkout>\\artifacts\\bound-references-native-cpu\\data\\cache\\thumbs\\extract-73356-1792319399402930400-3-0.png",
+          "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+          "matching_moments": [
+            {
+              "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+              "location": {
+                "kind": "page",
+                "page": 2
+              },
+              "thumbnail_path": "<checkout>\\artifacts\\bound-references-native-cpu\\data\\cache\\thumbs\\extract-73356-1792319399402930400-3-1.png"
+            }
+          ],
+          "entry_reference": {
+            "result_id": "e568",
+            "source_revision": "<opaque native identity proof redacted>"
+          }
+        }
+      ],
+      "expect_empty": false,
+      "expected_name": "item-b.pdf",
+      "expected_max_rank": 1,
+      "modality": "document",
+      "relevant_rank": 1
+    },
+    {
+      "name": "code_definition_reference",
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 5,
+          "batch": [
+            {
+              "id": "code:2:1:true:parityneedle",
+              "kind": "code",
+              "title": "parityneedle",
+              "subtitle": "<fixture>\\code\\源 code.rs",
+              "match_explanation": "function · line 1",
+              "score": 1.0,
+              "path": "<fixture>\\code\\源 code.rs",
+              "location": {
+                "kind": "line",
+                "line": 1
+              },
+              "thumbnail_path": null,
+              "excerpt": "pub fn parityneedle() {}",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c2",
+                "source_revision": "<opaque native identity proof redacted>"
+              }
+            },
+            {
+              "id": "code:2:2:false:parityneedle",
+              "kind": "code",
+              "title": "parityneedle",
+              "subtitle": "<fixture>\\code\\源 code.rs",
+              "match_explanation": "reference · line 2",
+              "score": 0.949999988079071,
+              "path": "<fixture>\\code\\源 code.rs",
+              "location": {
+                "kind": "line",
+                "line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "parityneedle",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c2",
+                "source_revision": "<opaque native identity proof redacted>"
+              }
+            }
+          ],
+          "done": true
+        }
+      ],
+      "cli": [
+        {
+          "id": "code:2:1:true:parityneedle",
+          "kind": "code",
+          "title": "parityneedle",
+          "subtitle": "<fixture>\\code\\源 code.rs",
+          "match_explanation": "function · line 1",
+          "score": 1.0,
+          "path": "<fixture>\\code\\源 code.rs",
+          "location": {
+            "kind": "line",
+            "line": 1
+          },
+          "thumbnail_path": null,
+          "excerpt": "pub fn parityneedle() {}",
+          "matching_moments": [],
+          "entry_reference": {
+            "result_id": "c2",
+            "source_revision": "<opaque native identity proof redacted>"
+          }
+        },
+        {
+          "id": "code:2:2:false:parityneedle",
+          "kind": "code",
+          "title": "parityneedle",
+          "subtitle": "<fixture>\\code\\源 code.rs",
+          "match_explanation": "reference · line 2",
+          "score": 0.949999988079071,
+          "path": "<fixture>\\code\\源 code.rs",
+          "location": {
+            "kind": "line",
+            "line": 2
+          },
+          "thumbnail_path": null,
+          "excerpt": "parityneedle",
+          "matching_moments": [],
+          "entry_reference": {
+            "result_id": "c2",
+            "source_revision": "<opaque native identity proof redacted>"
+          }
+        }
+      ],
+      "expect_empty": false,
+      "expected_name": "源 code.rs",
+      "expected_max_rank": 1,
+      "modality": "code",
+      "relevant_rank": 1
+    },
+    {
+      "name": "notebook",
+      "query": {
+        "text": "notebookparity",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 6,
+          "batch": [
+            {
+              "id": "code:1:2:true:notebookparity",
+              "kind": "code",
+              "title": "notebookparity",
+              "subtitle": "<fixture>\\code\\cells.ipynb",
+              "match_explanation": "function · cell 2, line 1",
+              "score": 1.0,
+              "path": "<fixture>\\code\\cells.ipynb",
+              "location": {
+                "kind": "notebook",
+                "cell_ordinal": 1,
+                "line": 1,
+                "end_line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "def notebookparity():\n    return 1",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c1",
+                "source_revision": "<opaque native identity proof redacted>"
+              }
+            }
+          ],
+          "done": true
+        }
+      ],
+      "cli": [
+        {
+          "id": "code:1:2:true:notebookparity",
+          "kind": "code",
+          "title": "notebookparity",
+          "subtitle": "<fixture>\\code\\cells.ipynb",
+          "match_explanation": "function · cell 2, line 1",
+          "score": 1.0,
+          "path": "<fixture>\\code\\cells.ipynb",
+          "location": {
+            "kind": "notebook",
+            "cell_ordinal": 1,
+            "line": 1,
+            "end_line": 2
+          },
+          "thumbnail_path": null,
+          "excerpt": "def notebookparity():\n    return 1",
+          "matching_moments": [],
+          "entry_reference": {
+            "result_id": "c1",
+            "source_revision": "<opaque native identity proof redacted>"
+          }
+        }
+      ],
+      "expect_empty": false,
+      "expected_name": "cells.ipynb",
+      "expected_max_rank": 1,
+      "modality": "code",
+      "relevant_rank": 1
+    },
+    {
+      "name": "code_isolation",
+      "query": {
+        "text": "parityneedle",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 7,
+          "batch": [],
+          "done": true
+        }
+      ],
+      "cli": [],
+      "expect_empty": true
+    },
+    {
+      "name": "absent_exact",
+      "query": {
+        "text": "unfindableparitytoken",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 8,
+          "batch": [],
+          "done": true
+        }
+      ],
+      "cli": [],
+      "expect_empty": true
+    },
+    {
+      "name": "code_absent_exact",
+      "query": {
+        "text": "unfindableparitytoken",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 9,
+          "batch": [],
+          "done": true
+        }
+      ],
+      "cli": [],
+      "expect_empty": true
+    },
+    {
+      "name": "document_semantic",
+      "query": {
+        "text": "baking a chocolate cake with flour butter eggs and sugar",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": true
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 10,
+          "batch": [],
+          "done": false
+        },
+        {
+          "type": "results",
+          "id": 10,
+          "batch": [
+            {
+              "id": "s567",
+              "kind": "document",
+              "title": "item-a.txt",
+              "subtitle": "<fixture>\\documents\\item-a.txt",
+              "match_explanation": "semantic content match · similarity 0.72",
+              "score": 0.8946094375848771,
+              "path": "<fixture>\\documents\\item-a.txt",
+              "location": {
+                "kind": "line",
+                "line": 1
+              },
+              "thumbnail_path": null,
+              "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+              "matching_moments": [
+                {
+                  "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+                  "location": {
+                    "kind": "line",
+                    "line": 1
+                  },
+                  "thumbnail_path": null
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e567",
+                "source_revision": "<opaque native identity proof redacted>"
+              }
+            },
+            {
+              "id": "s571",
+              "kind": "video",
+              "title": "item-e.mp4",
+              "subtitle": "<fixture>\\documents\\item-e.mp4",
+              "match_explanation": "semantic sound match · similarity 0.79",
+              "score": 0.8275509607791901,
+              "path": "<fixture>\\documents\\item-e.mp4",
+              "location": {
+                "kind": "timestamp",
+                "seconds": 50.0,
+                "end_seconds": 65.0
+              },
+              "thumbnail_path": null,
+              "excerpt": null,
+              "matching_moments": [
+                {
+                  "excerpt": "",
+                  "location": {
+                    "kind": "timestamp",
+                    "seconds": 50.0,
+                    "end_seconds": 65.0
+                  },
+                  "thumbnail_path": null
+                },
+                {
+                  "excerpt": "",
+                  "location": {
+                    "kind": "timestamp",
+                    "seconds": 25.0,
+                    "end_seconds": 55.0
+                  },
+                  "thumbnail_path": null
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e571",
+                "source_revision": "<opaque native identity proof redacted>"
+              }
+            },
+            {
+              "id": "s570",
+              "kind": "audio",
+              "title": "item-d.wav",
+              "subtitle": "<fixture>\\documents\\item-d.wav",
+              "match_explanation": "semantic sound match · similarity 0.79",
+              "score": 0.8271162015199662,
+              "path": "<fixture>\\documents\\item-d.wav",
+              "location": {
+                "kind": "timestamp",
+                "seconds": 50.0,
+                "end_seconds": 65.0
+              },
+              "thumbnail_path": null,
+              "excerpt": null,
+              "matching_moments": [
+                {
+                  "excerpt": "",
+                  "location": {
+                    "kind": "timestamp",
+                    "seconds": 50.0,
+                    "end_seconds": 65.0
+                  },
+                  "thumbnail_path": null
+                },
+                {
+                  "excerpt": "",
+                  "location": {
+                    "kind": "timestamp",
+                    "seconds": 25.0,
+                    "end_seconds": 55.0
+                  },
+                  "thumbnail_path": null
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e570",
+                "source_revision": "<opaque native identity proof redacted>"
+              }
+            }
+          ],
+          "done": true
+        }
+      ],
+      "cli": [
+        {
+          "id": "s567",
+          "kind": "document",
+          "title": "item-a.txt",
+          "subtitle": "<fixture>\\documents\\item-a.txt",
+          "match_explanation": "semantic content match · similarity 0.72",
+          "score": 0.8946094375848771,
+          "path": "<fixture>\\documents\\item-a.txt",
+          "location": {
+            "kind": "line",
+            "line": 1
+          },
+          "thumbnail_path": null,
+          "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+          "matching_moments": [
+            {
+              "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+              "location": {
+                "kind": "line",
+                "line": 1
+              },
+              "thumbnail_path": null
+            }
+          ],
+          "entry_reference": {
+            "result_id": "e567",
+            "source_revision": "<opaque native identity proof redacted>"
+          }
+        },
+        {
+          "id": "s571",
+          "kind": "video",
+          "title": "item-e.mp4",
+          "subtitle": "<fixture>\\documents\\item-e.mp4",
+          "match_explanation": "semantic sound match · similarity 0.79",
+          "score": 0.8275509607791901,
+          "path": "<fixture>\\documents\\item-e.mp4",
+          "location": {
+            "kind": "timestamp",
+            "seconds": 50.0,
+            "end_seconds": 65.0
+          },
+          "thumbnail_path": null,
+          "excerpt": null,
+          "matching_moments": [
+            {
+              "excerpt": "",
+              "location": {
+                "kind": "timestamp",
+                "seconds": 50.0,
+                "end_seconds": 65.0
+              },
+              "thumbnail_path": null
+            },
+            {
+              "excerpt": "",
+              "location": {
+                "kind": "timestamp",
+                "seconds": 25.0,
+                "end_seconds": 55.0
+              },
+              "thumbnail_path": null
+            }
+          ],
+          "entry_reference": {
+            "result_id": "e571",
+            "source_revision": "<opaque native identity proof redacted>"
+          }
+        },
+        {
+          "id": "s570",
+          "kind": "audio",
+          "title": "item-d.wav",
+          "subtitle": "<fixture>\\documents\\item-d.wav",
+          "match_explanation": "semantic sound match · similarity 0.79",
+          "score": 0.8271162015199662,
+          "path": "<fixture>\\documents\\item-d.wav",
+          "location": {
+            "kind": "timestamp",
+            "seconds": 50.0,
+            "end_seconds": 65.0
+          },
+          "thumbnail_path": null,
+          "excerpt": null,
+          "matching_moments": [
+            {
+              "excerpt": "",
+              "location": {
+                "kind": "timestamp",
+                "seconds": 50.0,
+                "end_seconds": 65.0
+              },
+              "thumbnail_path": null
+            },
+            {
+              "excerpt": "",
+              "location": {
+                "kind": "timestamp",
+                "seconds": 25.0,
+                "end_seconds": 55.0
+              },
+              "thumbnail_path": null
+            }
+          ],
+          "entry_reference": {
+            "result_id": "e570",
+            "source_revision": "<opaque native identity proof redacted>"
+          }
+        }
+      ],
+      "expect_empty": false,
+      "expected_name": "item-a.txt",
+      "expected_max_rank": 5,
+      "modality": "document",
+      "relevant_rank": 1
+    },
+    {
+      "name": "pdf_semantic",
+      "query": {
+        "text": "railway timetable for trains and departure platforms",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": true
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 11,
+          "batch": [],
+          "done": false
+        },
+        {
+          "type": "results",
+          "id": 11,
+          "batch": [
+            {
+              "id": "s568",
+              "kind": "document",
+              "title": "item-b.pdf",
+              "subtitle": "<fixture>\\documents\\item-b.pdf",
+              "match_explanation": "semantic content match · similarity 0.80",
+              "score": 0.8300144892930985,
+              "path": "<fixture>\\documents\\item-b.pdf",
+              "location": {
+                "kind": "page",
+                "page": 2
+              },
+              "thumbnail_path": "<checkout>\\artifacts\\bound-references-native-cpu\\data\\cache\\thumbs\\extract-73356-1792319399402930400-3-1.png",
+              "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+              "matching_moments": [
+                {
+                  "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+                  "location": {
+                    "kind": "page",
+                    "page": 2
+                  },
+                  "thumbnail_path": "<checkout>\\artifacts\\bound-references-native-cpu\\data\\cache\\thumbs\\extract-73356-1792319399402930400-3-1.png"
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e568",
+                "source_revision": "<opaque native identity proof redacted>"
+              }
+            },
+            {
+              "id": "s570",
+              "kind": "audio",
+              "title": "item-d.wav",
+              "subtitle": "<fixture>\\documents\\item-d.wav",
+              "match_explanation": "semantic sound match · similarity 0.72",
+              "score": 0.795631332397461,
+              "path": "<fixture>\\documents\\item-d.wav",
+              "location": {
+                "kind": "timestamp",
+                "seconds": 0.0,
+                "end_seconds": 30.0
+              },
+              "thumbnail_path": null,
+              "excerpt": null,
+              "matching_moments": [
+                {
+                  "excerpt": "",
+                  "location": {
+                    "kind": "timestamp",
+                    "seconds": 0.0,
+                    "end_seconds": 30.0
+                  },
+                  "thumbnail_path": null
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e570",
+                "source_revision": "<opaque native identity proof redacted>"
+              }
+            },
+            {
+              "id": "s571",
+              "kind": "video",
+              "title": "item-e.mp4",
+              "subtitle": "<fixture>\\documents\\item-e.mp4",
+              "match_explanation": "semantic sound match · similarity 0.72",
+              "score": 0.7944562298059463,
+              "path": "<fixture>\\documents\\item-e.mp4",
+              "location": {
+                "kind": "timestamp",
+                "seconds": 0.0,
+                "end_seconds": 30.0
+              },
+              "thumbnail_path": null,
+              "excerpt": null,
+              "matching_moments": [
+                {
+                  "excerpt": "",
+                  "location": {
+                    "kind": "timestamp",
+                    "seconds": 0.0,
+                    "end_seconds": 30.0
+                  },
+                  "thumbnail_path": null
+                }
+              ],
+              "entry_reference": {
+                "result_id": "e571",
+                "source_revision": "<opaque native identity proof redacted>"
+              }
+            }
+          ],
+          "done": true
+        }
+      ],
+      "cli": [
+        {
+          "id": "s568",
+          "kind": "document",
+          "title": "item-b.pdf",
+          "subtitle": "<fixture>\\documents\\item-b.pdf",
+          "match_explanation": "semantic content match · similarity 0.80",
+          "score": 0.8300144892930985,
+          "path": "<fixture>\\documents\\item-b.pdf",
+          "location": {
+            "kind": "page",
+            "page": 2
+          },
+          "thumbnail_path": "<checkout>\\artifacts\\bound-references-native-cpu\\data\\cache\\thumbs\\extract-73356-1792319399402930400-3-1.png",
+          "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+          "matching_moments": [
+            {
+              "excerpt": "pdfparitytoken The railway timetable lists trains and departure platforms.",
+              "location": {
+                "kind": "page",
+                "page": 2
+              },
+              "thumbnail_path": "<checkout>\\artifacts\\bound-references-native-cpu\\data\\cache\\thumbs\\extract-73356-1792319399402930400-3-1.png"
+            }
+          ],
+          "entry_reference": {
+            "result_id": "e568",
+            "source_revision": "<opaque native identity proof redacted>"
+          }
+        },
+        {
+          "id": "s570",
+          "kind": "audio",
+          "title": "item-d.wav",
+          "subtitle": "<fixture>\\documents\\item-d.wav",
+          "match_explanation": "semantic sound match · similarity 0.72",
+          "score": 0.795631332397461,
+          "path": "<fixture>\\documents\\item-d.wav",
+          "location": {
+            "kind": "timestamp",
+            "seconds": 0.0,
+            "end_seconds": 30.0
+          },
+          "thumbnail_path": null,
+          "excerpt": null,
+          "matching_moments": [
+            {
+              "excerpt": "",
+              "location": {
+                "kind": "timestamp",
+                "seconds": 0.0,
+                "end_seconds": 30.0
+              },
+              "thumbnail_path": null
+            }
+          ],
+          "entry_reference": {
+            "result_id": "e570",
+            "source_revision": "<opaque native identity proof redacted>"
+          }
+        },
+        {
+          "id": "s571",
+          "kind": "video",
+          "title": "item-e.mp4",
+          "subtitle": "<fixture>\\documents\\item-e.mp4",
+          "match_explanation": "semantic sound match · similarity 0.72",
+          "score": 0.7944562298059463,
+          "path": "<fixture>\\documents\\item-e.mp4",
+          "location": {
+            "kind": "timestamp",
+            "seconds": 0.0,
+            "end_seconds": 30.0
+          },
+          "thumbnail_path": null,
+          "excerpt": null,
+          "matching_moments": [
+            {
+              "excerpt": "",
+              "location": {
+                "kind": "timestamp",
+                "seconds": 0.0,
+                "end_seconds": 30.0
+              },
+              "thumbnail_path": null
+            }
+          ],
+          "entry_reference": {
+            "result_id": "e571",
+            "source_revision": "<opaque native identity proof redacted>"
+          }
+        }
+      ],
+      "expect_empty": false,
+      "expected_name": "item-b.pdf",
+      "expected_max_rank": 5,
+      "modality": "document",
+      "relevant_rank": 1
+    },
+    {
+      "name": "semantic_negative",
+      "query": {
+        "text": "asteroid orbital mechanics and interstellar propulsion",
+        "mode": "files",
+        "limit": 5,
+        "include_semantic": true
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 12,
+          "batch": [],
+          "done": false
+        },
+        {
+          "type": "results",
+          "id": 12,
+          "batch": [],
+          "done": true
+        }
+      ],
+      "cli": [],
+      "expect_empty": true
+    },
+    {
+      "name": "code_semantic_stream",
+      "query": {
+        "text": "parityneedle",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": true
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 13,
+          "batch": [
+            {
+              "id": "code:2:1:true:parityneedle",
+              "kind": "code",
+              "title": "parityneedle",
+              "subtitle": "<fixture>\\code\\源 code.rs",
+              "match_explanation": "function · line 1",
+              "score": 1.0,
+              "path": "<fixture>\\code\\源 code.rs",
+              "location": {
+                "kind": "line",
+                "line": 1
+              },
+              "thumbnail_path": null,
+              "excerpt": "pub fn parityneedle() {}",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c2",
+                "source_revision": "<opaque native identity proof redacted>"
+              }
+            },
+            {
+              "id": "code:2:2:false:parityneedle",
+              "kind": "code",
+              "title": "parityneedle",
+              "subtitle": "<fixture>\\code\\源 code.rs",
+              "match_explanation": "reference · line 2",
+              "score": 0.949999988079071,
+              "path": "<fixture>\\code\\源 code.rs",
+              "location": {
+                "kind": "line",
+                "line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "parityneedle",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c2",
+                "source_revision": "<opaque native identity proof redacted>"
+              }
+            }
+          ],
+          "done": false
+        },
+        {
+          "type": "results",
+          "id": 13,
+          "batch": [
+            {
+              "id": "code:1:2:false:notebookparity",
+              "kind": "code",
+              "title": "notebookparity",
+              "subtitle": "<fixture>\\code\\cells.ipynb",
+              "match_explanation": "function · cell 2, line 1",
+              "score": 0.8026110303401948,
+              "path": "<fixture>\\code\\cells.ipynb",
+              "location": {
+                "kind": "notebook",
+                "cell_ordinal": 1,
+                "line": 1,
+                "end_line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "def notebookparity():\n    return 1\n",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c1",
+                "source_revision": "<opaque native identity proof redacted>"
+              }
+            }
+          ],
+          "done": true
+        }
+      ],
+      "cli": [
+        {
+          "id": "code:2:1:true:parityneedle",
+          "kind": "code",
+          "title": "parityneedle",
+          "subtitle": "<fixture>\\code\\源 code.rs",
+          "match_explanation": "function · line 1",
+          "score": 1.0,
+          "path": "<fixture>\\code\\源 code.rs",
+          "location": {
+            "kind": "line",
+            "line": 1
+          },
+          "thumbnail_path": null,
+          "excerpt": "pub fn parityneedle() {}",
+          "matching_moments": [],
+          "entry_reference": {
+            "result_id": "c2",
+            "source_revision": "<opaque native identity proof redacted>"
+          }
+        },
+        {
+          "id": "code:2:2:false:parityneedle",
+          "kind": "code",
+          "title": "parityneedle",
+          "subtitle": "<fixture>\\code\\源 code.rs",
+          "match_explanation": "reference · line 2",
+          "score": 0.949999988079071,
+          "path": "<fixture>\\code\\源 code.rs",
+          "location": {
+            "kind": "line",
+            "line": 2
+          },
+          "thumbnail_path": null,
+          "excerpt": "parityneedle",
+          "matching_moments": [],
+          "entry_reference": {
+            "result_id": "c2",
+            "source_revision": "<opaque native identity proof redacted>"
+          }
+        },
+        {
+          "id": "code:1:2:false:notebookparity",
+          "kind": "code",
+          "title": "notebookparity",
+          "subtitle": "<fixture>\\code\\cells.ipynb",
+          "match_explanation": "function · cell 2, line 1",
+          "score": 0.8026110303401948,
+          "path": "<fixture>\\code\\cells.ipynb",
+          "location": {
+            "kind": "notebook",
+            "cell_ordinal": 1,
+            "line": 1,
+            "end_line": 2
+          },
+          "thumbnail_path": null,
+          "excerpt": "def notebookparity():\n    return 1\n",
+          "matching_moments": [],
+          "entry_reference": {
+            "result_id": "c1",
+            "source_revision": "<opaque native identity proof redacted>"
+          }
+        }
+      ],
+      "expect_empty": false,
+      "expected_name": "源 code.rs",
+      "expected_max_rank": 1,
+      "modality": "code",
+      "relevant_rank": 1
+    },
+    {
+      "name": "code_semantic_only_exact_control",
+      "query": {
+        "text": "a function named parityneedle and its caller",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": false
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 14,
+          "batch": [],
+          "done": true
+        }
+      ],
+      "cli": [],
+      "expect_empty": true
+    },
+    {
+      "name": "code_semantic_only",
+      "query": {
+        "text": "a function named parityneedle and its caller",
+        "mode": "code",
+        "limit": 5,
+        "include_semantic": true
+      },
+      "frames": [
+        {
+          "type": "results",
+          "id": 15,
+          "batch": [],
+          "done": false
+        },
+        {
+          "type": "results",
+          "id": 15,
+          "batch": [
+            {
+              "id": "code:2:2:false:caller",
+              "kind": "code",
+              "title": "caller",
+              "subtitle": "<fixture>\\code\\源 code.rs",
+              "match_explanation": "function · line 2",
+              "score": 0.8651343417167664,
+              "path": "<fixture>\\code\\源 code.rs",
+              "location": {
+                "kind": "line",
+                "line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "fn caller() { parityneedle(); }\r\n",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c2",
+                "source_revision": "<opaque native identity proof redacted>"
+              }
+            },
+            {
+              "id": "code:2:1:false:parityneedle",
+              "kind": "code",
+              "title": "parityneedle",
+              "subtitle": "<fixture>\\code\\源 code.rs",
+              "match_explanation": "function · line 1",
+              "score": 0.8575076144933701,
+              "path": "<fixture>\\code\\源 code.rs",
+              "location": {
+                "kind": "line",
+                "line": 1
+              },
+              "thumbnail_path": null,
+              "excerpt": "pub fn parityneedle() {}\r\n",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c2",
+                "source_revision": "<opaque native identity proof redacted>"
+              }
+            },
+            {
+              "id": "code:1:2:false:notebookparity",
+              "kind": "code",
+              "title": "notebookparity",
+              "subtitle": "<fixture>\\code\\cells.ipynb",
+              "match_explanation": "function · cell 2, line 1",
+              "score": 0.7947718453407289,
+              "path": "<fixture>\\code\\cells.ipynb",
+              "location": {
+                "kind": "notebook",
+                "cell_ordinal": 1,
+                "line": 1,
+                "end_line": 2
+              },
+              "thumbnail_path": null,
+              "excerpt": "def notebookparity():\n    return 1\n",
+              "matching_moments": [],
+              "entry_reference": {
+                "result_id": "c1",
+                "source_revision": "<opaque native identity proof redacted>"
+              }
+            }
+          ],
+          "done": true
+        }
+      ],
+      "cli": [
+        {
+          "id": "code:2:2:false:caller",
+          "kind": "code",
+          "title": "caller",
+          "subtitle": "<fixture>\\code\\源 code.rs",
+          "match_explanation": "function · line 2",
+          "score": 0.8651343417167664,
+          "path": "<fixture>\\code\\源 code.rs",
+          "location": {
+            "kind": "line",
+            "line": 2
+          },
+          "thumbnail_path": null,
+          "excerpt": "fn caller() { parityneedle(); }\r\n",
+          "matching_moments": [],
+          "entry_reference": {
+            "result_id": "c2",
+            "source_revision": "<opaque native identity proof redacted>"
+          }
+        },
+        {
+          "id": "code:2:1:false:parityneedle",
+          "kind": "code",
+          "title": "parityneedle",
+          "subtitle": "<fixture>\\code\\源 code.rs",
+          "match_explanation": "function · line 1",
+          "score": 0.8575076144933701,
+          "path": "<fixture>\\code\\源 code.rs",
+          "location": {
+            "kind": "line",
+            "line": 1
+          },
+          "thumbnail_path": null,
+          "excerpt": "pub fn parityneedle() {}\r\n",
+          "matching_moments": [],
+          "entry_reference": {
+            "result_id": "c2",
+            "source_revision": "<opaque native identity proof redacted>"
+          }
+        },
+        {
+          "id": "code:1:2:false:notebookparity",
+          "kind": "code",
+          "title": "notebookparity",
+          "subtitle": "<fixture>\\code\\cells.ipynb",
+          "match_explanation": "function · cell 2, line 1",
+          "score": 0.7947718453407289,
+          "path": "<fixture>\\code\\cells.ipynb",
+          "location": {
+            "kind": "notebook",
+            "cell_ordinal": 1,
+            "line": 1,
+            "end_line": 2
+          },
+          "thumbnail_path": null,
+          "excerpt": "def notebookparity():\n    return 1\n",
+          "matching_moments": [],
+          "entry_reference": {
+            "result_id": "c1",
+            "source_revision": "<opaque native identity proof redacted>"
+          }
+        }
+      ],
+      "expect_empty": false,
+      "expected_name": "源 code.rs",
+      "expected_max_rank": 5,
+      "modality": "code",
+      "relevant_rank": 1
+    }
+  ],
+  "checks": [
+    "pinned_model_import_ready_and_staged_artifact_hashes",
+    "native_code_index_has_complete_768d_vectors",
+    "native_indexed_entry_resolution_with_current_source_proof",
+    "native_code_and_notebook_exact_byte_sha256_provenance",
+    "native_extraction_exact_code_opt_in_and_payload_parity",
+    "typed_client_bound_code_notebook_refs_and_actual_sha256",
+    "typed_async_client_native_dto_status_pause_revoke_restore_reconnect"
+  ],
+  "failures": [
+    "AssertionError('typed semantic-only code DTO parity')"
+  ],
+  "quality_misses": [],
+  "owned_job_empty": true,
+  "harness_sha256": "7856a4c4877d84c85bb78f33d3a6f5b0eddf30aa80acce10b457358a3d074902",
+  "expected_pipeline_version": 2,
+  "expected_semantic_floor": 0.65,
+  "expected_code_query_policy": "code-and-search-task-corroboration-v1",
+  "binary_sha256": {
+    "winsearchd.exe": "b9f85eae0bb4a9931677a6a07135519f085c323ea365a533bc8cdd5be545eabc",
+    "winsearch-cli.exe": "b24d0d88abb2ab943962df6eb5057cb8722177767d6167fcd54a73b49faf04d6",
+    "winsearch-embed.exe": "25d57959583f1ca63d8f1dfd06cb85bf5c0e9914f9f1ff5acb57004cb4fa0ef8",
+    "winsearch-extract.exe": "fbd1a6019228bc02880c30f1bcae3a50e7bc9958418ee004b3b559ce7e03c3ab"
+  },
+  "adjacent_native_dll_sha256": {
+    "ggml-base.dll": "f90aa4e0cfd7809b84f8866526e70d3dc0f5deecf59371e24ce57a6f4da54b89",
+    "ggml-cpu-alderlake.dll": "697a3d64209cd048941a52cc659bd721b843ec2460fefd015cf6c05851bc6998",
+    "ggml-cpu-cannonlake.dll": "d1a1703e870094b3ded18fbaa703cc6ba109a4ec17eae75933b5e37e97ec94c1",
+    "ggml-cpu-cascadelake.dll": "ab6bb30884c0bb91cb7ab35e3a5cf2e94817a5be02afa373db43fb43d912d3c2",
+    "ggml-cpu-haswell.dll": "ff1899b838915629b543eefaca2b59cbd697eb545ca3d053849e9720dcf93bf2",
+    "ggml-cpu-icelake.dll": "c37dd0d96c6d18cfcbe613415348989054bca4b813fc895c1e0ea5e2fa582f0f",
+    "ggml-cpu-sandybridge.dll": "a185ef2810f9b94b227cdc79cceecd73392964897383021cf549ae0a93f8ab1d",
+    "ggml-cpu-skylakex.dll": "f735470e98ac465bcaefa49c011e9a6312792ed8352447ca5b94e0d3ea959828",
+    "ggml-cpu-sse42.dll": "1cc60a342cfa4e3671d8248c331bfffbc75a16c29c889832fc78b736bbef2488",
+    "ggml-cpu-x64.dll": "9856ba92bbf4f17a643bf86e5da819f4ea2ecff86a3f76072d6fd0f6b489bec3",
+    "ggml.dll": "d9380866b1560cd58f129d5ead2ec2b3d36c4c25097efed504d7747959ae0513",
+    "llama.dll": "46209859b057ce876c8b1d320087cde3e0d7e21baef9dcadce309ca349906a7c",
+    "mtmd.dll": "384b412308a247a2404911e2bcc95c6d6470cb99626f29cdf141d4f47e863c69",
+    "pdfium.dll": "1f2aee4286b8cf0413ab4562b7121aa454f9cfd9afd6ca8609bcef80927b3f80"
+  },
+  "model_sha256": "2188ac1deca4b77dffefd603c2776a9d76d9d74ec01841392982ebb840b09135",
+  "projector_sha256": "c4a8a52691ecef40618438928bdf9e68379b854e24166f292592353db0aab64f",
+  "offline_comparator_sha256": "0373c2576c7115902fcf3e416c22dd27421a05803cf2f2b006d5ea9ecd25c628",
+  "headless_client_sha256": "7050ae90dc7519935f6b0c86132a267e72f0453534c0a871081ed9517e8b0b2d",
+  "generated_source_sha256": {
+    "code\\cells.ipynb": "c26bfe670e78159ce485c66550cb8b38f5b7853d607d710950372a09254f1c01",
+    "code\\源 code.rs": "e91ca6326352f465dabbe4bc67d4271714e226c0a09cc36fdecc9f45c2e80bef",
+    "documents\\item-a.txt": "9fc1db8e72de0275279a18f08a76e43fbbeae6fbde7b9924c4d1f351eb4652d1",
+    "documents\\item-b.pdf": "028cfcb54c84c18f5351445f7edeb6d2651e9e4950714c61042cdd911870671e",
+    "documents\\item-c.png": "a8a0c831fe4746d00c95e3ab436d53e4cc9046a774fe4f0f6edb73d1a7d55f9b",
+    "documents\\item-d.wav": "43da34d73ff78e5bff08f8cca36e80a8bc3fca94824c84de9781bbe2ae2d448a",
+    "documents\\item-e.mp4": "9e2c999a84f7c19ebd7600aa37063ac047aac0aaf6a197601e839efd01d98160"
+  },
+  "model_import_status": {
+    "state": "ready",
+    "bytes": 864676480,
+    "total_bytes": 864676480,
+    "error": null
+  },
+  "code_vectors": {
+    "chunks": 4,
+    "embedded": 4,
+    "width_768": 4
+  },
+  "index_seconds": 66.121,
+  "entry_resolution": {
+    "admitted": {
+      "type": "resolved_entry",
+      "id": 155,
+      "entry": {
+        "result_id": "e567",
+        "root_path": "<fixture>\\documents",
+        "path": "<fixture>\\documents\\item-a.txt",
+        "name": "item-a.txt",
+        "kind": "document",
+        "size_bytes": 85,
+        "modified_unix_seconds": 1792319365,
+        "index_revision": 1,
+        "source_revision": "<opaque native identity proof redacted>"
+      }
+    }
+  },
+  "code_provenance": [
+    {
+      "path": "<fixture>\\code\\cells.ipynb",
+      "revision": 1,
+      "sha256": "c26bfe670e78159ce485c66550cb8b38f5b7853d607d710950372a09254f1c01"
+    },
+    {
+      "path": "<fixture>\\code\\源 code.rs",
+      "revision": 1,
+      "sha256": "e91ca6326352f465dabbe4bc67d4271714e226c0a09cc36fdecc9f45c2e80bef"
+    }
+  ],
+  "headless_client": {
+    "checks": [
+      "typed_status_and_configuration",
+      "paused_policy_pushed_subscription",
+      "native_document_and_code_locations",
+      "current_entry_source_proof",
+      "drop_disconnect_then_reconnect",
+      "root_revocation_hides_results",
+      "revoked_proof_stays_invalid_after_restore",
+      "fresh_reference_after_restore"
+    ],
+    "code": [
+      {
+        "entry_reference": {
+          "result_id": "c2",
+          "source_revision": "<opaque native identity proof redacted>"
+        },
+        "excerpt": "pub fn parityneedle() {}",
+        "id": "code:2:1:true:parityneedle",
+        "kind": "code",
+        "location": {
+          "kind": "line",
+          "line": 1
+        },
+        "match_explanation": "function · line 1",
+        "matching_moments": [],
+        "path": "<fixture>\\code\\源 code.rs",
+        "score": 1.0,
+        "subtitle": "<fixture>\\code\\源 code.rs",
+        "thumbnail_path": null,
+        "title": "parityneedle"
+      },
+      {
+        "entry_reference": {
+          "result_id": "c2",
+          "source_revision": "<opaque native identity proof redacted>"
+        },
+        "excerpt": "parityneedle",
+        "id": "code:2:2:false:parityneedle",
+        "kind": "code",
+        "location": {
+          "kind": "line",
+          "line": 2
+        },
+        "match_explanation": "reference · line 2",
+        "matching_moments": [],
+        "path": "<fixture>\\code\\源 code.rs",
+        "score": 0.949999988079071,
+        "subtitle": "<fixture>\\code\\源 code.rs",
+        "thumbnail_path": null,
+        "title": "parityneedle"
+      }
+    ],
+    "code_entries": [
+      {
+        "content_sha256": "e91ca6326352f465dabbe4bc67d4271714e226c0a09cc36fdecc9f45c2e80bef",
+        "index_revision": 1,
+        "kind": "code",
+        "modified_unix_seconds": 1792319365,
+        "name": "源 code.rs",
+        "path": "<fixture>\\code\\源 code.rs",
+        "result_id": "c2",
+        "root_path": "<fixture>\\code",
+        "size_bytes": 59,
+        "source_revision": "<opaque native identity proof redacted>"
+      },
+      {
+        "content_sha256": "e91ca6326352f465dabbe4bc67d4271714e226c0a09cc36fdecc9f45c2e80bef",
+        "index_revision": 1,
+        "kind": "code",
+        "modified_unix_seconds": 1792319365,
+        "name": "源 code.rs",
+        "path": "<fixture>\\code\\源 code.rs",
+        "result_id": "c2",
+        "root_path": "<fixture>\\code",
+        "size_bytes": 59,
+        "source_revision": "<opaque native identity proof redacted>"
+      },
+      {
+        "content_sha256": "c26bfe670e78159ce485c66550cb8b38f5b7853d607d710950372a09254f1c01",
+        "index_revision": 1,
+        "kind": "code",
+        "modified_unix_seconds": 1792319365,
+        "name": "cells.ipynb",
+        "path": "<fixture>\\code\\cells.ipynb",
+        "result_id": "c1",
+        "root_path": "<fixture>\\code",
+        "size_bytes": 234,
+        "source_revision": "<opaque native identity proof redacted>"
+      },
+      {
+        "content_sha256": "e91ca6326352f465dabbe4bc67d4271714e226c0a09cc36fdecc9f45c2e80bef",
+        "index_revision": 1,
+        "kind": "code",
+        "modified_unix_seconds": 1792319365,
+        "name": "源 code.rs",
+        "path": "<fixture>\\code\\源 code.rs",
+        "result_id": "c2",
+        "root_path": "<fixture>\\code",
+        "size_bytes": 59,
+        "source_revision": "<opaque native identity proof redacted>"
+      },
+      {
+        "content_sha256": "e91ca6326352f465dabbe4bc67d4271714e226c0a09cc36fdecc9f45c2e80bef",
+        "index_revision": 1,
+        "kind": "code",
+        "modified_unix_seconds": 1792319365,
+        "name": "源 code.rs",
+        "path": "<fixture>\\code\\源 code.rs",
+        "result_id": "c2",
+        "root_path": "<fixture>\\code",
+        "size_bytes": 59,
+        "source_revision": "<opaque native identity proof redacted>"
+      },
+      {
+        "content_sha256": "c26bfe670e78159ce485c66550cb8b38f5b7853d607d710950372a09254f1c01",
+        "index_revision": 1,
+        "kind": "code",
+        "modified_unix_seconds": 1792319365,
+        "name": "cells.ipynb",
+        "path": "<fixture>\\code\\cells.ipynb",
+        "result_id": "c1",
+        "root_path": "<fixture>\\code",
+        "size_bytes": 234,
+        "source_revision": "<opaque native identity proof redacted>"
+      }
+    ],
+    "document": [
+      {
+        "entry_reference": {
+          "result_id": "e567",
+          "source_revision": "<opaque native identity proof redacted>"
+        },
+        "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+        "id": "e567",
+        "kind": "document",
+        "location": {
+          "kind": "line",
+          "line": 2
+        },
+        "match_explanation": "Matches extracted content",
+        "matching_moments": [
+          {
+            "excerpt": "Generated notes. amberparitytoken Chocolate cake uses flour butter eggs and sugar.",
+            "location": {
+              "kind": "line",
+              "line": 2
+            },
+            "thumbnail_path": null
+          }
+        ],
+        "path": "<fixture>\\documents\\item-a.txt",
+        "score": 0.41,
+        "subtitle": "<fixture>\\documents\\item-a.txt",
+        "thumbnail_path": null,
+        "title": "item-a.txt"
+      }
+    ],
+    "document_preview": {
+      "entry": {
+        "index_revision": 1,
+        "kind": "document",
+        "modified_unix_seconds": 1792319365,
+        "name": "item-a.txt",
+        "path": "<fixture>\\documents\\item-a.txt",
+        "result_id": "e567",
+        "root_path": "<fixture>\\documents",
+        "size_bytes": 85,
+        "source_revision": "<opaque native identity proof redacted>"
+      },
+      "extraction": [
+        {
+          "capped": null,
+          "complete_within_limit": true,
+          "indexed_units": null,
+          "kind": "doc",
+          "source_units": null
+        }
+      ],
+      "parts": [
+        {
+          "kind": "doc",
+          "location": {
+            "kind": "line",
+            "line": 1
+          },
+          "text": "Generated notes.\r\namberparitytoken Chocolate cake uses flour butter eggs and sugar."
+        }
+      ],
+      "state": "ready",
+      "truncated": false
+    },
+    "engine_config": {
+      "preferred_backend": "cpu",
+      "semantic_enabled": true
+    },
+    "engine_version": "0.1.0",
+    "entry_index_revision": 1,
+    "entry_size_bytes": 85,
+    "features": [
+      "search.exact",
+      "search.semantic",
+      "code",
+      "entry.resolve",
+      "entry.resolve.code",
+      "search.entry_references",
+      "entry.preview.text"
+    ],
+    "initial_status": {
+      "current_activity": "",
+      "files_discovered": 7,
+      "files_indexed": 7,
+      "index_size_bytes": 2117632,
+      "model_loaded": true,
+      "queue_depth": 0,
+      "segments_indexed": 571,
+      "state": "idle"
+    },
+    "model_status": {
+      "bytes": 864676480,
+      "error": null,
+      "state": "ready",
+      "total_bytes": 864676480
+    },
+    "notebook": [
+      {
+        "entry_reference": {
+          "result_id": "c1",
+          "source_revision": "<opaque native identity proof redacted>"
+        },
+        "excerpt": "def notebookparity():\n    return 1",
+        "id": "code:1:2:true:notebookparity",
+        "kind": "code",
+        "location": {
+          "cell_ordinal": 1,
+          "end_line": 2,
+          "kind": "notebook",
+          "line": 1
+        },
+        "match_explanation": "function · cell 2, line 1",
+        "matching_moments": [],
+        "path": "<fixture>\\code\\cells.ipynb",
+        "score": 1.0,
+        "subtitle": "<fixture>\\code\\cells.ipynb",
+        "thumbnail_path": null,
+        "title": "notebookparity"
+      }
+    ],
+    "pdf_preview": {
+      "entry": {
+        "index_revision": 1,
+        "kind": "document",
+        "modified_unix_seconds": 1792319365,
+        "name": "item-b.pdf",
+        "path": "<fixture>\\documents\\item-b.pdf",
+        "result_id": "e568",
+        "root_path": "<fixture>\\documents",
+        "size_bytes": 924,
+        "source_revision": "<opaque native identity proof redacted>"
+      },
+      "extraction": [
+        {
+          "capped": null,
+          "complete_within_limit": true,
+          "indexed_units": null,
+          "kind": "pdf",
+          "source_units": null
+        }
+      ],
+      "parts": [
+        {
+          "kind": "pdf",
+          "location": {
+            "kind": "page",
+            "page": 2
+          },
+          "text": "pdfparitytoken The railway timetable lists trains and departure platforms."
+        }
+      ],
+      "state": "ready",
+      "truncated": false
+    },
+    "preview_checks": [
+      "current_metadata_bound_document_text",
+      "actual_pdf_page_two",
+      "preview_rejects_revoked_root",
+      "preview_proof_stays_invalid_after_restore"
+    ],
+    "reference_checks": [
+      "bound_document_and_pdf_refs",
+      "bound_code_and_notebook_refs",
+      "resolved_code_hashes",
+      "code_proof_stays_invalid_after_restore"
+    ],
+    "semantic_checks": [
+      "exact_only_control_empty",
+      "semantic_only_code",
+      "semantic_negative_empty"
+    ],
+    "semantic_code": [
+      {
+        "entry_reference": {
+          "result_id": "c2",
+          "source_revision": "<opaque native identity proof redacted>"
+        },
+        "excerpt": "fn caller() { parityneedle(); }\r\n",
+        "id": "code:2:2:false:caller",
+        "kind": "code",
+        "location": {
+          "kind": "line",
+          "line": 2
+        },
+        "match_explanation": "function · line 2",
+        "matching_moments": [],
+        "path": "<fixture>\\code\\源 code.rs",
+        "score": 0.8651343417167664,
+        "subtitle": "<fixture>\\code\\源 code.rs",
+        "thumbnail_path": null,
+        "title": "caller"
+      },
+      {
+        "entry_reference": {
+          "result_id": "c2",
+          "source_revision": "<opaque native identity proof redacted>"
+        },
+        "excerpt": "pub fn parityneedle() {}\r\n",
+        "id": "code:2:1:false:parityneedle",
+        "kind": "code",
+        "location": {
+          "kind": "line",
+          "line": 1
+        },
+        "match_explanation": "function · line 1",
+        "matching_moments": [],
+        "path": "<fixture>\\code\\源 code.rs",
+        "score": 0.8575076144933701,
+        "subtitle": "<fixture>\\code\\源 code.rs",
+        "thumbnail_path": null,
+        "title": "parityneedle"
+      },
+      {
+        "entry_reference": {
+          "result_id": "c1",
+          "source_revision": "<opaque native identity proof redacted>"
+        },
+        "excerpt": "def notebookparity():\n    return 1\n",
+        "id": "code:1:2:false:notebookparity",
+        "kind": "code",
+        "location": {
+          "cell_ordinal": 1,
+          "end_line": 2,
+          "kind": "notebook",
+          "line": 1
+        },
+        "match_explanation": "function · cell 2, line 1",
+        "matching_moments": [],
+        "path": "<fixture>\\code\\cells.ipynb",
+        "score": 0.7947718453407289,
+        "subtitle": "<fixture>\\code\\cells.ipynb",
+        "thumbnail_path": null,
+        "title": "notebookparity"
+      }
+    ]
+  },
+  "worker": {
+    "type": "worker_status",
+    "id": 2,
+    "model_loaded": true,
+    "backend": "cpu",
+    "stub": false,
+    "dim": 768,
+    "uptime_secs": 36,
+    "jobs_served": 29
+  },
+  "pids": [],
+  "elapsed_seconds": 72.384
+}

@@ -1,0 +1,21 @@
+failures:
+
+---- client::tests::extension_filter_rejects_a_peer_returning_unselected_results stdout ----
+
+thread 'client::tests::extension_filter_rejects_a_peer_returning_unselected_results' (20244) panicked at crates\ws-client\src\client.rs:719:13:
+assertion failed: matches!(stream.next().await,Err(Error::Protocol(_)))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- client::tests::extension_filter_requires_its_capability_before_sending_a_query stdout ----
+
+thread 'client::tests::extension_filter_requires_its_capability_before_sending_a_query' (76884) panicked at crates\ws-client\src\client.rs:704:9:
+assertion failed: matches!(outcome,Err(Error::Unsupported("search.filters")))
+
+
+failures:
+    client::tests::extension_filter_rejects_a_peer_returning_unselected_results
+    client::tests::extension_filter_requires_its_capability_before_sending_a_query
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 41 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p ws-client --lib`

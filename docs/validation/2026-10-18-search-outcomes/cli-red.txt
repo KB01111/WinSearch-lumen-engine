@@ -1,0 +1,50 @@
+cargo :    Compiling ws-index v0.1.0 (<checkout>\src\engine\crates\ws-index
+)
+At line:1 char:1
++ cargo test -p winsearch-cli --test search_json -- --test-threads=1 *> ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...rates\ws-index):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-code v0.1.0 (<checkout>\src\engine\crates\ws-code)
+   Compiling ws-extract v0.1.0 (<checkout>\src\engine\crates\ws-extract)
+   Compiling winsearch-cli v0.1.0 (<checkout>\src\engine\bins\winsearch-cli
+)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.26s
+     Running tests\search_json.rs (target\debug\deps\search_json-d8ac06996cf04803.exe)
+
+running 6 tests
+test json_does_not_publish_partial_hits_as_success_after_interruption ... FAILED
+test json_preserves_exact_hits_and_reports_bounded_optional_semantic_failure ... FAILED
+test json_preserves_order_and_complete_dtos_across_progressive_batches ... ok
+test json_rejection_is_an_empty_array ... ok
+test json_requires_advertised_terminal_outcome_and_rejects_premature_or_malformed_state ... FAILED
+test json_server_error_fails_without_a_success_payload ... ok
+
+failures:
+
+---- json_does_not_publish_partial_hits_as_success_after_interruption stdout ----
+
+thread 'json_does_not_publish_partial_hits_as_success_after_interruption' (119296) panicked at bins\winsearch-cli\tests\search_json.rs:169:9:
+Superseded cannot be reported as a successful result array
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- json_preserves_exact_hits_and_reports_bounded_optional_semantic_failure stdout ----
+
+thread 'json_preserves_exact_hits_and_reports_bounded_optional_semantic_failure' (122980) panicked at bins\winsearch-cli\tests\search_json.rs:184:5:
+assertion failed: String::from_utf8_lossy(&output.stderr).contains("embedding_failed")
+
+---- json_requires_advertised_terminal_outcome_and_rejects_premature_or_malformed_state stdout ----
+
+thread 'json_requires_advertised_terminal_outcome_and_rejects_premature_or_malformed_state' (126124) panicked at bins\winsearch-cli\tests\search_json.rs:157:9:
+case0 must reject invalid outcome
+
+
+failures:
+    json_does_not_publish_partial_hits_as_success_after_interruption
+    json_preserves_exact_hits_and_reports_bounded_optional_semantic_failure
+    json_requires_advertised_terminal_outcome_and_rejects_premature_or_malformed_state
+
+test result: FAILED. 3 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.23s
+
+error: test failed, to rerun pass `-p winsearch-cli --test search_json`

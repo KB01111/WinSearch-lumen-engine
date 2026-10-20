@@ -1,0 +1,29 @@
+rtk :    Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-prot
+ocol)
+At line:1 char:61
++ ... src/engine; rtk proxy cargo test -p ws-protocol --test preview code_p ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.90s
+     Running tests\preview.rs (target\debug\deps\preview-46b81d6297b182b2.exe)
+
+running 1 test
+test code_preview_locations_use_real_code_or_notebook_coordinates_only ... FAILED
+
+failures:
+
+---- code_preview_locations_use_real_code_or_notebook_coordinates_only stdout ----
+
+thread 'code_preview_locations_use_real_code_or_notebook_coordinates_only' (72480) panicked at crates\ws-protocol\tests\preview.rs:10:5:
+assertion failed: valid_code_preview_location(Some(notebook))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    code_preview_locations_use_real_code_or_notebook_coordinates_only
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p ws-protocol --test preview`

@@ -1,0 +1,30 @@
+rtk :    Compiling ws-code v0.1.0 (<checkout>\src\engine\crates\ws-code)
+At line:1 char:61
++ ... src/engine; rtk proxy cargo test -p ws-code code_preview_notebook_tru ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...crates\ws-code):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.12s
+     Running unittests src\lib.rs (target\debug\deps\ws_code-02f94e88609646da.exe)
+
+running 1 test
+test store::tests::code_preview_notebook_truncation_at_newline_does_not_claim_the_next_line ... FAILED
+
+failures:
+
+---- store::tests::code_preview_notebook_truncation_at_newline_does_not_claim_the_next_line stdout ----
+
+thread 'store::tests::code_preview_notebook_truncation_at_newline_does_not_claim_the_next_line' (109164) panicked at crates\ws-code\src\store.rs:1508:9:
+assertion `left == right` failed: the newline terminates the returned line; it does not return the next one
+  left: Some(Notebook { cell_ordinal: 4, line: 1, end_line: 2 })
+ right: Some(Notebook { cell_ordinal: 4, line: 1, end_line: 1 })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    store::tests::code_preview_notebook_truncation_at_newline_does_not_claim_the_next_line
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 43 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p ws-code --lib`

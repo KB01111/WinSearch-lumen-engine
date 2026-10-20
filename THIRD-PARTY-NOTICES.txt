@@ -94,3 +94,63 @@ WinSearch incorporates or references the following third-party software.
     Usage:    Native inference runtime for text and multimodal embeddings in
               ws-embed (fetched at build time at a pinned commit and linked via
               a flat C ABI shim).
+
+16. PDFium 157.0.8086.0 (chromium/8086), public Windows x64 build
+    Project:  https://pdfium.googlesource.com/pdfium/
+    Binaries: https://github.com/bblanchon/pdfium-binaries
+    License:  BSD-style; additional bundled dependencies have their own licenses.
+    Copyright 2014 The PDFium Authors; original code copyright 2014 Foxit Software Inc.
+    Usage:    Isolated extraction-worker PDF text, page rasterization and OCR input.
+    Pin/hash: src/engine/third_party/pdfium.json; tools/fetch-pdfium.ps1 verifies
+              the archive before extraction. Retain its LICENSE and licenses/*
+              alongside the packaged extraction worker and pdfium.dll.
+
+17. DigUp reference sizing and synthetic media fixtures/vectors
+    Project:  https://github.com/ARahim3/DigUp
+    Snapshot: ec28973268b81f836be72187ff23b3a16ef4fd97
+    License:  MIT; Copyright (c) 2026 Abdur Rahim
+    Usage:    Pillow-compatible bicubic sizing port in ws-embed/src/image.rs;
+              independent native image/audio tests. Full license/provenance:
+              src/engine/crates/ws-embed/tests/fixtures/media/.
+
+18. FFmpeg n9.0.2-17-g2a571b6068, Windows x64 LGPL shared 9.0 build
+    Project:  https://ffmpeg.org/
+    Binaries: https://github.com/BtbN/FFmpeg-Builds
+    License:  LGPL-3.0-or-later; bundled libraries retain their own licenses.
+    Copyright: The FFmpeg developers and individual bundled-library authors.
+    Usage:    Bounded local audio/video probing and decoding in the extraction child.
+    Pin/hash: src/engine/third_party/ffmpeg.json; tools/fetch-ffmpeg.ps1 verifies
+              before safe extraction. Retain LICENSE.txt, COPYING.GPLv3 and
+              SOURCE-INSTRUCTIONS.md with all required sibling DLLs.
+    Source:   src/engine/third_party/ffmpeg-source.md records exact upstream/build
+              revisions and the corresponding-source release assembly gate.
+
+19. Tree-sitter 0.27.1 and twenty native language grammar packages
+    Project:  https://github.com/tree-sitter/tree-sitter
+    License:  MIT (runtime, language interface and all selected grammars except
+              tree-sitter-sqlite3, which is CC0-1.0).
+    Grammars: Rust0.24.2, C0.24.2, C++0.23.4, C#0.23.5, Python0.25.0,
+              JavaScript0.25.0, TypeScript/TSX0.23.2, Go0.25.0, Java0.23.5,
+              Kotlin-ng1.1.0, Swift0.7.4, PHP0.25.1, Ruby0.23.1,
+              SQLite3/SQL0.1.0, PowerShell0.26.4, Bash0.25.1, HTML0.23.2,
+              CSS0.25.0, YAML0.7.2 and TOML-ng0.7.0.
+    Usage:    Bounded native syntax parsing in the owned extraction child.
+              SQL syntax uses the SQLite dialect; references are syntactic
+              occurrences, without cross-file type resolution.
+    Notices:  src/engine/third_party/code-grammars-LICENSES.txt contains the
+              complete license/copyright text, exact package versions and
+              upstream repositories, including runtime/interface dependencies,
+              regex and streaming-iterator (MIT OR Apache-2.0). Upstream license
+              files missing from published crate archives were fetched at those
+              crates' recorded VCS commits; their URLs/hashes are retained.
+              Redistribute this file with the extraction-worker payload.
+
+20. Microsoft Visual C++ v14 runtime (x64 release CRT), 14.51.36231
+    Project:  https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files
+    Copyright: Microsoft Corporation. All rights reserved.
+    License:  Applicable Microsoft Visual Studio license/redistribution terms.
+    Usage:    Application-local dependencies of the engine and llama.cpp DLLs.
+    Pin/hash: src/engine/third_party/msvc-runtime.json; the engine-only assembler
+              verifies the Microsoft redistributable archive before copying.
+    Notices:  Retain notices/msvc/REDISTRIBUTION.md; final release redistribution
+              eligibility remains a separate release-review requirement.

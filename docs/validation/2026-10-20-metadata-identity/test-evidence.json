@@ -1,0 +1,36 @@
+{
+  "date": "2026-10-20",
+  "scope": "Metadata-only indexed identities; native package performance still unverified",
+  "daemon": {
+    "unchangedCasesPassedInWorkspaceRun": 250,
+    "correctedWatcherCasePassedInWorkspaceReplay": 1,
+    "passedTotal": 251,
+    "initialFailureRetained": true
+  },
+  "otherWorkspace": {
+    "command": "cargo test --locked --workspace --exclude ws-embed --exclude winsearchd --all-targets -- --test-threads=1",
+    "passed": 402,
+    "failed": 0,
+    "ignored": 1
+  },
+  "combinedRustPassed": 653,
+  "sourceSha256": {
+    "src/engine/bins/winsearchd/src/engine.rs": "3833c6433c2d195e1d0831cff4cc3a7128f999e21aa262efc84f215b1745bdc7",
+    "src/engine/bins/winsearchd/src/server.rs": "9cbc05a8d25f0a36f64a4339a816691208c3f1ca56610f0f67efb0173190f86b"
+  },
+  "serverProductionUnchangedFrom": "04018c7733dbb58731c0b06308d49bf031676726",
+  "localLogSha256": {
+    "metadata-only-reference-functional-red.log": "aa69e364a21a92f52f97ace3a385e5ef5284c56c64723b928725622d3237902b",
+    "metadata-only-reference-focused.log": "5b30a815f753fa5d4babae2183eddaaaee9ac2141220d23a5dc3d2ba23a66f74",
+    "metadata-only-reference-workspace.log": "ac68f5d52cceefa557d876788a164845370f3079dbeaa76c2b987b539a9bf76f",
+    "metadata-reference-server-revision.log": "bcf9d936cbee65a6e7d476bba8067d303f92db1bc59b22243cd9c1645a38e962",
+    "metadata-reference-server-green.log": "cc3667b8e6295fe4d9baddc85af4af4d2f1ae2ce76f3450e0e284300facaaf0e",
+    "metadata-reference-final-scopes.log": "fcb8aaca45b8437aa3a62f8c157074073e3e8d884d3167ee8dbe03320f4228fd"
+  },
+  "notes": [
+    "One full workspace run passed250 daemon cases and failed a watcher-race fixture; that exact case was corrected with the established bounded NotReady retry and replayed under workspace features. Other daemon production code and assertions remained unchanged.",
+    "The other402 workspace cases ran separately. Focused and repeated cases are not added again.",
+    "The actual-model worker remains ignored in the workspace command; prior040 model/native/retrieval evidence is separate.",
+    "Author review only; new coherent binary/package, controlled performance and installed consumer acceptance remain open."
+  ]
+}

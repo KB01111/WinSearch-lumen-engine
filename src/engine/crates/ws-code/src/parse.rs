@@ -6,12 +6,61 @@
 //! notebooks via [`crate::notebook::parse_notebook`].
 
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 
 use crate::model::{language_for_file, NewCodeChunk, NewCodeSymbol, SymbolRole};
 use crate::notebook::parse_notebook;
 use crate::store::{CodeStore, CodeStoreError};
-use crate::symbols::{extract_symbols_with_offset, ExtractedSymbol, GrammarKind};
+use crate::symbols::ExtractedSymbol;
+
+#[cfg(test)]
+mod syntax_regressions {
+    use super::*;
+    #[test]
+    fn multiline_nested_and_fake_declarations_have_real_ranges() {
+        let s = "/* fn fake() {} */\nconst S: &str = \"fn string_fake() {}\";\npub fn\nouter() {\n fn nested() {}\n helper();\n}\n";
+        let p = parse_source(s, "rust");
+        assert!(!p
+            .symbols
+            .iter()
+            .any(|s| s.name == "fake" || s.name == "string_fake"));
+        let outer = p
+            .symbols
+            .iter()
+            .find(|s| s.name == "outer" && s.role.is_definition())
+            .expect("multiline definition");
+        assert_eq!((outer.line, outer.end_line), (3, 7));
+        assert!(p
+            .symbols
+            .iter()
+            .any(|s| s.name == "nested" && s.role.is_definition()));
+    }
+    #[test]
+    fn huge_single_line_has_bounded_chunks_and_preserves_tail() {
+        let source = format!("{}TAIL_NEEDLE", "x".repeat(150_000));
+        let p = parse_source(&source, "text");
+        assert!(p.chunks.iter().all(|c| c.text.len() <= 16_384));
+        assert!(p.chunks.last().unwrap().text.ends_with("TAIL_NEEDLE"));
+        assert!(p
+            .chunks
+            .iter()
+            .all(|c| c.start_line == 1 && c.end_line == 1));
+    }
+    #[test]
+    fn oversized_disk_source_is_rejected_before_read() {
+        let path =
+            std::env::temp_dir().join(format!("winsearch-code-limit-{}.rs", std::process::id()));
+        let f = std::fs::File::create(&path).unwrap();
+        f.set_len(crate::MAX_CODE_FILE_BYTES + 1).unwrap();
+        drop(f);
+        let rejected = parse_file(&path).is_err();
+        let provenance_rejected = parse_file_with_sha256(&path).is_err();
+        std::fs::remove_file(path).unwrap();
+        assert!(rejected);
+        assert!(provenance_rejected);
+    }
+}
 
 /// Maximum lines in one fallback text chunk when no symbol boundaries apply.
 pub const FALLBACK_CHUNK_LINES: usize = 60;
@@ -20,8 +69,10 @@ pub const FALLBACK_CHUNK_OVERLAP: usize = 10;
 
 /// One extracted code chunk with 1-based inclusive `(start_line, end_line)`
 /// range and optional enclosing symbol metadata.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParsedCodeUnit {
+    #[serde(default)]
+    pub notebook: Option<crate::model::NotebookLocation>,
     pub start_line: u32,
     pub end_line: u32,
     pub symbol_name: String,
@@ -30,8 +81,10 @@ pub struct ParsedCodeUnit {
 }
 
 /// Complete parse result for a source file or notebook.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParsedCodeFile {
+    #[serde(default)]
+    pub diagnostics: Vec<String>,
     pub language: String,
     pub chunks: Vec<ParsedCodeUnit>,
     pub symbols: Vec<ExtractedSymbol>,
@@ -42,7 +95,8 @@ pub fn parse_source(source: &str, language: &str) -> ParsedCodeFile {
     if language.eq_ignore_ascii_case("notebook") || language.eq_ignore_ascii_case("jupyter") {
         return match parse_notebook(source) {
             Ok(nb) => nb.parsed,
-            Err(_) => ParsedCodeFile {
+            Err(error) => ParsedCodeFile {
+                diagnostics: vec![format!("invalid notebook: {error}")],
                 language: language.to_string(),
                 chunks: Vec::new(),
                 symbols: Vec::new(),
@@ -54,40 +108,148 @@ pub fn parse_source(source: &str, language: &str) -> ParsedCodeFile {
 
 /// Parses `source` for `language` with a 1-based line offset (`base_line = 1`
 /// for standalone files, or the cell's starting line in a notebook).
-pub fn parse_source_with_offset(
-    source: &str,
-    language: &str,
-    base_line: u32,
-) -> ParsedCodeFile {
-    let lines: Vec<&str> = source.lines().collect();
-    if lines.is_empty() {
+pub fn parse_source_with_offset(source: &str, language: &str, base_line: u32) -> ParsedCodeFile {
+    if source.len() as u64 > crate::MAX_CODE_FILE_BYTES {
         return ParsedCodeFile {
-            language: language.to_string(),
+            language: language.into(),
             chunks: Vec::new(),
             symbols: Vec::new(),
+            diagnostics: vec!["source exceeds 2 MiB".into()],
         };
     }
-
-    let grammar = GrammarKind::from_language(language);
-    let symbols = extract_symbols_with_offset(source, language, base_line);
-
-    let chunks = if grammar == GrammarKind::FallbackText {
-        fallback_line_chunks(&lines, base_line)
-    } else {
-        symbol_aware_chunks(&lines, &symbols, base_line)
-    };
-
+    let (symbols, diagnostics) = crate::syntax::parse_symbols(source, language, base_line);
+    let chunks = bounded_chunks(source, &symbols, base_line);
     ParsedCodeFile {
-        language: language.to_string(),
+        language: language.into(),
         chunks,
         symbols,
+        diagnostics,
     }
+}
+
+/// Syntax chunks avoid nested-body amplification; fallback keeps ten overlap lines.
+/// Split at definition starts, 60 lines or 16 KiB, including inside a long line.
+pub const MAX_CHUNK_BYTES: usize = 16 * 1024;
+fn bounded_chunks(
+    source: &str,
+    symbols: &[ExtractedSymbol],
+    base_line: u32,
+) -> Vec<ParsedCodeUnit> {
+    let mut chunks = Vec::new();
+    let mut offset = 0;
+    let mut line = base_line;
+    let mut definitions = symbols
+        .iter()
+        .filter(|s| s.role == SymbolRole::Definition)
+        .peekable();
+    let has_definitions = symbols.iter().any(|s| s.role.is_definition());
+    let mut enclosing: Option<&ExtractedSymbol> = None;
+    while offset < source.len() {
+        while definitions.peek().is_some_and(|s| s.line <= line) {
+            enclosing = definitions.next();
+        }
+        let next_definition = definitions.peek().map(|s| s.line);
+        let mut end = offset;
+        let mut breaks = 0;
+        let start_line = line;
+        let mut last_line = line;
+        for (i, c) in source[offset..].char_indices() {
+            let char_end = offset + i + c.len_utf8();
+            if char_end - offset > MAX_CHUNK_BYTES {
+                break;
+            }
+            end = char_end;
+            last_line = line;
+            if c == '\n' {
+                line += 1;
+                breaks += 1;
+                if breaks >= FALLBACK_CHUNK_LINES || next_definition == Some(line) {
+                    break;
+                }
+            }
+        }
+        let symbol = enclosing.filter(|s| start_line <= s.end_line);
+        chunks.push(ParsedCodeUnit {
+            notebook: None,
+            start_line,
+            end_line: last_line,
+            symbol_name: symbol.map_or_else(String::new, |s| s.name.clone()),
+            symbol_kind: symbol.map_or_else(|| "lines".into(), |s| s.kind.clone()),
+            text: source[offset..end].to_string(),
+        });
+        offset = end;
+        if !has_definitions && breaks == FALLBACK_CHUNK_LINES && end < source.len() {
+            let window_start = end - chunks.last().unwrap().text.len();
+            if let Some((i, _)) = source[window_start..end]
+                .match_indices('\n')
+                .nth(FALLBACK_CHUNK_LINES - FALLBACK_CHUNK_OVERLAP - 1)
+            {
+                offset = window_start + i + 1;
+                line -= FALLBACK_CHUNK_OVERLAP as u32;
+            }
+        }
+    }
+    chunks
+}
+
+/// Metadata-only policy checks precede every content open, including binary sniff.
+pub fn guard_source_path(path: &Path) -> std::io::Result<()> {
+    if !path.is_absolute()
+        || crate::crawl::sensitive_code_ancestor(path)
+        || !ws_platform::content::local_content_allowed(path)
+        || path
+            .file_name()
+            .is_some_and(|n| crate::is_excluded_code_file(&n.to_string_lossy()))
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "code source policy denied",
+        ));
+    }
+    let meta = fs::symlink_metadata(path)?;
+    if !meta.is_file() || meta.len() > crate::MAX_CODE_FILE_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "source exceeds 2 MiB or is not a file",
+        ));
+    }
+    Ok(())
+}
+
+pub fn read_source(path: &Path) -> std::io::Result<String> {
+    guard_source_path(path)?;
+    let mut file = fs::File::open(path)?;
+    let before = file.metadata()?;
+    let mut bytes = Vec::new();
+    (&mut file)
+        .take(crate::MAX_CODE_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    guard_source_path(path)?;
+    let after = file.metadata()?;
+    if bytes.len() as u64 > crate::MAX_CODE_FILE_BYTES
+        || before.len() != after.len()
+        || before.modified()? != after.modified()?
+        || after.len() != bytes.len() as u64
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "source changed or exceeds 2 MiB",
+        ));
+    }
+    String::from_utf8(bytes).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
 /// Parses a file on disk (auto-detecting language from filename/extension or
 /// `.ipynb` notebook format).
 pub fn parse_file(path: &Path) -> std::io::Result<ParsedCodeFile> {
-    let raw = fs::read_to_string(path)?;
+    parse_file_with_sha256(path).map(|(parsed, _)| parsed)
+}
+
+/// Digest the exact admitted file bytes used by this parse, without another read.
+pub fn parse_file_with_sha256(path: &Path) -> std::io::Result<(ParsedCodeFile, String)> {
+    use sha2::{Digest, Sha256};
+    let raw = read_source(path)?;
+    let sha256 = hex::encode(Sha256::digest(raw.as_bytes()));
     let name = path
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
@@ -96,8 +258,20 @@ pub fn parse_file(path: &Path) -> std::io::Result<ParsedCodeFile> {
         .extension()
         .map(|s| s.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
-    let lang = language_for_file(&name, &ext);
-    Ok(parse_source(&raw, lang))
+    let lang = file_parse_language(path, language_for_file(&name, &ext));
+    Ok((parse_source(&raw, lang), sha256))
+}
+
+/// TSX has a separate grammar while its stored language remains TypeScript.
+pub(crate) fn file_parse_language<'a>(path: &Path, language: &'a str) -> &'a str {
+    if path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("tsx"))
+    {
+        "tsx"
+    } else {
+        language
+    }
 }
 
 /// Persists extracted symbols and chunks for `file_id` into `store` (`code.db`).
@@ -107,10 +281,20 @@ pub fn persist_parsed_file(
     file_id: i64,
     parsed: &ParsedCodeFile,
 ) -> Result<Vec<i64>, CodeStoreError> {
+    store.commit_parsed_file(file_id, parsed)
+}
+
+pub(crate) fn persist_parsed_rows(
+    store: &mut CodeStore,
+    file_id: i64,
+    parsed: &ParsedCodeFile,
+) -> Result<Vec<i64>, CodeStoreError> {
+    store.mark_parse_pending(file_id)?;
     let sym_inputs: Vec<NewCodeSymbol<'_>> = parsed
         .symbols
         .iter()
         .map(|s| NewCodeSymbol {
+            notebook: s.notebook,
             file_id,
             name: &s.name,
             kind: &s.kind,
@@ -125,6 +309,7 @@ pub fn persist_parsed_file(
     let mut chunk_ids = Vec::with_capacity(parsed.chunks.len());
     for (idx, ch) in parsed.chunks.iter().enumerate() {
         let id = store.upsert_chunk(NewCodeChunk {
+            notebook: ch.notebook,
             file_id,
             chunk_index: idx as i64,
             start_line: ch.start_line,
@@ -137,91 +322,102 @@ pub fn persist_parsed_file(
         chunk_ids.push(id);
     }
     store.truncate_chunks_for_file(file_id, parsed.chunks.len() as i64)?;
+    store.mark_parsed(file_id, &parsed.diagnostics)?;
     Ok(chunk_ids)
-}
-
-fn symbol_aware_chunks(
-    lines: &[&str],
-    symbols: &[ExtractedSymbol],
-    base_line: u32,
-) -> Vec<ParsedCodeUnit> {
-    let defs: Vec<&ExtractedSymbol> = symbols
-        .iter()
-        .filter(|s| s.role == SymbolRole::Definition)
-        .collect();
-
-    if defs.is_empty() {
-        return fallback_line_chunks(lines, base_line);
-    }
-
-    let mut chunks = Vec::new();
-    let total_lines = lines.len();
-
-    for (i, def) in defs.iter().enumerate() {
-        let start_idx = (def.line.saturating_sub(base_line) as usize).min(total_lines - 1);
-        let mut end_idx = (def.end_line.saturating_sub(base_line) as usize).min(total_lines - 1);
-
-        // If `end_line == line` (single-line declaration or header), extend up to
-        // the line before the next definition (capped at 40 lines) so the body
-        // context travels with the symbol chunk.
-        if end_idx <= start_idx {
-            let next_start = defs
-                .get(i + 1)
-                .map(|next| next.line.saturating_sub(base_line) as usize)
-                .unwrap_or(total_lines);
-            if next_start > start_idx + 1 {
-                end_idx = (next_start - 1).min(start_idx + 40).min(total_lines - 1);
-            }
-        }
-
-        let slice = &lines[start_idx..=end_idx];
-        let text = slice.join("\n");
-        if !text.trim().is_empty() {
-            chunks.push(ParsedCodeUnit {
-                start_line: base_line + start_idx as u32,
-                end_line: base_line + end_idx as u32,
-                symbol_name: def.name.clone(),
-                symbol_kind: def.kind.clone(),
-                text,
-            });
-        }
-    }
-
-    if chunks.is_empty() {
-        fallback_line_chunks(lines, base_line)
-    } else {
-        chunks
-    }
-}
-
-fn fallback_line_chunks(lines: &[&str], base_line: u32) -> Vec<ParsedCodeUnit> {
-    let mut chunks = Vec::new();
-    let step = (FALLBACK_CHUNK_LINES - FALLBACK_CHUNK_OVERLAP).max(1);
-    let mut start = 0usize;
-    while start < lines.len() {
-        let end = (start + FALLBACK_CHUNK_LINES).min(lines.len()) - 1;
-        let text = lines[start..=end].join("\n");
-        if !text.trim().is_empty() {
-            chunks.push(ParsedCodeUnit {
-                start_line: base_line + start as u32,
-                end_line: base_line + end as u32,
-                symbol_name: String::new(),
-                symbol_kind: "lines".to_string(),
-                text,
-            });
-        }
-        if end + 1 >= lines.len() {
-            break;
-        }
-        start += step;
-    }
-    chunks
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::{CodeFileRecord, DetectedRepo};
+
+    #[test]
+    fn code_provenance_hashes_exact_admitted_bytes_including_bom_crlf_and_notebook_outputs() {
+        let notebook = concat!(r#"{"cells":[{"cell_type":"code","metadata":{},"source":["print(7)\n"],"outputs":[{"text":["SECRET_OUTPUT"]}]}],"metadata":{"language_info":{"name":"python"}},"nbformat":4,"nbformat_minor":5}"#, "\r\n");
+        for (extension, bytes, expected) in [
+            ("txt", b"hello world".as_slice(), "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"),
+            ("txt", b"\xef\xbb\xbfhello world\r\n".as_slice(), "6600cce3a93121e79f93ad2175251d6d4c9b2a1241fbc1a8a45058e94e16ecd2"),
+            ("rs", b"".as_slice(), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+            ("ipynb", notebook.as_bytes(), "777135e70bd3b7b683b827b5d7ac5576941c543e19e037f9f707887138a3dca1"),
+        ] {
+            let path=std::env::temp_dir().join(format!("winsearch-code-provenance-{}.{}",std::process::id(),extension));
+            fs::write(&path,bytes).unwrap();
+            let result=parse_file_with_sha256(&path);
+            fs::remove_file(&path).unwrap();
+            let (parsed,sha256)=result.unwrap();
+            assert_eq!(sha256,expected,"hash must describe exact file bytes, not extracted cells or normalized text");
+            assert!(!parsed.chunks.iter().any(|chunk|chunk.text.contains("SECRET_OUTPUT")));
+            if extension=="ipynb" {
+                assert!(parsed.chunks.iter().any(|chunk|chunk.text.contains("print(7)")));
+                assert!(parsed.chunks.iter().all(|chunk|chunk.notebook.is_some()));
+            }
+        }
+    }
+
+    #[test]
+    fn high_level_index_helper_preserves_tsx_grammar_and_stored_expression_symbols() {
+        let path = std::env::temp_dir().join(format!(
+            "winsearch-code-index-tsx-{}.tsx",
+            std::process::id()
+        ));
+        let source = "export function Window() {\n return <div>{renderRow()}</div>;\n}\n";
+        fs::write(&path, source).unwrap();
+        let root = path.parent().unwrap();
+        let record = crate::record_for_code_path(root, &path).unwrap().unwrap();
+        assert_eq!(record.language, "typescript");
+        let mut store = CodeStore::open_in_memory().unwrap();
+        let repo = store
+            .ensure_repo(&DetectedRepo {
+                root_path: root.to_string_lossy().into_owned(),
+                name: "tsx-fixture".into(),
+                has_git: false,
+            })
+            .unwrap();
+        let (_, _, parsed) = crate::index_code_file(&mut store, repo, 1, &record).unwrap();
+        fs::remove_file(&path).unwrap();
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+        let stored = store.search_symbols("renderRow", 10).unwrap();
+        assert!(stored.iter().any(|s| !s.is_definition && s.line == 2));
+    }
+
+    #[test]
+    fn tsx_unicode_crlf_empty_and_malformed_sources_keep_honest_ranges_and_diagnostics() {
+        let text =
+            "export function 窓() {\r\n return <div id=\"welcome\">{renderRow()}</div>;\r\n}\r\n";
+        let parsed = parse_source(text, "tsx");
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+        assert!(parsed
+            .symbols
+            .iter()
+            .any(|s| s.name == "窓" && s.role.is_definition() && s.line == 1 && s.end_line == 3));
+        assert!(parsed
+            .symbols
+            .iter()
+            .any(|s| s.name == "renderRow" && s.role == SymbolRole::Reference && s.line == 2));
+        assert!(!parsed.symbols.iter().any(|s| s.name == "welcome"));
+        assert_eq!(
+            parsed
+                .chunks
+                .iter()
+                .map(|c| c.text.as_str())
+                .collect::<String>(),
+            text
+        );
+        let empty = parse_source("", "rust");
+        assert!(
+            empty.chunks.is_empty() && empty.symbols.is_empty() && empty.diagnostics.is_empty()
+        );
+        let malformed = parse_source("fn broken( {\n", "rust");
+        assert!(!malformed.diagnostics.is_empty());
+        assert_eq!(
+            malformed
+                .chunks
+                .iter()
+                .map(|c| c.text.as_str())
+                .collect::<String>(),
+            "fn broken( {\n"
+        );
+    }
 
     fn assert_def_and_ref(
         lang: &str,
@@ -230,6 +426,11 @@ mod tests {
         expected_ref: (&str, u32),
     ) {
         let parsed = parse_source(source, lang);
+        assert!(
+            parsed.diagnostics.is_empty(),
+            "{lang}: {:?}",
+            parsed.diagnostics
+        );
         assert!(
             !parsed.chunks.is_empty(),
             "language {lang}: expected non-empty chunks"
@@ -412,11 +613,16 @@ mod tests {
         );
 
         // 20. TOML
-        assert_def_and_ref(
-            "toml",
-            "[package]\nname = \"ws-code\"\nversion = resolve_version()\n",
-            ("package", 1),
-            ("resolve_version", 3),
+        let toml = parse_source("[package]\nname = \"ws-code\"\nversion = \"1.0\"\n", "toml");
+        assert!(toml
+            .symbols
+            .iter()
+            .any(|s| s.name == "package" && s.role.is_definition()));
+        assert!(toml.diagnostics.is_empty());
+        assert!(
+            !parse_source("[package]\nversion = resolve_version()\n", "toml")
+                .diagnostics
+                .is_empty()
         );
     }
 
@@ -535,8 +741,7 @@ mod tests {
         }
         for sym in &nb.parsed.symbols {
             assert!(
-                !sym.name.contains("SECRET_OUTPUT_TOKEN")
-                    && sym.name != "leaked_output_function",
+                !sym.name.contains("SECRET_OUTPUT_TOKEN") && sym.name != "leaked_output_function",
                 "notebook output leaked into symbol: {sym:?}"
             );
         }

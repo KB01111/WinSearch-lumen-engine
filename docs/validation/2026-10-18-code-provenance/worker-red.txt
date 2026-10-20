@@ -1,0 +1,39 @@
+rtk :    Compiling ws-index v0.1.0 (<checkout>\src\engine\crates\ws-index)
+At <checkout>\artifacts\code-provenance-checks.ps1:11 char:18
++ ... rker-red' { rtk proxy cargo test -p ws-extract code::tests -- --test- ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...rates\ws-index):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-code v0.1.0 (<checkout>\src\engine\crates\ws-code)
+   Compiling ws-extract v0.1.0 (<checkout>\src\engine\crates\ws-extract)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.61s
+     Running unittests src\lib.rs (target\debug\deps\ws_extract-2abb4d74555c6300.exe)
+
+running 2 tests
+test code::tests::code_provenance_batch_carries_exact_source_hash_in_every_continuation ... FAILED
+test code::tests::parent_rejects_skipped_ordinals_and_forged_locations_or_payloads ... FAILED
+
+failures:
+
+---- code::tests::code_provenance_batch_carries_exact_source_hash_in_every_continuation stdout ----
+
+thread 'code::tests::code_provenance_batch_carries_exact_source_hash_in_every_continuation' (113132) panicked at crates\ws-extract\src\code.rs:202:9:
+assertion `left == right` failed
+  left: ""
+ right: "6600cce3a93121e79f93ad2175251d6d4c9b2a1241fbc1a8a45058e94e16ecd2"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- code::tests::parent_rejects_skipped_ordinals_and_forged_locations_or_payloads stdout ----
+
+thread 'code::tests::parent_rejects_skipped_ordinals_and_forged_locations_or_payloads' (23688) panicked at crates\ws-extract\src\code.rs:296:13:
+forged case8 accepted
+
+
+failures:
+    code::tests::code_provenance_batch_carries_exact_source_hash_in_every_continuation
+    code::tests::parent_rejects_skipped_ordinals_and_forged_locations_or_payloads
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 44 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p ws-extract --lib`

@@ -1,0 +1,95 @@
+cargo :    Compiling ws-platform v0.1.0 (<checkout>\src\engine\crates\ws-pl
+atform)
+At line:1 char:145
++ ... EXITCODE }; cargo test -p ws-platform -p ws-extract --lib -- --test-t ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-platform):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-code v0.1.0 (<checkout>\src\engine\crates\ws-code)
+   Compiling ws-extract v0.1.0 (<checkout>\src\engine\crates\ws-extract)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.84s
+     Running unittests src\lib.rs (target\debug\deps\ws_extract-151dcf640616859e.exe)
+
+running 53 tests
+test budget::tests::expired_deadline_aborts ... ok
+test budget::tests::future_deadline_passes ... ok
+test budget::tests::size_and_segment_checks_enforce_limits ... ok
+test chunk::tests::anchored_excerpt_preserves_original_byte_position_through_whitespace_collapse ... ok
+test chunk::tests::empty_and_whitespace_inputs_produce_no_chunks ... ok
+test chunk::tests::long_text_splits_with_15_percent_overlap_and_tracks_lines ... ok
+test chunk::tests::multibyte_utf8_never_splits_codepoints ... ok
+test chunk::tests::select_excerpt_centers_on_matching_query_terms ... ok
+test chunk::tests::select_excerpt_falls_back_to_leading_text_when_no_term_matches ... ok
+test chunk::tests::short_text_fits_in_single_chunk ... ok
+test code::tests::code_provenance_batch_carries_exact_source_hash_in_every_continuation ... ok
+test code::tests::parent_rejects_skipped_ordinals_and_forged_locations_or_payloads ... ok
+test decoder::tests::decoder_hang_crash_and_capture_bombs_are_bounded ... ok
+test decoder::tests::probe_rejects_unbounded_or_unusable_metadata ... ok
+test decoder::tests::source_pts_are_exact_bounded_and_never_rounded_past_frame ... ok
+test docs::tests::docx_extracts_paragraphs_from_word_document_xml ... ok
+test docs::tests::html_strips_scripts_styles_and_extracts_visible_text ... ok
+test docs::tests::html_with_unescaped_less_than_inside_script_still_extracts_body ... ok
+test docs::tests::legacy_doc_ifilter_path_handles_fixture_cleanly ... ok
+test docs::tests::numeric_heavy_csv_routes_exact_only_without_embedding ... ok
+test docs::tests::odt_extracts_paragraphs_from_content_xml ... ok
+test docs::tests::rtf_strips_control_groups_and_decodes_escapes ... ok
+test docs::tests::task2_ifilter_capped_or_over_budget_text_is_explicitly_incomplete ... ok
+test docs::tests::task2_ifilter_unbounded_chunk_collection_keeps_decoded_text_limit ... ok
+test docs::tests::txt_and_md_extract_segments_and_excerpts ... ok
+test image::tests::exif_extracts_camera_date_dimensions_and_never_indexes_gps_geotags ... ok
+test image::tests::screenshot_with_error_dialog_emits_ocr_segment_and_detects_screenshot_path ... ok
+test image::tests::thumbnail_cache_hits_on_unchanged_mtime_and_invalidates_on_change ... ok
+test source::tests::ordinary_source_hash_attests_successful_parse_and_rejects_source_bytes_changed_by_parser ... ok
+test source::tests::ordinary_source_hash_changes_for_same_length_binary_bytes ... ok
+test source::tests::ordinary_source_hash_is_actual_complete_bytes_including_bom_and_crlf ... ok
+test source::tests::ordinary_source_hash_large_streaming_media_remains_unknown_without_relaxing_budget ... ok
+test source::tests::ordinary_source_hash_preserves_input_deadline_and_path_admission ... ok
+test source::tests::ordinary_source_hash_rejects_noncanonical_failed_and_code_worker_claims ... ok
+test source::tests::ordinary_source_hash_rejects_parse_time_change_and_restore_with_original_mtime ... ok
+test tests::modality_routing_covers_core_extensions ... ok
+test tests::plain_text_extractor_respects_size_and_segment_budgets ... ok
+test video::tests::cursor_phase_and_bounds_do_not_confuse_source_units ... ok
+test video::tests::selection_deduplicates_and_evenly_caps_preserving_endpoints ... ok
+test video::tests::selection_work_budget_coalesces_sparse_sources_but_bounds_hd ... ok
+test worker::tests::code_response_requires_typed_forward_units ... ok
+test worker::tests::final_selection_can_retain_video_tail_when_soundtrack_is_longer ... ok
+test worker::tests::media_audio_progress_allows_silence_and_rejects_forged_times_or_inputs ... ok
+test worker::tests::pdf_transport_multiple_drafts_and_packed_page_chunk_progress ... ok
+test worker::tests::pdf_transport_rejects_completed_or_advancing_page_draft_overflow ... ok
+test worker::tests::pdf_transport_rejects_missing_completed_page_and_limits_diagnostics ... ok
+test worker::tests::protocol_roundtrip_preserves_text_and_line_metadata ... ok
+test worker::tests::request_and_response_bounds_reject_hostile_values ... ok
+test worker::tests::response_rejects_reversed_metadata_and_foreign_kinds ... ok
+test worker::tests::text_batches_reject_empty_progress_and_false_completion ... ok
+test worker::tests::video_selection_continuation_rejects_replay_skip_and_mutated_state ... ok
+test worker::tests::video_transport_rejects_outside_times_budgets_and_selection_bombs ... ok
+test worker::tests::video_transport_validates_opaque_phases_partial_frames_and_silence ... ok
+
+test result: ok. 53 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.29s
+
+     Running unittests src\lib.rs (target\debug\deps\ws_platform-cd3472fe18a60382.exe)
+
+running 20 tests
+test child_job::tests::native_job_owns_memory_limit_and_kills_direct_child_on_drop ... ok
+test content::tests::actual_junction_and_ancestor_are_rejected_without_opening_content ... ok
+test content::tests::cloud_recall_and_reparse_flags_are_name_only ... ok
+test content::tests::metadata_guard_rejects_parent_traversal_and_alternate_streams ... ok
+test identity::tests::embed_pipe_name_is_distinct_from_engine_pipe ... ok
+test identity::tests::file_metadata_seconds_preserve_negative_fractional_instants ... ok
+test identity::tests::instance_id_validation ... ok
+test identity::tests::opened_file_identity_retains_the_actual_handle_across_path_replacement ... ok
+test identity::tests::pipe_name_embeds_sid ... ok
+test identity::tests::reads_a_plausible_current_user_sid ... ok
+test ifilter::tests::expired_deadline_returns_deadline_exceeded ... ok
+test ifilter::tests::hung_worker_times_out_at_deadline_without_stalling_caller ... ok
+test ifilter::tests::missing_file_returns_unsupported ... ok
+test paths::tests::data_override_requires_absolute_path ... ok
+test paths::tests::layout_creation_is_idempotent ... ok
+test pipe::tests::client_server_round_trip_over_real_pipe ... ok
+test pipe::tests::sid_lookup_works ... ok
+test single_instance::tests::embed_mutex_is_single_instance ... ok
+test source_guard::tests::read_guard_drop_cancels_pending_notifications_and_releases_handles ... ok
+test source_guard::tests::read_guard_observes_change_restore_without_blocking_reads_or_writes ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s

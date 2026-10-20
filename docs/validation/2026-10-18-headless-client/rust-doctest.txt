@@ -1,0 +1,15 @@
+cargo :    Compiling ws-client v0.1.0 (<checkout>\src\engine\crates\ws-clie
+nt)
+At line:1 char:225
++ ... it -eq 0) { cargo test -p ws-client --doc *> ../../artifacts/ws-clien ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...ates\ws-client):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.67s
+   Doc-tests ws_client
+
+running 1 test
+test crates\ws-client\src\lib.rs - (line 6) - compile ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s

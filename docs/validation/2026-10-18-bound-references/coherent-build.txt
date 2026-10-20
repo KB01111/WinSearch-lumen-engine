@@ -1,0 +1,124 @@
+rtk : warning: ws-embed@0.1.0: ws-embed: CUDA backend skipped (SDK not found)
+At <checkout>\artifacts\entry-reference-checks.ps1:21 char:12
++  'build' { rtk proxy cargo build --workspace --bins --examples *> ../ ...
++            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (warning: ws-emb...(SDK not found):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+warning: ws-embed@0.1.0: ws-embed: Vulkan backend skipped (SDK not found)
+   Compiling ws-index v0.1.0 (<checkout>\src\engine\crates\ws-index)
+   Compiling ws-client v0.1.0 (<checkout>\src\engine\crates\ws-client)
+   Compiling winsearch-embed v0.1.0 (<checkout>\src\engine\bins\winsearch-e
+mbed)
+   Compiling ws-embed v0.1.0 (<checkout>\src\engine\crates\ws-embed)
+   Compiling winsearch-cli v0.1.0 (<checkout>\src\engine\bins\winsearch-cli
+)
+   Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearchd)
+   Compiling winsearch-extract v0.1.0 (<checkout>\src\engine\bins\winsearch
+-extract)
+warning: function `scan_catalog` is never used
+  --> bins\winsearchd\src\catalog.rs:65:8
+   |
+65 | pub fn scan_catalog(roots: &[PathBuf]) -> Vec<AppEntry> {
+   |        ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `WorkerSnapshot` is never constructed
+   --> bins\winsearchd\src\embed_client.rs:113:12
+    |
+113 | pub struct WorkerSnapshot {
+    |            ^^^^^^^^^^^^^^
+
+warning: multiple methods are never used
+   --> bins\winsearchd\src\embed_client.rs:302:12
+    |
+237 | impl EmbedSupervisor {
+    | -------------------- methods in this implementation
+...
+302 |     pub fn stats(&self) -> EmbedStats {
+    |            ^^^^^
+...
+309 |     pub fn is_worker_running(&self) -> bool {
+    |            ^^^^^^^^^^^^^^^^^
+...
+388 |     pub fn embed_texts(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbedError> {
+    |            ^^^^^^^^^^^
+...
+622 |     pub fn embed_image_bounded(
+    |            ^^^^^^^^^^^^^^^^^^^
+...
+790 |     pub fn ping(&self) -> Result<WorkerSnapshot, EmbedError> {
+    |            ^^^^
+...
+826 |     fn transact(&self, req: EmbedRequest) -> Result<EmbedResponse, EmbedError> {
+    |        ^^^^^^^^
+...
+850 |     fn transact_after_restart(&self, req: EmbedRequest) -> Result<EmbedResponse, EmbedError> {
+    |        ^^^^^^^^^^^^^^^^^^^^^^
+...
+945 |     fn round_trip(&self, req: &EmbedRequest) -> Result<EmbedResponse, EmbedError> {
+    |        ^^^^^^^^^^
+
+warning: associated items `new`, `new_with_model_dir`, `set_query_embed_hook`, `set_model_ready_override`, and `cancel`
+ are never used
+   --> bins\winsearchd\src\engine.rs:135:12
+    |
+134 | impl EngineService {
+    | ------------------ associated items in this implementation
+135 |     pub fn new(indexer: Arc<Indexer>) -> SharedEngine {
+    |            ^^^
+...
+145 |     pub fn new_with_model_dir(indexer: Arc<Indexer>, model_dir: std::path::PathBuf) -> SharedEngine {
+    |            ^^^^^^^^^^^^^^^^^^
+...
+190 |     pub fn set_query_embed_hook(&self, hook: QueryEmbedHook) {
+    |            ^^^^^^^^^^^^^^^^^^^^
+...
+195 |     pub fn set_model_ready_override(&self, ready: Option<bool>) {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+...
+317 |     pub fn cancel(&self, id: RequestId) {
+    |            ^^^^^^
+
+warning: method `set_budget_factory` is never used
+   --> bins\winsearchd\src\extract.rs:102:12
+    |
+ 83 | impl ExtractorRegistry {
+    | ---------------------- method in this implementation
+...
+102 |     pub fn set_budget_factory<F>(&mut self, factory: F)
+    |            ^^^^^^^^^^^^^^^^^^
+
+warning: methods `extract_once_with`, `extract_once_with_media`, and `extract_once_typed` are never used
+   --> bins\winsearchd\src\extract.rs:126:12
+    |
+118 | impl Indexer {
+    | ------------ methods in this implementation
+...
+126 |     pub fn extract_once_with<F>(
+    |            ^^^^^^^^^^^^^^^^^
+...
+140 |     pub fn extract_once_with_media<F, FI>(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^
+...
+157 |     fn extract_once_typed<F, FI>(
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: methods `content_extract_queue_depth`, `segments_indexed`, and `embed_queue_depth` are never used
+   --> bins\winsearchd\src\indexer.rs:518:12
+    |
+141 | impl Indexer {
+    | ------------ methods in this implementation
+...
+518 |     pub fn content_extract_queue_depth(&self) -> Result<u64, StoreError> {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+523 |     pub fn segments_indexed(&self) -> Result<u64, StoreError> {
+    |            ^^^^^^^^^^^^^^^^
+...
+531 |     pub fn embed_queue_depth(&self) -> Result<u64, StoreError> {
+    |            ^^^^^^^^^^^^^^^^^
+
+warning: `winsearchd` (bin "winsearchd") generated 7 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 17.03s

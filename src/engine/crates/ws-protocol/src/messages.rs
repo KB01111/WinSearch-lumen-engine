@@ -20,54 +20,114 @@ pub enum ClientMessage {
         client_version: String,
     },
     /// Heartbeat; answered with `Pong`.
-    Ping { id: RequestId },
+    Ping {
+        id: RequestId,
+    },
+    ResolveEntry {
+        id: RequestId,
+        reference: crate::EntryReference,
+    },
+    PreviewEntry {
+        id: RequestId,
+        request: crate::PreviewRequest,
+    },
     /// Execute a search. Results stream back as `Results` frames with the same
     /// id; the last frame has `done: true`. Superseded/cancelled requests are
     /// closed early with `done: true`.
-    Search { id: RequestId, query: SearchQuery },
+    Search {
+        id: RequestId,
+        query: SearchQuery,
+    },
+    Related {
+        id: RequestId,
+        query: crate::RelatedQuery,
+    },
     /// Cancel the in-flight request with this id.
-    Cancel { id: RequestId },
+    Cancel {
+        id: RequestId,
+    },
     /// Snapshot of engine/indexing status.
-    GetStatus { id: RequestId },
+    GetStatus {
+        id: RequestId,
+    },
     /// Begin (or resume) the embedding-model download. Answered by
     /// `ModelStatus` with `id` set; progress arrives as pushed `ModelStatus`
     /// frames (`id: None`) until the download completes or is cancelled.
-    ModelDownloadStart { id: RequestId },
+    ModelDownloadStart {
+        id: RequestId,
+    },
     /// Cancel the in-flight model download; the partial files stay on disk
     /// so a later start resumes (status `paused`).
-    ModelDownloadCancel { id: RequestId },
+    ModelDownloadCancel {
+        id: RequestId,
+    },
     /// Copy model files from a local `path` (file or directory) into the
     /// model dir, verifying size (and SHA-256 when pinned).
-    ModelImport { id: RequestId, path: String },
+    ModelImport {
+        id: RequestId,
+        path: String,
+    },
     /// Delete the downloaded model files.
-    ModelDelete { id: RequestId },
+    ModelDelete {
+        id: RequestId,
+    },
     /// Snapshot of the model lifecycle state.
-    GetModelStatus { id: RequestId },
+    GetModelStatus {
+        id: RequestId,
+    },
     /// Snapshot of the engine search policy (`semantic_enabled`,
     /// `preferred_backend`). Answered by `Config` with `id` set.
-    GetConfig { id: RequestId },
+    GetConfig {
+        id: RequestId,
+    },
     /// Persist the engine search policy. Answered by `Config` with `id` set;
     /// an unknown `preferred_backend` spelling is refused with
     /// `Error{invalid_request}` (the typed store only holds
     /// `auto|cuda|vulkan|cpu`).
-    SetConfig { id: RequestId, config: EngineConfig },
+    SetConfig {
+        id: RequestId,
+        config: EngineConfig,
+    },
+    GetIndexingConfig {
+        id: RequestId,
+    },
+    SetIndexingConfig {
+        id: RequestId,
+        config: IndexingConfig,
+    },
 }
 
 /// Messages sent by the engine to a client.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
+    IndexingConfig {
+        id: Option<RequestId>,
+        config: IndexingConfig,
+    },
     HelloAck {
         protocol_version: u32,
         engine_version: String,
         /// Capability tags, e.g. "search.exact", "search.semantic", "code".
         features: Vec<String>,
     },
-    Pong { id: RequestId },
+    Pong {
+        id: RequestId,
+    },
+    ResolvedEntry {
+        id: RequestId,
+        entry: crate::ResolvedEntry,
+    },
+    EntryPreview {
+        id: RequestId,
+        preview: crate::EntryPreview,
+    },
     Results {
         id: RequestId,
         batch: Vec<SearchResult>,
         done: bool,
+        #[serde(default,skip_serializing_if="Option::is_none")]
+        outcome: Option<crate::SearchOutcome>,
     },
     /// `id: Some(_)` answers a `GetStatus` request; `id: None` is a pushed
     /// update (e.g. indexing progress) sent proactively to all clients.
@@ -94,6 +154,62 @@ pub enum ServerMessage {
         code: ErrorCode,
         message: String,
     },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexingMode {
+    #[default]
+    Always,
+    Scheduled,
+    Manual,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RootPolicy {
+    pub root: String,
+    #[serde(default)]
+    pub exclusions: Vec<String>,
+    #[serde(default)]
+    pub include_hidden: bool,
+    pub max_file_size_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct IndexingConfig {
+    pub roots: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub root_policies: Vec<RootPolicy>,
+    pub excluded_paths: Vec<String>,
+    pub excluded_extensions: Vec<String>,
+    pub code_enabled: bool,
+    pub code_roots: Vec<String>,
+    pub paused: bool,
+    pub mode: IndexingMode,
+    pub index_on_battery: bool,
+    pub respect_battery_saver: bool,
+    pub hours_start: u16,
+    pub hours_end: u16,
+}
+impl Default for IndexingConfig {
+    fn default() -> Self {
+        Self {
+            roots: vec![],
+            root_policies: vec![],
+            excluded_paths: vec![],
+            excluded_extensions: vec![],
+            code_enabled: false,
+            code_roots: vec![],
+            paused: false,
+            mode: IndexingMode::Always,
+            index_on_battery: true,
+            respect_battery_saver: true,
+            hours_start: 60,
+            hours_end: 420,
+        }
+    }
 }
 
 /// Engine search policy (P3.6): the semantic-stage kill switch plus the
@@ -170,6 +286,25 @@ pub struct SearchQuery {
     pub include_semantic: bool,
     /// Restrict to these result kinds; empty means all.
     pub categories: Vec<ResultKind>,
+    /// Restrict indexed files to these extensions; optional leading dot, ASCII case-insensitive.
+    #[serde(skip_serializing_if="Vec::is_empty")]
+    pub extensions: Vec<String>,
+    /// Source-file classifications; alternatives within this list, intersecting other selectors.
+    #[serde(skip_serializing_if="Vec::is_empty")]
+    pub file_kinds: Vec<crate::FileKind>,
+}
+
+pub fn valid_search_extensions(extensions:&[String])->bool {
+    extensions.len()<=64 && extensions.iter().all(|value| {
+        let extension=value.strip_prefix('.').unwrap_or(value);
+        !extension.is_empty() && extension.len()<=32 && extension.bytes()
+            .all(|byte|byte.is_ascii_alphanumeric() || matches!(byte,b'+'|b'-'|b'_'))
+    })
+}
+
+pub fn search_extension_allowed(extensions:&[String],extension:&str)->bool {
+    extensions.is_empty() || extensions.iter().any(|value|
+        value.strip_prefix('.').unwrap_or(value).eq_ignore_ascii_case(extension))
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -197,6 +332,15 @@ pub enum MatchLocation {
     Page { page: u32 },
     Timestamp { seconds: f64, end_seconds: f64 },
     Line { line: u32 },
+    Notebook { cell_ordinal:u32, line:u32, end_line:u32 },
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct MatchingMoment {
+    pub excerpt: String,
+    pub location: Option<MatchLocation>,
+    pub thumbnail_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -216,6 +360,11 @@ pub struct SearchResult {
     pub location: Option<MatchLocation>,
     /// Absolute path of a cached thumbnail, when one exists.
     pub thumbnail_path: Option<String>,
+    pub excerpt: Option<String>,
+    pub matching_moments: Vec<MatchingMoment>,
+    /// Current native file identity; independent of the query-specific hit ID.
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub entry_reference: Option<crate::EntryReference>,
 }
 
 impl Default for SearchResult {
@@ -230,6 +379,9 @@ impl Default for SearchResult {
             path: None,
             location: None,
             thumbnail_path: None,
+            excerpt: None,
+            matching_moments: Vec::new(),
+            entry_reference: None,
         }
     }
 }
@@ -248,6 +400,12 @@ pub enum EngineRunState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(default)]
 pub struct EngineStatus {
+    /// Non-secret ordinary-index incarnation, not a content hash or grant.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index_id: Option<String>,
+    /// Separate code-index incarnation; absent when unavailable or legacy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code_index_id: Option<String>,
     pub state: EngineRunState,
     /// Short human-readable activity line ("Indexing Pictures", "Paused").
     pub current_activity: String,
@@ -266,6 +424,55 @@ mod tests {
     use ws_modelmgr::ModelState;
 
     #[test]
+    fn database_identity_status_round_trips_and_keeps_legacy_unknown() {
+        let value = serde_json::json!({"index_id":"a".repeat(32),"code_index_id":"b".repeat(32)});
+        let status: EngineStatus = serde_json::from_value(value.clone()).unwrap();
+        let encoded = serde_json::to_value(status).unwrap();
+        assert_eq!(encoded["index_id"], value["index_id"]);
+        assert_eq!(encoded["code_index_id"], value["code_index_id"]);
+        let legacy: EngineStatus = serde_json::from_str("{}").unwrap();
+        let legacy = serde_json::to_value(legacy).unwrap();
+        assert!(legacy.get("index_id").is_none());
+        assert!(legacy.get("code_index_id").is_none());
+    }
+
+    #[test]
+    fn file_kind_selection_round_trips_closed_codes_and_keeps_legacy_requests_unchanged() {
+        let kinds=serde_json::json!(["folder","pdf","document","spreadsheet","presentation","source",
+            "image","video","audio","archive","executable","model","unknown"]);
+        let query:SearchQuery=serde_json::from_value(serde_json::json!({"text":"needle","file_kinds":kinds})).unwrap();
+        assert_eq!(serde_json::to_value(query).unwrap()["file_kinds"],kinds);
+        for invalid in [serde_json::json!(["PDF"]),serde_json::json!(["notebook"]),serde_json::json!([1]),serde_json::json!(null)] {
+            assert!(serde_json::from_value::<SearchQuery>(serde_json::json!({"file_kinds":invalid})).is_err());
+        }
+        let legacy:SearchQuery=serde_json::from_value(serde_json::json!({"text":"needle"})).unwrap();
+        assert!(serde_json::to_value(legacy).unwrap().get("file_kinds").is_none());
+    }
+
+    #[test]
+    fn search_extensions_validate_budgets_and_reject_path_or_wildcard_syntax() {
+        for values in [vec![],vec!["pdf".into(),".PDF".into(),"c++".into(),"7z".into()]] {
+            assert!(valid_search_extensions(&values));
+        }
+        for value in ["",".","..pdf","../pdf","ab/c","ab\\c","*.pdf","a\0b","has space","å"] {
+            assert!(!valid_search_extensions(&[value.into()]),"{value:?}");
+        }
+        assert!(!valid_search_extensions(&["a".repeat(33)]));
+        assert!(!valid_search_extensions(&vec!["pdf".into();65]));
+    }
+
+    #[test]
+    fn search_extensions_are_additive_and_match_only_explicit_file_extensions() {
+        let legacy:SearchQuery=serde_json::from_str(r#"{"text":"needle","mode":"files","limit":20}"#).unwrap();
+        assert!(legacy.extensions.is_empty());
+        assert!(serde_json::to_value(&legacy).unwrap().get("extensions").is_none());
+        let filters=vec![".PDF".into(),"rs".into()];
+        assert!(search_extension_allowed(&filters,"pdf"));assert!(search_extension_allowed(&filters,"RS"));
+        assert!(!search_extension_allowed(&filters,"png"));assert!(!search_extension_allowed(&filters,""));
+        assert!(search_extension_allowed(&[],""));
+    }
+
+    #[test]
     fn client_message_json_round_trip() {
         let msg = ClientMessage::Search {
             id: 42,
@@ -275,6 +482,8 @@ mod tests {
                 limit: 20,
                 include_semantic: true,
                 categories: vec![ResultKind::Image, ResultKind::Video],
+                extensions: Vec::new(),
+                file_kinds: Vec::new(),
             },
         };
         let json = serde_json::to_string(&msg).unwrap();
@@ -286,8 +495,10 @@ mod tests {
     #[test]
     fn server_message_json_round_trip() {
         let msg = ServerMessage::Results {
+            outcome: None,
             id: 7,
             batch: vec![SearchResult {
+                entry_reference:None,
                 id: "r1".into(),
                 kind: ResultKind::Document,
                 title: "rental-agreement.pdf".into(),
@@ -297,6 +508,12 @@ mod tests {
                 path: Some("C:\\Docs\\rental-agreement.pdf".into()),
                 location: Some(MatchLocation::Page { page: 14 }),
                 thumbnail_path: None,
+                excerpt: Some("rental clause".into()),
+                matching_moments: vec![MatchingMoment {
+                    excerpt: "rental clause".into(),
+                    location: Some(MatchLocation::Page { page: 14 }),
+                    thumbnail_path: None,
+                }],
             }],
             done: true,
         };
@@ -310,6 +527,7 @@ mod tests {
     #[test]
     fn timestamp_location_round_trip() {
         let msg = ServerMessage::Results {
+            outcome: None,
             id: 1,
             batch: vec![SearchResult {
                 location: Some(MatchLocation::Timestamp {
@@ -409,13 +627,11 @@ mod tests {
         assert_eq!(cfg.preferred_backend, "auto");
         // Unknown backend spellings still parse on the wire; the engine
         // refuses them at `set_config` application time.
-        let cfg: EngineConfig = serde_json::from_str(
-            r#"{"semantic_enabled":true,"preferred_backend":"opencl"}"#,
-        )
-        .unwrap();
+        let cfg: EngineConfig =
+            serde_json::from_str(r#"{"semantic_enabled":true,"preferred_backend":"opencl"}"#)
+                .unwrap();
         assert_eq!(cfg.preferred_backend, "opencl");
-        let msg: ClientMessage =
-            serde_json::from_str(r#"{"type":"get_config","id":3}"#).unwrap();
+        let msg: ClientMessage = serde_json::from_str(r#"{"type":"get_config","id":3}"#).unwrap();
         assert_eq!(msg, ClientMessage::GetConfig { id: 3 });
     }
 }

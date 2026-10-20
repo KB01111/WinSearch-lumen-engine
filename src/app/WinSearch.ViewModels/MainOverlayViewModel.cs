@@ -156,22 +156,24 @@ public sealed partial class MainOverlayViewModel : ObservableObject, IAsyncDispo
     /// <summary>Flushes any pending debounced query or awaits an in-flight search.</summary>
     public async Task FlushOrWaitForSearchAsync()
     {
-        Task? toAwait;
-        lock (_searchStateLock)
+        while (true)
         {
-            if (Volatile.Read(ref _debouncePending))
+            Task? toAwait;
+            lock (_searchStateLock)
             {
-                toAwait = RunSearchAsync(QueryText);
+                toAwait = _debouncePending ? RunSearchAsync(QueryText) : _activeSearchTask;
             }
-            else
+            if (toAwait is not null)
             {
-                toAwait = _activeSearchTask;
+                await toAwait;
             }
-        }
-
-        if (toAwait is { IsCompleted: false })
-        {
-            await toAwait;
+            lock (_searchStateLock)
+            {
+                if (!_debouncePending && ReferenceEquals(toAwait, _activeSearchTask))
+                {
+                    return;
+                }
+            }
         }
     }
 
@@ -227,7 +229,7 @@ public sealed partial class MainOverlayViewModel : ObservableObject, IAsyncDispo
             ? SearchMode.Code
             : SearchMode.Auto;
         var effectiveText = mode == SearchMode.Code ? query["code:".Length..].Trim() : query;
-        var includeSemantic = mode != SearchMode.Code && _semanticEnabled;
+        var includeSemantic = _semanticEnabled;
 
         Dispatch(() =>
         {

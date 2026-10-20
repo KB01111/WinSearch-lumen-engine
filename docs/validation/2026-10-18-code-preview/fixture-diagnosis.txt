@@ -1,0 +1,13 @@
+The engine preview fixture originally added a notebook after indexed_fixture
+had installed a live native watcher. Unchanged configure did not request a scan.
+Forcing ensure_scan_job due0 then raced the watcher's revision/quiet-period fence.
+Read-only inspection of the final failed fixture's actual code.db showed:
+  code_files: candidate.rs parse_version1 revision1; lib.rs parse_version1 revision1
+  code_jobs: repo scan1 revision3 claimed0 attempts0 due1792321001026
+The generated fixture was created at approximately1792320940xxx. The remaining
+root scan was deferred by the existing60second changed-source scan retry, not a
+preview failure. No notebook row or committed parse existed.
+The repaired fixture creates both files before configuring the watcher, just as
+the actual public native harness creates source files before admitting the root.
+It waits for the actual committed notebook provenance, without changing any
+production scheduler, source policy, retry, timeout or acceptance threshold.

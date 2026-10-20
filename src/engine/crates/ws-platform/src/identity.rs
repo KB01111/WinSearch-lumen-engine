@@ -13,6 +13,8 @@ pub enum IdentityError {
     Win32(#[from] windows::core::Error),
     #[error("token user buffer was malformed")]
     MalformedSid,
+    #[error("WINSEARCH_INSTANCE_ID must be 1..48 ASCII letters, digits, underscore or hyphen")]
+    InvalidInstanceId,
 }
 
 /// Returns the current user's SID as an SDDL string, e.g. `S-1-5-21-...`.
@@ -25,6 +27,18 @@ pub fn current_user_sid() -> Result<String, IdentityError> {
     let sid = read_token_sid()?;
     let _ = SID.set(sid.clone());
     Ok(sid)
+}
+
+/// Unix seconds rounded toward the earlier instant, including pre-1970 metadata.
+pub fn unix_seconds(time:std::time::SystemTime)->Option<i64> {
+    match time.duration_since(std::time::UNIX_EPOCH) {
+        Ok(duration)=>i64::try_from(duration.as_secs()).ok(),
+        Err(error)=>{
+            let duration=error.duration();
+            duration.as_secs().checked_add(u64::from(duration.subsec_nanos()>0))
+                .and_then(|value|i64::try_from(value).ok()).and_then(i64::checked_neg)
+        }
+    }
 }
 
 fn read_token_sid() -> Result<String, IdentityError> {
@@ -81,27 +95,63 @@ unsafe fn sid_to_string(sid: PSID) -> Option<String> {
 /// The engine's named pipe is suffixed with the user SID so two accounts on one
 /// machine never share a pipe.
 pub fn pipe_name() -> Result<String, IdentityError> {
-    Ok(format!(r"\\.\pipe\winsearch-{}", current_user_sid()?))
+    Ok(format!(
+        r"\\.\pipe\winsearch-{}{}",
+        current_user_sid()?,
+        instance_suffix()?
+    ))
 }
 
 /// The embed worker's private pipe (winsearchd is its only client), also
 /// per-user. The `winsearch-embed-` prefix keeps it distinct from the
 /// frontend pipe above; both share the same DACL machinery.
 pub fn embed_pipe_name() -> Result<String, IdentityError> {
-    Ok(format!(r"\\.\pipe\winsearch-embed-{}", current_user_sid()?))
+    Ok(format!(
+        r"\\.\pipe\winsearch-embed-{}{}",
+        current_user_sid()?,
+        instance_suffix()?
+    ))
+}
+
+pub fn validate_instance_id(value: &str) -> Result<(), IdentityError> {
+    if value.is_empty()
+        || value.len() > 48
+        || !value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    {
+        return Err(IdentityError::InvalidInstanceId);
+    }
+    Ok(())
+}
+pub fn instance_suffix() -> Result<String, IdentityError> {
+    match std::env::var("WINSEARCH_INSTANCE_ID") {
+        Ok(value) => {
+            validate_instance_id(&value)?;
+            Ok(format!("-{value}"))
+        }
+        Err(std::env::VarError::NotPresent) => Ok(String::new()),
+        Err(_) => Err(IdentityError::InvalidInstanceId),
+    }
+}
+pub fn isolated_object_name(base: &str) -> Result<String, IdentityError> {
+    let suffix = instance_suffix()?;
+    Ok(if suffix.is_empty() {
+        base.to_owned()
+    } else {
+        format!("{base}-{}{suffix}", current_user_sid()?)
+    })
 }
 
 /// Captures `(volume_serial, file_id)` for `path` via `GetFileInformationByHandleEx`
 /// without reading file contents (`FILE_READ_ATTRIBUTES` only).
 pub fn file_identity(path: &std::path::Path) -> Option<(u32, u64)> {
-    use std::ffi::c_void;
-    use std::mem::size_of;
+    use windows::core::PCWSTR;
     use windows::Win32::Storage::FileSystem::{
-        CreateFileW, FileIdInfo, GetFileInformationByHandleEx, FILE_FLAGS_AND_ATTRIBUTES,
-        FILE_ID_INFO, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        CreateFileW, FILE_FLAGS_AND_ATTRIBUTES,
+        FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
         OPEN_EXISTING,
     };
-    use windows::core::PCWSTR;
 
     let wide: Vec<u16> = path
         .to_string_lossy()
@@ -119,17 +169,39 @@ pub fn file_identity(path: &std::path::Path) -> Option<(u32, u64)> {
             None,
         )
         .ok()?;
-        let mut info: FILE_ID_INFO = std::mem::zeroed();
-        let result = GetFileInformationByHandleEx(
-            handle,
-            FileIdInfo,
-            &mut info as *mut FILE_ID_INFO as *mut c_void,
-            size_of::<FILE_ID_INFO>() as u32,
-        );
+        let result = identity_for_handle(handle);
         let _ = CloseHandle(handle);
-        result.ok()?;
-        let file_id =
-            u64::from_le_bytes(info.FileId.Identifier[..8].try_into().unwrap_or([0; 8]));
+        result
+    }
+}
+
+/// Identity of the already-opened source, without reopening a possibly replaced path.
+pub fn opened_file_identity(file: &std::fs::File) -> Option<(u32, u64)> {
+    use std::os::windows::io::AsRawHandle;
+    identity_for_handle(HANDLE(file.as_raw_handle()))
+}
+
+/// Native change time also observes edits whose last-write time was restored.
+pub fn opened_file_change_time(file: &std::fs::File) -> Option<i64> {
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Storage::FileSystem::{FileBasicInfo, GetFileInformationByHandleEx, FILE_BASIC_INFO};
+    unsafe {
+        let mut info:FILE_BASIC_INFO=std::mem::zeroed();
+        GetFileInformationByHandleEx(HANDLE(file.as_raw_handle()),FileBasicInfo,
+            &mut info as *mut FILE_BASIC_INFO as *mut std::ffi::c_void,
+            std::mem::size_of::<FILE_BASIC_INFO>() as u32).ok()?;
+        (info.ChangeTime>0).then_some(info.ChangeTime)
+    }
+}
+
+fn identity_for_handle(handle: HANDLE) -> Option<(u32, u64)> {
+    use windows::Win32::Storage::FileSystem::{FileIdInfo, GetFileInformationByHandleEx, FILE_ID_INFO};
+    unsafe {
+        let mut info: FILE_ID_INFO = std::mem::zeroed();
+        GetFileInformationByHandleEx(handle, FileIdInfo,
+            &mut info as *mut FILE_ID_INFO as *mut std::ffi::c_void,
+            std::mem::size_of::<FILE_ID_INFO>() as u32).ok()?;
+        let file_id = u64::from_le_bytes(info.FileId.Identifier[..8].try_into().unwrap_or([0; 8]));
         Some((info.VolumeSerialNumber as u32, file_id))
     }
 }
@@ -137,6 +209,44 @@ pub fn file_identity(path: &std::path::Path) -> Option<(u32, u64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn opened_file_identity_retains_the_actual_handle_across_path_replacement() {
+        let directory=std::env::temp_dir().join(format!("winsearch-opened-source-id-{}",std::process::id()));
+        std::fs::create_dir(&directory).unwrap();
+        let path=directory.join("source.bin");
+        std::fs::write(&path,b"old bytes").unwrap();
+        let old=file_identity(&path).unwrap();
+        let file=std::fs::File::open(&path).unwrap();
+        let first=opened_file_identity(&file);
+        std::fs::rename(&path,directory.join("previous.bin")).unwrap();
+        std::fs::write(&path,b"new bytes").unwrap();
+        let replacement=file_identity(&path).unwrap();
+        let retained=opened_file_identity(&file);
+        let still_open=file.metadata().unwrap().len();
+        drop(file);std::fs::remove_dir_all(directory).unwrap();
+        assert_ne!(old,replacement,"replacement must have a different native identity");
+        assert_eq!(first,Some(old));assert_eq!(retained,Some(old));assert_eq!(still_open,9);
+    }
+    #[test]
+    fn file_metadata_seconds_preserve_negative_fractional_instants() {
+        use std::time::{Duration,UNIX_EPOCH};
+        assert_eq!(unix_seconds(UNIX_EPOCH),Some(0));
+        // Windows SystemTime represents 100ns ticks; 1ns arithmetic rounds away.
+        let before=UNIX_EPOCH-Duration::new(0,100);
+        assert_eq!(before.duration_since(UNIX_EPOCH).unwrap_err().duration(),Duration::from_nanos(100));
+        assert_eq!(unix_seconds(UNIX_EPOCH+Duration::new(1,100)),Some(1));
+        assert_eq!(unix_seconds(before),Some(-1));
+        assert_eq!(unix_seconds(UNIX_EPOCH-Duration::new(1,100)),Some(-2));
+    }
+    #[test]
+    fn instance_id_validation() {
+        for value in ["", "a/b", "a b", "å", &"a".repeat(49)] {
+            assert!(validate_instance_id(value).is_err());
+        }
+        for value in ["test-A_1", &"a".repeat(48)] {
+            assert!(validate_instance_id(value).is_ok());
+        }
+    }
 
     #[test]
     fn reads_a_plausible_current_user_sid() {

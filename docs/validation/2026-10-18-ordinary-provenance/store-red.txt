@@ -1,0 +1,33 @@
+failures:
+
+---- store::tests::ordinary_source_hash_and_cursor_roll_back_with_chunk_transaction stdout ----
+
+thread 'store::tests::ordinary_source_hash_and_cursor_roll_back_with_chunk_transaction' (69348) panicked at crates\ws-index\src\store.rs:3061:9:
+assertion `left == right` failed
+  left: None
+ right: Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- store::tests::ordinary_source_hash_commits_with_chunks_and_survives_only_current_source_and_model_reset stdout ----
+
+thread 'store::tests::ordinary_source_hash_commits_with_chunks_and_survives_only_current_source_and_model_reset' (71940) panicked at crates\ws-index\src\store.rs:3018:9:
+assertion `left == right` failed
+  left: None
+ right: Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+---- store::tests::ordinary_source_hash_rejects_malformed_and_changed_or_missing_continuation_without_advancing stdout ----
+
+thread 'store::tests::ordinary_source_hash_rejects_malformed_and_changed_or_missing_continuation_without_advancing' (110220) panicked at crates\ws-index\src\store.rs:3032:13:
+assertion failed: store.commit_content_batch_with_source(&job, &progress,
+        &[content_chunk(&job, 0, "uncommitted")], None, None, None,
+        Some(&invalid)).is_err()
+
+
+failures:
+    store::tests::ordinary_source_hash_and_cursor_roll_back_with_chunk_transaction
+    store::tests::ordinary_source_hash_commits_with_chunks_and_survives_only_current_source_and_model_reset
+    store::tests::ordinary_source_hash_rejects_malformed_and_changed_or_missing_continuation_without_advancing
+
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 86 filtered out; finished in 0.03s
+
+error: test failed, to rerun pass `-p ws-index --lib`

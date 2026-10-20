@@ -5,39 +5,47 @@
 //! machine — and nothing over the network — can talk to the engine.
 
 use std::io::{self, Read, Write};
+use std::time::{Duration, Instant};
 
 use tracing::{error, info, warn};
+use windows::core::PCWSTR;
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_BROKEN_PIPE, ERROR_PIPE_CONNECTED, GENERIC_ALL, GENERIC_READ,
-    GENERIC_WRITE, HANDLE,
+    CloseHandle, ERROR_BROKEN_PIPE, ERROR_IO_PENDING, ERROR_PIPE_CONNECTED, GENERIC_ALL,
+    GENERIC_READ, GENERIC_WRITE, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows::Win32::Security::{
     AddAccessAllowedAce, GetLengthSid, GetTokenInformation, InitializeAcl,
-    InitializeSecurityDescriptor, SetSecurityDescriptorDacl, ACCESS_ALLOWED_ACE, ACL, ACL_REVISION,
-    PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR, TOKEN_QUERY, TOKEN_USER,
-    TokenUser as TokenUserClass,
+    InitializeSecurityDescriptor, SetSecurityDescriptorDacl, TokenUser as TokenUserClass,
+    ACCESS_ALLOWED_ACE, ACL, ACL_REVISION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
+    SECURITY_DESCRIPTOR, TOKEN_QUERY, TOKEN_USER,
+};
+use windows::Win32::Storage::FileSystem::{
+    CreateFileW, ReadFile, WriteFile, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_OVERLAPPED, FILE_SHARE_NONE,
+    OPEN_EXISTING, PIPE_ACCESS_DUPLEX,
 };
 use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, PeekNamedPipe, PIPE_READMODE_BYTE,
     PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
 };
-use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_NONE, OPEN_EXISTING, PIPE_ACCESS_DUPLEX,
-    ReadFile, WriteFile,
+use windows::Win32::System::Threading::{
+    CreateEventW, GetCurrentProcess, OpenProcessToken, WaitForSingleObject, INFINITE,
 };
-use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-use windows::core::PCWSTR;
+use windows::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 
 /// `SECURITY_DESCRIPTOR_REVISION` from winnt.h.
 const SECURITY_DESCRIPTOR_REVISION: u32 = 1;
 
 const OUT_BUFFER_BYTES: u32 = 64 * 1024;
 const IN_BUFFER_BYTES: u32 = 64 * 1024;
+const FRAME_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// One connected pipe endpoint. Implements blocking `Read`/`Write`; the frame
-/// codecs from `ws-protocol` operate on top of it.
+/// codecs operate on top of it. Server endpoints bound a frame's writes to five
+/// seconds, from its first byte through `flush`, and close on transport failure.
 pub struct PipeStream {
-    handle: PipeHandle,
+    handle: Option<PipeHandle>,
+    overlapped: bool,
+    write_deadline: Option<Instant>,
 }
 
 /// HANDLE wrapper: created by us, moved across a thread boundary exactly once,
@@ -54,6 +62,14 @@ impl Drop for PipeHandle {
 }
 
 impl PipeStream {
+    fn new(handle: PipeHandle, overlapped: bool) -> Self {
+        Self {
+            handle: Some(handle),
+            overlapped,
+            write_deadline: None,
+        }
+    }
+
     /// Client side: connects to an existing engine pipe.
     pub fn connect(name: &str) -> io::Result<PipeStream> {
         let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
@@ -68,9 +84,7 @@ impl PipeStream {
                 None,
             )
             .map_err(win32_io_error)?;
-            Ok(PipeStream {
-                handle: PipeHandle(handle),
-            })
+            Ok(Self::new(PipeHandle(handle), false))
         }
     }
 
@@ -78,9 +92,12 @@ impl PipeStream {
     /// Returns `Ok(Some(n))` when `n` bytes are queued (possibly 0), or
     /// `Ok(None)` when the peer has disconnected (`ERROR_BROKEN_PIPE`).
     pub fn peek_available(&self) -> io::Result<Option<usize>> {
+        let Some(handle) = &self.handle else {
+            return Ok(None);
+        };
         let mut avail = 0u32;
         unsafe {
-            match PeekNamedPipe(self.handle.0, None, 0, None, Some(&mut avail), None) {
+            match PeekNamedPipe(handle.0, None, 0, None, Some(&mut avail), None) {
                 Ok(()) => Ok(Some(avail as usize)),
                 Err(e) if is_disconnect(&e) => Ok(None),
                 Err(e) => Err(win32_io_error(e)),
@@ -94,28 +111,142 @@ impl Read for PipeStream {
         if buf.is_empty() {
             return Ok(0);
         }
-        let mut read = 0u32;
-        unsafe {
-            match ReadFile(self.handle.0, Some(buf), Some(&mut read), None) {
-                Ok(()) => Ok(read as usize),
-                Err(e) if is_disconnect(&e) => Ok(0),
-                Err(e) => Err(win32_io_error(e)),
+        let Some(handle) = &self.handle else {
+            return Ok(0);
+        };
+        let result = if self.overlapped {
+            let mut operation = PipeOperation::new()?;
+            let started =
+                unsafe { ReadFile(handle.0, Some(buf), None, Some(&mut operation.overlapped)) };
+            operation.complete(handle.0, started, None)
+        } else {
+            let mut read = 0;
+            unsafe { ReadFile(handle.0, Some(buf), Some(&mut read), None) }
+                .map(|()| read)
+                .map_err(win32_io_error)
+        };
+        match result {
+            Err(error) if error.raw_os_error() == Some(ERROR_BROKEN_PIPE.to_hresult().0) => Ok(0),
+            result => result.map(|read| read as usize),
+        }
+    }
+}
+
+/// Owns the event until completion, including cancellation. The OVERLAPPED and
+/// the caller's buffer must stay alive until GetOverlappedResult finishes.
+struct PipeOperation {
+    _event: PipeHandle,
+    overlapped: OVERLAPPED,
+}
+
+impl PipeOperation {
+    fn new() -> io::Result<Self> {
+        let event =
+            PipeHandle(unsafe { CreateEventW(None, true, false, None) }.map_err(win32_io_error)?);
+        Ok(Self {
+            overlapped: OVERLAPPED {
+                hEvent: event.0,
+                ..Default::default()
+            },
+            _event: event,
+        })
+    }
+
+    fn complete(
+        &mut self,
+        handle: HANDLE,
+        started: windows::core::Result<()>,
+        deadline: Option<Instant>,
+    ) -> io::Result<u32> {
+        if let Err(error) = started {
+            if error.code() != ERROR_IO_PENDING.to_hresult() {
+                return Err(win32_io_error(error));
+            }
+            let milliseconds = deadline.map_or(INFINITE, |deadline| {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    0
+                } else {
+                    remaining.as_millis().clamp(1, u128::from(INFINITE - 1)) as u32
+                }
+            });
+            let wait = unsafe { WaitForSingleObject(self.overlapped.hEvent, milliseconds) };
+            if wait != WAIT_OBJECT_0 {
+                let error = if wait == WAIT_TIMEOUT {
+                    io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "pipe frame write deadline exceeded",
+                    )
+                } else {
+                    io::Error::last_os_error()
+                };
+                unsafe {
+                    let _ = CancelIoEx(handle, Some(&self.overlapped));
+                    let mut transferred = 0;
+                    // Cancellation is a request, not completion; drain before releasing borrowed memory.
+                    let _ = GetOverlappedResult(handle, &self.overlapped, &mut transferred, true);
+                }
+                return Err(error);
             }
         }
+        let mut transferred = 0;
+        unsafe { GetOverlappedResult(handle, &self.overlapped, &mut transferred, false) }
+            .map_err(win32_io_error)?;
+        Ok(transferred)
     }
 }
 
 impl Write for PipeStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let mut written = 0u32;
-        unsafe {
-            WriteFile(self.handle.0, Some(buf), Some(&mut written), None)
-                .map_err(win32_io_error)?;
+        let handle = self
+            .handle
+            .as_ref()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "pipe closed"))?
+            .0;
+        let result = if self.overlapped {
+            let deadline = *self
+                .write_deadline
+                .get_or_insert_with(|| Instant::now() + FRAME_WRITE_TIMEOUT);
+            if Instant::now() >= deadline {
+                Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "pipe frame write deadline exceeded",
+                ))
+            } else {
+                PipeOperation::new().and_then(|mut operation| {
+                    let started = unsafe {
+                        WriteFile(handle, Some(buf), None, Some(&mut operation.overlapped))
+                    };
+                    operation.complete(handle, started, Some(deadline))
+                })
+            }
+        } else {
+            let mut written = 0;
+            unsafe { WriteFile(handle, Some(buf), Some(&mut written), None) }
+                .map(|()| written)
+                .map_err(win32_io_error)
+        };
+        if result.is_err() {
+            self.handle.take();
         }
-        Ok(written as usize)
+        result.map(|written| written as usize)
     }
 
     fn flush(&mut self) -> io::Result<()> {
+        if self.handle.is_none() {
+            return Err(io::Error::new(io::ErrorKind::BrokenPipe, "pipe closed"));
+        }
+        if self
+            .write_deadline
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            self.handle.take();
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "pipe frame write deadline exceeded",
+            ));
+        }
+        self.write_deadline = None;
         Ok(())
     }
 }
@@ -135,8 +266,7 @@ pub fn serve<F>(name: &str, on_connection: F) -> io::Result<()>
 where
     F: Fn(PipeStream) + Send + Sync + 'static,
 {
-    let security = UserOnlySecurity::new()
-        .map_err(|e| io::Error::other(e.to_string()))?;
+    let security = UserOnlySecurity::new().map_err(|e| io::Error::other(e.to_string()))?;
     let wide_name: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
     let on_connection = std::sync::Arc::new(on_connection);
 
@@ -150,24 +280,29 @@ where
             }
         };
 
-        if let Err(e) = unsafe { ConnectNamedPipe(handle, None) } {
-            // A client can connect between CreateNamedPipe and ConnectNamedPipe;
-            // ERROR_PIPE_CONNECTED means the connection is already established.
-            if e.code() != ERROR_PIPE_CONNECTED.to_hresult() {
-                unsafe {
-                    let _ = CloseHandle(handle);
-                }
-                warn!(error = %e, "ConnectNamedPipe failed");
-                continue;
-            }
+        let handle = PipeHandle(handle);
+        if let Err(error) = accept_connection(&handle) {
+            warn!(error = %error, "ConnectNamedPipe failed");
+            continue;
         }
 
-        let stream = PipeStream {
-            handle: PipeHandle(handle),
-        };
+        let stream = PipeStream::new(handle, true);
         let handler = on_connection.clone();
         std::thread::spawn(move || handler(stream));
     }
+}
+
+fn accept_connection(handle: &PipeHandle) -> io::Result<()> {
+    let mut operation = PipeOperation::new()?;
+    let started = unsafe { ConnectNamedPipe(handle.0, Some(&mut operation.overlapped)) };
+    // CreateFile can connect before the accept call; no operation remains pending in that case.
+    if started
+        .as_ref()
+        .is_err_and(|error| error.code() == ERROR_PIPE_CONNECTED.to_hresult())
+    {
+        return Ok(());
+    }
+    operation.complete(handle.0, started, None).map(|_| ())
 }
 
 unsafe fn create_instance(
@@ -178,7 +313,7 @@ unsafe fn create_instance(
     let pipe_mode = PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS;
     let handle = CreateNamedPipeW(
         PCWSTR(wide_name.as_ptr()),
-        PIPE_ACCESS_DUPLEX,
+        PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
         pipe_mode,
         PIPE_UNLIMITED_INSTANCES,
         OUT_BUFFER_BYTES,
@@ -186,7 +321,11 @@ unsafe fn create_instance(
         0,
         Some(&attrs as *const SECURITY_ATTRIBUTES),
     );
-    Ok(handle)
+    if handle.is_invalid() {
+        Err(windows::core::Error::from_win32())
+    } else {
+        Ok(handle)
+    }
 }
 
 /// A DACL granting exactly one ACE: generic-all for the current user's SID.
@@ -224,10 +363,9 @@ impl UserOnlySecurity {
 
             // ACL header + one ACCESS_ALLOWED_ACE (ACE header + mask + SID,
             // minus the ACE's SidStart u32 that overlaps the SID bytes).
-            let acl_len = std::mem::size_of::<ACL>()
-                + std::mem::size_of::<ACCESS_ALLOWED_ACE>()
-                + sid_len
-                - std::mem::size_of::<u32>();
+            let acl_len =
+                std::mem::size_of::<ACL>() + std::mem::size_of::<ACCESS_ALLOWED_ACE>() + sid_len
+                    - std::mem::size_of::<u32>();
             let mut acl_buf = vec![0u8; acl_len];
             let acl = acl_buf.as_mut_ptr() as *mut ACL;
             InitializeAcl(acl, acl_len as u32, ACL_REVISION)?;
@@ -254,6 +392,10 @@ impl UserOnlySecurity {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "pipe_tests.rs"]
+mod writer_tests;
 
 #[cfg(test)]
 mod tests {

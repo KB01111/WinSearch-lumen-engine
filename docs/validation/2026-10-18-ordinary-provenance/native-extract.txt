@@ -1,0 +1,46 @@
+rtk :    Compiling ws-index v0.1.0 (<checkout>\src\engine\crates\ws-index)
+At <checkout>\artifacts\ordinary-source-checks.ps1:11 char:13
++  'native' { rtk proxy cargo test -p winsearch-extract --tests -- --te ...
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...rates\ws-index):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-extract v0.1.0 (<checkout>\src\engine\crates\ws-extract)
+   Compiling winsearch-extract v0.1.0 (<checkout>\src\engine\bins\winsearch
+-extract)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.41s
+     Running unittests src\main.rs (target\debug\deps\winsearch_extract-8219e64c6a755c6b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\media_native.rs (target\debug\deps\media_native-3eab9a98abb9d801.exe)
+
+running 13 tests
+test audio_native_compressed_audio_routes_without_video ... ok
+test audio_native_disguised_playlist_cannot_connect_to_network ... ok
+test audio_native_long_silence_advances_across_batches_without_giant_artifacts ... ok
+test audio_native_silence_completes_without_fake_drafts ... ok
+test audio_native_windows_keep_source_times_and_resume_in_new_worker ... ok
+test video_native_commits_selection_before_rendering_frames ... ok
+test video_native_keeps_nonperiodic_shot_and_deferred_audio_phase ... ok
+test video_native_late_soundtrack_preserves_pcm_position_inside_window ... ok
+test video_native_restart_keeps_selection_and_all_soundtrack_windows ... ok
+test video_native_short_soundtrack_finishes_without_fake_tail_vectors ... ok
+test video_native_short_visual_track_keeps_full_soundtrack ... ok
+test video_native_variable_rate_uses_actual_pts_and_frame_ocr_is_real ... ok
+test video_native_without_audio_still_emits_searchable_frames ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.60s
+
+     Running tests\pdf_native.rs (target\debug\deps\pdf_native-efae11fd50def0ba.exe)
+
+running 5 tests
+test pdf_native_actual_scanned_invoice_ocr_and_rendered_visual ... ok
+test pdf_native_blank_failures_limits_and_large_page_continuation ... ok
+test pdf_native_forty_pages_unicode_and_continuation ... ok
+test pdf_native_source_page_limit_is_diagnostic_and_blank_pages_continue ... ok
+test pdf_native_unreadable_and_numeric_exact_only_are_explicit ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.84s

@@ -11,6 +11,7 @@
 
 pub mod backends;
 pub mod ffi;
+mod image;
 pub mod runtime;
 pub mod vector;
 

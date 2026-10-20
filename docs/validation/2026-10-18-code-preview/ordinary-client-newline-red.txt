@@ -1,0 +1,32 @@
+rtk :    Compiling ws-modelmgr v0.1.0 (<checkout>\src\engine\crates\ws-mode
+lmgr)
+At line:1 char:61
++ ... src/engine; rtk proxy cargo test -p ws-index -p ws-client preview_tex ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-modelmgr):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-protocol)
+   Compiling ws-client v0.1.0 (<checkout>\src\engine\crates\ws-client)
+   Compiling ws-index v0.1.0 (<checkout>\src\engine\crates\ws-index)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.12s
+     Running unittests src\lib.rs (target\debug\deps\ws_client-6eb05a167c27557a.exe)
+
+running 1 test
+test client::tests::preview_text_trailing_terminator_does_not_cover_the_following_line ... FAILED
+
+failures:
+
+---- client::tests::preview_text_trailing_terminator_does_not_cover_the_following_line stdout ----
+
+thread 'client::tests::preview_text_trailing_terminator_does_not_cover_the_following_line' (107504) panicked at crates\ws-client\src\client.rs:1041:9:
+a reply cannot claim unreturned line3 after its trailing newline
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    client::tests::preview_text_trailing_terminator_does_not_cover_the_following_line
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 40 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p ws-client --lib`

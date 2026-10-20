@@ -1,0 +1,117 @@
+[
+  {
+    "file": "rust-workspace.txt",
+    "local_raw_sha256": "524375528912db1b7ff93da37ca12ace0be866c2b9deb3f8a397436ca229c858",
+    "published_sha256": "91f623c77acef98eed009684e5558e969af3cbe245bdc5bcd9ad05421d2c94b1"
+  },
+  {
+    "file": "retained-workspace-integrity-failure.txt",
+    "local_raw_sha256": "9a9504beeb36db582bf6a1b299d7ead66492bbfb84aabcfad267911f43748a26",
+    "published_sha256": "ed31f7479f1ffc586add68ed9480ff8233f6ad25ffa7a3a0270ea5910920fd0d"
+  },
+  {
+    "file": "real-worker.txt",
+    "local_raw_sha256": "10c98cab60605d16cdd9a1c7795a6478e7d52efd454e04c919410ba97e728f16",
+    "published_sha256": "afbda133da3763caf7b261403f956d9a55ece6ccfa9632d2ddcb55de3559dfa6"
+  },
+  {
+    "file": "embedding-model-tests.txt",
+    "local_raw_sha256": "2c2c7aa2708237a00fd2e527546f819b288ba51e11f9871fc1ea46f40d694733",
+    "published_sha256": "505f5ddb2f6ca36bf1ee09a0aa10ad2d292c76d55bda64c87dc56efe7fdc76f2"
+  },
+  {
+    "file": "dotnet-tests.txt",
+    "local_raw_sha256": "bb0ef46d59c87ecdb136a98aa174424a1db1897a8ab1ba90dea29af3a2435610",
+    "published_sha256": "8a315d49ce9ecb972265676367acf8eee80dc0f57e695efa0be6dc399b91c8e7"
+  },
+  {
+    "file": "x64-build.txt",
+    "local_raw_sha256": "8cea083ef6974a8cc484ea74e3830e3d3fc65b3ab7306518c10a4fee603eb9c9",
+    "published_sha256": "386c50dce8ff70e9d998a90128582ea40c452fc40a39b59d0aa73e5f59086595"
+  },
+  {
+    "file": "coherent-build.txt",
+    "local_raw_sha256": "bc3852f4c7539690c54ab88bbe6f13ed1b31190236c22ae6317f323374d61250",
+    "published_sha256": "9797f97c00deb5652dfd35f10fb492271d120104323ebb39dac24301c9473689"
+  },
+  {
+    "file": "daemon-red.txt",
+    "local_raw_sha256": "0189b8b04b126f7c47a28ec905032031094cfc531e2d54114429f7a6c718a1f7",
+    "published_sha256": "5bf4f0bb4de2ed091c4ee4a2b5f6afd8a1b608c213fc121a693998e7cb0cf68d"
+  },
+  {
+    "file": "rust-client-red.txt",
+    "local_raw_sha256": "a0734ba592fa88f4f5005e2a62769cb4b3aa96ef8e7bec1e28176d2ab0d29899",
+    "published_sha256": "6a4b9e17e9726c7b0210e663277a8fdb1264d37cabf981d9cef8e64d4f17c1d8"
+  },
+  {
+    "file": "dotnet-client-red.txt",
+    "local_raw_sha256": "92211c5fa01f6d347a15936f156c455038ba9c249ed22ea632a5b05555c8511b",
+    "published_sha256": "088292a4c12a64cbe2951bfd2cefd7d413eabf6fe61324ad6ac8824d016dcb45"
+  },
+  {
+    "file": "code-readiness-red.txt",
+    "local_raw_sha256": "2e4497a70833f43b8f4297f5d6a68dc91e48cccdca05ac241306102534922b36",
+    "published_sha256": "5af45321a06264fd2ec0d8cda16d25070842844b6c70cccd7c7354c0b5ecf527"
+  },
+  {
+    "file": "closed-codes-red.txt",
+    "local_raw_sha256": "c3dfff6ba01f8a701ded7647fed3292f210e9df23913f2bcca3c2c50f0154ac0",
+    "published_sha256": "878f9bb14c2b736b27c8a6b853c0dcbe3c9eeb5c97a3baea3203219e05118140"
+  },
+  {
+    "file": "cli-red.txt",
+    "local_raw_sha256": "c297ab4383c9c6abf5aa2450be113dbca954edd90b189d78421038f0ecbc7f9b",
+    "published_sha256": "8b365142af52185e94919ece1e9def21bb1cc9dfb1e0912ce541de2af6ec8fa5"
+  },
+  {
+    "file": "exact-failure-red.txt",
+    "local_raw_sha256": "3ad45a17a4517dbd674050d7e7ef7735af99bad693ac93565bb1c060972311c2",
+    "published_sha256": "2934b5d07c14e8d30987251745d29ba03089b12682d1c098a05ddd383c599d8e"
+  },
+  {
+    "file": "source-integrity-tests.txt",
+    "local_raw_sha256": "c987f75eb0e6fc403181d702e634e1777056e03e6baccaf771f12e30fc7e0a89",
+    "published_sha256": "74261a7c8b8d68fc5717b651348dc6c77b7042f8ce282a0fb57c344f47fcb525"
+  },
+  {
+    "file": "source-notification-red.txt",
+    "local_raw_sha256": "a22fc1ef2315ef5b8bba8ecade740a3e9e2c1527acf2f4e63f9967aa0ed2be9d",
+    "published_sha256": "63e24d6de9b5e4a2eb7375be1024f5abff9fbf4332e76f9cadeb598f65abd011"
+  },
+  {
+    "file": "source-notification-probe.json",
+    "local_raw_sha256": "433602552b2fc828b7c4ea7970a99943b20458257f9b060b128531734f8b0988",
+    "published_sha256": "75283bf754812b3399402872a946622c600b25507bc3948094543dc5038ef82a"
+  },
+  {
+    "file": "source-integrity-fixed-samples.json",
+    "local_raw_sha256": "8a0425608af206fef7bfb153ece1ba569e4428ab8b870525bdeaee036ec70dc3",
+    "published_sha256": "7fe48c9e54381ebd27ba82e9918a2cfaefe3e7326df8a8736e667ebf288b661f"
+  },
+  {
+    "file": "native-no-model.json",
+    "local_raw_sha256": "24d29685e36804f810c271390c3449e052a0313649eb10f6fdf1e62ba7f41bf1",
+    "published_sha256": "9a3966ef2a57ba1d1350378ae8248605ebb927fb8cb57b16e742d8d68b31ccf7"
+  },
+  {
+    "file": "native-no-model-client.txt",
+    "local_raw_sha256": "5468e79954344dd31b536485f1774da71a0c2cabc25d9de2406b73676af4c6ca",
+    "published_sha256": "c759f77a25ec36cc4a53a8066e0fbbd2226807c687b822e7851a18364a8cacc8"
+  },
+  {
+    "file": "native-managed-cpu.json",
+    "local_raw_sha256": "88db1b14ce8c71193f2a4727bffe605889f4723010523320fc532c10e849df48",
+    "published_sha256": "7f559fd7441ffdf05e2135f5b4fd9703bcc984be8c4afa91cac2173083a1f857"
+  },
+  {
+    "file": "native-managed-cpu-client.txt",
+    "local_raw_sha256": "b580b6dc7936251a3da2f5699c7f2c1a10a1da21b40de3b5875706bdd175258e",
+    "published_sha256": "10363b7b06522e18ae8c08edc814f86d1d87b02345e61ea6e89ea5ed1ec2fe82"
+  },
+  {
+    "file": "host-reused.json",
+    "local_raw_sha256": "805f9cb81838c737dac3dfd06987a5f6759cf6d184c111ff27f61b62815081cf",
+    "published_sha256": "46d7ad4702c6c64fad0d45b2f2f41686c61c854b3fa29aa5341698451d433d94"
+  }
+]

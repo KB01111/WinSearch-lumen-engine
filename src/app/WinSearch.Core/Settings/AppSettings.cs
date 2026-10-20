@@ -2,6 +2,8 @@ using System.Text.Json;
 
 namespace WinSearch.Core.Settings;
 
+public enum CodeEditor { Associated, VSCode, Cursor, VisualStudio, JetBrains, Sublime, Zed, NotepadPlusPlus }
+
 public enum AppTheme
 {
     System,
@@ -17,6 +19,7 @@ public enum AppTheme
 /// </summary>
 public sealed class AppSettings
 {
+    public CodeEditor PreferredCodeEditor { get; set; } = CodeEditor.Associated;
     public AppTheme Theme { get; set; } = AppTheme.System;
 
     /// <summary>RegisterHotKey modifier flags (MOD_ALT = 1, MOD_CONTROL = 2, MOD_SHIFT = 4, MOD_WIN = 8).</summary>
@@ -28,20 +31,27 @@ public sealed class AppSettings
     public bool RememberLastQuery { get; set; }
     public string LastQuery { get; set; } = "";
 
-    public static string SettingsDirectory =>
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "WinSearch");
+    public static string SettingsDirectory
+    {
+        get
+        {
+            var value = Environment.GetEnvironmentVariable("WINSEARCH_DATA_DIR");
+            if (value is null) return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WinSearch");
+            if (!Path.IsPathFullyQualified(value)) throw new InvalidOperationException("WINSEARCH_DATA_DIR must be an absolute path");
+            return value;
+        }
+    }
 
     public static string SettingsPath => Path.Combine(SettingsDirectory, "settings.json");
 
     public static AppSettings Load()
     {
+        var settingsPath = SettingsPath;
         try
         {
-            if (File.Exists(SettingsPath))
+            if (File.Exists(settingsPath))
             {
-                var json = File.ReadAllText(SettingsPath);
+                var json = File.ReadAllText(settingsPath);
                 return JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
             }
         }

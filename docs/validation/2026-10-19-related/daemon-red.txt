@@ -1,0 +1,66 @@
+cargo :    Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-pr
+otocol)
+At line:1 char:1
++ cargo test -p winsearchd related_ -- --test-threads=1 *> ../../artifa ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-platform v0.1.0 (<checkout>\src\engine\crates\ws-platform)
+   Compiling ws-index v0.1.0 (<checkout>\src\engine\crates\ws-index)
+   Compiling ws-code v0.1.0 (<checkout>\src\engine\crates\ws-code)
+   Compiling ws-extract v0.1.0 (<checkout>\src\engine\crates\ws-extract)
+   Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearchd)
+warning: field `related_source` is never read
+   --> bins\winsearchd\src\engine.rs:116:5
+    |
+111 | struct SearchDelivery<'a> {
+    |        -------------- field in this struct
+...
+116 |     related_source:Option<&'a ws_protocol::EntryReference>,
+    |     ^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `winsearchd` (bin "winsearchd" test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 45.56s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-950b3e8f0455252c.exe)
+
+running 5 tests
+test engine::tests::related_empty_delivery_rechecks_seed_after_waiting_for_writer ... FAILED
+test engine::tests::related_excludes_every_seed_chunk_before_vector_topk_and_name_only_candidates ... FAILED
+test engine::tests::related_uses_current_cached_text_without_filename_or_unbound_seed ... FAILED
+test extract::tests::native_retained_cleanup_after_claim_preserves_unrelated_queue_and_artifacts ... ok
+test extract::tests::native_retained_cleanup_before_claim_preserves_unrelated_queue_and_artifacts ... ok
+
+failures:
+
+---- engine::tests::related_empty_delivery_rechecks_seed_after_waiting_for_writer stdout ----
+
+thread 'engine::tests::related_empty_delivery_rechecks_seed_after_waiting_for_writer' (128980) panicked at bins\winsearchd\src\engine.rs:1581:51:
+assertion `left == right` failed: source
+  left: Some(SearchOutcome { disposition: Complete, semantic: Some(SemanticOutcome { phase: Ready, reason: None }) })
+ right: Some(SearchOutcome { disposition: Superseded, semantic: None })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- engine::tests::related_excludes_every_seed_chunk_before_vector_topk_and_name_only_candidates stdout ----
+
+thread 'engine::tests::related_excludes_every_seed_chunk_before_vector_topk_and_name_only_candidates' (130724) panicked at bins\winsearchd\src\engine.rs:1544:34:
+assertion `left == right` failed: seed chunks cannot consume candidate limits
+  left: "seed.txt"
+ right: "target.txt"
+
+---- engine::tests::related_uses_current_cached_text_without_filename_or_unbound_seed stdout ----
+
+thread 'engine::tests::related_uses_current_cached_text_without_filename_or_unbound_seed' (78576) panicked at bins\winsearchd\src\engine.rs:1523:60:
+called `Result::unwrap()` on an `Err` value: NotReady
+
+
+failures:
+    engine::tests::related_empty_delivery_rechecks_seed_after_waiting_for_writer
+    engine::tests::related_excludes_every_seed_chunk_before_vector_topk_and_name_only_candidates
+    engine::tests::related_uses_current_cached_text_without_filename_or_unbound_seed
+
+test result: FAILED. 2 passed; 3 failed; 0 ignored; 0 measured; 220 filtered out; finished in 38.05s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

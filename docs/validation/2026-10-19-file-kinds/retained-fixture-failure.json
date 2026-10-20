@@ -1,0 +1,28 @@
+{
+  "scope": "Retained fixture classification failure; application names/paths omitted.",
+  "cause": "The fixture omitted .lnk unknown sources and expected no indexed matches for 1+2. All20 returned sources were valid application shortcuts. The corrected fixture forbids synthetic results and validates all indexed source kinds.",
+  "failed_query": {
+    "text": "1+2",
+    "mode": "auto",
+    "file_kinds": [
+      "unknown"
+    ]
+  },
+  "completed_kind_cases": 7,
+  "result_count": 20,
+  "result_kind_extension_counts": {
+    "application/.lnk": 20
+  },
+  "full_results_structural_sha256": "cb1a0fffe8eff1b07d92c8a65200828bf94b62c011b3fd0de85c5a7c5145e272",
+  "owned_job_empty": true,
+  "pids": [],
+  "index_seconds": 59.097,
+  "elapsed_seconds": 61.541,
+  "binary_sha256": {
+    "winsearchd.exe": "9eb4e580a5c5c95d2d5369ff03d1825bc98c78f5236474cbea52ff06455a9d05",
+    "winsearch-cli.exe": "ba147799e5daa1e71c4a4720827a629c33263e05d1e9b50c671602c6ed78aee1",
+    "winsearch-embed.exe": "2417bb278b02807cca0ee4ddf98b2183c68a09a6ebad6dd3d463ed83c21b03ca",
+    "winsearch-extract.exe": "0066b4a6d5c0e3e235cf312796e1e4139fb9c0b494dfc018c531b9f9dc14afec"
+  },
+  "harness_sha256": "f3292ba137484fa6ac9162ac95d174060a4a74fb9249d99d3fe0ded2730457ef"
+}

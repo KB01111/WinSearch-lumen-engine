@@ -1,0 +1,53 @@
+{
+  "name": "retrieval-development-v1",
+  "description": "Frozen before recipe/cutoff selection. Generated content, no personal files. Text segments exercise retrieval only; generated media must use actual worker inputs and code must separately pass parser/opt-in integration.",
+  "thresholds": {"min_recall_at_5": 0.9, "min_mrr": 0.85, "max_false_positive_rate": 0.0},
+  "entries": [
+    {"path":"C:\\Eval\\bicycle-maintenance-checklist.txt","name":"bicycle-maintenance-checklist.txt"},
+    {"path":"C:\\Eval\\fjallvandring-packlista.md","name":"fjallvandring-packlista.md"},
+    {"path":"C:\\Eval\\contrat-location-appartement.pdf","name":"contrat-location-appartement.pdf"},
+    {"path":"C:\\Eval\\家庭菜園-水やり予定.xlsx","name":"家庭菜園-水やり予定.xlsx"},
+    {"path":"C:\\Eval\\reunion-equipo-notas.docx","name":"reunion-equipo-notas.docx"},
+    {"path":"C:\\Eval\\VLC media player.lnk","name":"VLC media player.lnk","is_app":true},
+    {"path":"C:\\Eval\\draft-004.txt","name":"draft-004.txt","segments":[{"kind":"doc","text":"The community library lends books for three weeks. Return borrowed items through the slot beside the front door after closing. Overdue notices arrive by email."}]},
+    {"path":"C:\\Eval\\notes-008.md","name":"notes-008.md","segments":[{"kind":"doc","text":"To reset the garden irrigation controller, hold the blue button for ten seconds. The watering schedule is restored from the backup battery after a power failure."}]},
+    {"path":"C:\\Eval\\scan-013.pdf","name":"scan-013.pdf","segments":[{"kind":"pdf","page":7,"text":"Warranty coverage for the rechargeable drill lasts twenty-four months. Damage caused by immersion in water is excluded. Keep the purchase receipt when requesting a replacement."}]},
+    {"path":"C:\\Eval\\screen-017.png","name":"screen-017.png","segments":[{"kind":"ocr","text":"NETWORK UNAVAILABLE. The wireless adapter cannot connect to the office access point. Restart the router and check the connection settings. Diagnostic code NET-5842."},{"kind":"image","asset":"artifacts/retrieval-fixtures/development/screen.png"}]},
+    {"path":"C:\\Eval\\receipt-020.png","name":"receipt-020.png","segments":[{"kind":"ocr","text":"RIVER STREET BAKERY. Sourdough loaf 4.50. Two croissants 5.00. Total 9.50. Paid by card."},{"kind":"image","asset":"artifacts/retrieval-fixtures/development/receipt.png"}]},
+    {"path":"C:\\Eval\\recording-025.wav","name":"recording-025.wav","segments":[{"kind":"audio","asset":"artifacts/retrieval-fixtures/development/speech.wav","start_ms":0,"end_ms":30000}]},
+    {"path":"C:\\Eval\\clip-031.mp4","name":"clip-031.mp4","segments":[{"kind":"video","asset":"artifacts/retrieval-fixtures/development/frame.png","start_ms":40000,"end_ms":40000},{"kind":"audio","asset":"artifacts/retrieval-fixtures/development/soundtrack.wav","start_ms":50000,"end_ms":65000}]},
+    {"path":"C:\\Eval\\cache.rs","name":"cache.rs","segments":[{"kind":"code","line":1,"text":"/// Remove the least recently used cache entry when capacity is exhausted.\npub fn evict_oldest(cache: &mut Cache) { cache.remove_lru(); }"}]}
+  ],
+  "media_generation": {
+    "screen": ["NETWORK UNAVAILABLE", "Wireless adapter cannot connect", "Restart the router", "Diagnostic code NET-5842"],
+    "receipt": ["RIVER STREET BAKERY", "Sourdough loaf 4.50", "Two croissants 5.00", "TOTAL 9.50", "Paid by card"],
+    "speech": "The museum opens at nine in the morning. Tickets for the dinosaur exhibition can be purchased at the entrance. Children under six visit free of charge.",
+    "frame": ["PROJECT BUILD FAILED", "Compiler error in module cache", "Missing closing bracket", "Line 42"],
+    "soundtrack": "The swimming lesson has moved to Saturday afternoon. Bring a towel and a pair of goggles. Meet the instructor beside the shallow end of the pool."
+  },
+  "queries": [
+    {"query":"how to service my cycle","category":"name-en","expected_any":["bicycle-maintenance-checklist.txt"]},
+    {"query":"saker att ta med till bergen","category":"name-sv","expected_any":["fjallvandring-packlista.md"]},
+    {"query":"apartment rental agreement","category":"name-fr-crosslingual","expected_any":["contrat-location-appartement.pdf"]},
+    {"query":"vegetable garden watering timetable","category":"name-ja-crosslingual","expected_any":["家庭菜園-水やり予定.xlsx"]},
+    {"query":"minutes from the staff discussion","category":"name-es-crosslingual","expected_any":["reunion-equipo-notas.docx"]},
+    {"query":"play a movie","category":"application","expected_any":["VLC media player.lnk"]},
+    {"query":"where can I drop off borrowed books at night","category":"doc","expected_any":["draft-004.txt"]},
+    {"query":"recover automatic plant watering after electricity goes out","category":"doc","expected_any":["notes-008.md"]},
+    {"query":"how long is my cordless tool covered for defects","category":"pdf","expected_any":["scan-013.pdf"]},
+    {"query":"computer cannot join the office wifi","category":"ocr","expected_any":["screen-017.png"]},
+    {"query":"receipt for bread and pastries","category":"receipt","expected_any":["receipt-020.png"]},
+    {"query":"NET-5842","category":"ocr-exact","include_semantic":false,"expected_any":["screen-017.png"]},
+    {"query":"when does the dinosaur exhibition open","category":"audio","expected_any":["recording-025.wav"]},
+    {"query":"screenshot showing a compiler failure","category":"video-frame","expected_any":["clip-031.mp4"]},
+    {"query":"what should I bring to the pool lesson","category":"video-soundtrack","expected_any":["clip-031.mp4"]},
+    {"query":"remove the oldest item when the memory cache is full","category":"code","mode":"code","expected_any":["cache.rs"]},
+    {"query":"deep space telescope observations","category":"negative-distant","expect_empty":true},
+    {"query":"annual corporate dividend payout forecast","category":"negative-finance","expect_empty":true},
+    {"query":"antibiotic dosage for a sick horse","category":"negative-medical","expect_empty":true},
+    {"query":"recipe for fermenting cabbage at home","category":"negative-near-food","expect_empty":true},
+    {"query":"airline boarding gate and baggage allowance","category":"negative-near-travel","expect_empty":true},
+    {"query":"NET-9999","category":"negative-exact-identifier","include_semantic":false,"expect_empty":true},
+    {"query":"compute the determinant of a sparse matrix","category":"negative-code","mode":"code","expect_empty":true}
+  ]
+}

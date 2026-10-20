@@ -1,0 +1,190 @@
+{
+  "roots": [
+    {
+      "id": 1,
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents",
+      "enabled": 1,
+      "current_generation": 4
+    },
+    {
+      "id": 2,
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code",
+      "enabled": 1,
+      "current_generation": 4
+    }
+  ],
+  "entries": [
+    {
+      "id": 3,
+      "root_id": 2,
+      "parent_id": null,
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code\\cells.ipynb",
+      "name": "cells.ipynb",
+      "name_lower": "cells.ipynb",
+      "ext": "ipynb",
+      "is_dir": 0,
+      "size": 314,
+      "mtime": 1792349995,
+      "volume_serial": "<opaque native identity redacted>",
+      "file_id": "<opaque identity redacted>",
+      "is_app": 0,
+      "app_target": "",
+      "missing": 0,
+      "scan_generation": 4,
+      "thumbnail_path": null
+    },
+    {
+      "id": 4,
+      "root_id": 2,
+      "parent_id": null,
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\code\\源 code.rs",
+      "name": "源 code.rs",
+      "name_lower": "源 code.rs",
+      "ext": "rs",
+      "is_dir": 0,
+      "size": 59,
+      "mtime": 1792349995,
+      "volume_serial": "<opaque native identity redacted>",
+      "file_id": "<opaque identity redacted>",
+      "is_app": 0,
+      "app_target": "",
+      "missing": 0,
+      "scan_generation": 4,
+      "thumbnail_path": null
+    },
+    {
+      "id": 1,
+      "root_id": 1,
+      "parent_id": null,
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents\\item-a.txt",
+      "name": "item-a.txt",
+      "name_lower": "item-a.txt",
+      "ext": "txt",
+      "is_dir": 0,
+      "size": 85,
+      "mtime": 1792349995,
+      "volume_serial": "<opaque native identity redacted>",
+      "file_id": "<opaque identity redacted>",
+      "is_app": 0,
+      "app_target": "",
+      "missing": 0,
+      "scan_generation": 4,
+      "thumbnail_path": null
+    },
+    {
+      "id": 2,
+      "root_id": 1,
+      "parent_id": null,
+      "path": "<user>\\AppData\\Local\\Temp\\winsearch-search-parity-xgekd8_c\\documents\\item-b.pdf",
+      "name": "item-b.pdf",
+      "name_lower": "item-b.pdf",
+      "ext": "pdf",
+      "is_dir": 0,
+      "size": 924,
+      "mtime": 1792349995,
+      "volume_serial": "<opaque native identity redacted>",
+      "file_id": "<opaque identity redacted>",
+      "is_app": 0,
+      "app_target": "",
+      "missing": 0,
+      "scan_generation": 4,
+      "thumbnail_path": null
+    }
+  ],
+  "content_progress": [
+    {
+      "entry_id": 2,
+      "kind": "pdf",
+      "cursor": 0,
+      "complete": 0,
+      "revision": 3,
+      "source": "<opaque native identity redacted>",
+      "model_generation": 0,
+      "media_plan": null,
+      "video_selection": null,
+      "source_sha256": null,
+      "source_sha256_revision": null
+    },
+    {
+      "entry_id": 1,
+      "kind": "doc",
+      "cursor": 0,
+      "complete": 0,
+      "revision": 3,
+      "source": "<opaque native identity redacted>",
+      "model_generation": 0,
+      "media_plan": null,
+      "video_selection": null,
+      "source_sha256": null,
+      "source_sha256_revision": null
+    }
+  ],
+  "content_revisions": [
+    {
+      "entry_id": 1,
+      "revision": 3
+    },
+    {
+      "entry_id": 2,
+      "revision": 3
+    }
+  ],
+  "extract_jobs": [
+    {
+      "id": 1,
+      "entry_id": 1,
+      "kind": "name",
+      "state": "failed",
+      "claimed": 0,
+      "attempts": 5,
+      "priority": 10
+    },
+    {
+      "id": 3,
+      "entry_id": 2,
+      "kind": "name",
+      "state": "failed",
+      "claimed": 0,
+      "attempts": 5,
+      "priority": 10
+    },
+    {
+      "id": 5,
+      "entry_id": 3,
+      "kind": "name",
+      "state": "failed",
+      "claimed": 0,
+      "attempts": 5,
+      "priority": 10
+    },
+    {
+      "id": 6,
+      "entry_id": 4,
+      "kind": "name",
+      "state": "failed",
+      "claimed": 0,
+      "attempts": 5,
+      "priority": 10
+    },
+    {
+      "id": 7,
+      "entry_id": 1,
+      "kind": "doc",
+      "state": "claimed",
+      "claimed": 1,
+      "attempts": 0,
+      "priority": 0
+    },
+    {
+      "id": 8,
+      "entry_id": 2,
+      "kind": "pdf",
+      "state": "claimed",
+      "claimed": 1,
+      "attempts": 0,
+      "priority": 0
+    }
+  ],
+  "content_fts": "no such column: chunk_index",
+  "work_queue": "no such table: work_queue"
+}

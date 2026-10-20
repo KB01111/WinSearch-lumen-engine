@@ -1,0 +1,15 @@
+[package]
+name = "ws-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Typed asynchronous headless client for the local WinSearch engine"
+
+[dependencies]
+ws-protocol.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { version = "1", features = ["io-util", "net", "rt", "sync", "time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "test-util"] }

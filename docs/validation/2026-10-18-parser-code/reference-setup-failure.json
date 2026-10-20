@@ -1,0 +1,19 @@
+{
+  "scope": "Run the model-gated worker test and unchanged media references in an owned job.",
+  "model_sha256": "2188ac1deca4b77dffefd603c2776a9d76d9d74ec01841392982ebb840b09135",
+  "worker_sha256": "48b986e7b526d52299b8724b27265d09c8af79bb736f2d3cca5eee7a55dab735",
+  "test_binary_sha256": "8e542aa0aaf289cbaff43b9d2dfdd08bd91e523d27a099a5dadf4317f25ec69a",
+  "steps": [
+    {
+      "name": "worker-roundtrip",
+      "exit_code": 0
+    },
+    {
+      "name": "media-references",
+      "exit_code": 1
+    }
+  ],
+  "owned_job_empty": true,
+  "timed_out": false,
+  "elapsed_seconds": 2.223
+}

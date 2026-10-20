@@ -1,0 +1,36 @@
+cargo :    Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearc
+hd)
+At line:1 char:27
++ ... src/engine; cargo test -p winsearchd --bin winsearchd parser_slots -- ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling wi...ins\winsearchd):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.25s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-ea492ede1f9fd55e.exe)
+
+running 2 tests
+test extract_client::tests::process_wide_parser_slots_block_fresh_clients_until_owned_children_finish ... FAILED
+test extract_client::tests::retained_parser_slots_cannot_be_bypassed_with_a_new_client ... FAILED
+
+failures:
+
+---- extract_client::tests::process_wide_parser_slots_block_fresh_clients_until_owned_children_finish stdout ----
+
+thread 'extract_client::tests::process_wide_parser_slots_block_fresh_clients_until_owned_children_finish' (96508) panicked at bins\winsearchd\src\extract_client.rs:1126:9:
+Err(Malformed("frame of 4294967295 bytes exceeds the 16777216 byte limit"))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- extract_client::tests::retained_parser_slots_cannot_be_bypassed_with_a_new_client stdout ----
+
+thread 'extract_client::tests::retained_parser_slots_cannot_be_bypassed_with_a_new_client' (73448) panicked at bins\winsearchd\src\extract_client.rs:1154:9:
+Err(Worker("Det går inte att hitta filen. (os error 2)"))
+
+
+failures:
+    extract_client::tests::process_wide_parser_slots_block_fresh_clients_until_owned_children_finish
+    extract_client::tests::retained_parser_slots_cannot_be_bypassed_with_a_new_client
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 190 filtered out; finished in 3.64s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

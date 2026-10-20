@@ -10,10 +10,8 @@
 //!
 //! Jobs (winsearchd batches 32–256 items per job; see `docs/ipc-protocol.md`):
 //! - `embed_texts {id, texts[]}` → `embeddings {id, vecs[], dim, backend, stub}`
-//! - `embed_audio {id, path, window_ms?}` → `embeddings` (Phase 4; until the
-//!   mtmd audio path is wired the real worker answers `unsupported`, while a
-//!   stub worker answers deterministic vectors so the plumbing is testable)
-//! - `embed_image {id, path}` → `embeddings` (same Phase-4 note as audio)
+//! - `embed_audio {id, path, window_ms?}` → real bounded PCM16 mono16k embeddings
+//! - `embed_image {id, path, token_budget?}` → real70/140/280token image embeddings
 //! - `hello` / `status` / `shutdown` for handshake, health, and teardown.
 //!
 //! [`stub_vector`] provides the deterministic fake-embedding path used when no
@@ -51,15 +49,21 @@ pub enum EmbedRequest {
     },
     /// Embed a batch of texts (1–[`MAX_TEXTS_PER_JOB`] items).
     EmbedTexts { id: RequestId, texts: Vec<String> },
-    /// Embed an audio window (Phase 4 payload; plumbing lands in this task).
+    /// Embed a bounded PCM16 mono16k WAV window.
     EmbedAudio {
         id: RequestId,
         path: String,
         /// Optional `[start_ms, end_ms]` window; `None` means the whole file.
         window_ms: Option<(u64, u64)>,
     },
-    /// Embed an image file (Phase 4 payload; plumbing lands in this task).
-    EmbedImage { id: RequestId, path: String },
+    /// Embed a resident local image file.
+    EmbedImage {
+        id: RequestId,
+        path: String,
+        /// Omitted by older clients: full-image280tokens. Frames use70/140.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token_budget: Option<u32>,
+    },
     /// Health probe; answered by `worker_status`.
     Status { id: RequestId },
     /// Ask the worker to acknowledge and exit (idle-exit stays the normal path).
@@ -74,8 +78,8 @@ pub enum EmbedResponse {
         protocol_version: u32,
         worker_version: String,
         /// Capability tags, e.g. `embed_texts`. Audio/image tags appear only
-        /// when the worker can actually serve them (stub mode, or Phase 4+
-        /// with mtmd wired).
+        /// when the worker can actually serve them (explicit test stub mode,
+        /// or a loaded supporting projector).
         features: Vec<String>,
         /// True once real weights are resident (lazy on first job). Always
         /// false in stub mode — see `stub`, which the supervisor ORs in.
@@ -124,7 +128,7 @@ pub enum EmbedErrorCode {
     ModelNotAvailable,
     /// Load succeeded but this input failed (tokenize/decode).
     EmbedFailed,
-    /// Real worker without the Phase-4 mtmd path (audio/image until wired).
+    /// Loaded runtime without a projector supporting the requested modality.
     Unsupported,
 }
 
@@ -212,6 +216,7 @@ mod tests {
             EmbedRequest::EmbedImage {
                 id: 9,
                 path: "C:\\p.png".into(),
+                token_budget: None,
             },
             EmbedRequest::Status { id: 10 },
             EmbedRequest::Shutdown { id: 11 },

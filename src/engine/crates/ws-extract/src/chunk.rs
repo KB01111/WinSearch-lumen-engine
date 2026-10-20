@@ -258,6 +258,43 @@ pub fn select_excerpt<S: AsRef<str>>(text: &str, query_terms: &[S], max_chars: u
         best_anchor.saturating_sub(lead)
     };
 
+    render_excerpt(&normalized, &chars, max_chars, best_start, None)
+}
+
+/// Selects an excerpt at an authoritative match offset in the original UTF-8
+/// text. Whitespace collapsing retains that position without normalizing or
+/// searching the query again.
+pub fn select_excerpt_at(text: &str, match_byte: usize, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let normalized = collapse_whitespace(text);
+    if normalized.is_empty() {
+        return String::new();
+    }
+    let prefix = text.get(..match_byte).unwrap_or("");
+    let anchor = collapse_whitespace(prefix).chars().count()
+        + usize::from(prefix.chars().next_back().is_some_and(char::is_whitespace));
+    let chars: Vec<(usize, char)> = normalized.char_indices().collect();
+    let lead = (max_chars.saturating_sub(2).max(1) / 5).min(32);
+    render_excerpt(
+        &normalized,
+        &chars,
+        max_chars,
+        anchor.saturating_sub(lead),
+        Some(anchor),
+    )
+}
+
+fn render_excerpt(
+    normalized: &str,
+    chars: &[(usize, char)],
+    max_chars: usize,
+    best_start: usize,
+    anchor: Option<usize>,
+) -> String {
+    let total_chars = chars.len();
+    let window = max_chars.saturating_sub(2).max(1);
     let mut start = best_start.min(total_chars.saturating_sub(window));
     // Snap `start` to a word boundary if not at index 0.
     if start > 0 && !chars[start - 1].1.is_whitespace() {
@@ -267,6 +304,9 @@ pub fn select_excerpt<S: AsRef<str>>(text: &str, query_terms: &[S], max_chars: u
                 break;
             }
         }
+    }
+    if let Some(anchor) = anchor {
+        start = start.min(anchor);
     }
 
     let need_prefix = start > 0;
@@ -431,5 +471,17 @@ mod tests {
         assert!(excerpt.starts_with("Alpha beta"));
         assert!(excerpt.ends_with('…'));
         assert!(excerpt.chars().count() <= 60);
+    }
+
+    #[test]
+    fn anchored_excerpt_preserves_original_byte_position_through_whitespace_collapse() {
+        let prefix = "界\t  \n".repeat(200);
+        let text = format!("{prefix}café invoice detail {}", "trailing context ".repeat(30));
+        let excerpt = select_excerpt_at(&text, prefix.len(), 80);
+        assert!(excerpt.contains("café invoice detail"), "{excerpt:?}");
+        assert!(excerpt.chars().count() <= 80);
+        assert!(!excerpt.contains('\n'));
+        assert!(!excerpt.contains('\t'));
+        assert!(select_excerpt_at(&text, prefix.len(), 0).is_empty());
     }
 }

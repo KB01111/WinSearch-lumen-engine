@@ -1,0 +1,38 @@
+rtk :    Compiling ws-code v0.1.0 (<checkout>\src\engine\crates\ws-code)
+At <checkout>\artifacts\code-provenance-checks.ps1:14 char:20
++ ... e-red-v2' { rtk proxy cargo test -p ws-code code_provenance_ -- --tes ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...crates\ws-code):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.01s
+     Running unittests src\lib.rs (target\debug\deps\ws_code-4fc208959b0a087f.exe)
+
+running 3 tests
+test parse::tests::code_provenance_hashes_exact_admitted_bytes_including_bom_crlf_and_notebook_outputs ... ok
+test store::tests::code_provenance_commits_hash_revision_and_chunks_atomically_and_survives_reopen ... FAILED
+test store::tests::code_provenance_schema3_migration_preserves_data_and_keeps_legacy_hash_unknown ... FAILED
+
+failures:
+
+---- store::tests::code_provenance_commits_hash_revision_and_chunks_atomically_and_survives_reopen stdout ----
+
+thread 'store::tests::code_provenance_commits_hash_revision_and_chunks_atomically_and_survives_reopen' (111620) panicked at crates\ws-code\src\store.rs:1354:58:
+committed native content needs provenance
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- store::tests::code_provenance_schema3_migration_preserves_data_and_keeps_legacy_hash_unknown stdout ----
+
+thread 'store::tests::code_provenance_schema3_migration_preserves_data_and_keeps_legacy_hash_unknown' (91892) panicked at crates\ws-code\src\store.rs:1394:9:
+assertion `left == right` failed
+  left: "3"
+ right: "4"
+
+
+failures:
+    store::tests::code_provenance_commits_hash_revision_and_chunks_atomically_and_survives_reopen
+    store::tests::code_provenance_schema3_migration_preserves_data_and_keeps_legacy_hash_unknown
+
+test result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.06s
+
+error: test failed, to rerun pass `-p ws-code --lib`

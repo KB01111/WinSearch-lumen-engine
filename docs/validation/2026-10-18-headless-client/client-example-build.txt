@@ -1,0 +1,9 @@
+cargo :    Compiling ws-client v0.1.0 (<checkout>\src\engine\crates\ws-clie
+nt)
+At line:1 char:533
++ ... it -eq 0) { cargo build -p ws-client --example native-client-smoke *> ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...ates\ws-client):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.26s

@@ -1,0 +1,38 @@
+rtk :    Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-prot
+ocol)
+At line:1 char:61
++ ... src/engine; rtk proxy cargo test -p ws-client code_preview_client_ -- ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-client v0.1.0 (<checkout>\src\engine\crates\ws-client)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.06s
+     Running unittests src\lib.rs (target\debug\deps\ws_client-554fa414f259563f.exe)
+
+running 3 tests
+test client::tests::code_preview_client_rejects_invalid_code_and_ordinary_notebook_inputs ... ok
+test client::tests::code_preview_client_requires_its_own_capability_before_request ... FAILED
+test client::tests::code_preview_client_validates_actual_cell_ranges_kinds_hashes_and_budgets ... FAILED
+
+failures:
+
+---- client::tests::code_preview_client_requires_its_own_capability_before_request stdout ----
+
+thread 'client::tests::code_preview_client_requires_its_own_capability_before_request' (23244) panicked at crates\ws-client\src\client.rs:1045:90:
+Err(InvalidInput("preview exceeds its request budget"))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- client::tests::code_preview_client_validates_actual_cell_ranges_kinds_hashes_and_budgets stdout ----
+
+thread 'client::tests::code_preview_client_validates_actual_cell_ranges_kinds_hashes_and_budgets' (68664) panicked at crates\ws-client\src\client.rs:1093:36:
+case 0: Err(InvalidInput("preview exceeds its request budget"))
+
+
+failures:
+    client::tests::code_preview_client_requires_its_own_capability_before_request
+    client::tests::code_preview_client_validates_actual_cell_ranges_kinds_hashes_and_budgets
+
+test result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 37 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p ws-client --lib`

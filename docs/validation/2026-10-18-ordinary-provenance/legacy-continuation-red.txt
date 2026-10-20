@@ -1,0 +1,8 @@
+failures:
+
+failures:
+    store::tests::ordinary_source_hash_cannot_attest_earlier_chunks_of_a_resumed_legacy_parse
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 91 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p ws-index --lib`

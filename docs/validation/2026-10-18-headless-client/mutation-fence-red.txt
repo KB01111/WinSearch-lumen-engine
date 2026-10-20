@@ -1,0 +1,37 @@
+cargo :    Compiling ws-client v0.1.0 (<checkout>\src\engine\crates\ws-clie
+nt)
+At line:1 char:27
++ ... src/engine; cargo test -p ws-client --lib fences_later_writes *> ../. ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...ates\ws-client):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.39s
+     Running unittests src\lib.rs (target\debug\deps\ws_client-554fa414f259563f.exe)
+
+running 2 tests
+test client::tests::lost_mutation_reply_fences_later_writes_but_allows_status_recovery ... FAILED
+test client::tests::dropping_an_in_flight_mutation_fences_later_writes ... FAILED
+
+failures:
+
+---- client::tests::lost_mutation_reply_fences_later_writes_but_allows_status_recovery stdout ----
+
+thread 'client::tests::lost_mutation_reply_fences_later_writes_but_allows_status_recovery' (97732) panicked at crates\ws-client\src\client.rs:1292:9:
+unknown older policy must not be overtaken by another write
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- client::tests::dropping_an_in_flight_mutation_fences_later_writes stdout ----
+
+thread 'client::tests::dropping_an_in_flight_mutation_fences_later_writes' (89788) panicked at crates\ws-client\src\client.rs:1316:9:
+assertion failed: matches!(client.set_config(EngineConfig::default()).await,
+    Err(Error::MutationOutcomeUnknown))
+
+
+failures:
+    client::tests::dropping_an_in_flight_mutation_fences_later_writes
+    client::tests::lost_mutation_reply_fences_later_writes_but_allows_status_recovery
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 27 filtered out; finished in 5.00s
+
+error: test failed, to rerun pass `-p ws-client --lib`

@@ -92,7 +92,7 @@ pub fn build_document_output(
     }
 
     let numeric_only = is_numeric_dominated(trimmed, ext);
-    let raw_chunks = chunk_text_with_lines(trimmed, DEFAULT_CHUNK_CHARS, DEFAULT_OVERLAP_RATIO);
+    let raw_chunks = chunk_text_with_lines(text, DEFAULT_CHUNK_CHARS, DEFAULT_OVERLAP_RATIO);
     if raw_chunks.is_empty() {
         return Ok(ExtractOutput::extracted(Vec::new()));
     }
@@ -109,6 +109,7 @@ pub fn build_document_output(
             break;
         }
         segments.push(SegmentDraft {
+            embedding_input: crate::DraftEmbeddingInput::Text,
             kind: seg_kind.to_string(),
             text: chunk.text,
             page: None,
@@ -883,28 +884,59 @@ fn extract_ifilter_text(
     let meta = std::fs::metadata(path)?;
     budget.check_size(meta.len())?;
 
-    let max_chars = budget
-        .max_segments
-        .saturating_mul(DEFAULT_CHUNK_CHARS)
-        .max(DEFAULT_CHUNK_CHARS);
+    let max_chars = ifilter_character_limit(budget);
 
     match extract_text_ifilter(path, max_chars, budget.deadline) {
-        IFilterOutcome::Extracted(text) => {
-            let trimmed = text.trim();
-            if trimmed.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(trimmed.to_string()))
-            }
-        }
+        IFilterOutcome::Extracted(text) => checked_ifilter_text(text, max_chars, budget),
         IFilterOutcome::Unsupported | IFilterOutcome::Failed(_) => Ok(None),
         IFilterOutcome::DeadlineExceeded => Err(ExtractError::DeadlineExceeded),
+    }
+}
+
+fn ifilter_character_limit(budget: &ExtractBudget) -> usize {
+    budget
+        .max_segments
+        .saturating_mul(DEFAULT_CHUNK_CHARS)
+        .max(DEFAULT_CHUNK_CHARS)
+        .min(usize::try_from(budget.max_bytes).unwrap_or(usize::MAX))
+}
+
+fn checked_ifilter_text(
+    text: String,
+    max_chars: usize,
+    budget: &ExtractBudget,
+) -> Result<Option<String>, ExtractError> {
+    // IFilter does not report whether hitting its cap truncated output.
+    if text.chars().count() >= max_chars || text.len() as u64 > budget.max_bytes {
+        return Err(ExtractError::Decode(
+            "IFilter decoded text limit reached; extraction incomplete".into(),
+        ));
+    }
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(trimmed.to_string()))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task2_ifilter_unbounded_chunk_collection_keeps_decoded_text_limit() {
+        let budget=ExtractBudget { max_segments:usize::MAX,..Default::default() };
+        assert_eq!(ifilter_character_limit(&budget),budget.max_bytes as usize);
+    }
+
+    #[test]
+    fn task2_ifilter_capped_or_over_budget_text_is_explicitly_incomplete() {
+        let budget=ExtractBudget::new(32,Duration::from_secs(5),30);
+        assert!(checked_ifilter_text("a".repeat(32),32,&budget).is_err());
+        assert!(checked_ifilter_text("é".repeat(17),100,&budget).is_err());
+        assert_eq!(checked_ifilter_text("complete".into(),32,&budget).unwrap(),Some("complete".into()));
+    }
     use crate::chunk::select_excerpt;
     use crate::ExtractionStatus;
     use std::io::Write;

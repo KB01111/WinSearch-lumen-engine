@@ -1,0 +1,31 @@
+cargo :    Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-pr
+otocol)
+At line:1 char:1
++ cargo test -p ws-code corroborat -- --test-threads=1 *> ../../artifac ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-platform v0.1.0 (<checkout>\src\engine\crates\ws-platform)
+   Compiling ws-code v0.1.0 (<checkout>\src\engine\crates\ws-code)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.37s
+     Running unittests src\lib.rs (target\debug\deps\ws_code-02f94e88609646da.exe)
+
+running 1 test
+test store::tests::code_corroboration_filters_before_limit_and_rejects_invalid_query_views ... FAILED
+
+failures:
+
+---- store::tests::code_corroboration_filters_before_limit_and_rejects_invalid_query_views stdout ----
+
+thread 'store::tests::code_corroboration_filters_before_limit_and_rejects_invalid_query_views' (127844) panicked at crates\ws-code\src\store.rs:1742:9:
+below-threshold current vectors are a completed lookup
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    store::tests::code_corroboration_filters_before_limit_and_rejects_invalid_query_views
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 43 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p ws-code --lib`

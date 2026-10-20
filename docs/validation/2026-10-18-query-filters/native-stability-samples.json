@@ -1,0 +1,97 @@
+[
+  {
+    "sample": 1,
+    "scope": "earlier same-source sample before final executable reconciliation",
+    "local_raw_sha256": "c1bd81bfad2edc1a9584a2b568d8ccab5a4066ea7c3306b816f97e3b2313fc0b",
+    "elapsed_seconds": 6.592,
+    "index_seconds": 2.19,
+    "public_queries": 10,
+    "extension_cases": 7,
+    "typed_extension_cases": 4,
+    "failures": [],
+    "owned_job_empty": true,
+    "binary_sha256": {
+      "winsearchd.exe": "c63dc302098c8a9d3b06d9beb5af62c845338cc03004b1a556bc3cebdf736c35",
+      "winsearch-cli.exe": "027d5e9b83f48ae681f09c28b3cf2945d924c964d0792698a5774e07a281e1cd",
+      "winsearch-embed.exe": "70305a0cb61e97844253cf3dfa3f85f4219ae3bfcad734d1762c438419971317",
+      "winsearch-extract.exe": "ce9fa7624e267457d2daca7f1bb1e22c8504dbd830c709864115ab709b758cd9"
+    },
+    "harness_sha256": "d937385dcd7335675b2efea0c6389cac730c2c71237707e623f916d9e73ba0fb"
+  },
+  {
+    "sample": 2,
+    "scope": "earlier same-source sample before final executable reconciliation",
+    "local_raw_sha256": "ed0769497ca3017cc4b8d92c1751ab40ec509fc6db6e3f2847413e597ae12b68",
+    "elapsed_seconds": 5.239,
+    "index_seconds": 1.162,
+    "public_queries": 10,
+    "extension_cases": 7,
+    "typed_extension_cases": 4,
+    "failures": [],
+    "owned_job_empty": true,
+    "binary_sha256": {
+      "winsearchd.exe": "c63dc302098c8a9d3b06d9beb5af62c845338cc03004b1a556bc3cebdf736c35",
+      "winsearch-cli.exe": "027d5e9b83f48ae681f09c28b3cf2945d924c964d0792698a5774e07a281e1cd",
+      "winsearch-embed.exe": "70305a0cb61e97844253cf3dfa3f85f4219ae3bfcad734d1762c438419971317",
+      "winsearch-extract.exe": "ce9fa7624e267457d2daca7f1bb1e22c8504dbd830c709864115ab709b758cd9"
+    },
+    "harness_sha256": "d937385dcd7335675b2efea0c6389cac730c2c71237707e623f916d9e73ba0fb"
+  },
+  {
+    "sample": 3,
+    "scope": "earlier same-source sample before final executable reconciliation",
+    "local_raw_sha256": "2ab020c12bb3f5f846937f1a1ed3f802e33da0a5b8dbe26f1371516550ef658b",
+    "elapsed_seconds": 6.661,
+    "index_seconds": 2.196,
+    "public_queries": 10,
+    "extension_cases": 7,
+    "typed_extension_cases": 4,
+    "failures": [],
+    "owned_job_empty": true,
+    "binary_sha256": {
+      "winsearchd.exe": "c63dc302098c8a9d3b06d9beb5af62c845338cc03004b1a556bc3cebdf736c35",
+      "winsearch-cli.exe": "027d5e9b83f48ae681f09c28b3cf2945d924c964d0792698a5774e07a281e1cd",
+      "winsearch-embed.exe": "70305a0cb61e97844253cf3dfa3f85f4219ae3bfcad734d1762c438419971317",
+      "winsearch-extract.exe": "ce9fa7624e267457d2daca7f1bb1e22c8504dbd830c709864115ab709b758cd9"
+    },
+    "harness_sha256": "d937385dcd7335675b2efea0c6389cac730c2c71237707e623f916d9e73ba0fb"
+  },
+  {
+    "sample": 4,
+    "scope": "earlier same-source sample before final executable reconciliation",
+    "local_raw_sha256": "27a20f6a3875f90548df65a42887dd18f87ded2e6aab1763b3bfcd20ffb1aaf0",
+    "elapsed_seconds": 8.477,
+    "index_seconds": 3.267,
+    "public_queries": 10,
+    "extension_cases": 7,
+    "typed_extension_cases": 4,
+    "failures": [],
+    "owned_job_empty": true,
+    "binary_sha256": {
+      "winsearchd.exe": "c63dc302098c8a9d3b06d9beb5af62c845338cc03004b1a556bc3cebdf736c35",
+      "winsearch-cli.exe": "027d5e9b83f48ae681f09c28b3cf2945d924c964d0792698a5774e07a281e1cd",
+      "winsearch-embed.exe": "70305a0cb61e97844253cf3dfa3f85f4219ae3bfcad734d1762c438419971317",
+      "winsearch-extract.exe": "ce9fa7624e267457d2daca7f1bb1e22c8504dbd830c709864115ab709b758cd9"
+    },
+    "harness_sha256": "d937385dcd7335675b2efea0c6389cac730c2c71237707e623f916d9e73ba0fb"
+  },
+  {
+    "sample": 5,
+    "scope": "earlier same-source sample before final executable reconciliation",
+    "local_raw_sha256": "b6418c80e698d9312e483c7e0d7766ddc3c20910d7ca613295ddafefe8e80ff9",
+    "elapsed_seconds": 5.954,
+    "index_seconds": 1.582,
+    "public_queries": 10,
+    "extension_cases": 7,
+    "typed_extension_cases": 4,
+    "failures": [],
+    "owned_job_empty": true,
+    "binary_sha256": {
+      "winsearchd.exe": "c63dc302098c8a9d3b06d9beb5af62c845338cc03004b1a556bc3cebdf736c35",
+      "winsearch-cli.exe": "027d5e9b83f48ae681f09c28b3cf2945d924c964d0792698a5774e07a281e1cd",
+      "winsearch-embed.exe": "70305a0cb61e97844253cf3dfa3f85f4219ae3bfcad734d1762c438419971317",
+      "winsearch-extract.exe": "ce9fa7624e267457d2daca7f1bb1e22c8504dbd830c709864115ab709b758cd9"
+    },
+    "harness_sha256": "d937385dcd7335675b2efea0c6389cac730c2c71237707e623f916d9e73ba0fb"
+  }
+]

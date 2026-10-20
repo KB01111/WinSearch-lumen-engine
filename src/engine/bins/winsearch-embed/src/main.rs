@@ -14,6 +14,7 @@
 //! WS_EMBED_BACKEND/WS_EMBED_STUB_DELAY_MS`, else compiled defaults.
 
 mod server;
+mod wav;
 
 use tracing::info;
 use ws_platform::{identity, SingleInstanceGuard};

@@ -1,0 +1,30 @@
+rtk :    Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-prot
+ocol)
+At line:1 char:1
++ rtk proxy cargo test -p ws-client preview_checks -- --test-threads=1  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-client v0.1.0 (<checkout>\src\engine\crates\ws-client)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.74s
+     Running unittests src\lib.rs (target\debug\deps\ws_client-554fa414f259563f.exe)
+
+running 1 test
+test client::tests::preview_checks_identity_location_utf8_budget_and_partial_state_before_delivery ... FAILED
+
+failures:
+
+---- client::tests::preview_checks_identity_location_utf8_budget_and_partial_state_before_delivery stdout ----
+
+thread 'client::tests::preview_checks_identity_location_utf8_budget_and_partial_state_before_delivery' (75540) panicked at crates\ws-client\src\client.rs:882:43:
+called `Result::unwrap()` on an `Err` value: Unsupported("entry.preview.text")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    client::tests::preview_checks_identity_location_utf8_budget_and_partial_state_before_delivery
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 30 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p ws-client --lib`

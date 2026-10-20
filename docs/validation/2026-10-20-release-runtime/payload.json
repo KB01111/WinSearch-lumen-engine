@@ -1,0 +1,317 @@
+{
+  "schemaVersion": 1,
+  "engineCommit": "d4f1448068d93d51120f7ec1e2a17395f88089f7",
+  "target": "x86_64-pc-windows-msvc",
+  "files": [
+    {
+      "path": "THIRD-PARTY-NOTICES.txt",
+      "sha256": "aef5bfe7f34ea6512af902e78ec8f7f862a65ebc7f376061d3254bf3bbadd1bb",
+      "sizeBytes": 7630
+    },
+    {
+      "path": "avcodec-63.dll",
+      "sha256": "525060f60b3d0171bb9e0ea4b2074a2ff07f5d96b2483a82d9e08fe2ece58e9c",
+      "sizeBytes": 91182080
+    },
+    {
+      "path": "avdevice-63.dll",
+      "sha256": "e9e4306ac36778f2faceb1b3ee42152e9b16f10227d2315ae42d282d77c9105c",
+      "sizeBytes": 4948480
+    },
+    {
+      "path": "avfilter-12.dll",
+      "sha256": "df6f94c43a04be9f3cedcf94b9c5085ae4186339b6828271d42055723eccc060",
+      "sizeBytes": 31195648
+    },
+    {
+      "path": "avformat-63.dll",
+      "sha256": "7275053ebb1dfa708d45d8544ad94bf664e0cb534cd0f2ed979fdf024bc190b3",
+      "sizeBytes": 22764032
+    },
+    {
+      "path": "avutil-61.dll",
+      "sha256": "a34c7ef846a2d353c1a6a266b22a001ccd42f6654ab92631a7196e961bdedffd",
+      "sizeBytes": 3016704
+    },
+    {
+      "path": "concrt140.dll",
+      "sha256": "a5b9af428829ab7b61ceae9d88a37ce1053551379ee007d8df53a7ba4d33c251",
+      "sizeBytes": 374352
+    },
+    {
+      "path": "ffmpeg.exe",
+      "sha256": "24fdada9908f7a231e9dfcc9f462273d3ddb698f5071f04c61496819ce3cfef0",
+      "sizeBytes": 540160
+    },
+    {
+      "path": "ffprobe.exe",
+      "sha256": "a77003c4628c7a414718623156280be47c1aaa2fa85c177d3d1d325d3d06358f",
+      "sizeBytes": 229888
+    },
+    {
+      "path": "ggml-base.dll",
+      "sha256": "1fef4fe44a9a0ba54e04ae58c651ecce330cf425463041cc407b42be62b56962",
+      "sizeBytes": 675328
+    },
+    {
+      "path": "ggml-cpu-alderlake.dll",
+      "sha256": "6f335fe79a35276fcef8ed098d4e2b5952a6cce036549e6547ed7c9b08ac3147",
+      "sizeBytes": 1103360
+    },
+    {
+      "path": "ggml-cpu-cannonlake.dll",
+      "sha256": "8a78dfa98d6f6621f96041805227ed78a2a18e0459ba3446d4912cb9aa9e0511",
+      "sizeBytes": 1206272
+    },
+    {
+      "path": "ggml-cpu-cascadelake.dll",
+      "sha256": "26cb79d301458ab48143c6634ff4b9a17b247c8bd3203add4e9e3d90b93deed7",
+      "sizeBytes": 1205760
+    },
+    {
+      "path": "ggml-cpu-haswell.dll",
+      "sha256": "ea84ecaeab37d2fd794032dd6c7e441b6329abba5835f8ddcbdd9ffde7f4eb5e",
+      "sizeBytes": 1105408
+    },
+    {
+      "path": "ggml-cpu-icelake.dll",
+      "sha256": "d60448a478c6029c7e4f7abbb4343ecb2c1b4dea99b6e409028202a85aff0a4a",
+      "sizeBytes": 1205760
+    },
+    {
+      "path": "ggml-cpu-sandybridge.dll",
+      "sha256": "777f1172ff889dce5c2baf1bdb3313af7a7f04f213b7e783177d4692b90fad2a",
+      "sizeBytes": 1076224
+    },
+    {
+      "path": "ggml-cpu-skylakex.dll",
+      "sha256": "987007c231607c71e92c578c51efe05b263f4558983017446f38a86a7a967328",
+      "sizeBytes": 1206272
+    },
+    {
+      "path": "ggml-cpu-sse42.dll",
+      "sha256": "916bf899d3dd80d886ed604059a6ed9693eb37ac4734997ffeb625ce66c6fa1a",
+      "sizeBytes": 841728
+    },
+    {
+      "path": "ggml-cpu-x64.dll",
+      "sha256": "e12f726dce960488ec911e7a0e0a99c67fe32986facbddd49c35ed49120a3656",
+      "sizeBytes": 843264
+    },
+    {
+      "path": "ggml.dll",
+      "sha256": "7516e5d871d1fe0e31897f6ee0f3aaf4c6471ce9016472285e65b19a42443f1a",
+      "sizeBytes": 61440
+    },
+    {
+      "path": "llama.dll",
+      "sha256": "a66c29aa35f7301977b24389cc38f2c9c07a04a0cb49349cd2f5055b891f61e5",
+      "sizeBytes": 2771968
+    },
+    {
+      "path": "msvcp140.dll",
+      "sha256": "639342ea9a67c0009122238ce070a8257e2e04d367d627509fec29f8442afb42",
+      "sizeBytes": 642720
+    },
+    {
+      "path": "msvcp140_1.dll",
+      "sha256": "456aebccb449fcba35f1109c259ba0aa10923e660f4de812a490d35f37f54fc9",
+      "sizeBytes": 35920
+    },
+    {
+      "path": "msvcp140_2.dll",
+      "sha256": "7a403abf753d0bdf09776cf4bcb13b5a6ebe3a47670de124a3c621aa4b952f82",
+      "sizeBytes": 274512
+    },
+    {
+      "path": "msvcp140_atomic_wait.dll",
+      "sha256": "d759dd381bdbd6142372de4cb57acc382e1b80c106b7414a408816564ee1eb6a",
+      "sizeBytes": 57936
+    },
+    {
+      "path": "msvcp140_codecvt_ids.dll",
+      "sha256": "f781e1e0133c397c3a2c73fd4dbcdb442378ba20fced56a2f7db5822436ddd2a",
+      "sizeBytes": 31312
+    },
+    {
+      "path": "mtmd.dll",
+      "sha256": "4abc3e9e8ce9a378a76a2c885fd5078a251389b36dd6ecaed3811d48e1baef30",
+      "sizeBytes": 2423808
+    },
+    {
+      "path": "notices/DigUp-LICENSE.txt",
+      "sha256": "2ba7d3ad3aafa9b791002d62a6fe237e89fa4287c2f4e59234b09d25bd909b26",
+      "sizeBytes": 1068
+    },
+    {
+      "path": "notices/code-grammars-LICENSES.txt",
+      "sha256": "241f52bfb300a7f999b4157f307babdc725333dea027397695e03a091cd9a8d7",
+      "sizeBytes": 55577
+    },
+    {
+      "path": "notices/ffmpeg/COPYING.GPLv3",
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+      "sizeBytes": 35147
+    },
+    {
+      "path": "notices/ffmpeg/LICENSE.txt",
+      "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
+      "sizeBytes": 7651
+    },
+    {
+      "path": "notices/ffmpeg/SOURCE-INSTRUCTIONS.md",
+      "sha256": "0d16f827d44ff9e1fec0080c001669727587d242ce51f0210bf4096de076c3d8",
+      "sizeBytes": 1711
+    },
+    {
+      "path": "notices/llama.cpp-LICENSE",
+      "sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d",
+      "sizeBytes": 1078
+    },
+    {
+      "path": "notices/msvc/REDISTRIBUTION.md",
+      "sha256": "40df3e86e1d2457c506cae8b40e39017ca94b82442e8085ffc7f8b7dd3a7d9b9",
+      "sizeBytes": 1775
+    },
+    {
+      "path": "notices/pdfium/LICENSE",
+      "sha256": "8854f4388f1ca13b3ad9baa42e95f5546b4c0b17109c159256d3eca7be39b09b",
+      "sizeBytes": 1184
+    },
+    {
+      "path": "notices/pdfium/licenses/abseil.txt",
+      "sha256": "f54fff0b905df5b3464527c652a30e903b172d6dcab4d89b5e6f105d5e4a4603",
+      "sizeBytes": 11564
+    },
+    {
+      "path": "notices/pdfium/licenses/agg23.txt",
+      "sha256": "c110d3ea2ad77467ce0dcff7d3337e6c8be8049a5103f4b9bd5fd911a77972e5",
+      "sizeBytes": 725
+    },
+    {
+      "path": "notices/pdfium/licenses/dragonbox-Apache2-LLVM.txt",
+      "sha256": "4964a7aaf2801a42d2342d2f5bbccd2126be7a5d8d46150e1338a43ea70da5de",
+      "sizeBytes": 12480
+    },
+    {
+      "path": "notices/pdfium/licenses/dragonbox-Boost.txt",
+      "sha256": "beb8e42e9d6b4284e03304d05a81a0755200a965fc8d0a5e0aea1e84cf805d6e",
+      "sizeBytes": 1361
+    },
+    {
+      "path": "notices/pdfium/licenses/fast_float.txt",
+      "sha256": "bf1b57355feca8fce77ee95f48002f8d4789fb71b30ec7599c06cda4901fbb2b",
+      "sizeBytes": 1106
+    },
+    {
+      "path": "notices/pdfium/licenses/freetype.txt",
+      "sha256": "f4b133e25df1f86ad3ffea453aa0e613f0474f34778dbbb3e437e7b2724937d8",
+      "sizeBytes": 6741
+    },
+    {
+      "path": "notices/pdfium/licenses/harfbuzz.txt",
+      "sha256": "bd836c0ddca8ea0bab54a03cd32b6ff7256cbb3840fca2edc1249a4ed92c5b02",
+      "sizeBytes": 2013
+    },
+    {
+      "path": "notices/pdfium/licenses/icu.txt",
+      "sha256": "93679f4389d53b6835d89843f251844fb9bc455b35bab036d3c8e7abe497a47a",
+      "sizeBytes": 28286
+    },
+    {
+      "path": "notices/pdfium/licenses/lcms.txt",
+      "sha256": "7312b68c5b25e9bf2b828706fb4e29588f22705112f411fd42e1f7d84c3d139a",
+      "sizeBytes": 1353
+    },
+    {
+      "path": "notices/pdfium/licenses/libjpeg_turbo.ijg",
+      "sha256": "db16a04128171879c60708d171b88d97345a2dd20f9bfc173680a4497c73f704",
+      "sizeBytes": 13059
+    },
+    {
+      "path": "notices/pdfium/licenses/libjpeg_turbo.md",
+      "sha256": "be2b2b5ab168bce87bc3e31f2a5c5adba4b7f6e9e51d618e958d1d46972ebd95",
+      "sizeBytes": 5755
+    },
+    {
+      "path": "notices/pdfium/licenses/libopenjpeg.txt",
+      "sha256": "c5ab0890a737c2dfa7ba675036554f6d17741d98629b0c2a145354d00617e6b2",
+      "sizeBytes": 1794
+    },
+    {
+      "path": "notices/pdfium/licenses/libpng.txt",
+      "sha256": "452390433ba0f88aa3e2b122c647741b72a0c117cd6ed7a329b49785aecb5511",
+      "sizeBytes": 5479
+    },
+    {
+      "path": "notices/pdfium/licenses/llvm-libc.txt",
+      "sha256": "3b6226c32e168c83b891d8d6f0d3c29c2116dc3ef93dc93c307b54f279ecf383",
+      "sizeBytes": 15418
+    },
+    {
+      "path": "notices/pdfium/licenses/pdfium.txt",
+      "sha256": "961eacd9633fff6d051db7208b755e9210e30efac7adec3e6a6d52798f0ccf0e",
+      "sizeBytes": 12818
+    },
+    {
+      "path": "notices/pdfium/licenses/simdutf.txt",
+      "sha256": "c172a0ba936ff31230febb5dad869e25cb7c1a07480c7a381be8cf011bb52719",
+      "sizeBytes": 1077
+    },
+    {
+      "path": "notices/pdfium/licenses/zlib.txt",
+      "sha256": "33fd641c9f3b0e0be64bc78fea9e94807674cdd70c48477599226cb8956565fe",
+      "sizeBytes": 1332
+    },
+    {
+      "path": "pdfium.dll",
+      "sha256": "1f2aee4286b8cf0413ab4562b7121aa454f9cfd9afd6ca8609bcef80927b3f80",
+      "sizeBytes": 7494656
+    },
+    {
+      "path": "swresample-7.dll",
+      "sha256": "1fbcea031ada11a15e609e209e1cd71a9c632f39bc4794190137b67351db677f",
+      "sizeBytes": 734720
+    },
+    {
+      "path": "swscale-10.dll",
+      "sha256": "9ff8d80bc228f0e557553fd5cfcefc67b682098e9bd6ab08dc7a7d2dc8ad4699",
+      "sizeBytes": 2332160
+    },
+    {
+      "path": "vccorlib140.dll",
+      "sha256": "9ce6f235791450717f8e05ecd729e95ec98e9630a9caae661ba6773b669ecbf7",
+      "sizeBytes": 350800
+    },
+    {
+      "path": "vcruntime140.dll",
+      "sha256": "19c293ac482fdb882cd29d2b0e6d807419efdcada04068f03e5723670895e17d",
+      "sizeBytes": 178848
+    },
+    {
+      "path": "vcruntime140_1.dll",
+      "sha256": "a253a12e4a8e9e23ebfe0ced829f7751e4f42c60066986bf20515ced8dcc68cd",
+      "sizeBytes": 50256
+    },
+    {
+      "path": "vcruntime140_threads.dll",
+      "sha256": "cd05a48a1183b074e81275d6c6472ecb5b09db8a0db8d1850b009ad041907ce9",
+      "sizeBytes": 38560
+    },
+    {
+      "path": "winsearch-embed.exe",
+      "sha256": "f455430829227c9d254a818febddcc6c0f1d44ea5e80382a6bb50e72a641b94d",
+      "sizeBytes": 1382912
+    },
+    {
+      "path": "winsearch-extract.exe",
+      "sha256": "70a3ebb329a68f42407211bd1adea368f2318635ac1cd9cd156363081aa4209e",
+      "sizeBytes": 29918208
+    },
+    {
+      "path": "winsearchd.exe",
+      "sha256": "a8963f28292e4c6c587517bae587e46add571e351fd970246bf2961369c966e4",
+      "sizeBytes": 7169536
+    }
+  ]
+}

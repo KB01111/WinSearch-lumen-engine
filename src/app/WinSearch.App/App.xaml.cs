@@ -13,8 +13,8 @@ namespace WinSearch.App;
 /// </summary>
 public partial class App : Application
 {
-    private const string InstanceMutexName = @"Local\WinSearch.App.v1";
-    private const string ShowSignalName = @"Local\WinSearch.ShowOverlay";
+    private static string InstanceMutexName => EnginePipe.ObjectNameForCurrentUser(@"Local\WinSearch.App.v1");
+    private static string ShowSignalName => EnginePipe.ObjectNameForCurrentUser(@"Local\WinSearch.ShowOverlay");
 
     private Mutex? _instanceMutex;
     private EventWaitHandle? _showSignal;
@@ -44,6 +44,7 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        _ = AppSettings.SettingsDirectory;
         _instanceMutex = new Mutex(true, InstanceMutexName, out var isFirstInstance);
         if (!isFirstInstance)
         {

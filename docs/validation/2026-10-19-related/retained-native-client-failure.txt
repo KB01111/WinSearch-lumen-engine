@@ -1,0 +1,14 @@
+typed search outcome: {"disposition":"complete","semantic":{"phase":"disabled","reason":null}}
+typed search outcome: {"disposition":"complete","semantic":{"phase":"disabled","reason":null}}
+typed search outcome: {"disposition":"complete","semantic":{"phase":"disabled","reason":null}}
+typed search outcome: {"disposition":"complete","semantic":{"phase":"disabled","reason":null}}
+typed search outcome: {"disposition":"complete","semantic":{"phase":"disabled","reason":null}}
+typed search outcome: {"disposition":"complete","semantic":{"phase":"disabled","reason":null}}
+typed search outcome: {"disposition":"complete","semantic":{"phase":"disabled","reason":null}}
+typed search outcome: {"disposition":"complete","semantic":{"phase":"disabled","reason":null}}
+typed search outcome: {"disposition":"complete","semantic":{"phase":"disabled","reason":null}}
+typed search outcome: {"disposition":"complete","semantic":{"phase":"disabled","reason":null}}
+
+thread 'main' (129528) panicked at crates\ws-client\examples\native-client-smoke.rs:231:46:
+index out of bounds: the len is 0 but the index is 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

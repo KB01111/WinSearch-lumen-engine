@@ -1,0 +1,29 @@
+rtk :    Compiling ws-platform v0.1.0 (<checkout>\src\engine\crates\ws-plat
+form)
+At <checkout>\artifacts\entry-reference-checks.ps1:15 char:17
++ ... licy-red' { rtk proxy cargo test -p ws-platform metadata_guard_reject ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-platform):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.22s
+     Running unittests src\lib.rs (target\debug\deps\ws_platform-ee26edcd2fee13ac.exe)
+
+running 1 test
+test content::tests::metadata_guard_rejects_parent_traversal_and_alternate_streams ... FAILED
+
+failures:
+
+---- content::tests::metadata_guard_rejects_parent_traversal_and_alternate_streams stdout ----
+
+thread 'content::tests::metadata_guard_rejects_parent_traversal_and_alternate_streams' (78164) panicked at crates\ws-platform\src\content.rs:46:13:
+parent components must not cross a consented lexical root
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    content::tests::metadata_guard_rejects_parent_traversal_and_alternate_streams
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p ws-platform --lib`

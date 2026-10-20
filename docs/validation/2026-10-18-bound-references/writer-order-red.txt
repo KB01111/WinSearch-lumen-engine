@@ -1,0 +1,29 @@
+rtk :    Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearchd
+)
+At line:1 char:224
++ ... src/engine; rtk proxy cargo test -p winsearchd entry_reference_delive ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling wi...ins\winsearchd):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.32s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-a1af7bf73df4d90a.exe)
+
+running 1 test
+test engine::tests::entry_reference_delivery_withholds_prepared_content_after_source_change_or_request_reuse ... FAILED
+
+failures:
+
+---- engine::tests::entry_reference_delivery_withholds_prepared_content_after_source_change_or_request_reuse stdout ----
+
+thread 'engine::tests::entry_reference_delivery_withholds_prepared_content_after_source_change_or_request_reuse' (108172) panicked at bins\winsearchd\src\engine.rs:1533:17:
+only actually delivered exact IDs may suppress semantic hits
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    engine::tests::entry_reference_delivery_withholds_prepared_content_after_source_change_or_request_reuse
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 208 filtered out; finished in 0.29s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

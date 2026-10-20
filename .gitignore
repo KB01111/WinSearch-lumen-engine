@@ -18,6 +18,7 @@ models/
 cache/
 
 # Tooling
+__pycache__/
 *.log
 .DS_Store
 .commandcode/

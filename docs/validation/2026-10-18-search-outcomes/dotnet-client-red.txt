@@ -1,0 +1,157 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  WinSearch.Core -> <checkout>\src\app\WinSearch.Core\bin\Debug\net8.0-windows10.0.19041.0\WinSearch.Core.dll
+  WinSearch.ViewModels -> <checkout>\src\app\WinSearch.ViewModels\bin\Debug\net8.0-windows10.0.19041.0\WinSearch.ViewModels.dll
+  WinSearch.Tests -> <checkout>\src\app\WinSearch.Tests\bin\Debug\net8.0-windows10.0.19041.0\WinSearch.Tests.dll
+Test run for <checkout>\src\app\WinSearch.Tests\bin\Debug\net8.0-windows10.0.19041.0\WinSearch.Tests.dll (.NETCoreApp,Version=v8.0)
+A total of 1 test files matched the specified pattern.
+rtk : [xUnit.net 00:00:00.38]     WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery
+(scenario: 12) [FAIL]
+At line:1 char:147
++ ... -error.log; rtk proxy dotnet test WinSearch.slnx --nologo --filter Fu ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([xUnit.net 00:0...rio: 12) [FAIL]:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+[xUnit.net 00:00:00.39]     WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scena
+rio: 4) [FAIL]
+[xUnit.net 00:00:00.39]     WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scena
+rio: 11) [FAIL]
+[xUnit.net 00:00:00.40]     WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scena
+rio: 10) [FAIL]
+[xUnit.net 00:00:00.42]     WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scena
+rio: 5) [FAIL]
+[xUnit.net 00:00:00.42]     WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scena
+rio: 0) [FAIL]
+[xUnit.net 00:00:00.42]     WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scena
+rio: 2) [FAIL]
+[xUnit.net 00:00:00.43]     WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scena
+rio: 1) [FAIL]
+[xUnit.net 00:00:00.43]     WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scena
+rio: 7) [FAIL]
+  Failed WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scenario: 12) [104 ms]
+  Error Message:
+   Assert.NotNull() Failure: Value is null
+  Stack Trace:
+     at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 54
+   at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 54
+--- End of stack trace from previous location ---
+  Failed WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scenario: 4) [10 ms]
+  Error Message:
+   Assert.IsType() Failure: Value is null
+Expected: typeof(WinSearch.Core.Protocol.EngineException)
+Actual:   null
+  Stack Trace:
+     at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 53
+   at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 54
+--- End of stack trace from previous location ---
+  Failed WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scenario: 11) [2 ms]
+  Error Message:
+   Assert.NotNull() Failure: Value is null
+  Stack Trace:
+     at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 54
+   at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 54
+--- End of stack trace from previous location ---
+  Failed WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scenario: 10) [5 ms]
+  Error Message:
+   Assert.NotNull() Failure: Value is null
+  Stack Trace:
+     at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 54
+   at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 54
+--- End of stack trace from previous location ---
+  Failed WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scenario: 5) [14 ms]
+  Error Message:
+   Assert.IsType() Failure: Value is null
+Expected: typeof(WinSearch.Core.Protocol.EngineException)
+Actual:   null
+  Stack Trace:
+     at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 53
+   at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 54
+--- End of stack trace from previous location ---
+  Failed WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scenario: 0) [2 ms]
+  Error Message:
+   Assert.IsType() Failure: Value is null
+Expected: typeof(WinSearch.Core.Protocol.EngineException)
+Actual:   null
+  Stack Trace:
+     at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 53
+   at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 54
+--- End of stack trace from previous location ---
+  Failed WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scenario: 2) [2 ms]
+  Error Message:
+   Assert.IsType() Failure: Value is null
+Expected: typeof(WinSearch.Core.Protocol.EngineException)
+Actual:   null
+  Stack Trace:
+     at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 53
+   at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 54
+--- End of stack trace from previous location ---
+  Failed WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scenario: 1) [2 ms]
+  Error Message:
+   Assert.IsType() Failure: Value is null
+Expected: typeof(WinSearch.Core.Protocol.EngineException)
+Actual:   null
+  Stack Trace:
+     at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 53
+   at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 54
+--- End of stack trace from previous location ---
+  Failed WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scenario: 7) [2 ms]
+  Error Message:
+   Assert.IsType() Failure: Value is null
+Expected: typeof(WinSearch.Core.Protocol.EngineException)
+Actual:   null
+  Stack Trace:
+     at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 53
+   at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 54
+--- End of stack trace from previous location ---
+[xUnit.net 00:00:00.46]     WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scena
+rio: 8) [FAIL]
+[xUnit.net 00:00:00.46]     WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scena
+rio: 9) [FAIL]
+[xUnit.net 00:00:00.46]     WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scena
+rio: 13) [FAIL]
+[xUnit.net 00:00:00.46]     WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scena
+rio: 3) [FAIL]
+[xUnit.net 00:00:00.46]     WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scena
+rio: 6) [FAIL]
+  Failed WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scenario: 8) [2 ms]
+  Error Message:
+   Assert.NotNull() Failure: Value is null
+  Stack Trace:
+     at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 54
+   at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 54
+--- End of stack trace from previous location ---
+  Failed WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scenario: 9) [2 ms]
+  Error Message:
+   Assert.NotNull() Failure: Value is null
+  Stack Trace:
+     at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 54
+   at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 54
+--- End of stack trace from previous location ---
+  Failed WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scenario: 13) [2 ms]
+  Error Message:
+   Assert.NotNull() Failure: Value is null
+  Stack Trace:
+     at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 54
+   at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 54
+--- End of stack trace from previous location ---
+  Failed WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scenario: 3) [2 ms]
+  Error Message:
+   Assert.IsType() Failure: Value is null
+Expected: typeof(WinSearch.Core.Protocol.EngineException)
+Actual:   null
+  Stack Trace:
+     at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 53
+   at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 54
+--- End of stack trace from previous location ---
+  Failed WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(scenario: 6) [2 ms]
+  Error Message:
+   Assert.IsType() Failure: Value is null
+Expected: typeof(WinSearch.Core.Protocol.EngineException)
+Actual:   null
+  Stack Trace:
+     at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 53
+   at WinSearch.Tests.IndexingPipeTests.SearchOutcomesAreRequiredAndValidatedBeforeDelivery(Int32 scenario) in <checkout>\src\app\WinSearch.Tests\IndexingPipeTests.cs:line 54
+--- End of stack trace from previous location ---
+
+Failed!  - Failed:    14, Passed:     0, Skipped:     0, Total:    14, Duration: 182 ms - WinSearch.Tests.dll (net8.0)

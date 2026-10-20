@@ -12,6 +12,7 @@ pub mod notebook;
 pub mod parse;
 pub mod store;
 pub mod symbols;
+mod syntax;
 
 use std::path::Path;
 
@@ -28,7 +29,7 @@ pub use model::{
 };
 pub use notebook::{parse_notebook, NotebookCell, ParsedNotebook};
 pub use parse::{
-    parse_file, parse_source, parse_source_with_offset, persist_parsed_file, ParsedCodeFile,
+    parse_file, parse_file_with_sha256, parse_source, parse_source_with_offset, persist_parsed_file, ParsedCodeFile,
     ParsedCodeUnit, FALLBACK_CHUNK_LINES, FALLBACK_CHUNK_OVERLAP,
 };
 pub use store::{CodeIndexStats, CodeStore, CodeStoreError};
@@ -43,7 +44,7 @@ pub fn index_code_file(
     scan_generation: i64,
     record: &CodeFileRecord,
 ) -> anyhow::Result<(i64, Vec<i64>, ParsedCodeFile)> {
-    let raw = std::fs::read_to_string(Path::new(&record.path))?;
+    let raw = parse::read_source(Path::new(&record.path))?;
     let parsed = if record.language.eq_ignore_ascii_case("notebook")
         || record.language.eq_ignore_ascii_case("jupyter")
         || record.ext.eq_ignore_ascii_case("ipynb")
@@ -52,9 +53,13 @@ pub fn index_code_file(
             .map_err(|e| anyhow::anyhow!("invalid notebook {}: {e}", record.path))?
             .parsed
     } else {
-        parse_source(&raw, &record.language)
+        parse_source(
+            &raw,
+            parse::file_parse_language(Path::new(&record.path), &record.language),
+        )
     };
-    let outcomes = store.apply_file_batch(repo_id, scan_generation, std::slice::from_ref(record))?;
+    let outcomes =
+        store.apply_file_batch(repo_id, scan_generation, std::slice::from_ref(record))?;
     let file_id = outcomes
         .first()
         .map(|o| o.file_id())

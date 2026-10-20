@@ -1,0 +1,46 @@
+rtk :    Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-prot
+ocol)
+At line:1 char:1
++ rtk proxy cargo test -p ws-client --lib file_kind_selection *> ..\..\ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-client v0.1.0 (<checkout>\src\engine\crates\ws-client)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.21s
+     Running unittests src\lib.rs (target\debug\deps\ws_client-554fa414f259563f.exe)
+
+running 3 tests
+test client::tests::file_kind_selection_requires_its_capability_before_dispatch ... FAILED
+test client::tests::file_kind_selection_validates_every_reply_against_source_classification ... FAILED
+test client::tests::file_kind_selection_rejects_excessive_lists_before_connecting ... FAILED
+
+failures:
+
+---- client::tests::file_kind_selection_requires_its_capability_before_dispatch stdout ----
+
+thread 'client::tests::file_kind_selection_requires_its_capability_before_dispatch' (149244) panicked at crates\ws-client\src\client.rs:766:9:
+assertion failed: matches!(outcome,Err(Error::Unsupported("search.file_kinds")))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- client::tests::file_kind_selection_validates_every_reply_against_source_classification stdout ----
+
+thread 'client::tests::file_kind_selection_validates_every_reply_against_source_classification' (136160) panicked at crates\ws-client\src\client.rs:792:13:
+assertion `left == right` failed: Some("C:/Docs/book.pdf")/Spreadsheet
+  left: true
+ right: false
+
+---- client::tests::file_kind_selection_rejects_excessive_lists_before_connecting stdout ----
+
+thread 'client::tests::file_kind_selection_rejects_excessive_lists_before_connecting' (142576) panicked at crates\ws-client\src\client.rs:801:9:
+assertion failed: matches!(result,Ok(Err(Error::InvalidInput(_))))
+
+
+failures:
+    client::tests::file_kind_selection_rejects_excessive_lists_before_connecting
+    client::tests::file_kind_selection_requires_its_capability_before_dispatch
+    client::tests::file_kind_selection_validates_every_reply_against_source_classification
+
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 48 filtered out; finished in 0.11s
+
+error: test failed, to rerun pass `-p ws-client --lib`

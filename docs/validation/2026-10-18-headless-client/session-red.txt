@@ -1,0 +1,73 @@
+cargo :    Compiling ws-client v0.1.0 (<checkout>\src\engine\crates\ws-clie
+nt)
+At line:1 char:27
++ ... src/engine; cargo test -p ws-client --lib transport::tests *> ../../a ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...ates\ws-client):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.33s
+     Running unittests src\lib.rs (target\debug\deps\ws_client-dc52a795d104f408.exe)
+
+running 6 tests
+test transport::tests::dropped_partial_receive_closes_io_instead_of_reusing_partial_frame ... FAILED
+test transport::tests::dropped_partial_send_closes_owned_connection ... FAILED
+test transport::tests::receive_timeout_and_malformed_frame_close_owned_connection ... FAILED
+test transport::tests::handshake_rejects_foreign_version_and_wrong_envelope ... FAILED
+test transport::tests::handshake_preserves_connection_scoped_remote_error ... FAILED
+test transport::tests::handshake_sends_current_version_then_accepts_ack ... FAILED
+
+failures:
+
+---- transport::tests::dropped_partial_receive_closes_io_instead_of_reusing_partial_frame stdout ----
+
+thread 'transport::tests::dropped_partial_receive_closes_io_instead_of_reusing_partial_frame' (100712) panicked at crates\ws-client\src\transport.rs:128:9:
+assertion failed: tokio::time::timeout(Duration::from_millis(10),
+            session.recv(Some(deadline()))).await.is_err()
+
+---- transport::tests::dropped_partial_send_closes_owned_connection stdout ----
+
+thread 'transport::tests::dropped_partial_send_closes_owned_connection' (102812) panicked at crates\ws-client\src\transport.rs:154:9:
+assertion failed: tokio::time::timeout(Duration::from_millis(10),
+            session.send(&ClientMessage::Ping { id: 7 },
+                deadline())).await.is_err()
+
+---- transport::tests::receive_timeout_and_malformed_frame_close_owned_connection stdout ----
+
+thread 'transport::tests::receive_timeout_and_malformed_frame_close_owned_connection' (90224) panicked at crates\ws-client\src\transport.rs:139:9:
+assertion failed: matches!(session.recv(Some(Instant::now() + Duration::from_millis(10))).await,
+    Err(Error::Timeout))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- transport::tests::handshake_rejects_foreign_version_and_wrong_envelope stdout ----
+
+thread 'transport::tests::handshake_rejects_foreign_version_and_wrong_envelope' (54112) panicked at crates\ws-client\src\transport.rs:48:44:
+called `Result::unwrap()` on an `Err` value: Custom { kind: UnexpectedEof, error: "early eof" }
+
+thread 'transport::tests::handshake_rejects_foreign_version_and_wrong_envelope' (54112) panicked at crates\ws-client\src\transport.rs:106:24:
+called `Result::unwrap()` on an `Err` value: JoinError::Panic(Id(3), "called `Result::unwrap()` on an `Err` value: Custom { kind: UnexpectedEof, error: \"early eof\" }", ...)
+
+---- transport::tests::handshake_preserves_connection_scoped_remote_error stdout ----
+
+thread 'transport::tests::handshake_preserves_connection_scoped_remote_error' (6376) panicked at crates\ws-client\src\transport.rs:118:9:
+assertion failed: matches!(Session::handshake(client, deadline()).await,
+    Err(Error::Remote
+    { code: ws_protocol::ErrorCode::ProtocolVersionMismatch, .. }))
+
+---- transport::tests::handshake_sends_current_version_then_accepts_ack stdout ----
+
+thread 'transport::tests::handshake_sends_current_version_then_accepts_ack' (101780) panicked at crates\ws-client\src\transport.rs:85:72:
+called `Result::unwrap()` on an `Err` value: Protocol("handshake is not implemented")
+
+
+failures:
+    transport::tests::dropped_partial_receive_closes_io_instead_of_reusing_partial_frame
+    transport::tests::dropped_partial_send_closes_owned_connection
+    transport::tests::handshake_preserves_connection_scoped_remote_error
+    transport::tests::handshake_rejects_foreign_version_and_wrong_envelope
+    transport::tests::handshake_sends_current_version_then_accepts_ack
+    transport::tests::receive_timeout_and_malformed_frame_close_owned_connection
+
+test result: FAILED. 0 passed; 6 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p ws-client --lib`

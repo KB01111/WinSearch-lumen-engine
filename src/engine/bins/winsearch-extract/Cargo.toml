@@ -1,0 +1,11 @@
+[package]
+name = "winsearch-extract"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Job-contained document and image extraction worker"
+
+[dependencies]
+ws-extract.workspace = true
+ws-platform.workspace = true
+ws-protocol.workspace = true

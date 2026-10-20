@@ -1,0 +1,255 @@
+{
+  "scope": "Frozen generated source-text embedding calibration; not native parsing/installed acceptance.",
+  "documents": [
+    {
+      "id": "sort",
+      "filename": "names.rs",
+      "text": "pub fn sort_names(names: &mut [String]) {\n    names.sort_unstable();\n}\n"
+    },
+    {
+      "id": "unique",
+      "filename": "unique.py",
+      "text": "def unique_values(values):\n    return list(dict.fromkeys(values))\n"
+    },
+    {
+      "id": "http",
+      "filename": "profile.ts",
+      "text": "async function loadProfile(id: string) {\n    const response = await fetch(\"/api/users/\" + id);\n    return response.json();\n}\n"
+    },
+    {
+      "id": "lines",
+      "filename": "Lines.cs",
+      "text": "public static string[] LoadLines(string path) {\n    return System.IO.File.ReadAllLines(path);\n}\n"
+    },
+    {
+      "id": "checksum",
+      "filename": "checksum.go",
+      "text": "func FileChecksum(data []byte) [32]byte {\n    return sha256.Sum256(data)\n}\n"
+    },
+    {
+      "id": "retry",
+      "filename": "Retry.java",
+      "text": "static void retry(Runnable operation, int attempts) {\n    for (int n = 0; ; n++) {\n        try { operation.run(); return; }\n        catch (RuntimeException failure) { if (n + 1 >= attempts) throw failure; }\n    }\n}\n"
+    },
+    {
+      "id": "group",
+      "filename": "revenue.sql",
+      "text": "SELECT customer_id, SUM(amount) AS total_spent\nFROM orders\nGROUP BY customer_id;\n"
+    },
+    {
+      "id": "old_logs",
+      "filename": "logs.ps1",
+      "text": "Get-ChildItem -LiteralPath $logDirectory -Filter \"*.log\" |\n    Where-Object LastWriteTime -lt (Get-Date).AddDays(-30) |\n    Remove-Item -LiteralPath { $_.FullName }\n"
+    },
+    {
+      "id": "path",
+      "filename": "scope.rs",
+      "text": "pub fn contains_path(root: &Path, candidate: &Path) -> bool {\n    candidate.strip_prefix(root).is_ok()\n}\n"
+    },
+    {
+      "id": "batches",
+      "filename": "batches.py",
+      "text": "def batches(values, size):\n    for offset in range(0, len(values), size):\n        yield values[offset:offset + size]\n"
+    },
+    {
+      "id": "debounce",
+      "filename": "debounce.ts",
+      "text": "function debounce(callback: () => void, delay: number) {\n    let timer: ReturnType<typeof setTimeout>;\n    return () => { clearTimeout(timer); timer = setTimeout(callback, delay); };\n}\n"
+    },
+    {
+      "id": "cancel",
+      "filename": "Copy.cs",
+      "text": "public async Task Copy(Stream input, Stream output, CancellationToken stop) {\n    byte[] buffer = new byte[4096];\n    int count;\n    while ((count = await input.ReadAsync(buffer, stop)) != 0) {\n        stop.ThrowIfCancellationRequested();\n        await output.WriteAsync(buffer.AsMemory(0, count), stop);\n    }\n}\n"
+    },
+    {
+      "id": "json",
+      "filename": "decode.go",
+      "text": "func Decode(data []byte, target any) error {\n    return json.Unmarshal(data, target)\n}\n"
+    },
+    {
+      "id": "gzip",
+      "filename": "Compress.java",
+      "text": "static byte[] compress(byte[] input) throws IOException {\n    var buffer = new ByteArrayOutputStream();\n    try (var gzip = new GZIPOutputStream(buffer)) { gzip.write(input); }\n    return buffer.toByteArray();\n}\n"
+    },
+    {
+      "id": "latest",
+      "filename": "latest.sql",
+      "text": "SELECT * FROM (\n  SELECT e.*, ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY created_at DESC) AS position\n  FROM events e\n) ranked WHERE position = 1;\n"
+    },
+    {
+      "id": "graph",
+      "filename": "graph.py",
+      "text": "def breadth_first(graph, start):\n    visited = {start}\n    queue = [start]\n    while queue:\n        vertex = queue.pop(0)\n        yield vertex\n        for neighbor in graph[vertex]:\n            if neighbor not in visited:\n                visited.add(neighbor)\n                queue.append(neighbor)\n"
+    }
+  ],
+  "development": [
+    {
+      "name": "alphabetical",
+      "query": "Arrange a list of names in alphabetical order",
+      "expected": "sort"
+    },
+    {
+      "name": "deduplicate",
+      "query": "Remove repeated values while keeping their first occurrence",
+      "expected": "unique"
+    },
+    {
+      "name": "http_profile",
+      "query": "Request person details from an HTTP API",
+      "expected": "http"
+    },
+    {
+      "name": "read_file",
+      "query": "Load the lines of a text file into a string array",
+      "expected": "lines"
+    },
+    {
+      "name": "hash",
+      "query": "Compute a SHA-256 digest of bytes",
+      "expected": "checksum"
+    },
+    {
+      "name": "retry_errors",
+      "query": "Try an operation again when it fails",
+      "expected": "retry"
+    },
+    {
+      "name": "customer_totals",
+      "query": "Total the order amounts for each customer",
+      "expected": "group"
+    },
+    {
+      "name": "expire_logs",
+      "query": "Delete log files older than thirty days",
+      "expected": "old_logs"
+    },
+    {
+      "name": "astronomy",
+      "query": "Asteroid orbital mechanics and interstellar propulsion",
+      "expected": null
+    },
+    {
+      "name": "recipe",
+      "query": "Bake a chocolate cake with flour butter eggs and sugar",
+      "expected": null
+    },
+    {
+      "name": "animal_photo",
+      "query": "A photograph of a puppy running on a beach",
+      "expected": null
+    },
+    {
+      "name": "travel",
+      "query": "Hotel room reservations and airline boarding passes",
+      "expected": null
+    },
+    {
+      "name": "history",
+      "query": "Medieval castle architecture and royal dynasties",
+      "expected": null
+    },
+    {
+      "name": "music",
+      "query": "Beethoven symphonies and orchestral harmony",
+      "expected": null
+    },
+    {
+      "name": "wedding",
+      "query": "Wedding photography poses for a bride and groom",
+      "expected": null
+    },
+    {
+      "name": "cosmetics",
+      "query": "Moisturizing skincare products for sensitive skin",
+      "expected": null
+    }
+  ],
+  "heldout": [
+    {
+      "name": "contained_path",
+      "query": "Determine whether a file belongs inside a selected directory",
+      "expected": "path"
+    },
+    {
+      "name": "partition",
+      "query": "Split a sequence into consecutive fixed size groups",
+      "expected": "batches"
+    },
+    {
+      "name": "typing",
+      "query": "Delay a callback until typing has stopped",
+      "expected": "debounce"
+    },
+    {
+      "name": "abort_io",
+      "query": "Stop copying a stream when cancellation is requested",
+      "expected": "cancel"
+    },
+    {
+      "name": "parse_data",
+      "query": "Deserialize encoded JSON into a native structure",
+      "expected": "json"
+    },
+    {
+      "name": "compress_data",
+      "query": "Compress bytes into the GZIP format",
+      "expected": "gzip"
+    },
+    {
+      "name": "last_event",
+      "query": "Find the most recent event for every customer",
+      "expected": "latest"
+    },
+    {
+      "name": "traverse",
+      "query": "Visit a graph breadth first without repeating vertices",
+      "expected": "graph"
+    },
+    {
+      "name": "vegetables",
+      "query": "Roasted vegetables with herbs and olive oil",
+      "expected": null
+    },
+    {
+      "name": "football",
+      "query": "Professional football league match scores and stadium crowds",
+      "expected": null
+    },
+    {
+      "name": "climbing",
+      "query": "Mountain climbing routes and summit conditions",
+      "expected": null
+    },
+    {
+      "name": "wildflowers",
+      "query": "Identify wildflower plants from petals and leaves",
+      "expected": null
+    },
+    {
+      "name": "elections",
+      "query": "National election results and parliamentary coalitions",
+      "expected": null
+    },
+    {
+      "name": "sea_life",
+      "query": "Coral reef fish and underwater marine ecosystems",
+      "expected": null
+    },
+    {
+      "name": "furniture",
+      "query": "Choose a comfortable sofa for a living room",
+      "expected": null
+    },
+    {
+      "name": "poetry",
+      "query": "Romantic poetry and literary imagery",
+      "expected": null
+    }
+  ],
+  "gates": {
+    "minimum_recall_at_5": 0.9,
+    "minimum_mrr": 0.85,
+    "maximum_negative_fp_rate": 0,
+    "cosine_floor": 0.65
+  }
+}

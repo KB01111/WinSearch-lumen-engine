@@ -20,7 +20,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::{Child, Command};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -80,6 +80,8 @@ pub enum EmbedError {
     VersionMismatch(String),
     #[error("embedding model not available: {0}")]
     ModelNotAvailable(String),
+    #[error("embedding input unavailable: {0}")]
+    InputUnavailable(String),
     #[error("embedding failed: {0}")]
     EmbedFailed(String),
     #[error("unsupported by embed worker: {0}")]
@@ -200,6 +202,12 @@ struct Slot {
     child: Option<Child>,
 }
 
+#[derive(Default)]
+struct BoundedCalls {
+    active: usize,
+    epoch: u64,
+}
+
 pub struct EmbedSupervisor {
     config: EmbedConfig,
     /// Serializes whole requests on the legacy direct path (`transact`,
@@ -215,7 +223,7 @@ pub struct EmbedSupervisor {
     /// even for foreign (unkillable-by-us) workers without disrupting other
     /// concurrent bounded callers.
     inflight_tids: Mutex<HashMap<u64, u32>>,
-    active_bounded: AtomicUsize,
+    bounded_calls: Mutex<BoundedCalls>,
     worker_gen: AtomicU64,
     preferred_backend: Mutex<Option<String>>,
     cancel_seq: AtomicU64,
@@ -237,7 +245,7 @@ impl EmbedSupervisor {
             conn: Mutex::new(()),
             slot: Mutex::new(Slot { child: None }),
             inflight_tids: Mutex::new(HashMap::new()),
-            active_bounded: AtomicUsize::new(0),
+            bounded_calls: Mutex::new(BoundedCalls::default()),
             worker_gen: AtomicU64::new(1),
             preferred_backend: Mutex::new(None),
             cancel_seq: AtomicU64::new(1),
@@ -271,7 +279,8 @@ impl EmbedSupervisor {
                 true
             }
         };
-        if changed && self.active_bounded.load(Ordering::Acquire) == 0 {
+        let idle = self.bounded_calls.lock().unwrap_or_else(|p| p.into_inner()).active == 0;
+        if changed && idle {
             self.terminate_worker();
         }
     }
@@ -328,21 +337,47 @@ impl EmbedSupervisor {
     }
 
     fn begin_bounded(&self) {
-        let _slot = self.slot.lock().unwrap_or_else(|p| p.into_inner());
-        self.active_bounded.fetch_add(1, Ordering::AcqRel);
+        let mut calls = self.bounded_calls.lock().unwrap_or_else(|p| p.into_inner());
+        calls.active += 1;
+        calls.epoch += 1;
     }
 
-    fn finish_bounded(&self, timed_out: bool) {
-        let mut slot = self.slot.lock().unwrap_or_else(|p| p.into_inner());
-        let prev = self.active_bounded.fetch_sub(1, Ordering::AcqRel);
-        if timed_out && prev == 1 {
-            match kill_locked(&mut slot) {
-                Ok(true) => {
-                    self.worker_gen.fetch_add(1, Ordering::Release);
-                    info!("embed worker killed");
-                }
-                Ok(false) => {}
-                Err(e) => warn!(error = %e, "embed worker kill failed"),
+    fn finish_bounded(self: &std::sync::Arc<Self>, timed_out: bool) {
+        let mut calls = self.bounded_calls.lock().unwrap_or_else(|p| p.into_inner());
+        calls.active -= 1;
+        if !timed_out || calls.active != 0 {
+            return;
+        }
+        let epoch = calls.epoch;
+        let worker_gen = self.worker_gen.load(Ordering::Acquire);
+        drop(calls);
+        // Startup may hold `slot` for 30s. Cleanup must never extend the caller's
+        // deadline, and a newer caller must invalidate deferred cleanup.
+        let sup = std::sync::Arc::clone(self);
+        if let Err(e) = std::thread::Builder::new().name("winsearch-embed-cleanup".into()).spawn(move || {
+            sup.retire_timed_out_worker(epoch, worker_gen);
+        }) {
+            warn!(error = %e, "cannot spawn embed timeout cleanup");
+        }
+    }
+
+    fn retire_timed_out_worker(&self, epoch: u64, worker_gen: u64) {
+        let child = {
+            let mut slot = self.slot.lock().unwrap_or_else(|p| p.into_inner());
+            let calls = self.bounded_calls.lock().unwrap_or_else(|p| p.into_inner());
+            if calls.active != 0 || calls.epoch != epoch
+                || self.worker_gen.load(Ordering::Acquire) != worker_gen {
+                return;
+            }
+            let child = slot.child.take();
+            if child.is_some() {
+                self.worker_gen.fetch_add(1, Ordering::Release);
+            }
+            child
+        };
+        if let Some(mut child) = child {
+            if let Err(e) = child.kill().and_then(|()| child.wait().map(|_| ())) {
+                warn!(error = %e, "embed worker kill failed");
             }
         }
     }
@@ -432,11 +467,25 @@ impl EmbedSupervisor {
         texts: &[String],
         timeout: Duration,
     ) -> Result<Vec<Vec<f32>>, EmbedError> {
+        self.embed_texts_while(texts, timeout, || true)
+    }
+
+    /// Caller fence is checked while waiting, including during worker startup.
+    /// Cancellation targets this call's IO only; shared callers keep their worker.
+    pub fn embed_texts_while(
+        self: &std::sync::Arc<Self>,
+        texts: &[String],
+        timeout: Duration,
+        valid: impl Fn() -> bool,
+    ) -> Result<Vec<Vec<f32>>, EmbedError> {
         use std::sync::mpsc;
         if texts.is_empty() {
             return Err(EmbedError::InvalidRequest(
                 "cannot embed an empty batch".into(),
             ));
+        }
+        if !valid() {
+            return Err(EmbedError::Transport("embed caller cancelled".into()));
         }
         let call_id = self.cancel_seq.fetch_add(1, Ordering::Relaxed);
         self.begin_bounded();
@@ -458,7 +507,22 @@ impl EmbedSupervisor {
                 "cannot spawn embed helper: {e}"
             )));
         }
-        let outcome = rx.recv_timeout(timeout);
+        let outcome = loop {
+            if !valid() {
+                cancel.store(true, Ordering::Relaxed);
+                self.cancel_inflight_read_for(call_id);
+                self.finish_bounded(true);
+                return Err(EmbedError::Transport("embed caller cancelled".into()));
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break Err(mpsc::RecvTimeoutError::Timeout);
+            }
+            match rx.recv_timeout(remaining.min(CONNECT_POLL)) {
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                outcome => break outcome,
+            }
+        };
         match outcome {
             Ok(r) => {
                 self.finish_bounded(false);
@@ -466,9 +530,8 @@ impl EmbedSupervisor {
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 // Stop the helper promptly: flag it and cancel only this
-                // caller's synchronous pipe IO. `finish_bounded(true)` atomically
-                // decrements `active_bounded` and kills any hung worker under the
-                // `slot` mutex when this was the last active bounded caller.
+                // caller's synchronous pipe IO, then defer owned-worker cleanup
+                // if this was the last active bounded caller.
                 cancel.store(true, Ordering::Relaxed);
                 self.cancel_inflight_read_for(call_id);
                 self.finish_bounded(true);
@@ -561,10 +624,61 @@ impl EmbedSupervisor {
         path: &std::path::Path,
         timeout: Duration,
     ) -> Result<Vec<f32>, EmbedError> {
+        self.embed_image_with_budget_bounded(path, 280, timeout)
+    }
+
+    pub fn embed_image_with_budget_bounded(
+        self: &std::sync::Arc<Self>,
+        path: &std::path::Path,
+        token_budget: u32,
+        timeout: Duration,
+    ) -> Result<Vec<f32>, EmbedError> {
+        if !matches!(token_budget, 70 | 140 | 280) {
+            return Err(EmbedError::InvalidRequest(
+                "invalid image token budget".into(),
+            ));
+        }
+        self.embed_media_bounded(
+            EmbedRequest::EmbedImage {
+                id: 0,
+                path: path.to_string_lossy().into_owned(),
+                token_budget: Some(token_budget),
+            },
+            timeout,
+        )
+    }
+
+    pub fn embed_audio_bounded(
+        self: &std::sync::Arc<Self>,
+        path: &std::path::Path,
+        window_ms: Option<(u64, u64)>,
+        timeout: Duration,
+    ) -> Result<Vec<f32>, EmbedError> {
+        if window_ms.is_some_and(|(s, e)| e <= s || e - s > 30_000 || e.checked_mul(16).is_none()) {
+            return Err(EmbedError::InvalidRequest("invalid audio window".into()));
+        }
+        self.embed_media_bounded(
+            EmbedRequest::EmbedAudio {
+                id: 0,
+                path: path.to_string_lossy().into_owned(),
+                window_ms,
+            },
+            timeout,
+        )
+    }
+
+    fn embed_media_bounded(
+        self: &std::sync::Arc<Self>,
+        request: EmbedRequest,
+        timeout: Duration,
+    ) -> Result<Vec<f32>, EmbedError> {
         use std::sync::mpsc;
-        let path_str = path.to_string_lossy().into_owned();
-        if path_str.is_empty() {
-            return Err(EmbedError::InvalidRequest("empty image path".into()));
+        let path = match &request {
+            EmbedRequest::EmbedImage { path, .. } | EmbedRequest::EmbedAudio { path, .. } => path,
+            _ => unreachable!(),
+        };
+        if path.is_empty() {
+            return Err(EmbedError::InvalidRequest("empty media path".into()));
         }
         let call_id = self.cancel_seq.fetch_add(1, Ordering::Relaxed);
         self.begin_bounded();
@@ -574,15 +688,15 @@ impl EmbedSupervisor {
         let deadline = Instant::now() + timeout;
         let (tx, rx) = mpsc::channel();
         let spawned = std::thread::Builder::new()
-            .name("winsearch-embed-img".into())
+            .name("winsearch-embed-media".into())
             .spawn(move || {
-                let r = sup.embed_image_cancelable(call_id, &path_str, &cancel2, deadline);
+                let r = sup.embed_media_cancelable(call_id, request, &cancel2, deadline);
                 let _ = tx.send(r);
             });
         if let Err(e) = spawned {
             self.finish_bounded(false);
             return Err(EmbedError::Transport(format!(
-                "cannot spawn image embed helper: {e}"
+                "cannot spawn media embed helper: {e}"
             )));
         }
         let outcome = rx.recv_timeout(timeout);
@@ -595,39 +709,48 @@ impl EmbedSupervisor {
                 cancel.store(true, Ordering::Relaxed);
                 self.cancel_inflight_read_for(call_id);
                 self.finish_bounded(true);
-                warn!("image embed job timed out after {timeout:?}; helper cancelled");
+                warn!("media embed job timed out after {timeout:?}; helper cancelled");
                 Err(EmbedError::Transport(format!(
-                    "image embed job timed out after {timeout:?}"
+                    "media embed job timed out after {timeout:?}"
                 )))
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 self.finish_bounded(false);
                 Err(EmbedError::Transport(
-                    "image embed helper died before answering".into(),
+                    "media embed helper died before answering".into(),
                 ))
             }
         }
     }
 
-    fn embed_image_cancelable(
+    fn embed_media_cancelable(
         &self,
         call_id: u64,
-        path: &str,
+        request: EmbedRequest,
         cancel: &AtomicBool,
         deadline: Instant,
     ) -> Result<Vec<f32>, EmbedError> {
         if cancel.load(Ordering::Relaxed) || Instant::now() >= deadline {
-            return Err(EmbedError::Transport("image embed job cancelled".into()));
+            return Err(EmbedError::Transport("media embed job cancelled".into()));
         }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let req = EmbedRequest::EmbedImage {
-            id,
-            path: path.to_string(),
+        let make_request = |id| {
+            let mut req = request.clone();
+            match &mut req {
+                EmbedRequest::EmbedImage { id: request_id, .. }
+                | EmbedRequest::EmbedAudio { id: request_id, .. } => *request_id = id,
+                _ => unreachable!(),
+            }
+            req
         };
+        let req = make_request(id);
         let extract_first = |vecs: Vec<Vec<f32>>| -> Result<Vec<f32>, EmbedError> {
-            vecs.into_iter().next().ok_or_else(|| {
-                EmbedError::Protocol("embed_image returned empty vector list".into())
-            })
+            if vecs.len() != 1 {
+                return Err(EmbedError::Protocol(
+                    "media embedding returned wrong vector count".into(),
+                ));
+            }
+            Ok(vecs.into_iter().next().unwrap())
         };
         let mut used_gen = self.worker_gen.load(Ordering::Acquire);
         match self.transact_bounded(call_id, req, cancel, deadline, &mut used_gen) {
@@ -636,30 +759,23 @@ impl EmbedSupervisor {
                 extract_first(vecs)
             }
             Ok(other) => Err(EmbedError::Protocol(format!(
-                "unexpected reply to embed_image: {}",
+                "unexpected reply to media request: {}",
                 response_kind(&other)
             ))),
             Err(EmbedError::Transport(_)) => {
                 self.stats.lock().unwrap_or_else(|p| p.into_inner()).retries += 1;
-                info!("image embed job interrupted; restarting worker and retrying once");
+                info!("media embed job interrupted; restarting worker and retrying once");
                 let retry_id = self.next_id.fetch_add(1, Ordering::Relaxed);
-                let retry = EmbedRequest::EmbedImage {
-                    id: retry_id,
-                    path: path.to_string(),
-                };
-                match self.transact_bounded_after_restart(
-                    call_id,
-                    retry,
-                    cancel,
-                    deadline,
-                    used_gen,
-                ) {
+                let retry = make_request(retry_id);
+                match self
+                    .transact_bounded_after_restart(call_id, retry, cancel, deadline, used_gen)
+                {
                     Ok(EmbedResponse::Embeddings { vecs, .. }) => {
                         self.stats.lock().unwrap_or_else(|p| p.into_inner()).jobs += 1;
                         extract_first(vecs)
                     }
                     Ok(other) => Err(EmbedError::Protocol(format!(
-                        "unexpected reply to retried embed_image: {}",
+                        "unexpected reply to retried media request: {}",
                         response_kind(&other)
                     ))),
                     Err(e) => Err(e),
@@ -1211,6 +1327,116 @@ mod tests {
         HangFirst,
     }
 
+    #[test]
+    fn task2_supervisor_model_recovery_embeds_persisted_exact_without_reparse() {
+        use crate::extract::ExtractorRegistry;
+        use crate::indexer::Indexer;
+        use ws_index::{IndexStore, SearchRequest};
+        struct CountParser(Arc<AtomicUsize>);
+        impl ws_extract::Extractor for CountParser {
+            fn extract(
+                &self,
+                path: &std::path::Path,
+                budget: &ws_extract::ExtractBudget,
+            ) -> Result<ws_extract::ExtractOutput, ws_extract::ExtractError> {
+                self.0.fetch_add(1, AtomicOrdering::SeqCst);
+                ws_extract::DocumentExtractor.extract(path, budget)
+            }
+        }
+        let dir = std::env::temp_dir().join(format!(
+            "winsearch-task2-model-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("invoice.txt"),
+            "Header\nWINSEARCH_INVOICE_42 deferred genuine stage",
+        )
+        .unwrap();
+        let indexer = Indexer::open(IndexStore::open_in_memory().unwrap(), &[dir.clone()]).unwrap();
+        indexer.enqueue_initial_scan().unwrap();
+        while indexer.scan_available(64) > 0 {}
+        let parses = Arc::new(AtomicUsize::new(0));
+        let mut registry = ExtractorRegistry::default();
+        registry.register("doc", Arc::new(CountParser(parses.clone())));
+        let unavailable = FakeWorker::start(Mode::AlwaysUnavailable);
+        let sup = Arc::new(test_supervisor(unavailable.pipe_name.clone()));
+        for _ in 0..5 {
+            indexer
+                .extract_once_with_supervisor(&registry, &sup)
+                .unwrap();
+        }
+        let hits = indexer
+            .search(&SearchRequest {
+                text: "WINSEARCH_INVOICE_42".into(),
+                limit: 1,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        let id = hits[0].entry_id;
+        let chunks = indexer.store_lock().list_content_chunks(id).unwrap();
+        assert_eq!(chunks[0].attempts, 0);
+        assert!(indexer
+            .store_lock()
+            .list_segments_for_entry(id)
+            .unwrap()
+            .is_empty());
+        assert_eq!(parses.load(AtomicOrdering::SeqCst), 1);
+        let available = FakeWorker::start(Mode::Serve);
+        let sup = Arc::new(test_supervisor(available.pipe_name.clone()));
+        let outcome = indexer
+            .extract_once_with_supervisor(&registry, &sup)
+            .unwrap();
+        assert_eq!(outcome.segments_stored, 1);
+        assert_eq!(parses.load(AtomicOrdering::SeqCst), 1);
+        assert_eq!(
+            indexer.store_lock().list_content_chunks(id).unwrap()[0].id,
+            chunks[0].id
+        );
+        assert_eq!(
+            indexer
+                .store_lock()
+                .list_segments_for_entry(id)
+                .unwrap()
+                .len(),
+            1
+        );
+        // An incompatible space preserves exact rows and schedules fresh vectors.
+        indexer.purge_model_vectors_and_requeue().unwrap();
+        assert!(indexer
+            .store_lock()
+            .list_segments_for_entry(id)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            indexer
+                .search(&SearchRequest {
+                    text: "WINSEARCH_INVOICE_42".into(),
+                    limit: 1,
+                    ..Default::default()
+                })
+                .unwrap()
+                .len(),
+            1
+        );
+        indexer
+            .extract_once_with_supervisor(&registry, &sup)
+            .unwrap();
+        assert_eq!(parses.load(AtomicOrdering::SeqCst), 1);
+        assert_eq!(
+            indexer
+                .store_lock()
+                .list_segments_for_entry(id)
+                .unwrap()
+                .len(),
+            1
+        );
+        drop(indexer);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     static PIPE_SEQ: AtomicUsize = AtomicUsize::new(0);
 
     impl FakeWorker {
@@ -1449,6 +1675,75 @@ mod tests {
     }
 
     #[test]
+    fn timeout_cleanup_preserves_newer_worker_or_bounded_caller() {
+        for newer_caller in [false, true] {
+            let sup = Arc::new(test_supervisor("unused-cleanup-pipe".into()));
+            sup.begin_bounded();
+            sup.finish_bounded(false);
+            let epoch = sup.bounded_calls.lock().unwrap().epoch;
+            let worker_gen = sup.worker_gen.load(Ordering::Acquire);
+            let child = Command::new("powershell.exe")
+                .args(["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"])
+                .spawn().unwrap();
+            sup.slot.lock().unwrap().child = Some(child);
+            if newer_caller {
+                sup.begin_bounded();
+                sup.finish_bounded(false);
+            } else {
+                sup.worker_gen.fetch_add(1, Ordering::Release);
+            }
+            sup.retire_timed_out_worker(epoch, worker_gen);
+            let preserved = sup.slot.lock().unwrap().child.as_mut()
+                .is_some_and(|child| child.try_wait().unwrap().is_none());
+            sup.terminate_worker();
+            assert!(preserved, "stale timeout cleanup killed a newer worker/caller");
+        }
+    }
+
+    #[test]
+    fn bounded_calls_return_by_deadline_while_worker_slot_is_held() {
+        for image in [false, true] {
+            let sup = Arc::new(test_supervisor("unused-deadline-pipe".into()));
+            let slot = sup.slot.lock().unwrap();
+            let (tx, rx) = std::sync::mpsc::channel();
+            let other = Arc::clone(&sup);
+            let caller = std::thread::spawn(move || {
+                let result = if image {
+                    other.embed_image_bounded(std::path::Path::new("fixture.png"), Duration::from_millis(50))
+                } else {
+                    other.embed_texts_bounded(&["fixture".into()], Duration::from_millis(50))
+                        .map(|_| Vec::new())
+                };
+                tx.send(result.is_err()).unwrap();
+            });
+            let outcome = rx.recv_timeout(Duration::from_secs(1));
+            drop(slot);
+            caller.join().unwrap();
+            assert_eq!(outcome.unwrap(), true, "caller outlived its deadline waiting for slot");
+        }
+    }
+
+    #[test]
+    fn bounded_accounting_never_waits_for_worker_startup_slot() {
+        use std::sync::mpsc;
+        let sup = Arc::new(test_supervisor("unused-test-pipe".into()));
+        let slot = sup.slot.lock().unwrap();
+        let (tx, rx) = mpsc::channel();
+        let other = Arc::clone(&sup);
+        let helper = std::thread::spawn(move || {
+            other.begin_bounded();
+            other.finish_bounded(false);
+            other.begin_bounded();
+            other.finish_bounded(true);
+            tx.send(()).unwrap();
+        });
+        let result = rx.recv_timeout(Duration::from_secs(1));
+        drop(slot);
+        helper.join().unwrap();
+        assert!(result.is_ok(), "bounded accounting waited on the worker slot");
+    }
+
+    #[test]
     fn bounded_call_times_out_on_hanging_worker() {
         // Task2-I1: a worker that handshakes but never answers must fail the
         // bounded call instead of stalling the caller forever. The fake hangs
@@ -1518,6 +1813,47 @@ mod tests {
             "first batch must fail via the watchdog, got {err:?}"
         );
         assert_eq!(fake.jobs_seen.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn caller_cancellation_does_not_cancel_another_shared_call() {
+        let fake = FakeWorker::start(Mode::Hang);
+        let sup = Arc::new(test_supervisor(fake.pipe_name.clone()));
+        let first_valid = Arc::new(AtomicBool::new(true));
+        let second_valid = Arc::new(AtomicBool::new(true));
+        let spawn_call = |valid: Arc<AtomicBool>| {
+            let supervisor = Arc::clone(&sup);
+            std::thread::spawn(move || {
+                supervisor.embed_texts_while(
+                    &["deterministic fixture".into()],
+                    Duration::from_secs(10),
+                    || valid.load(Ordering::Acquire),
+                )
+            })
+        };
+        let first = spawn_call(Arc::clone(&first_valid));
+        let second = spawn_call(Arc::clone(&second_valid));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while fake.jobs_seen.lock().unwrap().len() < 2 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(fake.jobs_seen.lock().unwrap().len(), 2);
+        first_valid.store(false, Ordering::Release);
+        assert!(first
+            .join()
+            .unwrap()
+            .unwrap_err()
+            .to_string()
+            .contains("caller cancelled"));
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(
+            !second.is_finished(),
+            "another caller's pipe IO was cancelled"
+        );
+        assert_eq!(sup.bounded_calls.lock().unwrap().active, 1);
+        assert_eq!(sup.inflight_tids.lock().unwrap().len(), 1);
+        second_valid.store(false, Ordering::Release);
+        assert!(second.join().unwrap().is_err());
     }
 
     #[test]
@@ -1653,7 +1989,7 @@ mod tests {
         #[test]
         fn real_worker_round_trips_a_text_batch() {
             let _serial = serial();
-            let sup = real_supervisor(&["--stub", "--idle-secs", "60"]);
+            let sup = std::sync::Arc::new(real_supervisor(&["--stub", "--idle-secs", "60"]));
             assert!(!sup.is_worker_running(), "nothing spawned yet (lazy)");
 
             let texts = vec![
@@ -1676,6 +2012,13 @@ mod tests {
             let snap = sup.ping().expect("health ping");
             assert!(snap.stub);
             assert!(snap.jobs_served >= 2);
+            let image = sup.embed_image_with_budget_bounded(std::path::Path::new(r"C:\fixture.png"), 70, Duration::from_secs(5)).unwrap();
+            let audio = sup.embed_audio_bounded(std::path::Path::new(r"C:\fixture.wav"), Some((0,30_000)), Duration::from_secs(5)).unwrap();
+            assert_eq!(image.len(), ws_embed_protocol::STUB_DIM);
+            assert_eq!(audio.len(), ws_embed_protocol::STUB_DIM);
+            assert_ne!(image, audio);
+            assert!(sup.embed_image_with_budget_bounded(std::path::Path::new(r"C:\fixture.png"), 71, Duration::from_secs(5)).is_err());
+            assert!(sup.embed_audio_bounded(std::path::Path::new(r"C:\fixture.wav"), Some((0,30_001)), Duration::from_secs(5)).is_err());
             sup.terminate_worker();
         }
 

@@ -6,6 +6,10 @@ implemented **and** verified. Legend: `[x]` done+verified · `[~]` partial ·
 
 ## Reference
 
+The current [v1 gap matrix](v1-gap-matrix.md) records implementation, missing
+work, source, acceptance evidence and required changes. Its partial statuses
+include Lumen integration and the final native/installed acceptance gates.
+
 - DigUp (MIT, ARahim3/DigUp) — macOS/Swift reference. Architecture notes and
   behaviors ported are documented in `architecture.md`; attribution ships in
   `THIRD-PARTY-NOTICES.txt`.
@@ -44,6 +48,20 @@ implemented **and** verified. Legend: `[x]` done+verified · `[~]` partial ·
       claim queue, idempotent upserts, verified crash/resume
 - [x] Disconnected-drive preservation + reconnect reconciliation (Phase 2) —
       verified end-to-end with a mapped drive (subst)
+- [~] Ordinary source-byte provenance — bounded native SHA256, revision binding,
+      atomic chunks/cursor commit, native read-change notification and source/cache
+      mismatch rejection implemented; larger-source/legacy recovery, unsupported
+      notification coverage and final device/review acceptance remain open
+- [~] Query scopes/filters — app/file/category filters precede candidate caps;
+      typed ordinary/code/Related extension and source-kind selectors work before
+      candidate limits; consumer scope intersections and installed acceptance remain open
+- [~] Owned-host startup — process-bound Rust pipe connections and deferred
+      source/code/catalog admission verified locally; Lumen lifecycle wiring,
+      payload ownership and installed acceptance remain open
+- [~] Terminal source/semantic outcomes — daemon, Rust/C# clients and CLI now
+      distinguish completion/interruption and disabled/ready/degraded with closed
+      reasons; legacy remains unknown. [Local native/model evidence](validation/2026-10-18-search-outcomes/README.md)
+      passes; consumer wiring, independent review and installed acceptance remain open
 
 ## Semantic search (EmbeddingGemma 2)
 
@@ -51,37 +69,75 @@ implemented **and** verified. Legend: `[x]` done+verified · `[~]` partial ·
 - [x] llama.cpp integration, CUDA > Vulkan > CPU backend detection (Phase 3)
 - [x] Lazy load / warm-up / idle unload / explicit GPU release (Phase 3)
 - [x] Vector store (FP16, 768-d) + cosine scan (Phase 3)
-- [x] Hybrid ranking + exact boost + explanations + thresholds (Phase 3)
+- [~] Hybrid ranking + exact boost + explanations + thresholds (Phase 3) —
+      shared recipe/admission passes unchanged real CPU names, development and
+      held-out overall gates; shared offline query/native snapshot parity is
+      verified. Known modality misses remain; final source/release gates are open
 - [x] Query-embedding cache, cancellation-aware semantic pass (Phase 3)
 
 ## Multimodal content
 
-- [x] Image semantic search (JPEG/PNG/WebP/HEIC/AVIF/TIFF/BMP/GIF/RAW) + EXIF (Phase 4)
-- [x] Screenshot search: visual + OCR text, exact error codes (Phase 4)
-- [ ] PDF page-level search, scanned-page OCR, page numbers/thumbnails,
-      first-30-pages fast path, 5,000-page cap, resumable (Phase 4)
-- [x] Document search (txt/md/rtf/doc/docx/odt/html) with chunking, excerpts,
-      numeric-content exact-only routing (Phase 4)
-- [ ] Audio: 30 s overlapping windows, timestamp matches, player with
-      seek-to-match (Phase 4)
-- [ ] Video: periodic + shot-change frames, audio-track indexing, timestamp
-      navigation, timeline markers (Phase 4)
+- [~] Image semantic search (JPEG/PNG/WebP/HEIC/AVIF/TIFF/BMP/GIF/RAW) + EXIF (Phase 4) —
+      real CPU mixed encoder/reference and image retrieval pass; full format/EXIF,
+      final installed payload and UI acceptance remain required
+- [~] Screenshot search: visual + OCR text, exact error codes (Phase 4) —
+      actual OCR and genuine visual discrimination/reference checks pass;
+      final combined screenshot retrieval/UI acceptance remains required
+- [~] PDF page-level search, scanned-page OCR, page numbers/thumbnails,
+      first-30-pages fast path, 5,000-page cap, resumable (Phase 4) — native
+      PDFium text/raster and installed WinRT OCR verified with generated PDFs;
+      exact pages survive restart without a model. Rendered-page visual artifacts
+      reach the deferred embedding path; real visual-model quality and packaged
+      distribution acceptance remain separate gates.
+- [~] Document search (txt/md/rtf/doc/docx/odt/html) with chunking, excerpts,
+      numeric-content exact-only routing (Phase 4) — no-model exact persistence
+      and durable long-document continuation verified; final UI/package gates pending
+- [~] Audio: 30 s overlapping windows, timestamp matches, player with
+      seek-to-match (Phase 4) — real bounded PCM runtime/reference/spoken retrieval
+      verified. Native bounded decoding, silence-only continuation and durable
+      typed/deferred WAV inputs now pass. The genuine daemon retrieves the later
+      passage at 50..65s and the shared pipeline2 recipe rejects all3current
+      daemon negative controls; held-out quality, player and packaging remain required
+- [~] Video: periodic + shot-change frames, audio-track indexing, timestamp
+      navigation, timeline markers (Phase 4) — native selection/PTS/OCR/phases and
+      source-policy/cache recovery verified; genuine frame and later soundtrack
+      locations and all3current daemon negative controls pass; timeline/player, complete
+      cache maintenance and packaging remain open. Selection now checkpoints before
+      rendering; matched two-hour/1080p fixtures verify bounded scan continuation,
+      source-time coverage and owned cancellation. Broader codec/4k acceptance remains
 
 ## Code search (opt-in)
 
 - [x] Separate code index (never mixes with normal results) (Phase 5)
 - [x] Repository detection, .gitignore, language detection (Phase 5)
-- [x] Tree-sitter chunking + symbols, definitions over references (Phase 5)
-- [x] Notebook cells (without outputs), line-number preservation (Phase 5)
-- [ ] `code:` queries (semantic + exact identifier) (Phase 5)
-- [ ] Editor detection + open-at-line (VS Code, Cursor, VS, JetBrains,
-      Sublime, Zed, configurable) (Phase 5)
+- [~] Tree-sitter chunking + symbols, definitions over references (Phase 5) —
+      twenty actual grammars plus TSX, bounded owned-child batches, syntax
+      diagnostics, data-preserving schema4 migration, native scheduler and exact definition ranking verified
+- [~] Code byte provenance — exact admitted SHA256, durable content revision,
+      atomic replacement and legacy-hash recovery; public bound code references
+      and current hash metadata added; bounded cached code/notebook preview verified
+      with actual line/cell ranges, source checks and output exclusion
+- [~] Notebook cells without outputs, virtual/cell-local line preservation (Phase 5) —
+      native child/store/reopen and actual named-pipe cell-local location verified;
+      cached native preview verified; installed preview/editor interaction remains
+- [~] `code:` queries (semantic + exact identifier) (Phase 5) — native no-model
+      daemon, persistent60s quiet/restart/pause/root revocation verified; deterministic
+      semantic fixtures and request revision checks pass. Managed-model native768d
+      vectors, semantic-only function/caller source lines and unrelated negatives now
+      pass through typed Rust client/CLI/pipe and offline snapshots. Frozen code
+      dev/held-out each Recall/MRR1, FP0; final review/scale/installed quality remains
+- [~] Editor detection + open-at-line (VS Code, Cursor, VS, JetBrains,
+      Sublime, Zed, Notepad++, configurable) (Phase 5) — argument matrix and notebook
+      fallback verified in .NET; installed editor interaction remains
 
 ## Windows experience
 
 - [x] Tray icon: open/settings/exit, indexing tooltip
 - [x] Settings window (theme, hotkey rebind w/ conflict detection, query memory)
 - [ ] Expanded search explorer: list + grid, category filters, preview pane (Phase 6)
+- [~] Native preview contract: bounded cached document/PDF/OCR/code/notebook text
+      with actual locations, source/root checks and cancellation in Rust/C# clients;
+      raster/media/uncached preview and explorer wiring remain open
 - [ ] Onboarding (6 steps incl. model download, folder estimates, shortcut) (Phase 6)
 - [ ] Full settings sections (General/Search/Folders/Code/AI/Performance/Storage/About) (Phase 6)
 - [ ] Animations (overlay, selection, category), reduced-motion + high contrast (Phase 6)
@@ -100,7 +156,9 @@ implemented **and** verified. Legend: `[x]` done+verified · `[~]` partial ·
 - [x] Sensitive-file exclusions (keys, certs, credential stores, hidden dirs) (Phase 2)
 - [x] No cloud-file hydration (OneDrive placeholders) (Phase 2) — metadata
       from directory enumeration; attribute-only identity opens
-- [ ] Untrusted-content parser limits (Phase 4)
+- [~] Untrusted-content parser limits (Phase 4) — two process-wide slots retained
+      through child/pipe/scratch cleanup; native cancellation and durable resource
+      deferral regressions pass. Final independent/installed resource review remains
 
 ## Distribution
 
@@ -115,6 +173,8 @@ implemented **and** verified. Legend: `[x]` done+verified · `[~]` partial ·
       the workspace, incl. real ReadDirectoryChangesW events, shell-created
       .lnk round-trips, crash/resume, and subst-based drive disconnects
 - [~] Retrieval evals (exact, OCR, PDF page, audio/video timestamps, code) (Phases 3–5) —
-      Phase 3 `winsearch-cli eval names` suite (Recall@5 + MRR + negative controls) implemented and passing; OCR/PDF/media/code suites land in Phases 4–5
+      `winsearch-cli eval names` runs Recall@5, MRR and negative controls.
+      Deterministic fixtures and the unchanged real-model names gates pass.
+      Full indexed OCR/PDF/media/code and held-out quality remain required.
 - [ ] Resource-behavior tests (Phase 7)
 - [ ] UI verification matrix (Phase 7)

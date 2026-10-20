@@ -240,6 +240,7 @@ impl Extractor for ImageExtractor {
         let mut segments = Vec::new();
         if !meta_text.is_empty() && segments.len() < budget.max_segments {
             segments.push(SegmentDraft {
+                embedding_input: crate::DraftEmbeddingInput::Text,
                 kind: SEGMENT_KIND_IMAGE.to_string(),
                 text: meta_text,
                 page: None,

@@ -1,0 +1,69 @@
+cargo :     Updating crates.io index
+At line:1 char:27
++ ... src/engine; cargo test -p ws-client --lib *> ../../artifacts/ws-clien ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Updating crates.io index:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+     Locking 4 packages to latest compatible versions
+      Adding mio v1.2.4
+      Adding socket2 v0.6.5
+      Adding tokio v1.53.3
+      Adding tokio-macros v2.7.2
+   Compiling windows-sys v0.61.2
+   Compiling syn v3.0.9
+   Compiling mio v1.2.4
+   Compiling socket2 v0.6.5
+   Compiling serde_derive v1.0.229
+   Compiling thiserror-impl v2.0.21
+   Compiling tokio-macros v2.7.2
+   Compiling tokio v1.53.3
+   Compiling thiserror v2.0.21
+   Compiling serde v1.0.229
+   Compiling ws-modelmgr v0.1.0 (<checkout>\src\engine\crates\ws-modelmgr)
+   Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-protocol)
+   Compiling ws-client v0.1.0 (<checkout>\src\engine\crates\ws-client)
+warning: unused import: `AsyncReadExt`
+ --> crates\ws-client\src\lib.rs:3:28
+  |
+3 | use tokio::io::{AsyncRead, AsyncReadExt};
+  |                            ^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `ws-client` (lib test) generated 1 warning (run `cargo fix --lib -p ws-client --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.57s
+     Running unittests src\lib.rs (target\debug\deps\ws_client-dc52a795d104f408.exe)
+
+running 3 tests
+test tests::async_reader_accepts_the_existing_shared_wire_codec ... FAILED
+test tests::async_reader_distinguishes_closed_and_truncated_connections ... FAILED
+test tests::async_reader_rejects_oversized_headers_before_reading_a_body ... FAILED
+
+failures:
+
+---- tests::async_reader_accepts_the_existing_shared_wire_codec stdout ----
+
+thread 'tests::async_reader_accepts_the_existing_shared_wire_codec' (34396) panicked at crates\ws-client\src\lib.rs:39:52:
+called `Result::unwrap()` on an `Err` value: Protocol("async framing is not implemented")
+
+---- tests::async_reader_distinguishes_closed_and_truncated_connections stdout ----
+
+thread 'tests::async_reader_distinguishes_closed_and_truncated_connections' (4480) panicked at crates\ws-client\src\lib.rs:54:9:
+assertion failed: matches!(read_frame(&mut receiver).await, Err(Error::Closed))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- tests::async_reader_rejects_oversized_headers_before_reading_a_body stdout ----
+
+thread 'tests::async_reader_rejects_oversized_headers_before_reading_a_body' (61900) panicked at crates\ws-client\src\lib.rs:47:9:
+assertion failed: matches!(result, Err(Error::Frame(FrameError::FrameTooLarge(_))))
+
+
+failures:
+    tests::async_reader_accepts_the_existing_shared_wire_codec
+    tests::async_reader_distinguishes_closed_and_truncated_connections
+    tests::async_reader_rejects_oversized_headers_before_reading_a_body
+
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p ws-client --lib`

@@ -14,7 +14,7 @@
 
 use serde::Deserialize;
 
-use crate::parse::{parse_source_with_offset, ParsedCodeFile, ParsedCodeUnit};
+use crate::parse::{parse_source_with_offset, ParsedCodeFile};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotebookCell {
@@ -107,12 +107,19 @@ impl RawSource {
 /// languages, symbol-aware chunks, and extracted symbols with preserved line
 /// numbers.
 pub fn parse_notebook(raw_json: &str) -> Result<ParsedNotebook, serde_json::Error> {
+    if raw_json.len() as u64 > crate::MAX_CODE_FILE_BYTES {
+        return Err(serde_json::Error::io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "notebook exceeds 2 MiB",
+        )));
+    }
     let raw: RawNotebook = serde_json::from_str(raw_json)?;
     let default_language = detect_notebook_language(&raw.metadata);
 
     let mut cells = Vec::new();
     let mut chunks = Vec::new();
     let mut symbols = Vec::new();
+    let mut diagnostics = Vec::new();
     let mut current_line = 1u32;
 
     for (cell_index, raw_cell) in raw.cells.into_iter().enumerate() {
@@ -143,24 +150,46 @@ pub fn parse_notebook(raw_json: &str) -> Result<ParsedNotebook, serde_json::Erro
             )
         };
 
-        if cell_type == "code" {
-            let cell_parsed = parse_source_with_offset(&source, &cell_lang, start_line);
-            for mut ch in cell_parsed.chunks {
-                if ch.symbol_name.is_empty() {
-                    ch.symbol_name = format!("cell_{}", cell_index + 1);
-                    ch.symbol_kind = format!("notebook_cell:{cell_lang}");
-                }
-                chunks.push(ch);
-            }
-            symbols.extend(cell_parsed.symbols);
+        let mut cell_parsed = if cell_type == "code" && source.trim_start().starts_with("%%") {
+            let magic_end = source.find('\n').map_or(source.len(), |i| i + 1);
+            let mut parsed =
+                parse_source_with_offset(&source[magic_end..], &cell_lang, start_line + 1);
+            let mut magic =
+                parse_source_with_offset(&source[..magic_end], "text", start_line).chunks;
+            magic.append(&mut parsed.chunks);
+            parsed.chunks = magic;
+            parsed
         } else {
-            chunks.push(ParsedCodeUnit {
-                start_line,
-                end_line,
-                symbol_name: format!("cell_{}", cell_index + 1),
-                symbol_kind: "markdown_cell".to_string(),
-                text: source.clone(),
+            parse_source_with_offset(&source, &cell_lang, start_line)
+        };
+        for mut ch in cell_parsed.chunks {
+            ch.notebook = Some(crate::model::NotebookLocation {
+                cell_ordinal: cell_index as u32,
+                start_line: ch.start_line - start_line + 1,
+                end_line: ch.end_line - start_line + 1,
             });
+            if ch.symbol_name.is_empty() {
+                ch.symbol_name = format!("cell_{}", cell_index + 1);
+                ch.symbol_kind = if cell_type == "markdown" {
+                    "markdown_cell".into()
+                } else {
+                    format!("notebook_cell:{cell_lang}")
+                };
+            }
+            chunks.push(ch);
+        }
+        for sym in &mut cell_parsed.symbols {
+            sym.notebook = Some(crate::model::NotebookLocation {
+                cell_ordinal: cell_index as u32,
+                start_line: sym.line - start_line + 1,
+                end_line: sym.end_line - start_line + 1,
+            });
+        }
+        symbols.extend(cell_parsed.symbols);
+        for d in cell_parsed.diagnostics {
+            if diagnostics.len() < 8 {
+                diagnostics.push(format!("cell {cell_index}: {d}"));
+            }
         }
 
         cells.push(NotebookCell {
@@ -177,6 +206,7 @@ pub fn parse_notebook(raw_json: &str) -> Result<ParsedNotebook, serde_json::Erro
         default_language: default_language.clone(),
         cells,
         parsed: ParsedCodeFile {
+            diagnostics,
             language: "notebook".to_string(),
             chunks,
             symbols,
@@ -204,11 +234,7 @@ fn detect_notebook_language(meta: &RawMetadata) -> String {
     "python".to_string()
 }
 
-fn detect_cell_language(
-    source: &str,
-    cell_meta_lang: Option<&str>,
-    default_lang: &str,
-) -> String {
+fn detect_cell_language(source: &str, cell_meta_lang: Option<&str>, default_lang: &str) -> String {
     if let Some(l) = cell_meta_lang.filter(|s| !s.trim().is_empty()) {
         return normalize_lang(l);
     }
@@ -228,11 +254,9 @@ fn detect_cell_magic_language(magic_cmd: &str) -> Option<String> {
     let lower = magic_cmd.trim().to_ascii_lowercase();
     match lower.as_str() {
         "python" | "python2" | "python3" | "py" | "pypy" | "r" | "ruby" | "perl" | "sh"
-        | "bash" | "zsh" | "sql" | "html" | "svg" | "js" | "javascript" | "ts"
-        | "typescript" | "rust" | "c" | "cpp" | "c++" | "cython" | "go" | "java"
-        | "scala" | "julia" | "lua" | "markdown" | "md" | "latex" | "tex" => {
-            Some(normalize_lang(&lower))
-        }
+        | "bash" | "zsh" | "sql" | "html" | "svg" | "js" | "javascript" | "ts" | "typescript"
+        | "rust" | "c" | "cpp" | "c++" | "cython" | "go" | "java" | "scala" | "julia" | "lua"
+        | "markdown" | "md" | "latex" | "tex" => Some(normalize_lang(&lower)),
         _ => None,
     }
 }
@@ -263,6 +287,22 @@ fn normalize_lang(raw: &str) -> String {
 mod tests {
     use super::*;
     use crate::model::SymbolRole;
+
+    #[test]
+    fn source_identity_survives_non_code_cells_and_magic() {
+        let source = r#"{"cells":[{"cell_type":"raw","source":"ignore"},{"cell_type":"markdown","source":"heading"},{"cell_type":"code","source":"%%python\ndef real():\n return helper()\n","outputs":[{"text":"fake"}]}]}"#;
+        let nb = parse_notebook(source).unwrap();
+        let sym = nb
+            .parsed
+            .symbols
+            .iter()
+            .find(|s| s.name == "real" && s.role.is_definition())
+            .unwrap();
+        let loc = sym.notebook.expect("cell identity must survive flattening");
+        assert_eq!(loc.cell_ordinal, 2);
+        assert_eq!(loc.start_line, 2);
+        assert!(!nb.parsed.chunks.iter().any(|c| c.text.contains("fake")));
+    }
 
     #[test]
     fn non_language_cell_magics_preserve_default_notebook_language() {
@@ -302,11 +342,15 @@ mod tests {
         assert_eq!(nb.cells[0].language, "python");
         assert_eq!(nb.cells[1].language, "python");
         assert_eq!(nb.cells[2].language, "sql");
-        assert!(nb.parsed.symbols.iter().any(|s| {
-            s.name == "timed_worker" && s.role == SymbolRole::Definition
-        }));
-        assert!(nb.parsed.symbols.iter().any(|s| {
-            s.name == "captured_worker" && s.role == SymbolRole::Definition
-        }));
+        assert!(nb
+            .parsed
+            .symbols
+            .iter()
+            .any(|s| { s.name == "timed_worker" && s.role == SymbolRole::Definition }));
+        assert!(nb
+            .parsed
+            .symbols
+            .iter()
+            .any(|s| { s.name == "captured_worker" && s.role == SymbolRole::Definition }));
     }
 }

@@ -1,0 +1,42 @@
+rtk :    Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-prot
+ocol)
+At <checkout>\artifacts\entry-reference-checks.ps1:8 char:19
++ ... ocol-red' { rtk proxy cargo test -p ws-protocol --test entry_resoluti ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.10s
+     Running tests\entry_resolution.rs (target\debug\deps\entry_resolution-0264172bbc084204.exe)
+
+running 4 tests
+test code_metadata_keeps_actual_sha256_separate_from_metadata_source_proof ... FAILED
+test entry_resolution_does_not_accept_caller_supplied_paths ... ok
+test indexed_entry_resolution_is_typed_and_carries_a_source_revision ... ok
+test search_results_preserve_a_bound_canonical_entry_reference_separate_from_hit_id ... FAILED
+
+failures:
+
+---- code_metadata_keeps_actual_sha256_separate_from_metadata_source_proof stdout ----
+
+thread 'code_metadata_keeps_actual_sha256_separate_from_metadata_source_proof' (92552) panicked at crates\ws-protocol\tests\entry_resolution.rs:48:5:
+assertion `left == right` failed
+  left: Object {"entry": Object {"index_revision": Number(7), "kind": String("code"), "modified_unix_seconds": Number(1), "name": String("lib.rs"), "path": String("C:/code/lib.rs"), "result_id": String("c23"), "root_path": String("C:/code"), "size_bytes": Number(13), "source_revision": String("metadata-native-proof")}, "id": Number(8), "type": String("resolved_entry")}
+ right: Object {"entry": Object {"content_sha256": String("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), "index_revision": Number(7), "kind": String("code"), "modified_unix_seconds": Number(1), "name": String("lib.rs"), "path": String("C:/code/lib.rs"), "result_id": String("c23"), "root_path": String("C:/code"), "size_bytes": Number(13), "source_revision": String("metadata-native-proof")}, "id": Number(8), "type": String("resolved_entry")}
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- search_results_preserve_a_bound_canonical_entry_reference_separate_from_hit_id stdout ----
+
+thread 'search_results_preserve_a_bound_canonical_entry_reference_separate_from_hit_id' (106168) panicked at crates\ws-protocol\tests\entry_resolution.rs:38:5:
+assertion `left == right` failed
+  left: Object {"batch": Array [Object {"excerpt": String("fn long_symbol_name() {}"), "id": String("code:23:2:true:long_symbol_name"), "kind": String("code"), "location": Object {"kind": String("line"), "line": Number(2)}, "match_explanation": String("definition"), "matching_moments": Array [], "path": String("C:/code/lib.rs"), "score": Number(1.0), "subtitle": String("C:/code/lib.rs"), "thumbnail_path": Null, "title": String("long_symbol_name")}], "done": Bool(true), "id": Number(7), "type": String("results")}
+ right: Object {"batch": Array [Object {"entry_reference": Object {"result_id": String("c23"), "source_revision": String("native-bound-source")}, "excerpt": String("fn long_symbol_name() {}"), "id": String("code:23:2:true:long_symbol_name"), "kind": String("code"), "location": Object {"kind": String("line"), "line": Number(2)}, "match_explanation": String("definition"), "matching_moments": Array [], "path": String("C:/code/lib.rs"), "score": Number(1.0), "subtitle": String("C:/code/lib.rs"), "thumbnail_path": Null, "title": String("long_symbol_name")}], "done": Bool(true), "id": Number(7), "type": String("results")}
+
+
+failures:
+    code_metadata_keeps_actual_sha256_separate_from_metadata_source_proof
+    search_results_preserve_a_bound_canonical_entry_reference_separate_from_hit_id
+
+test result: FAILED. 2 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p ws-protocol --test entry_resolution`

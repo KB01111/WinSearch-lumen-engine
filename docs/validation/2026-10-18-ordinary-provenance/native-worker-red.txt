@@ -1,0 +1,15 @@
+failures:
+
+---- extract_client::tests::real_extract_binary_returns_actual_text_lines_and_explicit_unsupported stdout ----
+
+thread 'extract_client::tests::real_extract_binary_returns_actual_text_lines_and_explicit_unsupported' (2964) panicked at bins\winsearchd\src\extract_client.rs:1276:9:
+actual ordinary worker must attest complete source bytes
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    extract_client::tests::real_extract_binary_returns_actual_text_lines_and_explicit_unsupported
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 209 filtered out; finished in 0.08s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

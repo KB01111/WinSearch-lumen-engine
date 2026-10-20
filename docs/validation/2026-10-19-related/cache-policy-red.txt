@@ -1,0 +1,36 @@
+cargo :    Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-pr
+otocol)
+At line:1 char:1
++ cargo test -p winsearchd extract::tests::unavailable_embedding_preser ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-platform v0.1.0 (<checkout>\src\engine\crates\ws-platform)
+   Compiling ws-index v0.1.0 (<checkout>\src\engine\crates\ws-index)
+   Compiling ws-code v0.1.0 (<checkout>\src\engine\crates\ws-code)
+   Compiling ws-extract v0.1.0 (<checkout>\src\engine\crates\ws-extract)
+   Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearchd)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 19.52s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-950b3e8f0455252c.exe)
+
+running 1 test
+test extract::tests::unavailable_embedding_preserves_committed_exact_cache_across_policy_changes ... FAILED
+
+failures:
+
+---- extract::tests::unavailable_embedding_preserves_committed_exact_cache_across_policy_changes stdout ----
+
+thread 'extract::tests::unavailable_embedding_preserves_committed_exact_cache_across_policy_changes' (134468) panicked at bins\winsearchd\src\extract.rs:1000:17:
+assertion `left == right` failed: pause: unavailable inference must not erase committed exact text
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    extract::tests::unavailable_embedding_preserves_committed_exact_cache_across_policy_changes
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 227 filtered out; finished in 0.10s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

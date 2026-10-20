@@ -1,0 +1,31 @@
+rtk :    Compiling ws-index v0.1.0 (<checkout>\src\engine\crates\ws-index)
+At <checkout>\artifacts\preview-rust-checks.ps1:12 char:20
++ ... very-red' { rtk proxy cargo test -p winsearchd preview_delivery_reche ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...rates\ws-index):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-extract v0.1.0 (<checkout>\src\engine\crates\ws-extract)
+   Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearchd)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 14.12s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-ea492ede1f9fd55e.exe)
+
+running 1 test
+test engine::tests::preview_delivery_rechecks_cancellation_identity_and_source_after_waiting_to_write ... FAILED
+
+failures:
+
+---- engine::tests::preview_delivery_rechecks_cancellation_identity_and_source_after_waiting_to_write stdout ----
+
+thread 'engine::tests::preview_delivery_rechecks_cancellation_identity_and_source_after_waiting_to_write' (22584) panicked at bins\winsearchd\src\engine.rs:1410:9:
+assertion failed: matches!(engine.preview_response_for_delivery(7,1,&cancel,response()),Some(ServerMessage::Error
+    {code:ErrorCode::Cancelled,..}))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    engine::tests::preview_delivery_rechecks_cancellation_identity_and_source_after_waiting_to_write
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 200 filtered out; finished in 0.12s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

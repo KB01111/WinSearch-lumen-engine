@@ -1,0 +1,44 @@
+{
+  "fixture": "<fixture>",
+  "rows": [
+    {
+      "id": 1,
+      "path": "<fixture>",
+      "content_revision": 1,
+      "snapshot": "<opaque native identity redacted>",
+      "sha256": "5e7cb978860499fc260de80a104682072478682fde4159b6166747613a8c7be0",
+      "current_exists": true,
+      "current_stat": {
+        "size": 23,
+        "mtime_ns": 1792323629163154400,
+        "file_id": "<opaque native identity redacted>"
+      }
+    },
+    {
+      "id": 2,
+      "path": "<fixture>",
+      "content_revision": 1,
+      "snapshot": null,
+      "sha256": null,
+      "current_exists": true,
+      "current_stat": {
+        "size": 15,
+        "mtime_ns": 1792323629506866200,
+        "file_id": "<opaque native identity redacted>"
+      }
+    }
+  ],
+  "jobs": [
+    {
+      "path": "<fixture>",
+      "root": "<fixture>",
+      "scan": 1,
+      "revision": 5,
+      "due": 1792323689515,
+      "claimed": 0,
+      "attempts": 0
+    }
+  ],
+  "source_observation": "changed() increments the code epoch before waiting for the store mutex; result_allowed() captures/checks that epoch around the same mutex. Live callbacks can conservatively reject unaffected old results during a replacement.",
+  "limitation": "The precise failed assertion epoch was not recorded; callback timing is an inference from source and the retained fixture, not a captured scheduler trace."
+}

@@ -1,0 +1,31 @@
+cargo :    Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-pr
+otocol)
+At line:1 char:1
++ cargo test -p ws-platform --lib source_guard -- --test-threads=1 *> . ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-platform v0.1.0 (<checkout>\src\engine\crates\ws-platform)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.59s
+     Running unittests src\lib.rs (target\debug\deps\ws_platform-ee26edcd2fee13ac.exe)
+
+running 2 tests
+test source_guard::tests::read_guard_drop_cancels_pending_notifications_and_releases_handles ... ok
+test source_guard::tests::read_guard_observes_change_restore_without_blocking_reads_or_writes ... FAILED
+
+failures:
+
+---- source_guard::tests::read_guard_observes_change_restore_without_blocking_reads_or_writes stdout ----
+
+thread 'source_guard::tests::read_guard_observes_change_restore_without_blocking_reads_or_writes' (119216) panicked at crates\ws-platform\src\source_guard.rs:40:9:
+restoring bytes and mtime cannot restore a broken read notification
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    source_guard::tests::read_guard_observes_change_restore_without_blocking_reads_or_writes
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 18 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p ws-platform --lib`

@@ -13,7 +13,22 @@ fn local_app_data() -> PathBuf {
 
 /// Root for all engine-managed data: `%LOCALAPPDATA%\WinSearch`.
 pub fn data_dir() -> PathBuf {
+    if let Some(value) = std::env::var_os("WINSEARCH_DATA_DIR") {
+        return checked_data_override(PathBuf::from(value))
+            .expect("WINSEARCH_DATA_DIR must be an absolute path");
+    }
     local_app_data().join(APP_DIR_NAME)
+}
+
+fn checked_data_override(path: PathBuf) -> std::io::Result<PathBuf> {
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "WINSEARCH_DATA_DIR must be an absolute path",
+        ))
+    }
 }
 
 pub fn logs_dir() -> PathBuf {
@@ -54,7 +69,16 @@ pub fn settings_path() -> PathBuf {
 
 /// Creates the standard directory layout. Idempotent.
 pub fn ensure_layout() -> std::io::Result<()> {
-    for dir in [data_dir(), logs_dir(), db_dir(), model_dir(), thumbnail_cache_dir()] {
+    if let Some(value) = std::env::var_os("WINSEARCH_DATA_DIR") {
+        checked_data_override(PathBuf::from(value))?;
+    }
+    for dir in [
+        data_dir(),
+        logs_dir(),
+        db_dir(),
+        model_dir(),
+        thumbnail_cache_dir(),
+    ] {
         std::fs::create_dir_all(dir)?;
     }
     Ok(())
@@ -63,6 +87,14 @@ pub fn ensure_layout() -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn data_override_requires_absolute_path() {
+        assert!(checked_data_override(PathBuf::from("relative")).is_err());
+        assert_eq!(
+            checked_data_override(PathBuf::from(r"Z:\fixture")).unwrap(),
+            PathBuf::from(r"Z:\fixture")
+        );
+    }
 
     #[test]
     fn layout_creation_is_idempotent() {

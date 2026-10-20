@@ -26,6 +26,8 @@ pub enum StoreError {
     InvalidVector(String),
     #[error("invalid engine config: {0}")]
     InvalidConfig(String),
+    #[error("invalid durable index identity")]
+    InvalidIdentity,
 }
 
 /// A configured indexing root.
@@ -67,6 +69,550 @@ pub struct EntryRow {
 
 pub struct IndexStore {
     conn: Connection,
+    database_id: String,
+}
+
+#[derive(Clone)]
+pub struct SegmentSource {
+    pub path: String,
+    pub is_app: bool,
+    /// None is a filename vector; empty is content without a durable proof.
+    pub source: Option<String>,
+}
+
+impl IndexStore {
+    /// Offline fixture stores allow virtual paths; every production Indexer installs
+    /// its metadata-only native/source policy before exposing retrieval.
+    pub fn set_query_source_guard(
+        &self,
+        guard: impl Fn(&str, Option<&str>, bool) -> bool + Send + Sync + 'static,
+    ) -> Result<(), StoreError> {
+        self.conn.create_scalar_function("query_source_allowed", 3,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8,
+            move |ctx| Ok(guard(&ctx.get::<String>(0)?, ctx.get::<Option<String>>(1)?.as_deref(),ctx.get::<bool>(2)?)))?;
+        Ok(())
+    }
+
+    /// Durable source proofs are captured under the store lock, before scoring
+    /// under the vector-cache lock. Missing/legacy content proofs are empty.
+    pub fn segment_sources(&self) -> Result<std::collections::HashMap<i64, SegmentSource>, StoreError> {
+        let mut stmt=self.conn.prepare("SELECT s.id,e.path,e.is_app,CASE WHEN s.kind='name' THEN NULL ELSE COALESCE(p.source,'') END FROM segments s JOIN entries e ON e.id=s.entry_id LEFT JOIN content_chunks c ON c.entry_id=s.entry_id AND c.kind=s.kind AND c.chunk_index=s.chunk_index LEFT JOIN content_revisions r ON r.entry_id=s.entry_id LEFT JOIN content_progress p ON p.entry_id=c.entry_id AND p.kind=c.job_kind AND p.revision=r.revision")?;
+        let rows=stmt.query_map([],|r|Ok((r.get(0)?,SegmentSource {path:r.get(1)?,is_app:r.get(2)?,source:r.get(3)?})))?;
+        Ok(rows.collect::<Result<_,_>>()?)
+    }
+
+    pub fn segment_source_allowed(&self, segment: &Segment) -> Result<bool,StoreError> {
+        Ok(self.conn.query_row("SELECT EXISTS(SELECT 1 FROM segments s JOIN query_entries e ON e.id=s.entry_id LEFT JOIN content_chunks c ON c.entry_id=s.entry_id AND c.kind=s.kind AND c.chunk_index=s.chunk_index LEFT JOIN content_revisions r ON r.entry_id=s.entry_id LEFT JOIN content_progress p ON p.entry_id=c.entry_id AND p.kind=c.job_kind AND p.revision=r.revision WHERE s.id=?1 AND query_source_allowed(e.path,CASE WHEN s.kind='name' THEN NULL ELSE COALESCE(p.source,'') END,e.is_app))",[segment.id],|r|r.get(0))?)
+    }
+
+    pub fn entry_content_allowed(&self, entry:i64) -> Result<bool,StoreError> {
+        Ok(self.conn.prepare_cached("SELECT EXISTS(SELECT 1 FROM query_entries e JOIN content_progress p ON p.entry_id=e.id JOIN content_revisions r ON r.entry_id=e.id AND r.revision=p.revision WHERE e.id=?1 AND query_source_allowed(e.path,p.source,e.is_app))")?.query_row([entry],|r|r.get(0))?)
+    }
+
+    pub fn content_revision(&self, entry: i64) -> Result<i64, StoreError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT revision FROM content_revisions WHERE entry_id=?1",
+                [entry],
+                |r| r.get(0),
+            )
+            .optional()?
+            .unwrap_or(0))
+    }
+
+    pub fn content_sha256(&self, entry: i64) -> Result<Option<String>, StoreError> {
+        let mut statement=self.conn.prepare_cached("SELECT DISTINCT p.source_sha256 FROM content_progress p JOIN content_revisions r ON r.entry_id=p.entry_id AND r.revision=p.revision JOIN query_entries e ON e.id=p.entry_id WHERE p.entry_id=?1 AND p.source_sha256_revision=p.revision AND p.source_sha256 IS NOT NULL AND query_source_allowed(e.path,p.source,e.is_app) LIMIT 2")?;
+        let hashes=statement.query_map([entry],|row|row.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+        Ok(match hashes.as_slice() {
+            [hash] if ws_protocol::valid_content_sha256(hash)=>Some(hash.clone()),
+            _=>None,
+        })
+    }
+
+    /// Watch events invalidate even when coarse entry metadata is unchanged.
+    pub fn invalidate_content_source(&mut self, entry: i64) -> Result<(), StoreError> {
+        let tx = self.conn.transaction()?;
+        tx.execute("INSERT INTO content_revisions(entry_id,revision) VALUES(?1,1) ON CONFLICT(entry_id) DO UPDATE SET revision=revision+1", [entry])?;
+        tx.execute("DELETE FROM content_progress WHERE entry_id=?1", [entry])?;
+        tx.execute("DELETE FROM content_chunks WHERE entry_id=?1", [entry])?;
+        tx.execute("DELETE FROM content_fts WHERE entry_id=?1", [entry])?;
+        tx.execute(
+            "DELETE FROM segments WHERE entry_id=?1 AND kind!='name'",
+            [entry],
+        )?;
+        tx.execute(
+            "UPDATE entries SET thumbnail_path=NULL WHERE id=?1",
+            [entry],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn model_generation(&self) -> Result<i64, StoreError> {
+        Ok(self
+            .meta_get("content_model_generation")?
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0))
+    }
+
+    /// Model changes discard only vectors; valid exact content and parse cursors survive.
+    pub fn reset_content_vectors(&mut self) -> Result<(), StoreError> {
+        let tx = self.conn.transaction()?;
+        tx.execute("INSERT INTO meta(key,value) VALUES('content_model_generation','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1", [])?;
+        tx.execute(
+            "UPDATE content_chunks SET embed_state='pending',attempts=0 WHERE embed=1",
+            [],
+        )?;
+        tx.execute("UPDATE content_progress SET model_generation=(SELECT CAST(value AS INTEGER) FROM meta WHERE key='content_model_generation')", [])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn content_progress(
+        &self,
+        entry: i64,
+        kind: &str,
+    ) -> Result<Option<crate::model::ContentProgress>, StoreError> {
+        Ok(self.conn.query_row("SELECT cursor,complete,revision,source,model_generation,media_plan,video_selection,CASE WHEN source_sha256_revision=revision THEN source_sha256 ELSE NULL END FROM content_progress WHERE entry_id=?1 AND kind=?2", params![entry,kind], |r| Ok(crate::model::ContentProgress {
+            cursor:r.get::<_,i64>(0)? as u64, complete:r.get(1)?, revision:r.get(2)?, source:r.get(3)?, model_generation:r.get(4)?,
+            source_sha256:r.get(7)?,
+            media_plan:r.get::<_,Option<String>>(5)?.map(|s| serde_json::from_str(&s))
+                .transpose().map_err(|e| rusqlite::Error::FromSqlConversionFailure(5,rusqlite::types::Type::Text,Box::new(e)))?,
+            video_selection:r.get::<_,Option<String>>(6)?.map(|s| serde_json::from_str(&s))
+                .transpose().map_err(|e| rusqlite::Error::FromSqlConversionFailure(6,rusqlite::types::Type::Text,Box::new(e)))?,
+        })).optional()?)
+    }
+
+    pub fn begin_content_batch(
+        &mut self,
+        entry: i64,
+        kind: &str,
+        source: &str,
+    ) -> Result<crate::model::ContentProgress, StoreError> {
+        let revision = self.content_revision(entry)?;
+        let generation = self.model_generation()?;
+        if let Some(progress) = self.content_progress(entry, kind)? {
+            if !progress.complete && progress.revision == revision && progress.source == source
+                && (kind != "video"
+                    || progress.cursor == 0
+                    || progress.media_plan.is_some()
+                    || progress.video_selection.is_some())
+            {
+                return Ok(progress);
+            }
+        }
+        self.conn.execute("INSERT INTO content_revisions(entry_id,revision) VALUES(?1,1) ON CONFLICT(entry_id) DO UPDATE SET revision=revision+1",[entry])?;
+        let revision = self.content_revision(entry)?;
+        self.conn.execute("INSERT INTO content_progress(entry_id,kind,revision,source,model_generation) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(entry_id,kind) DO UPDATE SET cursor=0,complete=0,revision=excluded.revision,source=excluded.source,model_generation=excluded.model_generation,media_plan=NULL,video_selection=NULL,source_sha256=NULL,source_sha256_revision=NULL",params![entry,kind,revision,source,generation])?;
+        Ok(self
+            .content_progress(entry, kind)?
+            .expect("inserted progress"))
+    }
+
+    /// Exact text, locations, next cursor, and release of the claim are one transaction.
+    /// A stale revision/space cannot advance or overwrite a newer source.
+    pub fn commit_content_batch_with_media(
+        &mut self,
+        job: &ExtractJob,
+        progress: &crate::model::ContentProgress,
+        chunks: &[crate::model::ContentChunk],
+        next: Option<u64>,
+        media: Option<&crate::model::MediaPlan>,
+    ) -> Result<bool, StoreError> {
+        self.commit_content_batch_with_video_selection(job, progress, chunks, next, media, None)
+    }
+
+    pub fn commit_content_batch_with_video_selection(
+        &mut self,
+        job: &ExtractJob,
+        progress: &crate::model::ContentProgress,
+        chunks: &[crate::model::ContentChunk],
+        next: Option<u64>,
+        media: Option<&crate::model::MediaPlan>,
+        selection: Option<&crate::model::VideoSelection>,
+    ) -> Result<bool, StoreError> {
+        self.commit_content_batch_with_source(job,progress,chunks,next,media,selection,None)
+    }
+
+    pub fn commit_content_batch_with_source(
+        &mut self, job: &ExtractJob, progress: &crate::model::ContentProgress,
+        chunks: &[crate::model::ContentChunk], next: Option<u64>,
+        media: Option<&crate::model::MediaPlan>, selection: Option<&crate::model::VideoSelection>,
+        source_sha256: Option<&str>,
+    ) -> Result<bool, StoreError> {
+        if source_sha256.is_some_and(|hash|!ws_protocol::valid_content_sha256(hash)) {
+            return Err(StoreError::InvalidConfig("invalid complete-source SHA256".into()));
+        }
+        if progress.source_sha256.as_deref().is_some_and(|hash|Some(hash)!=source_sha256) {
+            return Ok(false);
+        }
+        // A resumed legacy parse has no byte attestation for its earlier chunks or media plan.
+        let source_sha256=source_sha256.filter(|_|progress.source_sha256.is_some()
+            || (progress.cursor==0 && progress.media_plan.is_none() && progress.video_selection.is_none()));
+        if self.content_revision(job.entry_id)? != progress.revision
+            || self.model_generation()? != progress.model_generation
+        {
+            return Ok(false);
+        }
+        if self.content_progress(job.entry_id, &job.kind)?.as_ref() != Some(progress) {
+            return Ok(false);
+        }
+        if let Some(plan) = media {
+            plan.validate().map_err(|s| StoreError::InvalidConfig(s.into()))?;
+            if !matches!(job.kind.as_str(),"audio"|"video")
+                || progress.media_plan.as_ref().is_some_and(|saved| saved != plan) {
+                return Err(StoreError::InvalidConfig(
+                    "media plan changed within source revision".into(),
+                ));
+            }
+        }
+        if let Some(state) = selection {
+            state
+                .validate_successor(progress.video_selection.as_ref())
+                .map_err(|s| StoreError::InvalidConfig(s.into()))?;
+            if job.kind != "video"
+                || !chunks.is_empty()
+                || progress.media_plan.is_some()
+                || (progress.video_selection.is_none() && progress.cursor != 0)
+                || progress
+                    .video_selection
+                    .as_ref()
+                    .is_some_and(|p| progress.cursor != ((1u64 << 61) | p.next_ms))
+                || (state.next_ms < state.duration_ms
+                    && (media.is_some() || next != Some((1u64 << 61) | state.next_ms)))
+                || (state.next_ms == state.duration_ms && (media.is_none() || next != Some(0)))
+            {
+                return Err(StoreError::InvalidConfig(
+                    "invalid video selection commit".into(),
+                ));
+            }
+        } else if progress.video_selection.is_some() {
+            return Err(StoreError::InvalidConfig(
+                "selection phase lost its checkpoint".into(),
+            ));
+        }
+        let media_json = media.map(serde_json::to_string).transpose()
+            .map_err(|e| StoreError::InvalidConfig(e.to_string()))?;
+        let selection_json = selection
+            .filter(|s| s.next_ms < s.duration_ms)
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|e| StoreError::InvalidConfig(e.to_string()))?;
+        let phase_finish = selection.is_some_and(|s| s.next_ms == s.duration_ms) && next == Some(0);
+        if next.is_some_and(|n| (!phase_finish && n <= progress.cursor) || n > i64::MAX as u64)
+            || (chunks.is_empty() && next.is_some() && !matches!(job.kind.as_str(), "audio" | "video")) {
+            return Err(StoreError::InvalidConfig(
+                "cursor advanced without content".into(),
+            ));
+        }
+        let tx = self.conn.transaction()?;
+        if progress.cursor == 0 {
+            tx.execute("DELETE FROM segments WHERE entry_id=?1 AND kind!='name' AND EXISTS(SELECT 1 FROM content_chunks c WHERE c.entry_id=?1 AND c.job_kind=?2 AND c.kind=segments.kind AND c.chunk_index=segments.chunk_index)",params![job.entry_id,job.kind])?;
+            tx.execute(
+                "DELETE FROM content_chunks WHERE entry_id=?1 AND job_kind=?2",
+                params![job.entry_id, job.kind],
+            )?;
+            tx.execute(
+                "DELETE FROM content_fts WHERE entry_id=?1 AND kind=?2",
+                params![job.entry_id, job.kind],
+            )?;
+            tx.execute("DELETE FROM segments WHERE entry_id=?1 AND (kind=?2 OR (?2 IN ('image','pdf') AND kind='ocr') OR (?2='pdf' AND kind='pdf_visual'))",params![job.entry_id,job.kind])?;
+            tx.execute(
+                "UPDATE entries SET thumbnail_path=NULL WHERE id=?1",
+                [job.entry_id],
+            )?;
+        }
+        for chunk in chunks {
+            let input = serde_json::to_string(&chunk.embedding_input)
+                .map_err(|e| StoreError::InvalidConfig(e.to_string()))?;
+            tx.execute("INSERT INTO content_chunks(entry_id,job_kind,kind,chunk_index,text,page,start_ms,end_ms,line,thumbnail_path,embed,visual,embedding_input) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",params![job.entry_id,job.kind,chunk.kind,chunk.chunk_index,chunk.text,chunk.location.page,chunk.location.start_ms.map(|n| n as i64),chunk.location.end_ms.map(|n| n as i64),chunk.location.line,chunk.location.thumbnail_path,chunk.embed,chunk.visual,input])?;
+            let id = tx.last_insert_rowid();
+            if !chunk.visual && !chunk.text.trim().is_empty() {
+                tx.execute(
+                    "INSERT INTO content_fts(rowid,entry_id,kind,text) VALUES(?1,?2,?3,?4)",
+                    params![id, job.entry_id, job.kind, chunk.text],
+                )?;
+            }
+            if let Some(thumb) = &chunk.location.thumbnail_path {
+                tx.execute(
+                    "UPDATE entries SET thumbnail_path=COALESCE(thumbnail_path,?2) WHERE id=?1",
+                    params![job.entry_id, thumb],
+                )?;
+            }
+        }
+        tx.execute(
+            "UPDATE content_progress SET cursor=?3,complete=?4,media_plan=COALESCE(?5,media_plan),video_selection=?6,source_sha256=?7,source_sha256_revision=CASE WHEN ?7 IS NULL THEN NULL ELSE ?8 END WHERE entry_id=?1 AND kind=?2",
+            params![
+                job.entry_id,
+                job.kind,
+                next.unwrap_or(progress.cursor + chunks.iter().filter(|c|!c.visual).count() as u64) as i64,
+                next.is_none(),
+                media_json, selection_json, source_sha256, progress.revision
+            ],
+        )?;
+        if next.is_some() {
+            tx.execute("UPDATE extract_jobs SET claimed=0,state='pending',priority=-1000000000000,attempts=0 WHERE id=?1",[job.id])?;
+        } else {
+            tx.execute("DELETE FROM extract_jobs WHERE id=?1", [job.id])?;
+        }
+        tx.commit()?;
+        Ok(true)
+    }
+
+    pub fn list_content_chunks(
+        &self,
+        entry: i64,
+    ) -> Result<Vec<crate::model::ContentChunk>, StoreError> {
+        self.content_chunks_by("WHERE entry_id=?1 ORDER BY chunk_index", entry)
+    }
+
+    /// Reads only a bounded byte prefix and source locations from admitted rows.
+    pub fn preview_text(&self, entry:i64, location:Option<ws_protocol::MatchLocation>)
+        -> Result<(Vec<ws_protocol::PreviewTextPart>,bool),StoreError> {
+        use ws_protocol::{MatchLocation,PreviewTextPart,MAX_PREVIEW_TEXT_BYTES,MAX_PREVIEW_TEXT_PARTS};
+        let (mut page,mut line,mut start,mut end)=(None,None,None,None);
+        match location {
+            Some(MatchLocation::Page {page:value}) if (1..=5000).contains(&value)=>page=Some(value),
+            Some(MatchLocation::Line {line:value}) if value>0=>line=Some(value),
+            Some(MatchLocation::Timestamp {seconds,end_seconds})
+                if seconds.is_finite() && end_seconds.is_finite() && seconds>=0.0
+                    && end_seconds>=seconds && end_seconds<=366.0*86400.0=> {
+                start=Some(seconds);end=Some(end_seconds);
+            }
+            None=>(),
+            _=>return Err(StoreError::InvalidConfig("unsupported preview location".into())),
+        }
+        let mut statement=self.conn.prepare("SELECT c.kind,substr(CAST(c.text AS BLOB),1,?2),length(CAST(c.text AS BLOB)),c.page,c.start_ms,c.end_ms,c.line FROM content_chunks c JOIN query_content_rows admitted ON admitted.id=c.id WHERE c.entry_id=?1 AND c.text!='' AND (?3 IS NULL OR c.page=?3) AND (?4 IS NULL OR c.line<=?4) AND (?5 IS NULL OR (c.start_ms/1000.0=?5 AND COALESCE(c.end_ms,c.start_ms)/1000.0=?6)) ORDER BY CASE WHEN ?4 IS NOT NULL THEN -c.line ELSE 0 END,c.chunk_index,c.id LIMIT ?7")?;
+        let mut rows=statement.query(params![entry,(MAX_PREVIEW_TEXT_BYTES+1) as i64,page,line,start,end,(MAX_PREVIEW_TEXT_PARTS+1) as i64])?;
+        let (mut parts,mut used,mut seen,mut truncated)=(Vec::new(),0,0,false);
+        while let Some(row)=rows.next()? {
+            seen+=1;
+            if seen>MAX_PREVIEW_TEXT_PARTS {truncated=true;break;}
+            let bytes:Vec<u8>=row.get(1)?;
+            let original_size=usize::try_from(row.get::<_,i64>(2)?)
+                .map_err(|_|StoreError::InvalidConfig("invalid cached preview size".into()))?;
+            let available=MAX_PREVIEW_TEXT_BYTES-used;
+            let prefix=&bytes[..bytes.len().min(available)];
+            let text=match std::str::from_utf8(prefix) {
+                Ok(text)=>text,
+                Err(error) if error.error_len().is_none()=>std::str::from_utf8(&prefix[..error.valid_up_to()]).expect("validated UTF8 prefix"),
+                Err(_)=>return Err(StoreError::InvalidConfig("cached preview text is not UTF8".into())),
+            };
+            let part_line:Option<u32>=row.get(6)?;
+            if line.is_some_and(|focus|part_line.is_none_or(|first|
+                focus<first || u64::from(focus-first)>=text.lines().count().max(1) as u64)) {
+                truncated|=original_size>text.len();continue;
+            }
+            let part_page:Option<u32>=row.get(3)?;
+            let part_start:Option<i64>=row.get(4)?;
+            let part_end:Option<i64>=row.get(5)?;
+            let location=if let Some(page)=part_page {Some(MatchLocation::Page {page})}
+                else if let Some(start)=part_start {
+                    let end=part_end.unwrap_or(start);
+                    if start<0 || end<start || end>366*86400*1000 {return Err(StoreError::InvalidConfig("invalid cached preview time".into()));}
+                    Some(MatchLocation::Timestamp {seconds:start as f64/1000.0,end_seconds:end as f64/1000.0})
+                } else {part_line.map(|line|MatchLocation::Line {line})};
+            if !text.is_empty() {
+                used+=text.len();
+                parts.push(PreviewTextPart {kind:row.get(0)?,text:text.to_owned(),location});
+            }
+            if original_size>text.len() {truncated=true;break;}
+        }
+        Ok((parts,truncated))
+    }
+
+    pub fn preview_extraction(&self,entry:i64)->Result<Vec<ws_protocol::PreviewExtraction>,StoreError> {
+        let mut statement=self.conn.prepare("SELECT substr(p.kind,1,33),p.complete FROM content_progress p JOIN content_revisions r ON r.entry_id=p.entry_id AND r.revision=p.revision JOIN query_entries e ON e.id=p.entry_id WHERE p.entry_id=?1 AND query_source_allowed(e.path,p.source,e.is_app) ORDER BY p.kind LIMIT ?2")?;
+        let rows=statement.query_map(params![entry,(ws_protocol::MAX_PREVIEW_EXTRACTIONS+1) as i64],|row| {
+            Ok(ws_protocol::PreviewExtraction {kind:row.get(0)?,complete_within_limit:row.get(1)?,
+                source_units:None,indexed_units:None,capped:None})
+        })?;
+        let metadata=rows.collect::<Result<Vec<_>,_>>()?;
+        if metadata.len()>ws_protocol::MAX_PREVIEW_EXTRACTIONS || metadata.iter().any(|m|!crate::CONTENT_SEGMENT_KINDS.contains(&m.kind.as_str())) {
+            return Err(StoreError::InvalidConfig("invalid preview extraction metadata".into()));
+        }
+        Ok(metadata)
+    }
+
+    /// Cached pixels must belong to the exact chunk metadata that was scored.
+    pub fn segment_thumbnail(&self,segment:&crate::model::Segment) -> Result<Option<String>,StoreError> {
+        if !self.segment_source_allowed(segment)? { return Ok(None); }
+        Ok(self.conn.query_row("SELECT thumbnail_path FROM content_chunks WHERE entry_id=?1 AND kind=?2 AND chunk_index=?3 AND text=?4 AND page IS ?5 AND start_ms IS ?6 AND end_ms IS ?7 AND line IS ?8 LIMIT 1",
+            params![segment.entry_id,segment.kind,segment.chunk_index,segment.text,segment.page,segment.start_ms,segment.end_ms,segment.line],
+            |r|r.get::<_,Option<String>>(0)).optional()?.flatten())
+    }
+
+    pub fn commit_content_batch(
+        &mut self, job: &ExtractJob, progress: &crate::model::ContentProgress,
+        chunks: &[crate::model::ContentChunk], next: Option<u64>,
+    ) -> Result<bool, StoreError> {
+        self.commit_content_batch_with_media(job, progress, chunks, next, None)
+    }
+
+    fn content_chunks_by(
+        &self,
+        suffix: &str,
+        entry: i64,
+    ) -> Result<Vec<crate::model::ContentChunk>, StoreError> {
+        let mut stmt = self.conn.prepare(&format!("SELECT id,entry_id,job_kind,kind,chunk_index,text,page,start_ms,end_ms,line,thumbnail_path,embed,attempts,visual,embedding_input FROM content_chunks {suffix}"))?;
+        let rows = stmt.query_map([entry], |r| {
+            Ok(crate::model::ContentChunk {
+                id: r.get(0)?,
+                entry_id: r.get(1)?,
+                job_kind: r.get(2)?,
+                kind: r.get(3)?,
+                chunk_index: r.get(4)?,
+                text: r.get(5)?,
+                location: crate::model::ContentMatch {
+                    excerpt: String::new(),
+                    match_byte: None,
+                    page: r.get(6)?,
+                    start_ms: r.get::<_, Option<i64>>(7)?.map(|n| n as u64),
+                    end_ms: r.get::<_, Option<i64>>(8)?.map(|n| n as u64),
+                    line: r.get(9)?,
+                    thumbnail_path: r.get(10)?,
+                },
+                embed: r.get(11)?,
+                attempts: r.get(12)?,
+                visual: r.get(13)?,
+                embedding_input: serde_json::from_str(&r.get::<_, String>(14)?)
+                    .map_err(|e| rusqlite::Error::FromSqlConversionFailure(14, rusqlite::types::Type::Text, Box::new(e)))?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Atomically claims one source's pending vectors; no parser invocation is needed.
+    pub fn claim_content_vectors(
+        &mut self,
+        preferred: Option<i64>,
+    ) -> Result<Vec<crate::model::ContentChunk>, StoreError> {
+        let entry: Option<i64> = self.conn.query_row("SELECT c.entry_id FROM content_chunks c JOIN visible_entries e ON e.id=c.entry_id WHERE (?1 IS NULL OR c.entry_id=?1) AND c.embed=1 AND c.embed_state='pending' AND c.attempts<3 AND e.missing=0 ORDER BY c.attempts,c.id LIMIT 1",[preferred],|r|r.get(0)).optional()?;
+        let Some(entry) = entry else {
+            return Ok(Vec::new());
+        };
+        let mut chunks = self.content_chunks_by("WHERE entry_id=?1 AND embed=1 AND embed_state='pending' AND attempts<3 AND visual=(SELECT visual FROM content_chunks WHERE entry_id=?1 AND embed=1 AND embed_state='pending' AND attempts<3 ORDER BY visual,id LIMIT 1) ORDER BY id LIMIT 30",entry)?;
+        if let Some(first) = chunks.first() {
+            let class = std::mem::discriminant(&first.embedding_input);
+            chunks.retain(|c| std::mem::discriminant(&c.embedding_input) == class);
+        }
+        let tx = self.conn.transaction()?;
+        for chunk in &chunks {
+            tx.execute(
+                "UPDATE content_chunks SET embed_state='claimed' WHERE id=?1",
+                [chunk.id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(chunks)
+    }
+
+    /// Replace a regenerated input without changing exact rows or vector state.
+    pub fn replace_content_artifact(
+        &mut self, chunk: &crate::model::ContentChunk,
+        input: &crate::model::DraftEmbeddingInput, revision: i64, generation: i64,
+    ) -> Result<bool, StoreError> {
+        if self.content_revision(chunk.entry_id)? != revision || self.model_generation()? != generation {
+            return Ok(false);
+        }
+        if std::mem::discriminant(input) != std::mem::discriminant(&chunk.embedding_input)
+            || matches!(input, crate::model::DraftEmbeddingInput::Text) {
+            return Err(StoreError::InvalidConfig("regenerated artifact type changed".into()));
+        }
+        let encode = |input| serde_json::to_string(input).map_err(|e| StoreError::InvalidConfig(e.to_string()));
+        let tx=self.conn.transaction()?;
+        if tx.execute("UPDATE content_chunks SET embedding_input=?3 WHERE id=?1 AND entry_id=?2 AND embed_state IN ('claimed','done') AND embedding_input=?4",
+            params![chunk.id, chunk.entry_id, encode(input)?, encode(&chunk.embedding_input)?])? != 1 { return Ok(false); }
+        if let (crate::model::DraftEmbeddingInput::Image { path:old,.. },crate::model::DraftEmbeddingInput::Image { path:new,.. })=(&chunk.embedding_input,input) {
+            let (old,new)=(old.to_string_lossy(),new.to_string_lossy());
+            // A continued frame is rendered in another worker and can have a
+            // different PNG path for its OCR. Source time identifies its siblings.
+            tx.execute("UPDATE content_chunks SET thumbnail_path=?3 WHERE entry_id=?1 AND job_kind=?2 AND (thumbnail_path=?4 OR (?5 AND start_ms=?6 AND end_ms=?7))",
+                params![chunk.entry_id,chunk.job_kind,new,old,
+                    chunk.job_kind=="video" && chunk.kind=="video",
+                    chunk.location.start_ms.and_then(|t|i64::try_from(t).ok()),
+                    chunk.location.end_ms.and_then(|t|i64::try_from(t).ok())])?;
+            tx.execute("UPDATE entries SET thumbnail_path=?2 WHERE id=?1 AND thumbnail_path=?3",params![chunk.entry_id,new,old])?;
+        }
+        tx.commit()?;
+        Ok(true)
+    }
+
+    pub fn release_content_vectors(
+        &mut self,
+        chunks: &[crate::model::ContentChunk],
+        failed: bool,
+    ) -> Result<(), StoreError> {
+        let tx = self.conn.transaction()?;
+        for c in chunks {
+            tx.execute("UPDATE content_chunks SET embed_state='pending',attempts=attempts+?2 WHERE id=?1 AND embed_state='claimed'",params![c.id,failed])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn complete_optional_visual(
+        &mut self,
+        chunks: &[crate::model::ContentChunk],
+    ) -> Result<(), StoreError> {
+        for c in chunks {
+            self.conn.execute(
+                "UPDATE content_chunks SET embed_state='done' WHERE id=?1 AND visual=1",
+                [c.id],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn commit_content_vectors(
+        &mut self,
+        chunks: &[crate::model::ContentChunk],
+        vectors: &[Vec<f32>],
+        revision: i64,
+        generation: i64,
+    ) -> Result<bool, StoreError> {
+        if chunks.is_empty() {
+            return Ok(true);
+        }
+        if vectors.len() != chunks.len() {
+            return Err(StoreError::InvalidVector("content vector arity".into()));
+        }
+        if self.content_revision(chunks[0].entry_id)? != revision
+            || self.model_generation()? != generation
+        {
+            return Ok(false);
+        }
+        let encoded = vectors
+            .iter()
+            .map(|v| {
+                if v.is_empty() || v.iter().any(|n| !n.is_finite()) || v.iter().all(|n| *n == 0.0) {
+                    return Err(StoreError::InvalidVector(
+                        "empty, zero or nonfinite content vector".into(),
+                    ));
+                }
+                Ok(encode_normalized_vector(v))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let tx = self.conn.transaction()?;
+        for (c, (blob, norm)) in chunks.iter().zip(encoded) {
+            let exists: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM content_chunks WHERE id=?1 AND embed_state='claimed')",
+                [c.id],
+                |r| r.get(0),
+            )?;
+            if !exists {
+                return Ok(false);
+            }
+            tx.execute("INSERT INTO segments(entry_id,kind,chunk_index,text,page,start_ms,end_ms,line,vector,norm) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) ON CONFLICT(entry_id,kind,chunk_index) DO UPDATE SET text=excluded.text,page=excluded.page,start_ms=excluded.start_ms,end_ms=excluded.end_ms,line=excluded.line,vector=excluded.vector,norm=excluded.norm",params![c.entry_id,c.kind,c.chunk_index,c.text,c.location.page,c.location.start_ms.map(|n|n as i64),c.location.end_ms.map(|n|n as i64),c.location.line,blob,norm])?;
+            tx.execute(
+                "UPDATE content_chunks SET embed_state='done',attempts=0 WHERE id=?1",
+                [c.id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(true)
+    }
 }
 
 const SCHEMA: &str = r#"
@@ -186,6 +732,23 @@ CREATE VIRTUAL TABLE IF NOT EXISTS content_fts USING fts5(
 /// a migration and `meta.schema_version` stays "2" (same pattern as the
 /// `priority`-column exception: a policy hint, not a format break).
 const SCHEMA_CONFIG: &str = r#"
+CREATE VIEW IF NOT EXISTS visible_entries AS
+WITH policy AS (SELECT value AS config FROM meta WHERE key='indexing_config'),
+normalized AS (SELECT *, policy_fold(path) AS policy_path FROM entries)
+SELECT e.id,e.root_id,e.parent_id,e.path,e.name,e.name_lower,e.ext,e.is_dir,e.is_app,e.size,e.mtime,e.missing,e.thumbnail_path
+FROM normalized e
+WHERE e.is_app=1 OR NOT EXISTS(SELECT 1 FROM policy) OR (
+ EXISTS(SELECT 1 FROM roots WHERE roots.id=e.root_id AND enabled=1)
+ AND EXISTS(SELECT 1 FROM policy,json_each(config,'$.roots') r
+ WHERE (e.policy_path=policy_fold(r.value)
+ OR substr(e.policy_path,1,length(policy_fold(r.value))+1)=policy_fold(r.value)||'\')
+ AND NOT EXISTS(SELECT 1 FROM json_each(config,'$.excluded_paths') x
+ WHERE length(policy_fold(x.value))>=length(policy_fold(r.value))
+ AND (e.policy_path=policy_fold(x.value)
+ OR substr(e.policy_path,1,length(policy_fold(x.value))+1)=policy_fold(x.value)||'\')))
+ AND NOT EXISTS(SELECT 1 FROM policy,json_each(config,'$.excluded_extensions') x WHERE lower(e.ext)=x.value)
+);
+
 CREATE TABLE IF NOT EXISTS config (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -197,6 +760,56 @@ pub const CONFIG_KEY_SEMANTIC_ENABLED: &str = "semantic_enabled";
 pub const CONFIG_KEY_PREFERRED_BACKEND: &str = "preferred_backend";
 
 impl IndexStore {
+    pub fn entry_visible(&self, id: i64) -> Result<bool, StoreError> {
+        Ok(self.conn.prepare_cached(
+            "SELECT EXISTS(SELECT 1 FROM query_entries WHERE id=?1)")?.query_row(
+            [id],
+            |r| r.get(0),
+        )?)
+    }
+    pub fn root_enabled(&self, id: i64) -> Result<bool, StoreError> {
+        Ok(self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM roots WHERE id=?1 AND enabled=1)",
+            [id],
+            |r| r.get(0),
+        )?)
+    }
+    /// Loads policy once, migrating only roots already registered by legacy engines.
+    pub fn get_or_migrate_indexing_config(
+        &mut self,
+    ) -> Result<ws_protocol::IndexingConfig, StoreError> {
+        if let Some(json) = self.meta_get("indexing_config")? {
+            return serde_json::from_str(&json)
+                .map_err(|e| StoreError::InvalidConfig(e.to_string()));
+        }
+        let mut config = ws_protocol::IndexingConfig::default();
+        config.roots = self
+            .roots()?
+            .into_iter()
+            .filter(|r| r.enabled && r.path != "@apps")
+            .map(|r| r.path)
+            .collect();
+        self.set_indexing_config(&config)?;
+        Ok(config)
+    }
+
+    /// Policy and root visibility share a single SQLite transaction.
+    pub fn set_indexing_config(
+        &mut self,
+        config: &ws_protocol::IndexingConfig,
+    ) -> Result<(), StoreError> {
+        let json =
+            serde_json::to_string(config).map_err(|e| StoreError::InvalidConfig(e.to_string()))?;
+        let tx = self.conn.transaction()?;
+        tx.execute("UPDATE roots SET enabled = 0 WHERE path != '@apps'", [])?;
+        for path in &config.roots {
+            tx.execute("INSERT INTO roots(path, enabled) VALUES(?1, 1) ON CONFLICT(path) DO UPDATE SET enabled = 1", [path])?;
+        }
+        tx.execute("INSERT INTO meta(key,value) VALUES('indexing_config',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [json])?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn open(path: &Path) -> Result<Self, StoreError> {
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -209,6 +822,17 @@ impl IndexStore {
     }
 
     fn init(conn: Connection) -> Result<Self, StoreError> {
+        use rusqlite::functions::FunctionFlags;
+        conn.create_scalar_function("policy_fold", 1,
+            FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+            |ctx| {
+                Ok(ctx
+                    .get::<String>(0)?
+                    .replace('/', "\\")
+                    .trim_end_matches('\\')
+                    .to_lowercase())
+            },
+        )?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
@@ -224,6 +848,83 @@ impl IndexStore {
         // stays "2": the column is a queue-ordering hint, not a format break.
         Self::ensure_extract_jobs_priority_column(&conn)?;
         Self::ensure_crawl_queue_generation_column(&conn)?;
+        conn.execute_batch(
+            r#"
+CREATE TABLE IF NOT EXISTS content_revisions (
+ entry_id INTEGER PRIMARY KEY REFERENCES entries(id) ON DELETE CASCADE,
+ revision INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS content_progress (
+ entry_id INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+ kind TEXT NOT NULL, cursor INTEGER NOT NULL DEFAULT 0, complete INTEGER NOT NULL DEFAULT 0,
+ revision INTEGER NOT NULL, source TEXT NOT NULL, model_generation INTEGER NOT NULL,
+ PRIMARY KEY(entry_id,kind)
+);
+CREATE TABLE IF NOT EXISTS content_chunks (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ entry_id INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+ job_kind TEXT NOT NULL, kind TEXT NOT NULL, chunk_index INTEGER NOT NULL,
+ text TEXT NOT NULL, page INTEGER, start_ms INTEGER, end_ms INTEGER, line INTEGER,
+ thumbnail_path TEXT, embed INTEGER NOT NULL DEFAULT 0, visual INTEGER NOT NULL DEFAULT 0,
+ embed_state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+ UNIQUE(entry_id,job_kind,chunk_index)
+);
+CREATE INDEX IF NOT EXISTS idx_content_pending ON content_chunks(embed,embed_state,id);
+CREATE INDEX IF NOT EXISTS idx_content_segment_location ON content_chunks(entry_id,kind,chunk_index);
+CREATE TRIGGER IF NOT EXISTS content_chunk_delete AFTER DELETE ON content_chunks BEGIN
+ DELETE FROM content_fts WHERE rowid=old.id;
+END;
+UPDATE content_chunks SET embed_state='pending' WHERE embed_state='claimed';
+"#,
+        )?;
+        let progress_columns = conn.prepare("PRAGMA table_info(content_progress)")?
+            .query_map([], |r| r.get::<_,String>(1))?.collect::<Result<Vec<_>,_>>()?;
+        if !progress_columns.iter().any(|c| c == "media_plan") {
+            conn.execute(
+                "ALTER TABLE content_progress ADD COLUMN media_plan TEXT",
+                [],
+            )?;
+        }
+        if !progress_columns.iter().any(|c| c == "video_selection") {
+            conn.execute(
+                "ALTER TABLE content_progress ADD COLUMN video_selection TEXT",
+                [],
+            )?;
+        }
+        if !progress_columns.iter().any(|c| c == "source_sha256") {
+            conn.execute("ALTER TABLE content_progress ADD COLUMN source_sha256 TEXT", [])?;
+        }
+        if !progress_columns.iter().any(|c| c == "source_sha256_revision") {
+            conn.execute("ALTER TABLE content_progress ADD COLUMN source_sha256_revision INTEGER", [])?;
+        }
+        let chunk_columns = conn.prepare("PRAGMA table_info(content_chunks)")?
+            .query_map([], |r| r.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?;
+        if !chunk_columns.iter().any(|c| c == "embedding_input") {
+            conn.execute("ALTER TABLE content_chunks ADD COLUMN embedding_input TEXT NOT NULL DEFAULT '\"Text\"'", [])?;
+        }
+        // Preserve legacy FTS rows, including numeric exact-only text without segments.
+        if conn.query_row(
+            "SELECT COUNT(*) FROM meta WHERE key='content_batches_v1'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )? == 0
+        {
+            conn.execute_batch(r#"
+BEGIN IMMEDIATE;
+INSERT INTO content_chunks(entry_id,job_kind,kind,chunk_index,text,page,start_ms,end_ms,line)
+ SELECT CAST(f.entry_id AS INTEGER),f.kind,f.kind,f.rowid,f.text,
+ (SELECT page FROM segments s WHERE s.entry_id=f.entry_id AND s.text=f.text LIMIT 1),
+ (SELECT start_ms FROM segments s WHERE s.entry_id=f.entry_id AND s.text=f.text LIMIT 1),
+ (SELECT end_ms FROM segments s WHERE s.entry_id=f.entry_id AND s.text=f.text LIMIT 1),
+ (SELECT line FROM segments s WHERE s.entry_id=f.entry_id AND s.text=f.text LIMIT 1)
+ FROM content_fts f JOIN entries e ON e.id=CAST(f.entry_id AS INTEGER);
+DELETE FROM content_fts;
+INSERT INTO content_fts(rowid,entry_id,kind,text) SELECT id,entry_id,job_kind,text FROM content_chunks;
+INSERT INTO meta(key,value) VALUES('content_batches_v1','1');
+COMMIT;
+"#)?;
+        }
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_extract_jobs_priority ON extract_jobs(state, claimed, priority, id);",
         )?;
@@ -243,9 +944,11 @@ impl IndexStore {
         // Additive migration 1 → 2: fresh DBs land directly on 2, v1 files
         // keep every existing row and just gain the new tables.
         let version: Option<String> = conn
-            .query_row("SELECT value FROM meta WHERE key = 'schema_version'", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'schema_version'",
+                [],
+                |r| r.get(0),
+            )
             .optional()?;
         match version.as_deref() {
             None => {
@@ -265,7 +968,17 @@ impl IndexStore {
                 return Err(StoreError::UnsupportedSchemaVersion(other.to_string()));
             }
         }
-        Ok(Self { conn })
+        conn.execute("INSERT OR IGNORE INTO meta(key,value) VALUES('database_id',lower(hex(randomblob(16))))", [])?;
+        let database_id: String = conn.query_row("SELECT value FROM meta WHERE key='database_id'", [], |row| row.get(0))?;
+        if database_id.len() != 32 || !database_id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+            return Err(StoreError::InvalidIdentity);
+        }
+        let store=Self { conn, database_id };
+        store.set_query_source_guard(|_,_,_|true)?;
+        store.conn.execute_batch("CREATE TEMP VIEW IF NOT EXISTS query_entries AS SELECT * FROM visible_entries WHERE query_source_allowed(path,NULL,is_app); CREATE TEMP VIEW IF NOT EXISTS query_content_rows AS SELECT f.rowid AS id FROM content_fts f JOIN query_entries e ON e.id=CAST(f.entry_id AS INTEGER) LEFT JOIN content_chunks c ON c.id=f.rowid AND c.entry_id=e.id LEFT JOIN content_revisions r ON r.entry_id=e.id LEFT JOIN content_progress p ON p.entry_id=c.entry_id AND p.kind=c.job_kind AND p.revision=r.revision WHERE query_source_allowed(e.path,COALESCE(p.source,''),e.is_app);")?;
+        store.set_search_request_filter(&crate::model::SearchRequest::default())?;
+        store.conn.execute_batch("CREATE TEMP VIEW IF NOT EXISTS search_entries AS SELECT * FROM query_entries WHERE missing=0 AND search_request_allowed(path,ext,is_dir,is_app);")?;
+        Ok(store)
     }
 
     /// Current `meta.schema_version` (`"2"` on fresh and migrated DBs).
@@ -276,6 +989,11 @@ impl IndexStore {
             |r| r.get(0),
         )?;
         Ok(v)
+    }
+
+    /// Non-secret database incarnation, stable across process restarts.
+    pub fn database_id(&self) -> &str {
+        &self.database_id
     }
 
     fn ensure_extract_jobs_priority_column(conn: &Connection) -> Result<(), StoreError> {
@@ -315,30 +1033,28 @@ impl IndexStore {
     }
 
     fn ensure_entries_path_tri_backfilled(conn: &Connection) -> Result<(), StoreError> {
-        let has_path_tri: bool = conn
-            .query_row("SELECT 1 FROM entries_path_tri LIMIT 1", [], |_| Ok(true))
+        let backfilled: bool = conn
+            .query_row("SELECT 1 FROM meta WHERE key = 'entries_path_tri_backfilled'", [], |_| Ok(true))
             .optional()?
             .unwrap_or(false);
-        if has_path_tri {
+        if backfilled {
             return Ok(());
         }
-        let has_entries: bool = conn
-            .query_row("SELECT 1 FROM entries LIMIT 1", [], |_| Ok(true))
-            .optional()?
-            .unwrap_or(false);
-        if !has_entries {
-            return Ok(());
-        }
+        let tx = conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM entries_path_tri", [])?;
         let rows: Vec<(i64, String)> = {
-            let mut stmt = conn.prepare("SELECT id, path FROM entries")?;
+            let mut stmt = tx.prepare("SELECT id, path FROM entries")?;
             let mapped = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
             mapped.collect::<Result<_, _>>()?
         };
-        let mut insert =
-            conn.prepare("INSERT INTO entries_path_tri(rowid, path) VALUES(?1, ?2)")?;
-        for (id, path) in rows {
-            insert.execute(params![id, path.to_lowercase()])?;
+        {
+            let mut insert = tx.prepare("INSERT INTO entries_path_tri(rowid, path) VALUES(?1, ?2)")?;
+            for (id, path) in rows {
+                insert.execute(params![id, path.to_lowercase()])?;
+            }
         }
+        tx.execute("INSERT INTO meta(key, value) VALUES('entries_path_tri_backfilled', '1')", [])?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -776,7 +1492,9 @@ impl IndexStore {
                  ?2,
                  COALESCE((SELECT current_generation FROM roots WHERE id = ?1), 0)
              )
-             ON CONFLICT(root_id, dir_path) DO NOTHING",
+             ON CONFLICT(root_id, dir_path) DO UPDATE SET
+                 id = excluded.id, generation = excluded.generation, claimed = 0
+             WHERE crawl_queue.generation != excluded.generation",
             params![root_id, dir_path],
         )?;
         Ok(())
@@ -820,7 +1538,7 @@ impl IndexStore {
         self.conn
             .query_row(
                 "UPDATE crawl_queue SET claimed = 1
-                 WHERE id = (SELECT id FROM crawl_queue WHERE claimed = 0 ORDER BY id LIMIT 1)
+                 WHERE id = (SELECT id FROM crawl_queue WHERE claimed = 0 AND root_id IN (SELECT id FROM roots WHERE enabled=1) ORDER BY id LIMIT 1)
                  RETURNING id, root_id, dir_path, generation",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
@@ -1124,7 +1842,7 @@ impl IndexStore {
         let mut stmt = self.conn.prepare(
             "SELECT id, entry_id, kind, chunk_index, text, page, start_ms, end_ms,
                     line, vector, norm
-             FROM segments ORDER BY id",
+             FROM segments WHERE EXISTS (SELECT 1 FROM visible_entries v WHERE v.id = segments.entry_id) ORDER BY id",
         )?;
         let rows = stmt.query_map([], map_segment_row)?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -1136,7 +1854,7 @@ impl IndexStore {
         &self,
     ) -> Result<Vec<(i64, i64, String, Vec<u8>, f32)>, StoreError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, entry_id, kind, vector, norm FROM segments ORDER BY id",
+            "SELECT id, entry_id, kind, vector, norm FROM segments WHERE EXISTS (SELECT 1 FROM visible_entries v WHERE v.id = segments.entry_id) ORDER BY id",
         )?;
         let rows = stmt.query_map([], |row| {
             let bytes: Vec<u8> = row.get(3)?;
@@ -1186,10 +1904,15 @@ impl IndexStore {
     /// Deletes all `content_fts` rows for `entry_id` (used when re-extraction
     /// returns `Unsupported` or `Failed`).
     pub fn delete_content_text(&mut self, entry_id: i64) -> Result<u64, StoreError> {
-        let n = self.conn.execute(
+        let tx=self.conn.transaction()?;
+        tx.execute("DELETE FROM segments WHERE entry_id=?1 AND kind!='name'",[entry_id])?;
+        let n = tx.execute(
             "DELETE FROM content_fts WHERE entry_id = ?1",
             params![entry_id],
         )?;
+        tx.execute("DELETE FROM content_chunks WHERE entry_id=?1",[entry_id])?;
+        tx.execute("DELETE FROM content_progress WHERE entry_id=?1",[entry_id])?;
+        tx.commit()?;
         Ok(n as u64)
     }
 
@@ -1208,6 +1931,10 @@ impl IndexStore {
             "DELETE FROM content_fts WHERE entry_id = ?1 AND kind = ?2",
             params![entry_id, kind],
         )?;
+        tx.execute(
+            "DELETE FROM content_chunks WHERE entry_id=?1 AND job_kind=?2",
+            params![entry_id, kind],
+        )?;
         let mut combined = String::new();
         for t in texts {
             let s = t.as_ref().trim();
@@ -1219,9 +1946,11 @@ impl IndexStore {
             }
         }
         if !combined.is_empty() {
+            tx.execute("INSERT INTO content_chunks(entry_id,job_kind,kind,chunk_index,text) VALUES(?1,?2,?2,0,?3)",params![entry_id,kind,combined])?;
+            let chunk_id = tx.last_insert_rowid();
             tx.execute(
-                "INSERT INTO content_fts(entry_id, kind, text) VALUES(?1, ?2, ?3)",
-                params![entry_id, kind, combined],
+                "INSERT INTO content_fts(rowid,entry_id, kind, text) VALUES(?1, ?2, ?3,?4)",
+                params![chunk_id, entry_id, kind, combined],
             )?;
         }
         tx.commit()?;
@@ -1278,7 +2007,7 @@ impl IndexStore {
         let mut sql = String::from(
             "SELECT id, entry_id, kind, chunk_index, text, page, start_ms, end_ms,
                     line, vector, norm
-             FROM segments",
+             FROM segments WHERE EXISTS (SELECT 1 FROM visible_entries v WHERE v.id = segments.entry_id)",
         );
         // Own the bound values so the prepared statement can borrow them.
         let kinds_owned: Vec<String>;
@@ -1325,7 +2054,7 @@ impl IndexStore {
                 entries_owned = Vec::new();
             }
             if !clauses.is_empty() {
-                sql.push_str(" WHERE ");
+                sql.push_str(" AND ");
                 sql.push_str(&clauses.join(" AND "));
             }
             let mut stmt = self.conn.prepare(&sql)?;
@@ -1441,7 +2170,7 @@ impl IndexStore {
             .query_row(
                 "UPDATE extract_jobs SET claimed = 1, state = 'claimed'
                  WHERE id = (SELECT id FROM extract_jobs
-                             WHERE claimed = 0 AND state = 'pending'
+                             WHERE claimed = 0 AND state = 'pending' AND EXISTS (SELECT 1 FROM visible_entries v WHERE v.id=extract_jobs.entry_id)
                              ORDER BY priority DESC, id DESC LIMIT 1)
                  RETURNING id, entry_id, kind, state, claimed, attempts, priority",
                 [],
@@ -1481,7 +2210,7 @@ impl IndexStore {
                 .query_row(
                     "UPDATE extract_jobs SET claimed = 1, state = 'claimed'
                      WHERE id = (SELECT id FROM extract_jobs
-                                 WHERE claimed = 0 AND state = 'pending' AND kind = ?1
+                                 WHERE claimed = 0 AND state = 'pending' AND EXISTS (SELECT 1 FROM visible_entries v WHERE v.id=extract_jobs.entry_id) AND kind = ?1
                                  ORDER BY priority DESC, id DESC LIMIT 1)
                      RETURNING id, entry_id, kind, state, claimed, attempts, priority",
                     params![kind],
@@ -1581,7 +2310,7 @@ impl IndexStore {
             .query_row(
                 "UPDATE extract_jobs SET claimed = 1, state = 'claimed'
                  WHERE id = (SELECT id FROM extract_jobs
-                             WHERE claimed = 0 AND state = 'pending' AND kind != ?1
+                             WHERE claimed = 0 AND state = 'pending' AND EXISTS (SELECT 1 FROM visible_entries v WHERE v.id=extract_jobs.entry_id) AND kind != ?1
                              ORDER BY priority DESC, id DESC LIMIT 1)
                  RETURNING id, entry_id, kind, state, claimed, attempts, priority",
                 params![crate::model::SEGMENT_KIND_NAME],
@@ -1637,6 +2366,11 @@ impl IndexStore {
             .map_err(Into::into)
     }
 
+    pub fn entry_identity(&self,id:i64)->Result<Option<(u32,u64)>,StoreError> {
+        Ok(self.conn.query_row("SELECT volume_serial,file_id FROM entries WHERE id=?1",[id],
+            |r|Ok((r.get::<_,i64>(0)? as u32,r.get::<_,i64>(1)? as u64))).optional()?)
+    }
+
     /// Persists or clears the cached `thumbnail_path` for `entry_id`.
     pub fn set_entry_thumbnail_path(
         &mut self,
@@ -1667,8 +2401,17 @@ impl IndexStore {
         exclude_apps: bool,
         kinds: &[crate::model::HitKind],
     ) -> Result<Vec<i64>, StoreError> {
+        self.matching_entry_ids_filtered(apps_only,exclude_apps,kinds,&[],&[])
+    }
+
+    pub fn matching_entry_ids_filtered(
+        &self,apps_only:bool,exclude_apps:bool,kinds:&[crate::model::HitKind],extensions:&[String],file_kinds:&[ws_protocol::FileKind],
+    )->Result<Vec<i64>,StoreError> {
+        if !ws_protocol::valid_search_extensions(extensions) || !ws_protocol::valid_search_file_kinds(file_kinds) {
+            return Err(StoreError::InvalidConfig("invalid search extension filter".into()));
+        }
         let mut sql = String::from(
-            "SELECT id, path, ext, is_dir, is_app FROM entries WHERE missing = 0",
+            "SELECT id, path, ext, is_dir, is_app FROM visible_entries WHERE missing = 0",
         );
         if apps_only {
             sql.push_str(" AND is_app = 1");
@@ -1689,6 +2432,8 @@ impl IndexStore {
         let mut ids = Vec::new();
         for r in rows {
             let (id, path, ext, is_dir, is_app) = r?;
+            if (!extensions.is_empty() && is_dir) || !ws_protocol::search_extension_allowed(extensions,&ext) {continue;}
+            if !ws_protocol::search_file_kind_allowed(file_kinds,&ext,is_dir) {continue;}
             if !kinds.is_empty() {
                 let kind = if is_app {
                     crate::model::HitKind::Application
@@ -1873,6 +2618,1140 @@ fn fts_keywords(rec: &EntryRecord) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_entry_queries_recheck_live_source_policy_and_invalidated_content() {
+        use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+        let (mut store, job, progress) = batch_fixture();
+        let chunk = content_chunk(&job, 0, "freshneedle generated fixture");
+        assert!(store.commit_content_batch(&job, &progress, &[chunk], None).unwrap());
+        let hash = "a".repeat(64);
+        store.conn.execute("UPDATE content_progress SET source_sha256=?2,source_sha256_revision=revision WHERE entry_id=?1",
+            params![job.entry_id, hash]).unwrap();
+        let admitted = Arc::new(AtomicBool::new(true));
+        let current = Arc::clone(&admitted);
+        store.set_query_source_guard(move |_, _, _| current.load(Ordering::Acquire)).unwrap();
+        let tokens = vec!["freshneedle".into()];
+        for allowed in [true, false, true] {
+            admitted.store(allowed, Ordering::Release);
+            for _ in 0..2 {
+                assert_eq!(store.entry_visible(job.entry_id).unwrap(), allowed);
+                assert_eq!(store.entry_content_allowed(job.entry_id).unwrap(), allowed);
+                assert_eq!(store.content_sha256(job.entry_id).unwrap(), allowed.then_some(hash.clone()));
+                assert_eq!(store.content_matches(job.entry_id, &tokens).unwrap().len(), usize::from(allowed));
+            }
+        }
+        store.invalidate_content_source(job.entry_id).unwrap();
+        assert!(store.entry_visible(job.entry_id).unwrap());
+        assert!(!store.entry_content_allowed(job.entry_id).unwrap());
+        assert!(store.content_sha256(job.entry_id).unwrap().is_none());
+        assert!(store.content_matches(job.entry_id, &tokens).unwrap().is_empty());
+        store.set_indexing_config(&ws_protocol::IndexingConfig::default()).unwrap();
+        assert!(!store.entry_visible(job.entry_id).unwrap(), "cached SQL must honor root revocation");
+    }
+
+    #[test]
+    fn extraction_claims_check_candidate_visibility_without_materializing_the_index() {
+        use rusqlite::functions::FunctionFlags;
+        use std::sync::{Arc,atomic::{AtomicUsize,Ordering}};
+        let mut counts=Vec::new();
+        for mode in 0..3 {
+            let mut store=IndexStore::open_in_memory().unwrap();let root=store.ensure_root("C:/claims").unwrap();
+            let wanted="C:/claims/allowed.txt";let denied="C:/claims/denied.txt";
+            let mut rows=(0..1100).map(|n|rec(&format!("C:/claims/metadata-{n:04}.bin"),
+                &format!("metadata-{n:04}.bin"),1,1)).collect::<Vec<_>>();
+            rows.push(rec(wanted,"allowed.txt",1,1));rows.push(rec(denied,"denied.txt",1,1));
+            store.apply_batch(root,1,&rows).unwrap();
+            store.set_indexing_config(&ws_protocol::IndexingConfig {roots:vec!["C:/claims".into()],
+                excluded_paths:vec![denied.into()],..Default::default()}).unwrap();
+            let allowed=store.find_by_path(wanted).unwrap().unwrap().id;
+            let rejected=store.find_by_path(denied).unwrap().unwrap().id;
+            let kind=if mode==2 {"doc"} else {"name"};
+            for row in &rows[..1100] {
+                let entry=store.find_by_path(&row.path).unwrap().unwrap().id;
+                store.enqueue_extract_job_with_priority(entry,kind,0).unwrap();
+            }
+            store.enqueue_extract_job_with_priority(allowed,kind,10).unwrap();
+            store.enqueue_extract_job_with_priority(rejected,kind,100).unwrap();
+            let calls=Arc::new(AtomicUsize::new(0));let observed=Arc::clone(&calls);
+            store.conn.create_scalar_function("policy_fold",1,
+                FunctionFlags::SQLITE_UTF8|FunctionFlags::SQLITE_DETERMINISTIC,move |ctx| {
+                    observed.fetch_add(1,Ordering::Relaxed);
+                    Ok(ctx.get::<String>(0)?.replace('/',"\\").trim_end_matches('\\').to_lowercase())
+                }).unwrap();
+            let job=match mode {
+                0=>store.claim_extract_job().unwrap().unwrap(),
+                1=>store.claim_extract_jobs_batch_for_kind(kind,1).unwrap().remove(0),
+                _=>store.claim_content_extract_job().unwrap().unwrap(),
+            };
+            assert_eq!(job.entry_id,allowed,"excluded high-priority jobs must not consume the claim limit");
+            counts.push(calls.load(Ordering::Relaxed));
+        }
+        eprintln!("CLAIM_POLICY_FOLDS {counts:?}");
+        assert!(counts.iter().all(|calls|*calls<100),"one claim must check only queued candidates: {counts:?}");
+    }
+
+    #[test]
+    fn database_identity_survives_reopen_and_changes_for_a_recreated_index() {
+        let path = std::env::temp_dir().join(format!("winsearch-index-identity-{}-{}.db",
+            std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let first = IndexStore::open(&path).unwrap();
+        let identity = first.meta_get("database_id").unwrap().expect("durable index identity");
+        assert_eq!(identity.len(), 32);
+        assert!(identity.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
+        drop(first);
+        let reopened = IndexStore::open(&path).unwrap();
+        assert_eq!(reopened.meta_get("database_id").unwrap().as_ref(), Some(&identity));
+        assert_ne!(IndexStore::open_in_memory().unwrap().meta_get("database_id").unwrap().as_ref(), Some(&identity));
+        drop(reopened);
+        std::fs::remove_file(&path).unwrap();
+        let recreated = IndexStore::open(&path).unwrap();
+        assert_ne!(recreated.meta_get("database_id").unwrap().as_ref(), Some(&identity));
+        drop(recreated);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn database_identity_corruption_is_rejected_without_rotating_existing_bindings() {
+        let store = IndexStore::open_in_memory().unwrap();
+        store.conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('database_id','invalid')", []).unwrap();
+        assert!(IndexStore::init(store.conn).is_err());
+    }
+    fn batch_fixture() -> (IndexStore, ExtractJob, crate::model::ContentProgress) {
+        let mut store = IndexStore::open_in_memory().unwrap();
+        let root = store.ensure_root(r"C:\task2").unwrap();
+        store
+            .apply_batch(
+                root,
+                0,
+                &[rec(r"C:\task2\fixture.txt", "fixture.txt", 1, 1)],
+            )
+            .unwrap();
+        let id = store
+            .find_by_path(r"C:\task2\fixture.txt")
+            .unwrap()
+            .unwrap()
+            .id;
+        store.enqueue_extract_job(id, "doc").unwrap();
+        let job = store.claim_content_extract_job().unwrap().unwrap();
+        let progress = store
+            .begin_content_batch(id, "doc", "fixture-source")
+            .unwrap();
+        (store, job, progress)
+    }
+    fn content_chunk(job: &ExtractJob, index: i64, text: &str) -> crate::model::ContentChunk {
+        crate::model::ContentChunk {
+            id: 0,
+            entry_id: job.entry_id,
+            job_kind: job.kind.clone(),
+            kind: job.kind.clone(),
+            chunk_index: index,
+            text: text.into(),
+            location: Default::default(),
+            embed: true,
+            visual: false,
+            embedding_input: Default::default(),
+            attempts: 0,
+        }
+    }
+
+    #[test]
+    fn preview_text_bounds_utf8_and_rows_without_loading_vectors_or_artifact_inputs() {
+        let (mut store,job,progress)=batch_fixture();
+        let text=format!("ab{}","🌿".repeat(18000));
+        let chunk=content_chunk(&job,0,&text);
+        assert!(store.commit_content_batch(&job,&progress,&[chunk],None).unwrap());
+        store.conn.execute("UPDATE content_chunks SET embedding_input='not valid JSON',thumbnail_path='C:/must-not-open'",[]).unwrap();
+        let (parts,truncated)=store.preview_text(job.entry_id,None).unwrap();
+        assert!(truncated);
+        assert_eq!(parts.len(),1);
+        assert_eq!(parts[0].text.len(),65534);
+        assert_eq!(parts[0].text,format!("ab{}","🌿".repeat(16383)));
+
+        let (mut store,job,progress)=batch_fixture();
+        let chunks=(0..65).map(|index|content_chunk(&job,index,"row")).collect::<Vec<_>>();
+        assert!(store.commit_content_batch(&job,&progress,&chunks,None).unwrap());
+        let (parts,truncated)=store.preview_text(job.entry_id,None).unwrap();
+        assert_eq!(parts.len(),64);
+        assert!(truncated,"the bounded extra row must expose omitted content");
+    }
+
+    #[test]
+    fn preview_text_applies_current_source_guard_before_row_limit() {
+        let (mut store,job,progress)=batch_fixture();
+        let chunks=(0..65).map(|index|content_chunk(&job,index,if index==64 {"admitted tail"} else {"stale private text"})).collect::<Vec<_>>();
+        assert!(store.commit_content_batch(&job,&progress,&chunks,None).unwrap());
+        store.conn.execute("INSERT INTO content_progress(entry_id,kind,cursor,complete,revision,source,model_generation) VALUES(?1,'stale',64,1,?2,'stale-source',?3)",params![job.entry_id,progress.revision,progress.model_generation]).unwrap();
+        store.conn.execute("UPDATE content_chunks SET job_kind='stale' WHERE chunk_index<64",[]).unwrap();
+        store.set_query_source_guard(|_,source,_|source.is_none_or(|source|source=="fixture-source")).unwrap();
+        let (parts,truncated)=store.preview_text(job.entry_id,None).unwrap();
+        assert_eq!(parts.len(),1);
+        assert_eq!(parts[0].text,"admitted tail");
+        assert!(!truncated);
+        store.invalidate_content_source(job.entry_id).unwrap();
+        assert!(store.preview_text(job.entry_id,None).unwrap().0.is_empty());
+    }
+
+    #[test]
+    fn preview_text_trailing_terminator_does_not_cover_the_following_line() {
+        let (mut store,job,progress)=batch_fixture();
+        let mut lines=content_chunk(&job,0,"first\nsecond\n");lines.location.line=Some(20);
+        assert!(store.commit_content_batch(&job,&progress,&[lines],None).unwrap());
+        assert_eq!(store.preview_text(job.entry_id,Some(ws_protocol::MatchLocation::Line {line:21})).unwrap().0.len(),1);
+        assert!(store.preview_text(job.entry_id,Some(ws_protocol::MatchLocation::Line {line:22})).unwrap().0.is_empty(),
+            "a trailing terminator does not return the following line");
+    }
+
+    #[test]
+    fn preview_text_preserves_page_line_and_time_without_fabricating_requested_positions() {
+        use ws_protocol::MatchLocation;
+        let (mut store,job,progress)=batch_fixture();
+        let mut page=content_chunk(&job,0,"actual page eight");page.location.page=Some(8);
+        let mut lines=content_chunk(&job,1,"first\nsecond\nthird");lines.location.line=Some(20);
+        let mut timed=content_chunk(&job,2,"screen words");timed.location.start_ms=Some(50250);timed.location.end_ms=Some(50250);
+        assert!(store.commit_content_batch(&job,&progress,&[page,lines,timed],None).unwrap());
+        for (focus,text,actual) in [
+            (MatchLocation::Page {page:8},"actual page eight",MatchLocation::Page {page:8}),
+            (MatchLocation::Line {line:21},"first\nsecond\nthird",MatchLocation::Line {line:20}),
+            (MatchLocation::Timestamp {seconds:50.25,end_seconds:50.25},"screen words",MatchLocation::Timestamp {seconds:50.25,end_seconds:50.25}),
+        ] {
+            let (parts,truncated)=store.preview_text(job.entry_id,Some(focus)).unwrap();
+            assert_eq!(parts.len(),1);assert_eq!(parts[0].text,text);
+            assert_eq!(parts[0].location,Some(actual));assert!(!truncated);
+        }
+        for focus in [MatchLocation::Page {page:9},MatchLocation::Line {line:23},MatchLocation::Timestamp {seconds:50.251,end_seconds:50.251},MatchLocation::Timestamp {seconds:50.2501,end_seconds:50.2501}] {
+            assert!(store.preview_text(job.entry_id,Some(focus)).unwrap().0.is_empty());
+        }
+    }
+
+    #[test]
+    fn media_split_frame_restore_repairs_continued_ocr_thumbnail_only_at_same_time() {
+        use crate::model::{DraftEmbeddingInput, MediaPlan};
+        let (mut store, old, _) = batch_fixture();
+        store.complete_extract_job(old.id).unwrap();
+        store.enqueue_extract_job(old.entry_id,"video").unwrap();
+        let job=store.claim_content_extract_job().unwrap().unwrap();
+        let progress=store.begin_content_batch(job.entry_id,"video","same-video").unwrap();
+        let plan=MediaPlan { duration_ms:10000,frames_ms:vec![0,5000],has_audio:false };
+        let mut frame=content_chunk(&job,0,"");
+        frame.kind="video".into(); frame.visual=true;
+        frame.location.start_ms=Some(0); frame.location.end_ms=Some(0);
+        frame.location.thumbnail_path=Some("C:/private/frame-first.png".into());
+        frame.embedding_input=DraftEmbeddingInput::Image { path:"C:/private/frame-first.png".into(),token_budget:140 };
+        assert!(store.commit_content_batch_with_media(&job,&progress,&[frame.clone()],Some(1),Some(&plan)).unwrap());
+        let resumed=store.claim_content_extract_job().unwrap().unwrap();
+        let continued=store.content_progress(job.entry_id,"video").unwrap().unwrap();
+        let mut ocr=content_chunk(&job,1,"continued screen words");
+        ocr.kind="ocr".into(); ocr.embed=false;
+        ocr.location.start_ms=Some(0); ocr.location.end_ms=Some(0);
+        ocr.location.thumbnail_path=Some("C:/private/frame-continuation.png".into());
+        let mut later=frame.clone(); later.chunk_index=65536;
+        later.location.start_ms=Some(5000); later.location.end_ms=Some(5000);
+        later.location.thumbnail_path=Some("C:/private/later-frame.png".into());
+        later.embedding_input=DraftEmbeddingInput::Image { path:"C:/private/later-frame.png".into(),token_budget:140 };
+        assert!(store.commit_content_batch_with_media(&resumed,&continued,&[ocr,later],None,Some(&plan)).unwrap());
+        let claimed=store.claim_content_vectors(Some(job.entry_id)).unwrap();
+        assert_eq!(claimed.len(),2);
+        let input=DraftEmbeddingInput::Image { path:"C:/private/restored.png".into(),token_budget:140 };
+        assert!(store.replace_content_artifact(&claimed[0],&input,progress.revision,progress.model_generation).unwrap());
+        let chunks=store.list_content_chunks(job.entry_id).unwrap();
+        assert_eq!(chunks[0].location.thumbnail_path.as_deref(),Some("C:/private/restored.png"));
+        assert_eq!(chunks[1].text,"continued screen words");
+        assert_eq!(chunks[1].location.thumbnail_path.as_deref(),Some("C:/private/restored.png"));
+        assert_eq!(chunks[2].location.thumbnail_path.as_deref(),Some("C:/private/later-frame.png"));
+        assert!(!store.replace_content_artifact(&claimed[0],&input,progress.revision,progress.model_generation).unwrap());
+    }
+
+    #[test]
+    fn media_video_replacement_and_failure_clear_every_derived_kind() {
+        use crate::model::DraftEmbeddingInput;
+        let (mut store,old,_) = batch_fixture();
+        store.complete_extract_job(old.id).unwrap();
+        store.enqueue_extract_job(old.entry_id,"video").unwrap();
+        let job=store.claim_content_extract_job().unwrap().unwrap();
+        let progress=store.begin_content_batch(job.entry_id,"video","same-source").unwrap();
+        let mut frame=content_chunk(&job,0,"");
+        frame.kind="video".into(); frame.visual=true;
+        frame.embedding_input=DraftEmbeddingInput::Image { path:"C:/private/frame.png".into(),token_budget:70 };
+        let mut ocr=content_chunk(&job,1,"old screen text"); ocr.kind="ocr".into();
+        let mut audio=content_chunk(&job,1<<62,""); audio.kind="audio".into();
+        audio.embedding_input=DraftEmbeddingInput::Audio { path:"C:/private/window.wav".into() };
+        assert!(store.commit_content_batch(&job,&progress,&[frame.clone(),ocr,audio],None).unwrap());
+        loop {
+            let chunks=store.claim_content_vectors(Some(job.entry_id)).unwrap();
+            if chunks.is_empty() { break; }
+            let vectors=chunks.iter().map(|_|vec![1.0,0.0]).collect::<Vec<_>>();
+            assert!(store.commit_content_vectors(&chunks,&vectors,progress.revision,progress.model_generation).unwrap());
+        }
+        assert_eq!(store.list_segments_for_entry(job.entry_id).unwrap().len(),3);
+        let name=store.upsert_segment(NewSegment { entry_id:job.entry_id,kind:"name",chunk_index:0,
+            text:"filename",page:None,start_ms:None,end_ms:None,line:None,vector:&[1.0,0.0] }).unwrap();
+        store.enqueue_extract_job(job.entry_id,"video").unwrap();
+        let job=store.claim_content_extract_job().unwrap().unwrap();
+        let replacement=store.begin_content_batch(job.entry_id,"video","same-source").unwrap();
+        assert!(store.commit_content_batch(&job,&replacement,&[frame],Some(65536)).unwrap());
+        assert_eq!(store.list_segments_for_entry(job.entry_id).unwrap().iter().map(|s|s.id).collect::<Vec<_>>(),vec![name],
+            "replace every prior derived kind while retaining the independent name vector");
+        let chunks=store.claim_content_vectors(Some(job.entry_id)).unwrap();
+        assert!(store.commit_content_vectors(&chunks,&[vec![1.0,0.0]],replacement.revision,replacement.model_generation).unwrap());
+        store.delete_content_text(job.entry_id).unwrap();
+        assert_eq!(store.list_segments_for_entry(job.entry_id).unwrap().iter().map(|s|s.id).collect::<Vec<_>>(),vec![name],
+            "failed content removes derived data and preserves name search");
+        assert!(store.content_progress(job.entry_id,"video").unwrap().is_none());
+    }
+
+    #[test]
+    fn media_video_plan_and_frame_cursor_commit_together_and_reject_mutation() {
+        let (mut store, old, _) = batch_fixture();
+        store.complete_extract_job(old.id).unwrap();
+        store.enqueue_extract_job(old.entry_id, "video").unwrap();
+        let job = store.claim_content_extract_job().unwrap().unwrap();
+        let progress = store.begin_content_batch(job.entry_id, "video", "same-video").unwrap();
+        let plan = crate::model::MediaPlan { duration_ms:65000, frames_ms:vec![0,33000,64999], has_audio:true };
+        let chunk = content_chunk(&job, 0, "durable frame OCR");
+        store.conn.execute_batch("CREATE TEMP TRIGGER abort_video BEFORE UPDATE ON content_progress WHEN NEW.cursor=65536 BEGIN SELECT RAISE(ABORT,'interrupted video'); END;").unwrap();
+        assert!(store.commit_content_batch_with_media(&job, &progress, &[chunk.clone()], Some(65536), Some(&plan)).is_err());
+        assert_eq!(store.content_progress(job.entry_id, "video").unwrap().unwrap(), progress);
+        assert!(store.list_content_chunks(job.entry_id).unwrap().is_empty());
+        store.conn.execute_batch("DROP TRIGGER abort_video").unwrap();
+        assert!(store.commit_content_batch_with_media(&job, &progress, &[chunk], Some(65536), Some(&plan)).unwrap());
+        let saved = store.content_progress(job.entry_id, "video").unwrap().unwrap();
+        assert_eq!(saved.media_plan, Some(plan.clone()), "selection and visual cursor must survive the same commit");
+        assert!(!store.commit_content_batch_with_media(&job, &progress, &[], Some(65536), Some(&plan)).unwrap());
+        let mut changed = plan.clone(); changed.frames_ms[1] = 34000;
+        assert!(store.commit_content_batch_with_media(&job, &saved, &[], Some(131072), Some(&changed)).is_err());
+        assert_eq!(store.content_progress(job.entry_id, "video").unwrap().unwrap(), saved);
+        store.reset_content_vectors().unwrap();
+        assert_eq!(store.content_progress(job.entry_id, "video").unwrap().unwrap().media_plan, Some(plan));
+        let replaced = store.begin_content_batch(job.entry_id, "video", "changed-video").unwrap();
+        assert_eq!(replaced.cursor, 0);
+        assert_eq!(replaced.media_plan, None);
+    }
+
+    #[test]
+    fn final_selection_with_short_video_and_long_audio_commits_tail() {
+        use crate::model::{VideoSelection, VIDEO_GRAY_PIXELS};
+        let (mut store, old, _) = batch_fixture();
+        store.complete_extract_job(old.id).unwrap();
+        store.enqueue_extract_job(old.entry_id, "video").unwrap();
+        let mut state = VideoSelection {
+            duration_ms: 65_000,
+            scan_span_ms: crate::model::VIDEO_SELECTION_SPAN_MS,
+            has_audio: true,
+            next_ms: 15_000,
+            last_sample_ms: Some(7_000),
+            last_gray: vec![4; VIDEO_GRAY_PIXELS],
+            candidates_ms: vec![0, 5_000],
+            next_periodic_ms: 10_000,
+            sample_count: 8,
+        };
+        for next_ms in [15_000, 30_000, 45_000, 60_000] {
+            let job = store.claim_content_extract_job().unwrap().unwrap();
+            let progress = store
+                .begin_content_batch(job.entry_id, "video", "short-visual-source")
+                .unwrap();
+            state.next_ms = next_ms;
+            assert!(store
+                .commit_content_batch_with_video_selection(
+                    &job,
+                    &progress,
+                    &[],
+                    Some((1u64 << 61) | next_ms),
+                    None,
+                    Some(&state)
+                )
+                .unwrap());
+        }
+        let job = store.claim_content_extract_job().unwrap().unwrap();
+        let progress = store
+            .begin_content_batch(job.entry_id, "video", "short-visual-source")
+            .unwrap();
+        state.next_ms = 65_000;
+        state.candidates_ms.push(7_000);
+        let plan = crate::model::MediaPlan {
+            duration_ms: 65_000,
+            frames_ms: vec![0, 5_000, 7_000],
+            has_audio: true,
+        };
+        assert!(store
+            .commit_content_batch_with_video_selection(
+                &job,
+                &progress,
+                &[],
+                Some(0),
+                Some(&plan),
+                Some(&state)
+            )
+            .expect("completed scan can retain its known visual tail"));
+        assert_eq!(
+            store
+                .content_progress(job.entry_id, "video")
+                .unwrap()
+                .unwrap()
+                .media_plan,
+            Some(plan)
+        );
+    }
+
+    #[test]
+    fn video_selection_checkpoint_cursor_and_claim_commit_atomically() {
+        use crate::model::{VideoSelection, VIDEO_GRAY_PIXELS};
+        let (mut store, old, _) = batch_fixture();
+        store.complete_extract_job(old.id).unwrap();
+        store.enqueue_extract_job(old.entry_id, "video").unwrap();
+        let job = store.claim_content_extract_job().unwrap().unwrap();
+        let progress = store
+            .begin_content_batch(job.entry_id, "video", "selection-source")
+            .unwrap();
+        let state = VideoSelection {
+            duration_ms: 30_000,
+            scan_span_ms: crate::model::VIDEO_SELECTION_SPAN_MS,
+            has_audio: true,
+            next_ms: 15_000,
+            last_sample_ms: Some(14_000),
+            last_gray: vec![4; VIDEO_GRAY_PIXELS],
+            candidates_ms: vec![0, 5_000, 10_000],
+            next_periodic_ms: 15_000,
+            sample_count: 15,
+        };
+        let cursor = (1u64 << 61) | 15_000;
+        store.conn.execute_batch(&format!("CREATE TEMP TRIGGER interrupt_selection BEFORE UPDATE ON content_progress WHEN NEW.cursor={cursor} BEGIN SELECT RAISE(ABORT,'interrupted selection'); END;")).unwrap();
+        assert!(store
+            .commit_content_batch_with_video_selection(
+                &job,
+                &progress,
+                &[],
+                Some(cursor),
+                None,
+                Some(&state)
+            )
+            .is_err());
+        assert_eq!(
+            store
+                .content_progress(job.entry_id, "video")
+                .unwrap()
+                .unwrap(),
+            progress
+        );
+        store
+            .conn
+            .execute_batch("DROP TRIGGER interrupt_selection")
+            .unwrap();
+        assert!(store
+            .commit_content_batch_with_video_selection(
+                &job,
+                &progress,
+                &[],
+                Some(cursor),
+                None,
+                Some(&state)
+            )
+            .unwrap());
+        let saved = store
+            .content_progress(job.entry_id, "video")
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.cursor, cursor);
+        assert_eq!(saved.video_selection, Some(state.clone()));
+        assert!(saved.media_plan.is_none());
+        assert!(!store
+            .commit_content_batch_with_video_selection(
+                &job,
+                &progress,
+                &[],
+                Some(cursor),
+                None,
+                Some(&state)
+            )
+            .unwrap());
+        let resumed = store.claim_content_extract_job().unwrap().unwrap();
+        let final_state = VideoSelection {
+            next_ms: 30_000,
+            last_sample_ms: Some(29_999),
+            candidates_ms: vec![0, 5_000, 10_000, 29_999],
+            next_periodic_ms: 30_000,
+            sample_count: 16,
+            ..state
+        };
+        let plan = crate::model::MediaPlan {
+            duration_ms: 30_000,
+            frames_ms: final_state.candidates_ms.clone(),
+            has_audio: true,
+        };
+        assert!(store
+            .commit_content_batch_with_video_selection(
+                &resumed,
+                &saved,
+                &[],
+                Some(0),
+                Some(&plan),
+                Some(&final_state)
+            )
+            .unwrap());
+        let frozen = store
+            .content_progress(job.entry_id, "video")
+            .unwrap()
+            .unwrap();
+        assert_eq!(frozen.cursor, 0);
+        assert_eq!(frozen.media_plan, Some(plan));
+        assert!(frozen.video_selection.is_none());
+    }
+
+    #[test]
+    fn media_typed_artifact_persists_independently_of_text_and_vector_reset() {
+        use crate::model::DraftEmbeddingInput;
+        let (mut store, job, progress) = batch_fixture();
+        let mut chunk = content_chunk(&job, 0, "");
+        chunk.kind = "audio".into();
+        chunk.location.start_ms = Some(50000);
+        chunk.location.end_ms = Some(65000);
+        chunk.embedding_input = DraftEmbeddingInput::Audio { path: std::path::PathBuf::from("C:/private/cache/時刻 window.wav") };
+        assert!(store.commit_content_batch(&job, &progress, &[chunk.clone()], None).unwrap());
+        assert_eq!(store.list_content_chunks(job.entry_id).unwrap()[0].embedding_input, chunk.embedding_input);
+        store.reset_content_vectors().unwrap();
+        let claimed = store.claim_content_vectors(Some(job.entry_id)).unwrap();
+        assert_eq!(claimed.len(), 1);
+        assert_eq!(claimed[0].embedding_input, chunk.embedding_input);
+        assert!(claimed[0].text.is_empty());
+        assert_eq!(claimed[0].location.start_ms, Some(50000));
+        let generation = store.model_generation().unwrap();
+        let restored = DraftEmbeddingInput::Audio { path: std::path::PathBuf::from("C:/private/cache/restored.wav") };
+        assert!(!store.replace_content_artifact(&claimed[0], &restored, progress.revision + 1, generation).unwrap());
+        assert!(!store.replace_content_artifact(&claimed[0], &restored, progress.revision, generation + 1).unwrap());
+        assert!(store.replace_content_artifact(&claimed[0], &restored, progress.revision, generation).unwrap());
+        assert!(!store.replace_content_artifact(&claimed[0], &restored, progress.revision, generation).unwrap());
+        let after = store.list_content_chunks(job.entry_id).unwrap();
+        assert_eq!(after[0].id, claimed[0].id);
+        assert_eq!(after[0].embedding_input, restored);
+        assert_eq!(after[0].location.start_ms, Some(50000));
+        assert!(store.commit_content_vectors(&after, &[vec![0.0, 1.0]], progress.revision, generation).unwrap());
+        let segments = store.list_segments_for_entry(job.entry_id).unwrap();
+        let completed_input = DraftEmbeddingInput::Audio { path: "C:/private/cache/completed.wav".into() };
+        assert!(!store.replace_content_artifact(&after[0], &completed_input, progress.revision + 1, generation).unwrap());
+        assert!(!store.replace_content_artifact(&after[0], &completed_input, progress.revision, generation + 1).unwrap());
+        assert!(store.replace_content_artifact(&after[0], &completed_input, progress.revision, generation).unwrap());
+        assert!(!store.replace_content_artifact(&after[0], &completed_input, progress.revision, generation).unwrap());
+        assert!(store.claim_content_vectors(Some(job.entry_id)).unwrap().is_empty());
+        let preserved = store.list_segments_for_entry(job.entry_id).unwrap();
+        assert_eq!(preserved.iter().map(|s| (s.id, &s.vector)).collect::<Vec<_>>(),
+            segments.iter().map(|s| (s.id, &s.vector)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn media_silent_progress_is_durable_without_content_and_rejects_replay() {
+        let (mut store, old_job, _) = batch_fixture();
+        store.complete_extract_job(old_job.id).unwrap();
+        store.enqueue_extract_job(old_job.entry_id, "audio").unwrap();
+        let job = store.claim_content_extract_job().unwrap().unwrap();
+        let progress = store.begin_content_batch(job.entry_id, "audio", "silent-source").unwrap();
+        assert!(store.commit_content_batch(&job, &progress, &[], Some(30)).unwrap());
+        assert!(store.list_content_chunks(job.entry_id).unwrap().is_empty());
+        let saved = store.content_progress(job.entry_id, "audio").unwrap().unwrap();
+        assert_eq!(saved.cursor, 30);
+        assert!(!saved.complete);
+        assert!(!store.commit_content_batch(&job, &progress, &[], Some(30)).unwrap());
+        let resumed = store.claim_content_extract_job().unwrap().unwrap();
+        assert!(store.commit_content_batch(&resumed, &saved, &[], None).unwrap());
+        assert!(store.content_progress(job.entry_id, "audio").unwrap().unwrap().complete);
+        assert!(store.claim_content_vectors(Some(job.entry_id)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn ordinary_source_hash_commits_with_chunks_and_survives_only_current_source_and_model_reset() {
+        let (mut store,job,progress)=batch_fixture();
+        let hash="a".repeat(64);
+        assert_eq!(store.content_sha256(job.entry_id).unwrap(),None,"legacy progress has no invented byte hash");
+        let chunk=content_chunk(&job,0,"current bytes");
+        assert!(store.commit_content_batch_with_source(&job,&progress,&[chunk],Some(1),None,None,Some(&hash)).unwrap());
+        assert_eq!(store.content_sha256(job.entry_id).unwrap().as_deref(),Some(hash.as_str()));
+        store.reset_content_vectors().unwrap();
+        assert_eq!(store.content_sha256(job.entry_id).unwrap().as_deref(),Some(hash.as_str()));
+        store.set_query_source_guard(|_,_,_|false).unwrap();
+        assert_eq!(store.content_sha256(job.entry_id).unwrap(),None);
+        store.set_query_source_guard(|_,_,_|true).unwrap();
+        store.invalidate_content_source(job.entry_id).unwrap();
+        assert_eq!(store.content_sha256(job.entry_id).unwrap(),None);
+    }
+
+    #[test]
+    fn ordinary_source_hash_rejects_malformed_and_changed_or_missing_continuation_without_advancing() {
+        for invalid in [String::new(),"a".repeat(63),"A".repeat(64),"g".repeat(64)] {
+            let (mut store,job,progress)=batch_fixture();
+            assert!(store.commit_content_batch_with_source(&job,&progress,&[content_chunk(&job,0,"uncommitted")],None,None,None,Some(&invalid)).is_err());
+            assert_eq!(store.content_progress(job.entry_id,"doc").unwrap(),Some(progress));
+            assert!(store.list_content_chunks(job.entry_id).unwrap().is_empty());
+        }
+        for next_hash in [Some("b".repeat(64)),None] {
+            let (mut store,job,progress)=batch_fixture();
+            let hash="a".repeat(64);
+            assert!(store.commit_content_batch_with_source(&job,&progress,&[content_chunk(&job,0,"first")],Some(1),None,None,Some(&hash)).unwrap());
+            let next_job=store.claim_content_extract_job().unwrap().unwrap();
+            let saved=store.content_progress(job.entry_id,"doc").unwrap().unwrap();
+            assert!(!store.commit_content_batch_with_source(&next_job,&saved,&[content_chunk(&job,1,"different source")],None,None,None,next_hash.as_deref()).unwrap());
+            assert_eq!(store.content_progress(job.entry_id,"doc").unwrap(),Some(saved));
+            assert_eq!(store.list_content_chunks(job.entry_id).unwrap().len(),1);
+            assert_eq!(store.content_sha256(job.entry_id).unwrap().as_deref(),Some(hash.as_str()));
+        }
+    }
+
+    #[test]
+    fn ordinary_source_hash_from_an_older_writer_cannot_bind_to_a_later_content_revision() {
+        let (mut store,job,progress)=batch_fixture();let hash="a".repeat(64);
+        assert!(store.commit_content_batch_with_source(&job,&progress,&[content_chunk(&job,0,"first")],Some(1),None,None,Some(&hash)).unwrap());
+        // An older binary changes only the columns it knows and leaves new columns untouched.
+        store.conn.execute("UPDATE content_revisions SET revision=revision+1 WHERE entry_id=?1",[job.entry_id]).unwrap();
+        store.conn.execute("UPDATE content_progress SET revision=revision+1,source='new source snapshot' WHERE entry_id=?1",[job.entry_id]).unwrap();
+        assert_eq!(store.content_sha256(job.entry_id).unwrap(),None,"a retained old digest is not provenance for the new revision");
+        assert_eq!(store.content_progress(job.entry_id,"doc").unwrap().unwrap().source_sha256,None);
+    }
+
+    #[test]
+    fn ordinary_source_hash_cannot_attest_earlier_chunks_of_a_resumed_legacy_parse() {
+        let (mut store,job,progress)=batch_fixture();let hash="a".repeat(64);
+        assert!(store.commit_content_batch_with_source(&job,&progress,&[content_chunk(&job,0,"legacy chunk")],Some(1),None,None,None).unwrap());
+        let resumed=store.claim_content_extract_job().unwrap().unwrap();
+        let saved=store.content_progress(job.entry_id,"doc").unwrap().unwrap();
+        assert!(store.commit_content_batch_with_source(&resumed,&saved,&[content_chunk(&job,1,"newly hashed chunk")],None,None,None,Some(&hash)).unwrap());
+        assert_eq!(store.list_content_chunks(job.entry_id).unwrap().len(),2);
+        assert_eq!(store.content_progress(job.entry_id,"doc").unwrap().unwrap().source_sha256,None,
+            "new continuation bytes cannot attest the earlier legacy chunks");
+        assert_eq!(store.content_sha256(job.entry_id).unwrap(),None);
+        store.enqueue_extract_job(job.entry_id,"doc").unwrap();
+        let fresh_job=store.claim_content_extract_job().unwrap().unwrap();
+        let fresh=store.begin_content_batch(job.entry_id,"doc",&progress.source).unwrap();
+        assert!(fresh.revision>saved.revision);
+        assert!(store.commit_content_batch_with_source(&fresh_job,&fresh,&[content_chunk(&job,0,"fresh full parse")],None,None,None,Some(&hash)).unwrap());
+        assert_eq!(store.content_sha256(job.entry_id).unwrap().as_deref(),Some(hash.as_str()));
+        assert_eq!(store.list_content_chunks(job.entry_id).unwrap().len(),1);
+    }
+
+    #[test]
+    fn ordinary_source_hash_and_cursor_roll_back_with_chunk_transaction() {
+        let (mut store,job,progress)=batch_fixture();
+        let hash="a".repeat(64);
+        store.conn.execute_batch("CREATE TRIGGER fail_source_hash_fixture BEFORE UPDATE ON content_progress BEGIN SELECT RAISE(ABORT,'source hash fixture failure'); END;").unwrap();
+        let chunk=content_chunk(&job,0,"must roll back");
+        assert!(store.commit_content_batch_with_source(&job,&progress,&[chunk.clone()],Some(1),None,None,Some(&hash)).is_err());
+        assert_eq!(store.content_progress(job.entry_id,"doc").unwrap(),Some(progress.clone()));
+        assert_eq!(store.content_sha256(job.entry_id).unwrap(),None);
+        assert!(store.list_content_chunks(job.entry_id).unwrap().is_empty());
+        store.conn.execute_batch("DROP TRIGGER fail_source_hash_fixture").unwrap();
+        assert!(store.commit_content_batch_with_source(&job,&progress,&[chunk],None,None,None,Some(&hash)).unwrap());
+        assert_eq!(store.content_sha256(job.entry_id).unwrap().as_deref(),Some(hash.as_str()));
+    }
+
+    #[test]
+    fn ordinary_source_hash_restart_and_legacy_migration_preserve_existing_content_and_jobs() {
+        let (mut store,job,progress)=batch_fixture();let hash="a".repeat(64);
+        assert!(store.commit_content_batch_with_source(&job,&progress,&[content_chunk(&job,0,"preservedprovenanceneedle")],Some(1),None,None,Some(&hash)).unwrap());
+        let id=store.list_content_chunks(job.entry_id).unwrap()[0].id;
+        let reopened=IndexStore::init(store.conn).unwrap();
+        assert_eq!(reopened.content_sha256(job.entry_id).unwrap().as_deref(),Some(hash.as_str()));
+        assert_eq!(reopened.list_content_chunks(job.entry_id).unwrap()[0].id,id);
+        reopened.conn.execute_batch("ALTER TABLE content_progress DROP COLUMN source_sha256").unwrap();
+        let mut legacy=IndexStore::init(reopened.conn).unwrap();
+        assert_eq!(legacy.content_sha256(job.entry_id).unwrap(),None,"old databases never invent a digest");
+        let saved=legacy.content_progress(job.entry_id,"doc").unwrap().unwrap();
+        assert_eq!((saved.cursor,saved.revision,saved.source),(1,progress.revision,progress.source));
+        assert_eq!(legacy.list_content_chunks(job.entry_id).unwrap()[0].id,id);
+        assert_eq!(legacy.search(&crate::model::SearchRequest {text:"preservedprovenanceneedle".into(),limit:5,..Default::default()}).unwrap().len(),1);
+        assert_eq!(legacy.claim_content_extract_job().unwrap().unwrap().entry_id,job.entry_id);
+    }
+
+    #[test]
+    fn task2_content_cursor_and_text_roll_back_together_and_reject_replay() {
+        let (mut store, job, progress) = batch_fixture();
+        let first = (0..30)
+            .map(|i| content_chunk(&job, i, "firstbatchneedle"))
+            .collect::<Vec<_>>();
+        assert!(store
+            .commit_content_batch(&job, &progress, &first, Some(30))
+            .unwrap());
+        assert!(!store
+            .commit_content_batch(&job, &progress, &first, Some(30))
+            .unwrap());
+        let job = store.claim_content_extract_job().unwrap().unwrap();
+        let progress = store
+            .content_progress(job.entry_id, "doc")
+            .unwrap()
+            .unwrap();
+        let second = (30..60)
+            .map(|i| content_chunk(&job, i, "secondbatchneedle"))
+            .collect::<Vec<_>>();
+        store.conn.execute_batch("CREATE TEMP TRIGGER interrupt_batch BEFORE UPDATE ON content_progress WHEN NEW.cursor=60 BEGIN SELECT RAISE(ABORT,'interrupted commit'); END;").unwrap();
+        assert!(store
+            .commit_content_batch(&job, &progress, &second, Some(60))
+            .is_err());
+        assert_eq!(
+            store
+                .content_progress(job.entry_id, "doc")
+                .unwrap()
+                .unwrap()
+                .cursor,
+            30
+        );
+        assert_eq!(store.list_content_chunks(job.entry_id).unwrap().len(), 30);
+        assert!(store.get_extract_job(job.id).unwrap().unwrap().claimed);
+        assert!(store
+            .search(&crate::model::SearchRequest {
+                text: "secondbatchneedle".into(),
+                limit: 1,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty());
+        store
+            .conn
+            .execute_batch("DROP TRIGGER interrupt_batch")
+            .unwrap();
+        assert!(store
+            .commit_content_batch(&job, &progress, &second, Some(60))
+            .unwrap());
+        assert_eq!(store.list_content_chunks(job.entry_id).unwrap().len(), 60);
+        let job = store.claim_content_extract_job().unwrap().unwrap();
+        let progress = store
+            .content_progress(job.entry_id, "doc")
+            .unwrap()
+            .unwrap();
+        store.invalidate_content_source(job.entry_id).unwrap();
+        assert!(!store
+            .commit_content_batch(
+                &job,
+                &progress,
+                &[content_chunk(&job, 60, "staleneedle")],
+                None
+            )
+            .unwrap());
+        assert!(store.list_content_chunks(job.entry_id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn task2_exact_locations_multiple_moments_numeric_and_policy_before_cap() {
+        let (mut store, job, progress) = batch_fixture();
+        let mut chunks = vec![
+            content_chunk(&job, 0, "firstpagetoken repeatedmoment"),
+            content_chunk(&job, 1, "secondpagetoken repeatedmoment"),
+            content_chunk(&job, 2, "timetoken 98017"),
+        ];
+        chunks[0].location.page = Some(2);
+        chunks[1].location.page = Some(9);
+        chunks[2].location.start_ms = Some(42_000);
+        chunks[2].location.end_ms = Some(48_000);
+        for c in &mut chunks {
+            c.embed = false;
+        }
+        store
+            .commit_content_batch(&job, &progress, &chunks, None)
+            .unwrap();
+        for (query, page) in [("firstpagetoken", Some(2)), ("secondpagetoken", Some(9))] {
+            let hits = store
+                .search(&crate::model::SearchRequest {
+                    text: query.into(),
+                    limit: 1,
+                    ..Default::default()
+                })
+                .unwrap();
+            assert_eq!(hits[0].matches.len(), 1);
+            assert_eq!(hits[0].matches[0].page, page);
+            assert!(hits[0].matches[0].excerpt.contains(query));
+        }
+        let hits = store
+            .search(&crate::model::SearchRequest {
+                text: "repeatedmoment".into(),
+                limit: 1,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(hits[0].matches.len(), 2);
+        let first = store
+            .content_matches_page(job.entry_id, &["repeatedmoment".into()], 0, 1)
+            .unwrap();
+        let second = store
+            .content_matches_page(job.entry_id, &["repeatedmoment".into()], 1, 1)
+            .unwrap();
+        assert_eq!(first[0].page, Some(2));
+        assert_eq!(second[0].page, Some(9));
+        let hit = store
+            .search(&crate::model::SearchRequest {
+                text: "98017".into(),
+                limit: 1,
+                ..Default::default()
+            })
+            .unwrap()
+            .remove(0);
+        assert_eq!(hit.matches[0].start_ms, Some(42_000));
+        assert!(store.claim_content_vectors(None).unwrap().is_empty());
+        let root = store.roots().unwrap()[0].id;
+        for i in 0..510 {
+            let name = format!("hidden{i}.txt");
+            let path = format!(r"C:\task2\hidden\{name}");
+            store
+                .apply_batch(root, 0, &[rec(&path, &name, 1, 1)])
+                .unwrap();
+            let id = store.find_by_path(&path).unwrap().unwrap().id;
+            store.replace_content_fts(id, "doc", &["98017"]).unwrap();
+        }
+        let config = ws_protocol::IndexingConfig {
+            roots: vec![r"C:\task2".into()],
+            excluded_paths: vec![r"C:\task2\hidden".into()],
+            ..Default::default()
+        };
+        store.set_indexing_config(&config).unwrap();
+        let hits = store
+            .search(&crate::model::SearchRequest {
+                text: "98017".into(),
+                limit: 1,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].entry_id, job.entry_id);
+        let config = ws_protocol::IndexingConfig {
+            roots: vec![],
+            ..Default::default()
+        };
+        store.set_indexing_config(&config).unwrap();
+        assert!(store
+            .search(&crate::model::SearchRequest {
+                text: "98017".into(),
+                limit: 1,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .content_matches(job.entry_id, &["98017".into()])
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn task2_migrates_legacy_numeric_fts_without_vector_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn.execute_batch(SCHEMA_V2).unwrap();
+        conn.execute_batch("INSERT INTO meta VALUES('schema_version','2'); INSERT INTO roots(id,path) VALUES(1,'C:\\legacy'); INSERT INTO entries(id,root_id,path,name,name_lower,ext) VALUES(7,1,'C:\\legacy\\invoice.csv','invoice.csv','invoice.csv','csv'); INSERT INTO content_fts(entry_id,kind,text) VALUES(7,'doc','98017 2026 10 42');").unwrap();
+        let store = IndexStore::init(conn).unwrap();
+        assert_eq!(store.get_entry(7).unwrap().unwrap().name, "invoice.csv");
+        assert!(store.list_segments_for_entry(7).unwrap().is_empty());
+        let hits = store
+            .search(&crate::model::SearchRequest {
+                text: "98017".into(),
+                limit: 5,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].matches[0].excerpt.contains("98017"));
+        assert!(!store.list_content_chunks(7).unwrap()[0].embed);
+        // The migration marker makes reopen idempotent, preserving row identity.
+        let id = store.list_content_chunks(7).unwrap()[0].id;
+        let store = IndexStore::init(store.conn).unwrap();
+        assert_eq!(store.list_content_chunks(7).unwrap()[0].id, id);
+    }
+
+    #[test]
+    fn task2_deferred_vector_failures_never_remove_exact_and_space_change_rejects_inflight() {
+        let (mut store, job, progress) = batch_fixture();
+        store
+            .commit_content_batch(
+                &job,
+                &progress,
+                &[content_chunk(&job, 0, "durableexactneedle")],
+                None,
+            )
+            .unwrap();
+        for _ in 0..3 {
+            let chunks = store.claim_content_vectors(None).unwrap();
+            assert_eq!(chunks.len(), 1);
+            assert!(store
+                .commit_content_vectors(
+                    &chunks,
+                    &[vec![]],
+                    progress.revision,
+                    progress.model_generation
+                )
+                .is_err());
+            assert!(store
+                .commit_content_vectors(
+                    &chunks,
+                    &[vec![0., 0.]],
+                    progress.revision,
+                    progress.model_generation
+                )
+                .is_err());
+            store.release_content_vectors(&chunks, true).unwrap();
+        }
+        assert!(store.claim_content_vectors(None).unwrap().is_empty());
+        assert_eq!(store.list_content_chunks(job.entry_id).unwrap().len(), 1);
+        assert!(store
+            .list_segments_for_entry(job.entry_id)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            store
+                .search(&crate::model::SearchRequest {
+                    text: "durableexactneedle".into(),
+                    limit: 1,
+                    ..Default::default()
+                })
+                .unwrap()
+                .len(),
+            1
+        );
+        store.reset_content_vectors().unwrap();
+        let chunks = store.claim_content_vectors(None).unwrap();
+        let generation = store.model_generation().unwrap();
+        store.reset_content_vectors().unwrap();
+        assert!(!store
+            .commit_content_vectors(&chunks, &[vec![1., 0.]], progress.revision, generation)
+            .unwrap());
+        let chunks = store.claim_content_vectors(None).unwrap();
+        assert!(store
+            .commit_content_vectors(
+                &chunks,
+                &[vec![1., 0.]],
+                progress.revision,
+                store.model_generation().unwrap()
+            )
+            .unwrap());
+        assert_eq!(
+            store.list_segments_for_entry(job.entry_id).unwrap().len(),
+            1
+        );
+    }
+    #[test]
+    fn active_policy_sparse_search_does_not_classify_unmatched_index_rows() {
+        use rusqlite::functions::FunctionFlags;
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        let mut store = IndexStore::open_in_memory().unwrap();
+        let root = store.ensure_root(r"C:\scale").unwrap();
+        let mut config = ws_protocol::IndexingConfig::default();
+        config.roots = vec![r"C:\scale".into()];
+        store.set_indexing_config(&config).unwrap();
+        let records: Vec<_> = (0..50_000)
+            .map(|i| {
+                let name = if i == 49_999 {
+                    "singleneedle.txt".to_string()
+                } else {
+                    format!("ordinary{i}.txt")
+                };
+                rec(&format!(r"C:\scale\{name}"), &name, 1, 1)
+            })
+            .collect();
+        store.apply_batch(root, 0, &records).unwrap();
+        let content_entry = store
+            .find_by_path(r"C:\scale\ordinary0.txt")
+            .unwrap()
+            .unwrap()
+            .id;
+        store
+            .replace_content_fts(
+                content_entry,
+                crate::model::SEGMENT_KIND_DOC,
+                &["contentsingleneedle"],
+            )
+            .unwrap();
+        store
+            .upsert_segment(NewSegment {
+                entry_id: content_entry,
+                kind: crate::model::SEGMENT_KIND_NAME,
+                chunk_index: 0,
+                text: "ordinary0",
+                page: None,
+                start_ms: None,
+                end_ms: None,
+                line: None,
+                vector: &[0., 1.],
+            })
+            .unwrap();
+        let hidden = store
+            .find_by_path(r"C:\scale\ordinary1.txt")
+            .unwrap()
+            .unwrap()
+            .id;
+        store
+            .upsert_segment(NewSegment {
+                entry_id: hidden,
+                kind: crate::model::SEGMENT_KIND_NAME,
+                chunk_index: 0,
+                text: "ordinary1",
+                page: None,
+                start_ms: None,
+                end_ms: None,
+                line: None,
+                vector: &[1., 0.],
+            })
+            .unwrap();
+        config.excluded_paths.push(r"C:\scale\ordinary1.txt".into());
+        store.set_indexing_config(&config).unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        store
+            .conn
+            .create_scalar_function(
+                "policy_fold",
+                1,
+                FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+                move |ctx| {
+                    observed.fetch_add(1, Ordering::Relaxed);
+                    Ok(ctx
+                        .get::<String>(0)?
+                        .replace('/', "\\")
+                        .trim_end_matches('\\')
+                        .to_lowercase())
+                },
+            )
+            .unwrap();
+        for (query, expected_hits) in [
+            ("singleneedle", 1),
+            ("contentsingleneedle", 1),
+            ("zzz-no-match", 0),
+        ] {
+            calls.store(0, Ordering::Relaxed);
+            let hits = store
+                .search(&crate::model::SearchRequest {
+                    text: query.into(),
+                    limit: 20,
+                    ..Default::default()
+                })
+                .unwrap();
+            assert_eq!(hits.len(), expected_hits);
+            // Count actual policy evaluations, independent of host speed: unmatched
+            // rows must not be materialized by any production candidate source.
+            assert!(
+                calls.load(Ordering::Relaxed) < 1000,
+                "{query} policy folds: {}",
+                calls.load(Ordering::Relaxed)
+            );
+        }
+        calls.store(0, Ordering::Relaxed);
+        let vectors = store.search_vectors(&[1., 0.], 1, None).unwrap();
+        assert_eq!(vectors.len(), 1);
+        assert_eq!(vectors[0].segment.entry_id, content_entry);
+        assert!(
+            calls.load(Ordering::Relaxed) < 1000,
+            "vector search policy folds: {}",
+            calls.load(Ordering::Relaxed)
+        );
+        calls.store(0, Ordering::Relaxed);
+        assert_eq!(store.all_segments().unwrap().len(), 1);
+        assert!(
+            calls.load(Ordering::Relaxed) < 1000,
+            "segment load policy folds: {}",
+            calls.load(Ordering::Relaxed)
+        );
+        calls.store(0, Ordering::Relaxed);
+        assert_eq!(store.all_segment_vectors_raw().unwrap().len(), 1);
+        assert!(
+            calls.load(Ordering::Relaxed) < 1000,
+            "raw vector load policy folds: {}",
+            calls.load(Ordering::Relaxed)
+        );
+    }
+
+    #[test]
+    fn policy_visibility_uses_unicode_case_and_component_boundaries() {
+        let mut store = IndexStore::open_in_memory().unwrap();
+        let id = store.ensure_root(r"C:\DÄTA").unwrap();
+        store
+            .apply_batch(
+                id,
+                0,
+                &[
+                    rec(r"C:\DÄTA\note.txt", "note.txt", 1, 1),
+                    rec(r"C:\DÄTABASE\leak.txt", "leak.txt", 1, 1),
+                ],
+            )
+            .unwrap();
+        let mut c = ws_protocol::IndexingConfig::default();
+        c.roots = vec![r"C:\DÄTA".into()];
+        c.excluded_paths = vec![r"c:\däta\note.txt".into()];
+        store.set_indexing_config(&c).unwrap();
+        assert!(!store
+            .entry_visible(store.find_by_path(r"C:\DÄTA\note.txt").unwrap().unwrap().id)
+            .unwrap());
+        assert!(!store
+            .entry_visible(
+                store
+                    .find_by_path(r"C:\DÄTABASE\leak.txt")
+                    .unwrap()
+                    .unwrap()
+                    .id
+            )
+            .unwrap());
+    }
+    #[test]
+    fn indexing_policy_migrates_once_and_fresh_is_empty() {
+        let mut fresh = IndexStore::open_in_memory().unwrap();
+        assert!(fresh
+            .get_or_migrate_indexing_config()
+            .unwrap()
+            .roots
+            .is_empty());
+        let mut legacy = IndexStore::open_in_memory().unwrap();
+        let id = legacy.ensure_root(r"Z:\offline").unwrap();
+        legacy.ensure_root("@apps").unwrap();
+        let c = legacy.get_or_migrate_indexing_config().unwrap();
+        assert_eq!(c.roots, vec![r"Z:\offline"]);
+        legacy.ensure_root(r"D:\later").unwrap();
+        assert_eq!(legacy.get_or_migrate_indexing_config().unwrap(), c);
+        assert_eq!(legacy.roots().unwrap()[0].id, id);
+    }
+    #[test]
+    fn indexing_policy_write_failure_keeps_policy_and_visibility() {
+        let mut store = IndexStore::open_in_memory().unwrap();
+        let mut c = ws_protocol::IndexingConfig::default();
+        c.roots = vec![r"C:\A".into()];
+        store.set_indexing_config(&c).unwrap();
+        let before = store.roots().unwrap();
+        store.conn.execute_batch("CREATE TRIGGER fail_policy BEFORE UPDATE ON meta WHEN new.key='indexing_config' BEGIN SELECT RAISE(ABORT,'fixture write failure'); END;").unwrap();
+        let mut next = c.clone();
+        next.roots = vec![r"C:\B".into()];
+        assert!(store.set_indexing_config(&next).is_err());
+        assert_eq!(store.get_or_migrate_indexing_config().unwrap(), c);
+        assert_eq!(store.roots().unwrap(), before);
+    }
+    #[test]
+    fn policy_filter_precedes_candidate_limits_and_keeps_rows() {
+        let mut store = IndexStore::open_in_memory().unwrap();
+        let a = store.ensure_root(r"C:\A").unwrap();
+        let b = store.ensure_root(r"C:\B").unwrap();
+        let rows: Vec<_> = (0..600)
+            .map(|i| {
+                rec(
+                    &format!(r"C:\A\match{i}.txt"),
+                    &format!("match{i}.txt"),
+                    1,
+                    1,
+                )
+            })
+            .collect();
+        store.apply_batch(a, 0, &rows).unwrap();
+        store
+            .apply_batch(b, 0, &[rec(r"C:\B\matchgood.txt", "matchgood.txt", 1, 1)])
+            .unwrap();
+        let mut c = ws_protocol::IndexingConfig::default();
+        c.roots = vec![r"C:\B".into()];
+        store.set_indexing_config(&c).unwrap();
+        let hits = store
+            .search(&crate::model::SearchRequest {
+                text: "match".into(),
+                limit: 1,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(hits[0].path, r"C:\B\matchgood.txt");
+        assert!(store.find_by_path(r"C:\A\match0.txt").unwrap().is_some());
+        store.enqueue_dir(a, r"C:\A").unwrap();
+        assert!(store.claim_dir().unwrap().is_none());
+        c.roots.push(r"C:\A".into());
+        store.set_indexing_config(&c).unwrap();
+        assert!(store.claim_dir().unwrap().is_some());
+    }
 
     fn rec(path: &str, name: &str, size: u64, mtime: i64) -> EntryRecord {
         EntryRecord {
@@ -2762,6 +4641,30 @@ mod tests {
         assert_eq!(claimed.priority, 42);
         drop(store);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn partial_path_backfill_is_repaired_atomically() {
+        let (mut store, root) = setup();
+        let generation = store.begin_generation(root).unwrap();
+        store.apply_batch(root, generation, &[
+            rec("C:\\alpha\\one.txt", "one.txt", 1, 1),
+            rec("C:\\RÄKNING\\two.txt", "two.txt", 1, 1),
+        ]).unwrap();
+        store.conn.execute_batch("DELETE FROM meta WHERE key = 'entries_path_tri_backfilled';
+            DELETE FROM entries_path_tri WHERE rowid = (SELECT MAX(id) FROM entries);
+            CREATE TRIGGER fail_backfill BEFORE INSERT ON meta
+            WHEN NEW.key = 'entries_path_tri_backfilled'
+            BEGIN SELECT RAISE(FAIL, 'simulated migration failure'); END;").unwrap();
+        assert!(IndexStore::ensure_entries_path_tri_backfilled(&store.conn).is_err());
+        let count: i64 = store.conn.query_row("SELECT COUNT(*) FROM entries_path_tri", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 1, "failed migration must roll back its partial work");
+        store.conn.execute_batch("DROP TRIGGER fail_backfill;").unwrap();
+        IndexStore::ensure_entries_path_tri_backfilled(&store.conn).unwrap();
+        let hits = store.search(&crate::model::SearchRequest {
+            text: "räkning".into(), limit: 10, ..Default::default()
+        }).unwrap();
+        assert_eq!(hits.len(), 1);
     }
 
     #[test]

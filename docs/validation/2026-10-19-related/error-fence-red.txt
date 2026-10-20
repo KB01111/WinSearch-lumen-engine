@@ -1,0 +1,35 @@
+cargo :    Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearc
+hd)
+At line:1 char:1
++ cargo test -p winsearchd engine::tests::related_public_pipe_bounds_wo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling wi...ins\winsearchd):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.09s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-950b3e8f0455252c.exe)
+
+running 1 test
+Related public stage: blocked-store controls
+Related public stage: cancelled workers
+Related public stage: ready
+Related public stage: no_model
+Related public stage: embed_failure
+Related public stage: below_threshold
+Related public stage: no_vectors
+Related public stage: source_change_on_error
+
+thread 'engine::tests::related_public_pipe_bounds_work_keeps_controls_live_and_reports_actual_lookup_state' (127560) pa
+nicked at bins\winsearchd\src\engine.rs:1722:85:
+missing terminal Related: Error { id: Some(25), code: Internal, message: "search request failed" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test engine::tests::related_public_pipe_bounds_work_keeps_controls_live_and_reports_actual_lookup_state ... FAILED
+
+failures:
+
+failures:
+    engine::tests::related_public_pipe_bounds_work_keeps_controls_live_and_reports_actual_lookup_state
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 226 filtered out; finished in 0.42s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

@@ -1,0 +1,17 @@
+Full local raw log SHA256: dde1424b279365df679c832eb2d5d87d7af6228a2664cc3be67e26eb5ea0e63c
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.57s
+     Running tests\media.rs (target\debug\deps\media-c62f332ecd511f23.exe)
+test distinct_images_and_pinned_screen_reference ... ok
+test public_synthetic_audio_matches_pinned_reference ... ok
+test reduced_frame_budgets_match_independent_references ... ok
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 21.49s
+     Running tests\native.rs (target\debug\deps\native-e9ad386fca18c074.exe)
+test backends_load_and_cpu_device_is_present ... ok
+test cpu_load_embed_release_roundtrip ... ok
+test embedding_is_deterministic_on_cpu ... ok
+test missing_model_is_reported ... ok
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.04s
+     Running tests\reference.rs (target\debug\deps\reference-6119388869fd3f02.exe)
+test embeddinggemma2_matches_reference_vectors ... ok
+test fixture_is_well_formed ... ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.64s

@@ -1,0 +1,137 @@
+[
+  {
+    "file": "rust-tests.txt",
+    "local_raw_sha256": "3ecdee322f36045784bbeffb9b10c6b851257e04c1e648de588e480877ff40d4",
+    "published_sha256": "4045bc367cb0663fa11082b1a39bd8f068ebbb20fd8dff551318c7a38b7f7b03"
+  },
+  {
+    "file": "coherent-build.txt",
+    "local_raw_sha256": "6590e09aeec3e3b4acdb8ee3e62badd5746daeab6806966d25bc505b5efd3245",
+    "published_sha256": "503f5deadee354e255c9780ce915ea3e7e582f8a172b82f622a1bfef1cd63e39"
+  },
+  {
+    "file": "native-extract.txt",
+    "local_raw_sha256": "c9b7d3e9390f557e8de378c85cf0ce97e136aa9bc42ff0c80575a00514af67b8",
+    "published_sha256": "2e8352019726bc184ed9290164c61c8861c76c0cde16477a51d4e69acf7c0f0d"
+  },
+  {
+    "file": "dotnet-tests.txt",
+    "local_raw_sha256": "d54d2580c107b7336ce97b3f176050edaf1b90bb44a5203029f19cfe5f6af753",
+    "published_sha256": "b897ac3fd20e7721b307384759d20199849f0484e326094c83c32a75a5ff9aeb"
+  },
+  {
+    "file": "x64-build.txt",
+    "local_raw_sha256": "3ecadcdd8f9102f9457652541bb03cf344f994e92047552e6d8c1a51671753b6",
+    "published_sha256": "dc75f9616488b3edda5b18b8cb129bc23963742bfe92142c5fc22840cd0622ae"
+  },
+  {
+    "file": "hash-red.txt",
+    "local_raw_sha256": "2338af12408aad801bc4ec8d5016d321a21aecc4892dccf2227acc6bced83263",
+    "published_sha256": "c40962e2f2b696aa29e4deeca0b90785566babeec74beff973ccd97efeff7712"
+  },
+  {
+    "file": "opened-handle-red.txt",
+    "local_raw_sha256": "239807b7367ea4a2942d15a8fe01c39af92ce5f59f3cf3e827822d91a7fc7ae3",
+    "published_sha256": "1c78766f0c5ec95b560465e49a78bf4249738db4c0c81db26c2e314697976a85"
+  },
+  {
+    "file": "store-red.txt",
+    "local_raw_sha256": "e722ab94bc306cc774f6ea261e6a16e415895aab3ab269c0eb4ef74761c900bb",
+    "published_sha256": "3210bd8fe1a7a27227a293651b28d3f9a860554618373716262f057b6422cc77"
+  },
+  {
+    "file": "worker-red.txt",
+    "local_raw_sha256": "da87e59c8a51821cf59ca4fa2363f929dd5105b1ee806c6196c2542cbf4300bf",
+    "published_sha256": "248c4c30c48803e35723ad79ea1ae8165ae6316bda5a0893e8d178ca2f5f675c"
+  },
+  {
+    "file": "native-worker-red.txt",
+    "local_raw_sha256": "800566c01d1f8f9bb50e5449ec72474ec5bb8598bacd4e86f11a81d43e6eefcf",
+    "published_sha256": "d68b4ad98ebe32d8916c87cb3c504a8f8d6d23e041c5c744b403ab354674df2e"
+  },
+  {
+    "file": "native-store-red.txt",
+    "local_raw_sha256": "f11be2b0a1a1364e50cc600db0991da34ef23058f0d32fe98817c801d1d252b4",
+    "published_sha256": "9ed881a0a3cbbfe0031c855c0cede8c8ccc543a639ff12c204b298a5d9e225a2"
+  },
+  {
+    "file": "change-retry-red.txt",
+    "local_raw_sha256": "6d8a19d053129697445a51ddd50dcbe6ec697203c2c9ecc7dd64dd87781cb83d",
+    "published_sha256": "92f826f515531acfaf8c4a4a01933d81b25bf46707caddd4e05dfe58b63b17e6"
+  },
+  {
+    "file": "media-cache-red.txt",
+    "local_raw_sha256": "a1b7149989b81c69ba1f7d4b4d6375e8ec18ba1efb2a5724d94b95b37f3ca4b3",
+    "published_sha256": "9e9a97489cf3cae9afeb15cd2c232d485b0ed67377bb4d1d6231da4b0656678b"
+  },
+  {
+    "file": "older-writer-red.txt",
+    "local_raw_sha256": "1685f4094636653d2e046d070b3e3061d018c097bea7ea805115ac52a3caf86f",
+    "published_sha256": "b94e20584df1b97870f7f637111a10dec1c55272aeaac254963a2619245925fc"
+  },
+  {
+    "file": "legacy-continuation-red.txt",
+    "local_raw_sha256": "c43e85d501085439ca58a0f27135774dd60ae76feeea227d9e6042efc8c6e795",
+    "published_sha256": "949d8ba278b97d8af4dd2eda5cfb3c8ff62ded93ef73861673744df8572845d5"
+  },
+  {
+    "file": "legacy-filter-empty.txt",
+    "local_raw_sha256": "56f2b1921655ae3df9514ad53875e0b436fa4c524688cf58cf022e0cb6fc9386",
+    "published_sha256": "c800262c0d6c9549db3a6d436917cc864b75c7ad245674248d671ab4c5cfa997"
+  },
+  {
+    "file": "source-store-green.txt",
+    "local_raw_sha256": "2febc0c5f22f78268eebb3e4ae2d1cfb5153c9c6b3dc09d13c63dc2473a5e475",
+    "published_sha256": "3bb6a8ddf087b06d5ae0321af85cae578460ff62a68bb0ee538213a74be90a18"
+  },
+  {
+    "file": "change-and-restore-red.txt",
+    "local_raw_sha256": "7af4f778c5eeb27b3040ebc3382412eee5551713c58fd8c8f9570aaebd9a2fa6",
+    "published_sha256": "89a6e97fe73b606146a491566b76adcb7a46f9d463015a877ddd5e9408e8f620"
+  },
+  {
+    "file": "source-hash-green.txt",
+    "local_raw_sha256": "39958f6081ca3657ad5f5a1788b055da5bec2db643f6c2b2fbd4f7876dfd85b2",
+    "published_sha256": "662d4d9c0faae0d8d6b710c3fbae98a9dd30492fbac31ea72a0b6306704df38f"
+  },
+  {
+    "file": "locked-pdf-diagnostic-red.txt",
+    "local_raw_sha256": "a0f249badb6f2a06c25a4d653749607f320d2420225637814f21db14a1fb1527",
+    "published_sha256": "f188a37469567cbe1e83ef20e683952c6332cdfc0f9c1172cea97ac0332e67af"
+  },
+  {
+    "file": "cache-fixture-compile-error.txt",
+    "local_raw_sha256": "4db78585f7bcebb62b05e6b9a3dca816d4843c98ce6241670cb9e337b436e68d",
+    "published_sha256": "41ff6bc3ea57bc5a269326825624e27c7e7aaa65f61f4299b82dcea44ed7a3a9"
+  },
+  {
+    "file": "code-delivery-fixture-failure.txt",
+    "local_raw_sha256": "291738e850bc7d2f36f147891ceb35af84d334774e1f945ea6484bfbac2ce790",
+    "published_sha256": "fbae19910acb48c6934f5638c71eac9a2beddc82359ef5bfa0ac6aa2c7c7e8cb"
+  },
+  {
+    "file": "code-vector-recovery-fixture-failure.txt",
+    "local_raw_sha256": "4e006038df1b6e31641285e3510fe59243d553a1a265e7393ffa7e3ed0a54ee6",
+    "published_sha256": "eeb1f1df087a3b16beeb92348734f077a21767e3129d103bd35d117bed659763"
+  },
+  {
+    "file": "code-fixture-diagnosis.json",
+    "local_raw_sha256": "ba00fe9ec26b09e5e60db79afdde57f294523db9a9b91599e142b6e29aef9e89",
+    "published_sha256": "aa725f2e1d3324f490db5204f9125d1ed9236437b644fb5593fc0ade1f1e1901"
+  },
+  {
+    "file": "native-no-model.json",
+    "local_raw_sha256": "efb4657293b0c341571bfc435eb3cb6044a7a0ba8e66d846e622ef9e86c076c3",
+    "published_sha256": "b44147401890c29286b8d45b9fc7fceafc0b62241f3ce6115d75acd3130b7b59"
+  },
+  {
+    "file": "native-managed-cpu.json",
+    "local_raw_sha256": "4c0c02ab72ba1b76752ddc11dcc139d57259843f747de7ff49504353175ee642",
+    "published_sha256": "2672f007b9e46cb7410f32e574bef95ecab5d263f8ae3a3bc47a3bd18c60c3c7"
+  },
+  {
+    "file": "host-reused.json",
+    "local_raw_sha256": "805f9cb81838c737dac3dfd06987a5f6759cf6d184c111ff27f61b62815081cf",
+    "published_sha256": "07508ebeb657b220d7204fc4f6e3906868276f8978c7066daa98b15df6a35d99"
+  }
+]

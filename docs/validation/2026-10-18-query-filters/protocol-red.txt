@@ -1,0 +1,21 @@
+failures:
+
+---- messages::tests::search_extensions_are_additive_and_match_only_explicit_file_extensions stdout ----
+
+thread 'messages::tests::search_extensions_are_additive_and_match_only_explicit_file_extensions' (83876) panicked at crates\ws-protocol\src\messages.rs:406:9:
+assertion failed: !search_extension_allowed(&filters, "png")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- messages::tests::search_extensions_validate_budgets_and_reject_path_or_wildcard_syntax stdout ----
+
+thread 'messages::tests::search_extensions_validate_budgets_and_reject_path_or_wildcard_syntax' (38448) panicked at crates\ws-protocol\src\messages.rs:393:13:
+""
+
+
+failures:
+    messages::tests::search_extensions_are_additive_and_match_only_explicit_file_extensions
+    messages::tests::search_extensions_validate_budgets_and_reject_path_or_wildcard_syntax
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p ws-protocol --lib`

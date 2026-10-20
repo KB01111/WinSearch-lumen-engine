@@ -1,0 +1,23 @@
+rtk :    Compiling ws-extract v0.1.0 (<checkout>\src\engine\crates\ws-extra
+ct)
+At <checkout>\artifacts\ordinary-source-checks.ps1:9 char:15
++ ... affected' { rtk proxy cargo test -p ws-code -p ws-extract -p winsearc ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...tes\ws-extract):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearchd)
+error[E0624]: method `conn` is private
+    --> bins\winsearchd\src\extract.rs:2490:30
+     |
+2490 | ...   indexer.store_lock().conn().execute("UPDATE content_progress SET source_sha256=?2 WHERE entry_id=?1",rusql
+ite::params![entry...
+     |                            ^^^^ private method
+     |
+    ::: crates\ws-index\src\store.rs:2469:5
+     |
+2469 |     pub(crate) fn conn(&self) -> &Connection {
+     |     ---------------------------------------- private method defined here
+
+For more information about this error, try `rustc --explain E0624`.
+error: could not compile `winsearchd` (bin "winsearchd" test) due to 1 previous error

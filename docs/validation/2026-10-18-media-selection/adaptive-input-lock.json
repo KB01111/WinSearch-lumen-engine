@@ -1,0 +1,26 @@
+{
+  "scope": "Measure a generated two-hour sparse video and cancellation of its real decoder tree.",
+  "source_bytes": 355439,
+  "source_video": {
+    "duration_seconds": 7200,
+    "width": 160,
+    "height": 100,
+    "fps": 1
+  },
+  "measurement": "job-tree process memory sampled every20ms; scratch sampled and final files counted",
+  "timing_clock": {
+    "implementation": "QueryPerformanceCounter()",
+    "monotonic": true,
+    "adjustable": false,
+    "resolution": 1e-07
+  },
+  "batches": [],
+  "reused_source_dir": "<checkout>\\artifacts\\media-selection-resources-v1",
+  "sha256": {
+    "harness": "36ec67a13371f7c10b0810a1106e53c2bcda0ef39482a1c0e628c5ce539ac680",
+    "extractor": "2d494b6d931b60bf36a05ef1a4f188b37b01363688af6c198931e9c909708b10",
+    "ffmpeg": "24fdada9908f7a231e9dfcc9f462273d3ddb698f5071f04c61496819ce3cfef0",
+    "ffprobe": "a77003c4628c7a414718623156280be47c1aaa2fa85c177d3d1d325d3d06358f",
+    "sparse_source": "f428d7e23df93d96711247afd1117acbc675b07af6d03dcb752242956542858f"
+  }
+}

@@ -1,0 +1,36 @@
+rtk :    Compiling winsearch-cli v0.1.0 (<checkout>\src\engine\bins\winsear
+ch-cli)
+At line:1 char:1
++ rtk proxy cargo test -p winsearch-cli --all-targets extension *> ..\. ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling wi...\winsearch-cli):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.00s
+     Running unittests src\main.rs (target\debug\deps\winsearch_cli-a940bf76679cba8b.exe)
+
+running 2 tests
+test tests::search_extension_options_do_not_become_query_text ... FAILED
+test tests::search_rejects_invalid_or_excessive_extension_options ... FAILED
+
+failures:
+
+---- tests::search_extension_options_do_not_become_query_text stdout ----
+
+thread 'tests::search_extension_options_do_not_become_query_text' (147468) panicked at bins\winsearch-cli\src\main.rs:667:9:
+assertion failed: matches!(command, CliCommand::Search { query, .. } if query == "needle")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- tests::search_rejects_invalid_or_excessive_extension_options stdout ----
+
+thread 'tests::search_rejects_invalid_or_excessive_extension_options' (25316) panicked at bins\winsearch-cli\src\main.rs:673:13:
+""
+
+
+failures:
+    tests::search_extension_options_do_not_become_query_text
+    tests::search_rejects_invalid_or_excessive_extension_options
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p winsearch-cli --bin winsearch-cli`

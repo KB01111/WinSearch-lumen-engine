@@ -1,0 +1,12 @@
+{
+  "fixture_sha256": "db7020b7318353407dbaad8a160a098ef878f531f541160c3cc5b40420430dba",
+  "method": "both_tasks",
+  "policy": "Embed the unchanged query under code retrieval and search result tasks in the same pinned 768-dimensional space. Require each raw cosine to pass the existing common 0.65 floor before candidate truncation. Rank admitted code chunks by the original code-task cosine and existing hybrid scoring.",
+  "rationale": "Code-task prompt affinity admits unrelated queries above the common floor. General-search corroboration rejects them on the frozen development set and the original four-chunk native diagnostic while preserving all expected positives. No query-specific exceptions, keyword gate, corpus calibration, changed threshold, document re-embedding, model, or dimension change.",
+  "development": "code-calibration-development-v1/results.json",
+  "development_recall_at_5": 1.0,
+  "development_mrr": 1.0,
+  "development_negative_fp_rate": 0.0,
+  "heldout_evaluated_before_policy_lock": false,
+  "native_managed_regression_still_required": true
+}

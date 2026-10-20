@@ -241,6 +241,43 @@ public sealed class MainOverlayViewModelTests
         Assert.Equal("r1", vm.Results[0].Result.Id);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FlushOrWaitForSearchAsync_FollowsQueryChangesWhileWaiting(bool debounceElapsed)
+    {
+        var first = Channel.CreateUnbounded<SearchBatch>();
+        var second = Channel.CreateUnbounded<SearchBatch>();
+        var secondStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fake = new FakeEngineClient
+        {
+            SearchHandler = (q, ct) =>
+            {
+                if (q.Text == "second") secondStarted.TrySetResult();
+                return ReadBatchesAsync(q.Text == "first" ? first.Reader : second.Reader, ct);
+            },
+        };
+        await using var vm = new MainOverlayViewModel(fake, new AppSettings());
+        vm.QueryText = "first";
+        var search = vm.SearchNowAsync();
+        var flush = vm.FlushOrWaitForSearchAsync();
+        vm.QueryText = "second";
+        var replacement = debounceElapsed ? vm.SearchNowAsync() : Task.CompletedTask;
+        first.Writer.TryComplete();
+        await search.WaitAsync(TimeSpan.FromSeconds(2));
+        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.False(flush.IsCompletedSuccessfully);
+        second.Writer.TryWrite(new SearchBatch
+        {
+            Results = [new SearchResult { Id = "second", Title = "second.txt" }],
+            Done = true,
+        });
+        second.Writer.TryComplete();
+        await Task.WhenAll(flush, replacement).WaitAsync(TimeSpan.FromSeconds(2));
+        await WaitUntilAsync(() => vm.Results.Count == 1);
+        Assert.Equal("second", Assert.Single(vm.Results).Result.Id);
+    }
+
     [Fact]
     public async Task SupersededDebounceCallback_DoesNotStartOrCancelSearch()
     {

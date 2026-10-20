@@ -233,23 +233,20 @@ public sealed partial class OverlayWindow : Window
     {
         if (e.ClickedItem is ResultItemViewModel item)
         {
-            ResultActions.Open(item.Result);
-            HideOverlay();
+            var explanation = ResultActions.Open(item.Result);
+            if (explanation is null) HideOverlay();
+            else _viewModel.StatusText = explanation;
         }
     }
 
     private async Task FlushPendingQueryAsync()
     {
-        var queryMismatch = _viewModel.QueryText != SearchBox.Text;
-        if (queryMismatch)
+        do
         {
             _viewModel.QueryText = SearchBox.Text;
-            await _viewModel.SearchNowAsync();
-        }
-        else
-        {
             await _viewModel.FlushOrWaitForSearchAsync();
         }
+        while (_viewModel.QueryText != SearchBox.Text || _viewModel.HasPendingSearch);
 
         if (ResultsList.SelectedIndex < 0 && _viewModel.Results.Count > 0)
         {
@@ -274,8 +271,9 @@ public sealed partial class OverlayWindow : Window
             ?? (_viewModel.Results.Count > 0 ? _viewModel.Results[0] : null);
         if (item is not null)
         {
-            ResultActions.Open(item.Result);
-            HideOverlay();
+            var explanation = ResultActions.Open(item.Result);
+            if (explanation is null) HideOverlay();
+            else _viewModel.StatusText = explanation;
         }
     }
 

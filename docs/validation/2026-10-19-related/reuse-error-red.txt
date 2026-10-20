@@ -1,0 +1,31 @@
+cargo :    Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearc
+hd)
+At line:1 char:1
++ cargo test -p winsearchd engine::tests::related_failure_rechecks_requ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling wi...ins\winsearchd):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 14.49s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-950b3e8f0455252c.exe)
+
+running 1 test
+test engine::tests::related_failure_rechecks_request_identity_after_blocked_seed_lookup ... FAILED
+
+failures:
+
+---- engine::tests::related_failure_rechecks_request_identity_after_blocked_seed_lookup stdout ----
+
+thread 'engine::tests::related_failure_rechecks_request_identity_after_blocked_seed_lookup' (85980) panicked at bins\winsearchd\src\engine.rs:1706:13:
+assertion `left == right` failed: old work cannot reject the reused request after seed validation
+  left: Some(80)
+ right: Some(0)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    engine::tests::related_failure_rechecks_request_identity_after_blocked_seed_lookup
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 228 filtered out; finished in 0.08s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

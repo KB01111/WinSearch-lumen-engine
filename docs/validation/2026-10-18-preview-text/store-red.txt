@@ -1,0 +1,46 @@
+rtk :    Compiling ws-index v0.1.0 (<checkout>\src\engine\crates\ws-index)
+At line:1 char:1
++ rtk proxy cargo test -p ws-index preview_text -- --test-threads=1 > C ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...rates\ws-index):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.99s
+     Running unittests src\lib.rs (target\debug\deps\ws_index-70ff3159c871f712.exe)
+
+running 3 tests
+test store::tests::preview_text_applies_current_source_guard_before_row_limit ... FAILED
+test store::tests::preview_text_bounds_utf8_and_rows_without_loading_vectors_or_artifact_inputs ... FAILED
+test store::tests::preview_text_preserves_page_line_and_time_without_fabricating_requested_positions ... FAILED
+
+failures:
+
+---- store::tests::preview_text_applies_current_source_guard_before_row_limit stdout ----
+
+thread 'store::tests::preview_text_applies_current_source_guard_before_row_limit' (73724) panicked at crates\ws-index\src\store.rs:2561:9:
+assertion `left == right` failed
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- store::tests::preview_text_bounds_utf8_and_rows_without_loading_vectors_or_artifact_inputs stdout ----
+
+thread 'store::tests::preview_text_bounds_utf8_and_rows_without_loading_vectors_or_artifact_inputs' (110652) panicked at crates\ws-index\src\store.rs:2539:9:
+assertion failed: truncated
+
+---- store::tests::preview_text_preserves_page_line_and_time_without_fabricating_requested_positions stdout ----
+
+thread 'store::tests::preview_text_preserves_page_line_and_time_without_fabricating_requested_positions' (107952) panicked at crates\ws-index\src\store.rs:2582:13:
+assertion `left == right` failed
+  left: 0
+ right: 1
+
+
+failures:
+    store::tests::preview_text_applies_current_source_guard_before_row_limit
+    store::tests::preview_text_bounds_utf8_and_rows_without_loading_vectors_or_artifact_inputs
+    store::tests::preview_text_preserves_page_line_and_time_without_fabricating_requested_positions
+
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 82 filtered out; finished in 0.04s
+
+error: test failed, to rerun pass `-p ws-index --lib`

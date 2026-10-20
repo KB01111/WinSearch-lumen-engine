@@ -1,0 +1,49 @@
+cargo :    Compiling ws-client v0.1.0 (<checkout>\src\engine\crates\ws-clie
+nt)
+At line:1 char:27
++ ... src/engine; cargo test -p ws-client --lib client::tests *> ../../arti ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...ates\ws-client):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.85s
+     Running unittests src\lib.rs (target\debug\deps\ws_client-dc52a795d104f408.exe)
+
+running 7 tests
+test client::tests::refuses_remote_worker_and_foreign_pipe_namespaces ... ok
+test client::tests::typed_configuration_and_model_operations_preserve_wire_values ... FAILED
+test client::tests::entry_resolution_checks_identity_proof_and_lexical_root_before_delivery ... FAILED
+test client::tests::legacy_capabilities_refuse_entry_resolution_before_sending_an_unknown_frame ... FAILED
+test client::tests::status_uses_secured_pipe_framing_and_ignores_only_pushes ... ok
+test client::tests::unary_rejects_wrong_id_and_type_and_preserves_matching_errors ... ok
+test client::tests::unavailable_pipe_has_bounded_connect_deadline ... ok
+
+failures:
+
+---- client::tests::typed_configuration_and_model_operations_preserve_wire_values stdout ----
+
+thread 'client::tests::typed_configuration_and_model_operations_preserve_wire_values' (98524) panicked at crates\ws-client\src\client.rs:292:55:
+called `Result::unwrap()` on an `Err` value: Protocol("typed configuration is not implemented")
+
+---- client::tests::entry_resolution_checks_identity_proof_and_lexical_root_before_delivery stdout ----
+
+thread 'client::tests::entry_resolution_checks_identity_proof_and_lexical_root_before_delivery' (102996) panicked at crates\ws-client\src\client.rs:345:45:
+called `Result::unwrap()` on an `Err` value: Protocol("typed entry resolution is not implemented")
+
+---- client::tests::legacy_capabilities_refuse_entry_resolution_before_sending_an_unknown_frame stdout ----
+
+thread 'client::tests::legacy_capabilities_refuse_entry_resolution_before_sending_an_unknown_frame' (85240) panicked at crates\ws-client\src\client.rs:362:9:
+assertion failed: matches!(client.resolve_entry(EntryReference
+    { result_id: "e42".into(), source_revision: None }).await,
+    Err(Error::Unsupported("entry.resolve")))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    client::tests::entry_resolution_checks_identity_proof_and_lexical_root_before_delivery
+    client::tests::legacy_capabilities_refuse_entry_resolution_before_sending_an_unknown_frame
+    client::tests::typed_configuration_and_model_operations_preserve_wire_values
+
+test result: FAILED. 4 passed; 3 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p ws-client --lib`

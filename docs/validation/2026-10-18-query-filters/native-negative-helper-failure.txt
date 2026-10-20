@@ -1,0 +1,16 @@
+rtk : Traceback (most recent call last):
+At line:1 char:137
++ ... ython.exe"; rtk proxy $taskPython -X utf8 tools/test-search-parity.py ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+  File "<checkout>\tools\test-search-parity.py", line 513, in <module>
+    main()
+  File "<checkout>\tools\test-search-parity.py", line 319, in main
+    rejected=malformed.request('search',query={'text':'needle','extensions':['../pdf']})
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<checkout>\tools\test-indexed-media.py", line 129, in request
+    assert reply['type'] != 'error', reply
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: {'type': 'error', 'id': 2, 'code': 'invalid_request', 'message': 'invalid search extension filter'}

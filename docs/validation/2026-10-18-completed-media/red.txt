@@ -1,0 +1,27 @@
+cargo :     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.39s
+At line:1 char:27
++ ... src/engine; cargo test -p winsearchd extract::tests::media_completed_ ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Finished `t...get(s) in 0.39s:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+     Running unittests src\main.rs (target\debug\deps\winsearchd-ea492ede1f9fd55e.exe)
+
+running 1 test
+test extract::tests::media_completed_native_cache_recovery_preserves_vectors_and_exact_rows ... FAILED
+
+failures:
+
+---- extract::tests::media_completed_native_cache_recovery_preserves_vectors_and_exact_rows stdout ----
+
+thread 'extract::tests::media_completed_native_cache_recovery_preserves_vectors_and_exact_rows' (91704) panicked at bins\winsearchd\src\extract.rs:1271:18:
+a completed vector's evicted preview must regenerate without re-embedding: InputUnavailable("artifact claim became stale")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    extract::tests::media_completed_native_cache_recovery_preserves_vectors_and_exact_rows
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 188 filtered out; finished in 0.91s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

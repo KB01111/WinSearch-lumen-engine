@@ -1,0 +1,37 @@
+cargo :    Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-pr
+otocol)
+At line:1 char:1
++ cargo test -p ws-client --lib related_ -- --test-threads=1 *> ../../a ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-client v0.1.0 (<checkout>\src\engine\crates\ws-client)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.99s
+     Running unittests src\lib.rs (target\debug\deps\ws_client-554fa414f259563f.exe)
+
+running 2 tests
+test client::tests::related_rejects_unbound_source_before_opening_a_connection ... FAILED
+test client::tests::related_stream_uses_distinct_operation_and_rejects_seed_or_ordinary_fallback_replies ... FAILED
+
+failures:
+
+---- client::tests::related_rejects_unbound_source_before_opening_a_connection stdout ----
+
+thread 'client::tests::related_rejects_unbound_source_before_opening_a_connection' (115440) panicked at crates\ws-client\src\client.rs:807:9:
+assertion failed: matches!(result,Err(Error::InvalidInput(_)))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- client::tests::related_stream_uses_distinct_operation_and_rejects_seed_or_ordinary_fallback_replies stdout ----
+
+thread 'client::tests::related_stream_uses_distinct_operation_and_rejects_seed_or_ordinary_fallback_replies' (124812) panicked at crates\ws-client\src\client.rs:831:70:
+new peer must support Related: Unsupported("search.related")
+
+
+failures:
+    client::tests::related_rejects_unbound_source_before_opening_a_connection
+    client::tests::related_stream_uses_distinct_operation_and_rejects_seed_or_ordinary_fallback_replies
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 45 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p ws-client --lib`

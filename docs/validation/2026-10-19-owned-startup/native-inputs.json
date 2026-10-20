@@ -1,0 +1,60 @@
+{
+  "no-model": {
+    "binary_sha256": {
+      "winsearchd.exe": "bc4a15dc09fc4a472a8826a6471f3d088a13641072dbc64ddcac95c650b0dda9",
+      "winsearch-cli.exe": "ba147799e5daa1e71c4a4720827a629c33263e05d1e9b50c671602c6ed78aee1",
+      "winsearch-embed.exe": "2417bb278b02807cca0ee4ddf98b2183c68a09a6ebad6dd3d463ed83c21b03ca",
+      "winsearch-extract.exe": "0066b4a6d5c0e3e235cf312796e1e4139fb9c0b494dfc018c531b9f9dc14afec"
+    },
+    "adjacent_native_dll_sha256": {
+      "ggml-base.dll": "1fef4fe44a9a0ba54e04ae58c651ecce330cf425463041cc407b42be62b56962",
+      "ggml-cpu-alderlake.dll": "6f335fe79a35276fcef8ed098d4e2b5952a6cce036549e6547ed7c9b08ac3147",
+      "ggml-cpu-cannonlake.dll": "8a78dfa98d6f6621f96041805227ed78a2a18e0459ba3446d4912cb9aa9e0511",
+      "ggml-cpu-cascadelake.dll": "26cb79d301458ab48143c6634ff4b9a17b247c8bd3203add4e9e3d90b93deed7",
+      "ggml-cpu-haswell.dll": "ea84ecaeab37d2fd794032dd6c7e441b6329abba5835f8ddcbdd9ffde7f4eb5e",
+      "ggml-cpu-icelake.dll": "d60448a478c6029c7e4f7abbb4343ecb2c1b4dea99b6e409028202a85aff0a4a",
+      "ggml-cpu-sandybridge.dll": "777f1172ff889dce5c2baf1bdb3313af7a7f04f213b7e783177d4692b90fad2a",
+      "ggml-cpu-skylakex.dll": "987007c231607c71e92c578c51efe05b263f4558983017446f38a86a7a967328",
+      "ggml-cpu-sse42.dll": "916bf899d3dd80d886ed604059a6ed9693eb37ac4734997ffeb625ce66c6fa1a",
+      "ggml-cpu-x64.dll": "e12f726dce960488ec911e7a0e0a99c67fe32986facbddd49c35ed49120a3656",
+      "ggml-cuda.dll": "8bf0d44ebdb60df7e398b9fddcc4ef5a7aeb63adfbcb85764db2e43e507edf1c",
+      "ggml.dll": "7516e5d871d1fe0e31897f6ee0f3aaf4c6471ce9016472285e65b19a42443f1a",
+      "llama.dll": "a66c29aa35f7301977b24389cc38f2c9c07a04a0cb49349cd2f5055b891f61e5",
+      "mtmd.dll": "4abc3e9e8ce9a378a76a2c885fd5078a251389b36dd6ecaed3811d48e1baef30",
+      "pdfium.dll": "1f2aee4286b8cf0413ab4562b7121aa454f9cfd9afd6ca8609bcef80927b3f80"
+    },
+    "headless_client_sha256": "698a6b34e59aefa6d230f80815df2d2f00785566a4877a08a31fb4e695a1707d",
+    "offline_comparator_sha256": "bdb0d8d26dce444eeb619470e39a74ebd303c56036bfd3b6bfe836773a665622",
+    "harness_sha256": "b31b3047f2439414aef80ccf52720db79d692968fa4aa7e5779f89b413716bc7"
+  },
+  "cpu": {
+    "binary_sha256": {
+      "winsearchd.exe": "bc4a15dc09fc4a472a8826a6471f3d088a13641072dbc64ddcac95c650b0dda9",
+      "winsearch-cli.exe": "ba147799e5daa1e71c4a4720827a629c33263e05d1e9b50c671602c6ed78aee1",
+      "winsearch-embed.exe": "2417bb278b02807cca0ee4ddf98b2183c68a09a6ebad6dd3d463ed83c21b03ca",
+      "winsearch-extract.exe": "0066b4a6d5c0e3e235cf312796e1e4139fb9c0b494dfc018c531b9f9dc14afec"
+    },
+    "adjacent_native_dll_sha256": {
+      "ggml-base.dll": "1fef4fe44a9a0ba54e04ae58c651ecce330cf425463041cc407b42be62b56962",
+      "ggml-cpu-alderlake.dll": "6f335fe79a35276fcef8ed098d4e2b5952a6cce036549e6547ed7c9b08ac3147",
+      "ggml-cpu-cannonlake.dll": "8a78dfa98d6f6621f96041805227ed78a2a18e0459ba3446d4912cb9aa9e0511",
+      "ggml-cpu-cascadelake.dll": "26cb79d301458ab48143c6634ff4b9a17b247c8bd3203add4e9e3d90b93deed7",
+      "ggml-cpu-haswell.dll": "ea84ecaeab37d2fd794032dd6c7e441b6329abba5835f8ddcbdd9ffde7f4eb5e",
+      "ggml-cpu-icelake.dll": "d60448a478c6029c7e4f7abbb4343ecb2c1b4dea99b6e409028202a85aff0a4a",
+      "ggml-cpu-sandybridge.dll": "777f1172ff889dce5c2baf1bdb3313af7a7f04f213b7e783177d4692b90fad2a",
+      "ggml-cpu-skylakex.dll": "987007c231607c71e92c578c51efe05b263f4558983017446f38a86a7a967328",
+      "ggml-cpu-sse42.dll": "916bf899d3dd80d886ed604059a6ed9693eb37ac4734997ffeb625ce66c6fa1a",
+      "ggml-cpu-x64.dll": "e12f726dce960488ec911e7a0e0a99c67fe32986facbddd49c35ed49120a3656",
+      "ggml-cuda.dll": "8bf0d44ebdb60df7e398b9fddcc4ef5a7aeb63adfbcb85764db2e43e507edf1c",
+      "ggml.dll": "7516e5d871d1fe0e31897f6ee0f3aaf4c6471ce9016472285e65b19a42443f1a",
+      "llama.dll": "a66c29aa35f7301977b24389cc38f2c9c07a04a0cb49349cd2f5055b891f61e5",
+      "mtmd.dll": "4abc3e9e8ce9a378a76a2c885fd5078a251389b36dd6ecaed3811d48e1baef30",
+      "pdfium.dll": "1f2aee4286b8cf0413ab4562b7121aa454f9cfd9afd6ca8609bcef80927b3f80"
+    },
+    "headless_client_sha256": "698a6b34e59aefa6d230f80815df2d2f00785566a4877a08a31fb4e695a1707d",
+    "offline_comparator_sha256": "bdb0d8d26dce444eeb619470e39a74ebd303c56036bfd3b6bfe836773a665622",
+    "harness_sha256": "b31b3047f2439414aef80ccf52720db79d692968fa4aa7e5779f89b413716bc7",
+    "model_sha256": "2188ac1deca4b77dffefd603c2776a9d76d9d74ec01841392982ebb840b09135",
+    "projector_sha256": "c4a8a52691ecef40618438928bdf9e68379b854e24166f292592353db0aab64f"
+  }
+}

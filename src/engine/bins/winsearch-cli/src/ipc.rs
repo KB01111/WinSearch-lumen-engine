@@ -5,7 +5,7 @@ use ws_platform::identity;
 use ws_platform::pipe::PipeStream;
 use ws_protocol::{
     read_message, write_message, ClientMessage, EngineConfig, EngineStatus, ModelStatus,
-    SearchQuery, SearchResult, ServerMessage, PROTOCOL_VERSION,
+    SearchDisposition, SearchOutcome, SearchQuery, SearchResult, ServerMessage, PROTOCOL_VERSION,
 };
 
 pub const CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -27,6 +27,20 @@ pub enum IpcError {
     },
     #[error("unexpected EOF from daemon")]
     UnexpectedEof,
+    #[error("invalid or missing terminal search outcome")]
+    InvalidSearchOutcome,
+    #[error("search interrupted: {0:?}")]
+    SearchInterrupted(SearchDisposition),
+    #[error("invalid search extension filter")]
+    InvalidSearchExtensions,
+    #[error("daemon does not support {0}")]
+    UnsupportedFeature(&'static str),
+    #[error("daemon returned a result outside the extension filter")]
+    UnselectedSearchExtension,
+    #[error("invalid search file kind filter")]
+    InvalidSearchFileKinds,
+    #[error("daemon returned a result outside the file kind filter")]
+    UnselectedSearchFileKind,
 }
 
 pub struct DaemonClient {
@@ -35,6 +49,7 @@ pub struct DaemonClient {
     pub engine_version: String,
     pub features: Vec<String>,
     pub initial_status: Option<EngineStatus>,
+    pub last_search_outcome: Option<SearchOutcome>,
     next_id: u64,
 }
 
@@ -86,6 +101,7 @@ impl DaemonClient {
             engine_version,
             features,
             initial_status: None,
+            last_search_outcome: None,
             next_id: 1,
         })
     }
@@ -169,6 +185,23 @@ impl DaemonClient {
     /// Executes a streaming search over IPC and collects all batches until
     /// `done: true`.
     pub fn search(&mut self, query: SearchQuery) -> Result<Vec<SearchResult>, IpcError> {
+        self.last_search_outcome=None;
+        if !ws_protocol::valid_search_extensions(&query.extensions) {
+            return Err(IpcError::InvalidSearchExtensions);
+        }
+        if !ws_protocol::valid_search_file_kinds(&query.file_kinds) {
+            return Err(IpcError::InvalidSearchFileKinds);
+        }
+        if !query.file_kinds.is_empty() && !self.features.iter().any(|feature| feature == "search.file_kinds") {
+            return Err(IpcError::UnsupportedFeature("search.file_kinds"));
+        }
+        if !query.extensions.is_empty() && !self.features.iter().any(|feature| feature == "search.filters") {
+            return Err(IpcError::UnsupportedFeature("search.filters"));
+        }
+        let extensions = query.extensions.clone();
+        let file_kinds = query.file_kinds.clone();
+        let requested_semantic=query.include_semantic;
+        let require_outcome=self.features.iter().any(|feature|feature=="search.outcomes");
         let id = self.alloc_id();
         write_message(&mut self.stream, &ClientMessage::Search { id, query })?;
         let mut results = Vec::new();
@@ -178,9 +211,27 @@ impl DaemonClient {
                     id: resp_id,
                     batch,
                     done,
+                    outcome,
                 }) if resp_id == id => {
+                    if batch.iter().any(|hit| !ws_protocol::search_file_kind_result_allowed(&file_kinds,hit)) {
+                        return Err(IpcError::UnselectedSearchFileKind);
+                    }
+                    if !extensions.is_empty() && batch.iter().any(|hit|
+                        hit.kind == ws_protocol::ResultKind::Folder || !hit.path.as_deref().is_some_and(|path|
+                            ws_protocol::search_extension_allowed(&extensions,
+                                std::path::Path::new(path).extension().and_then(|extension| extension.to_str()).unwrap_or("")))) {
+                        return Err(IpcError::UnselectedSearchExtension);
+                    }
+                    if (done && require_outcome && outcome.is_none()) || outcome.as_ref()
+                        .is_some_and(|state|!state.valid_for(done,batch.is_empty(),requested_semantic)) {
+                        return Err(IpcError::InvalidSearchOutcome);
+                    }
                     results.extend(batch);
                     if done {
+                        self.last_search_outcome=outcome;
+                        if let Some(outcome)=outcome.filter(|state|state.disposition!=SearchDisposition::Complete) {
+                            return Err(IpcError::SearchInterrupted(outcome.disposition));
+                        }
                         return Ok(results);
                     }
                 }

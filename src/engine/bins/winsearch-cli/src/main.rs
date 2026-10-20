@@ -25,6 +25,8 @@ pub enum CliCommand {
         mode: SearchMode,
         semantic: bool,
         limit: u32,
+        extensions: Vec<String>,
+        json: bool,
     },
     Eval {
         suite: String,
@@ -50,10 +52,7 @@ pub fn parse_args(args: &[String]) -> anyhow::Result<CliCommand> {
         "status" => Ok(CliCommand::Status),
         "search" => parse_search_args(&args[1..]),
         "eval" => {
-            let suite = args
-                .get(1)
-                .cloned()
-                .unwrap_or_else(|| "names".to_string());
+            let suite = args.get(1).cloned().unwrap_or_else(|| "names".to_string());
             Ok(CliCommand::Eval { suite })
         }
         "model" => parse_model_args(&args[1..]),
@@ -65,15 +64,25 @@ fn parse_search_args(args: &[String]) -> anyhow::Result<CliCommand> {
     let mut mode = SearchMode::Auto;
     let mut semantic = false;
     let mut limit = 20u32;
+    let mut extensions = Vec::new();
+    let mut json = false;
     let mut query_parts: Vec<String> = Vec::new();
 
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
+            "--" => {
+                query_parts.extend_from_slice(&args[i + 1..]);
+                break;
+            }
+            "--json" => {
+                json = true;
+                i += 1;
+            }
             "--mode" | "-m" => {
-                let val = args
-                    .get(i + 1)
-                    .ok_or_else(|| anyhow::anyhow!("--mode requires a value (all|files|apps|code)"))?;
+                let val = args.get(i + 1).ok_or_else(|| {
+                    anyhow::anyhow!("--mode requires a value (all|files|apps|code)")
+                })?;
                 mode = parse_search_mode(val)?;
                 i += 2;
             }
@@ -95,16 +104,34 @@ fn parse_search_args(args: &[String]) -> anyhow::Result<CliCommand> {
                     .max(1);
                 i += 2;
             }
+            "--extension" | "-e" => {
+                let value = args.get(i + 1)
+                    .filter(|value| !value.starts_with('-'))
+                    .ok_or_else(|| anyhow::anyhow!("--extension requires a single extension (e.g. pdf)"))?;
+                extensions.push(value.clone());
+                i += 2;
+            }
+            arg if arg.starts_with("--extension=") => {
+                extensions.push(arg["--extension=".len()..].to_string());
+                i += 1;
+            }
             arg if arg.starts_with("--mode=") => {
                 let val = arg.trim_start_matches("--mode=");
                 mode = parse_search_mode(val)?;
                 i += 1;
+            }
+            arg if arg.starts_with("--") => {
+                anyhow::bail!("unknown search option {:?} (use -- before literal query text starting with --)", arg);
             }
             arg => {
                 query_parts.push(arg.to_string());
                 i += 1;
             }
         }
+    }
+
+    if !ws_protocol::valid_search_extensions(&extensions) {
+        anyhow::bail!("invalid --extension filter: use at most 64 single extensions of 1..32 ASCII letters/digits/+/-/_, with an optional leading dot");
     }
 
     let query = query_parts.join(" ").trim().to_string();
@@ -117,6 +144,8 @@ fn parse_search_args(args: &[String]) -> anyhow::Result<CliCommand> {
         mode,
         semantic,
         limit,
+        extensions,
+        json,
     })
 }
 
@@ -166,8 +195,12 @@ SUBCOMMANDS:
         Connect to running winsearchd daemon and print engine/model/config status
         (falls back to local on-disk diagnostic when daemon is not running).
 
-    search <query> [--mode <all|files|apps|code>] [--semantic] [--limit <N>]
+    search <query> [--mode <all|files|apps|code>] [--semantic] [--limit <N>] [--extension <ext>] [--json]
         Run a search against the running winsearchd daemon over named-pipe IPC.
+        --json prints the ordered SearchResult array after the final batch.
+        Repeat --extension/-e for alternatives (e.g. -e pdf -e .docx); max 64.
+        Values are single extensions, case-insensitive, without wildcards or paths.
+        Use -- before literal query text starting with --.
 
     eval [suite]
         Run headless retrieval evaluation against a fixture index (default: `names`).
@@ -249,7 +282,14 @@ fn cmd_status() -> anyhow::Result<()> {
     }
 }
 
-fn cmd_search(query: String, mode: SearchMode, semantic: bool, limit: u32) -> anyhow::Result<()> {
+fn cmd_search(
+    query: String,
+    mode: SearchMode,
+    semantic: bool,
+    limit: u32,
+    extensions: Vec<String>,
+    json: bool,
+) -> anyhow::Result<()> {
     let mut client = DaemonClient::connect()?;
     let results = client.search(SearchQuery {
         text: query.clone(),
@@ -257,7 +297,17 @@ fn cmd_search(query: String, mode: SearchMode, semantic: bool, limit: u32) -> an
         limit,
         include_semantic: semantic,
         categories: Vec::new(),
+        extensions,
+        file_kinds: Vec::new(),
     })?;
+
+    if json {
+        if let Some(outcome)=client.last_search_outcome {
+            eprintln!("search outcome: {}",serde_json::to_string(&outcome)?);
+        }
+        println!("{}", serde_json::to_string(&results)?);
+        return Ok(());
+    }
 
     println!(
         "search {:?} (mode={:?}, semantic={}) -> {} hit(s):",
@@ -266,6 +316,10 @@ fn cmd_search(query: String, mode: SearchMode, semantic: bool, limit: u32) -> an
         semantic,
         results.len()
     );
+    match client.last_search_outcome {
+        Some(outcome)=>println!("outcome: {}",serde_json::to_string(&outcome)?),
+        None=>println!("outcome: unknown (legacy peer)"),
+    }
     for (idx, r) in results.iter().enumerate() {
         println!(
             "  {:>2}. [{:?}] {} (score {:.3}) — {} [{}]",
@@ -288,6 +342,14 @@ fn cmd_eval(suite_name: &str) -> anyhow::Result<()> {
     println!("=== WinSearch Retrieval Eval: {} ===", report.suite_name);
     println!("suite file:        {}", path.display());
     println!("embedder:          {}", report.embedder_label);
+    println!(
+        "vector pipeline:   {}",
+        ws_modelmgr::manifest::VECTOR_PIPELINE_VERSION
+    );
+    println!(
+        "semantic floor:    {:.4}",
+        ws_index::retrieval::MIN_SEMANTIC_COSINE
+    );
     println!("fixture entries:   {}", suite.entries.len());
     println!(
         "queries:           {} total ({} positive, {} negative control)",
@@ -299,13 +361,22 @@ fn cmd_eval(suite_name: &str) -> anyhow::Result<()> {
 
     for outcome in &report.outcomes {
         if outcome.expect_empty {
-            let status = if outcome.false_positive { "FAIL (FP)" } else { "PASS (empty)" };
+            let status = if outcome.false_positive {
+                "FAIL (FP)"
+            } else {
+                "PASS (empty)"
+            };
             println!(
                 "  [{status}] [{}] {:?} -> {} hit(s)",
                 outcome.category,
                 outcome.query,
                 outcome.top_hits.len()
             );
+            if outcome.false_positive {
+                for (name, score, explanation) in &outcome.top_hits {
+                    println!("      {name} (score {score:.4}) | {explanation}");
+                }
+            }
         } else {
             let status = if outcome.hit_in_top_5 { "PASS" } else { "MISS" };
             let rank_str = outcome
@@ -322,8 +393,45 @@ fn cmd_eval(suite_name: &str) -> anyhow::Result<()> {
                 outcome.category, outcome.query, outcome.reciprocal_rank
             );
         }
+        for hit in &outcome.ranked_hits {
+            for location in &hit.matches {
+                println!(
+                    "      {}: page={:?} time_ms={:?}..{:?} line={:?}",
+                    hit.name, location.page, location.start_ms, location.end_ms, location.line
+                );
+            }
+            if let Some(code) = &hit.code {
+                println!(
+                    "      {}: symbol={} kind={} definition={} virtual_lines={}..{} cell={:?}",
+                    hit.path,
+                    code.symbol,
+                    code.kind,
+                    code.is_definition,
+                    code.start_line,
+                    code.end_line,
+                    code.notebook
+                );
+            }
+        }
     }
 
+    println!();
+    println!("Per modality/category (n/a means no queries of that type):");
+    for (modality, metrics) in &report.modalities {
+        let metric = |value: Option<f64>| {
+            value
+                .map(|n| format!("{n:.3}"))
+                .unwrap_or_else(|| "n/a".into())
+        };
+        println!(
+            "  {modality}: positive={} negative={} Recall@5={} MRR={} FP={}",
+            metrics.positive,
+            metrics.negative,
+            metric(metrics.recall()),
+            metric(metrics.mrr()),
+            metric(metrics.fp_rate())
+        );
+    }
     println!();
     println!(
         "Recall@5:          {:.3}  (threshold >= {:.3})",
@@ -400,7 +508,10 @@ fn cmd_model_with_pipe(
             for expected in &EXPECTED_FILES {
                 let file_path = model_dir.join(expected.name);
                 if !file_path.is_file() {
-                    println!("  [MISSING] {} (expected {} bytes)", expected.name, expected.size);
+                    println!(
+                        "  [MISSING] {} (expected {} bytes)",
+                        expected.name, expected.size
+                    );
                     all_ok = false;
                     continue;
                 }
@@ -457,7 +568,10 @@ fn cmd_model_with_pipe(
                 }
             }
             Err(IpcError::NotConnected { .. }) => {
-                println!("downloading EmbeddingGemma 2 into {}...", model_dir.display());
+                println!(
+                    "downloading EmbeddingGemma 2 into {}...",
+                    model_dir.display()
+                );
                 let cancel = AtomicBool::new(false);
                 let last_pct = std::sync::Mutex::new(0u64);
                 let progress = |done: u64, total: u64| {
@@ -546,7 +660,9 @@ fn main() -> anyhow::Result<()> {
             mode,
             semantic,
             limit,
-        } => cmd_search(query, mode, semantic, limit),
+            extensions,
+            json,
+        } => cmd_search(query, mode, semantic, limit, extensions, json),
         CliCommand::Eval { suite } => cmd_eval(&suite),
         CliCommand::Model(sub) => cmd_model(sub),
     }
@@ -566,8 +682,49 @@ mod tests {
     }
 
     #[test]
+    fn search_json_option_is_not_part_of_the_query() {
+        let command =
+            parse_args(&vec_args(&["search", "needle", "--json", "--mode", "code"])).unwrap();
+        assert!(
+            matches!(command, CliCommand::Search { query, mode: SearchMode::Code, json: true, .. } if query == "needle")
+        );
+    }
+
+    #[test]
+    fn search_extension_options_do_not_become_query_text() {
+        let command = parse_args(&vec_args(&[
+            "search", "needle", "--extension", ".RS", "--extension=pdf", "-e", "c++",
+        ])).unwrap();
+        assert!(matches!(command, CliCommand::Search { query, extensions, .. }
+            if query == "needle" && extensions == vec![".RS", "pdf", "c++"]));
+    }
+
+    #[test]
+    fn search_rejects_invalid_or_excessive_extension_options() {
+        for value in ["", ".", "*.pdf", "../pdf", "pdf,rs", "two words", "--json"] {
+            assert!(parse_args(&vec_args(&["search", "needle", "--extension", value])).is_err(), "{value:?}");
+        }
+        assert!(parse_args(&vec_args(&["search", "needle", "--extension"])).is_err());
+        assert!(parse_args(&vec_args(&["search", "needle", "--extension="])).is_err());
+        assert!(parse_args(&vec_args(&["search", "needle", "--extension", &"a".repeat(33)])).is_err());
+        let mut args = vec_args(&["search", "needle"]);
+        for _ in 0..65 { args.extend(vec_args(&["--extension", "pdf"])); }
+        assert!(parse_args(&args).is_err());
+    }
+
+    #[test]
+    fn search_rejects_unknown_long_options_and_allows_literal_options_after_separator() {
+        assert!(parse_args(&vec_args(&["search", "needle", "--extensoin", "pdf"])).is_err());
+        let command = parse_args(&vec_args(&["search", "--extension", "txt", "--", "--extension=pdf", "-42"])).unwrap();
+        assert!(matches!(command, CliCommand::Search { query, .. } if query == "--extension=pdf -42"));
+    }
+
+    #[test]
     fn cli_arg_parsing_covers_all_subcommands() {
-        assert_eq!(parse_args(&vec_args(&["status"])).unwrap(), CliCommand::Status);
+        assert_eq!(
+            parse_args(&vec_args(&["status"])).unwrap(),
+            CliCommand::Status
+        );
         assert_eq!(
             parse_args(&vec_args(&["eval", "names"])).unwrap(),
             CliCommand::Eval {
@@ -597,6 +754,8 @@ mod tests {
                 mode: SearchMode::Files,
                 semantic: true,
                 limit: 10,
+                extensions: Vec::new(),
+                json: false,
             }
         );
         assert_eq!(
@@ -670,7 +829,7 @@ mod tests {
                         ClientMessage::Search { id, query } => {
                             write_message(
                                 &mut stream,
-                                &ServerMessage::Results {
+                                &ServerMessage::Results { outcome:None,
                                     id,
                                     batch: vec![SearchResult {
                                         id: "e1".into(),
@@ -687,15 +846,15 @@ mod tests {
                             .unwrap();
                             write_message(
                                 &mut stream,
-                                &ServerMessage::Results {
+                                &ServerMessage::Results { outcome:None,
                                     id,
                                     batch: vec![SearchResult {
                                         id: "s2".into(),
                                         kind: ResultKind::Document,
                                         title: "semantic-hit.xlsx".into(),
                                         subtitle: "C:\\Docs\\semantic-hit.xlsx".into(),
-                                        match_explanation:
-                                            "semantic name match · similarity 0.84".into(),
+                                        match_explanation: "semantic name match · similarity 0.84"
+                                            .into(),
                                         score: 0.83,
                                         ..Default::default()
                                     }],
@@ -731,6 +890,8 @@ mod tests {
                 limit: 10,
                 include_semantic: true,
                 categories: Vec::new(),
+                extensions: Vec::new(),
+                file_kinds: Vec::new(),
             })
             .expect("search");
         assert_eq!(hits.len(), 2);

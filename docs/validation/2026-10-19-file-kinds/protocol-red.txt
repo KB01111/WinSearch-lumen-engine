@@ -1,0 +1,31 @@
+rtk :    Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-prot
+ocol)
+At line:1 char:1
++ rtk proxy cargo test -p ws-protocol file_kind_selection *> ..\..\arti ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.22s
+     Running unittests src\lib.rs (target\debug\deps\ws_protocol-560893df34112aa1.exe)
+
+running 1 test
+test messages::tests::file_kind_selection_round_trips_closed_codes_and_keeps_legacy_requests_unchanged ... FAILED
+
+failures:
+
+---- messages::tests::file_kind_selection_round_trips_closed_codes_and_keeps_legacy_requests_unchanged stdout ----
+
+thread 'messages::tests::file_kind_selection_round_trips_closed_codes_and_keeps_legacy_requests_unchanged' (145708) panicked at crates\ws-protocol\src\messages.rs:408:9:
+assertion `left == right` failed
+  left: Null
+ right: Array [String("folder"), String("pdf"), String("document"), String("spreadsheet"), String("presentation"), String("source"), String("image"), String("video"), String("audio"), String("archive"), String("executable"), String("model"), String("unknown")]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    messages::tests::file_kind_selection_round_trips_closed_codes_and_keeps_legacy_requests_unchanged
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p ws-protocol --lib`

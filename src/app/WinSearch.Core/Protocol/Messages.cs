@@ -9,7 +9,10 @@ namespace WinSearch.Core.Protocol;
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
 [JsonDerivedType(typeof(HelloMessage), "hello")]
 [JsonDerivedType(typeof(PingMessage), "ping")]
+[JsonDerivedType(typeof(ResolveEntryMessage), "resolve_entry")]
+[JsonDerivedType(typeof(PreviewEntryMessage), "preview_entry")]
 [JsonDerivedType(typeof(SearchMessage), "search")]
+[JsonDerivedType(typeof(RelatedMessage), "related")]
 [JsonDerivedType(typeof(CancelMessage), "cancel")]
 [JsonDerivedType(typeof(GetStatusMessage), "get_status")]
 [JsonDerivedType(typeof(ModelDownloadStartMessage), "model_download_start")]
@@ -19,6 +22,8 @@ namespace WinSearch.Core.Protocol;
 [JsonDerivedType(typeof(GetModelStatusMessage), "get_model_status")]
 [JsonDerivedType(typeof(GetConfigMessage), "get_config")]
 [JsonDerivedType(typeof(SetConfigMessage), "set_config")]
+[JsonDerivedType(typeof(GetIndexingConfigMessage), "get_indexing_config")]
+[JsonDerivedType(typeof(SetIndexingConfigMessage), "set_indexing_config")]
 public abstract class ClientMessage;
 
 public sealed class HelloMessage : ClientMessage
@@ -31,6 +36,80 @@ public sealed class HelloMessage : ClientMessage
 public sealed class PingMessage : ClientMessage
 {
     public ulong Id { get; set; }
+}
+
+public sealed class ResolveEntryMessage : ClientMessage
+{
+    public ulong Id { get; set; }
+    public EntryReference Reference { get; set; } = new();
+}
+
+public sealed class PreviewEntryMessage : ClientMessage
+{
+    public ulong Id { get; set; }
+    public PreviewRequest Request { get; set; } = new();
+}
+
+public sealed class RelatedMessage : ClientMessage
+{
+    public ulong Id { get; set; }
+    public RelatedQuery Query { get; set; } = new();
+}
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed class PreviewRequest
+{
+    public EntryReference Reference { get; set; } = new();
+    public MatchLocation? Location { get; set; }
+}
+
+public enum PreviewState { Ready, NotIndexed, NoCachedText, LocationUnavailable }
+
+public sealed class PreviewTextPart
+{
+    public string Kind { get; set; } = "";
+    public string Text { get; set; } = "";
+    public MatchLocation? Location { get; set; }
+}
+
+public sealed class PreviewExtraction
+{
+    public string Kind { get; set; } = "";
+    public bool CompleteWithinLimit { get; set; }
+    public ulong? SourceUnits { get; set; }
+    public ulong? IndexedUnits { get; set; }
+    public bool? Capped { get; set; }
+}
+
+public sealed class EntryPreview
+{
+    public ResolvedEntry Entry { get; set; } = new();
+    public PreviewState State { get; set; }
+    public List<PreviewTextPart> Parts { get; set; } = new();
+    public bool Truncated { get; set; }
+    public List<PreviewExtraction> Extraction { get; set; } = new();
+}
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed class EntryReference
+{
+    public string ResultId { get; set; } = "";
+    public string? SourceRevision { get; set; }
+}
+
+public sealed class ResolvedEntry
+{
+    public string ResultId { get; set; } = "";
+    public string RootPath { get; set; } = "";
+    public string Path { get; set; } = "";
+    public string Name { get; set; } = "";
+    public ResultKind Kind { get; set; }
+    public ulong SizeBytes { get; set; }
+    public long? ModifiedUnixSeconds { get; set; }
+    public long? IndexRevision { get; set; }
+    /// <summary>Opaque metadata/identity and policy proof, never a content hash.</summary>
+    public string SourceRevision { get; set; } = "";
+    public string? ContentSha256 { get; set; }
 }
 
 public sealed class SearchMessage : ClientMessage
@@ -86,6 +165,13 @@ public sealed class SetConfigMessage : ClientMessage
     public EngineConfig Config { get; set; } = new();
 }
 
+public sealed class GetIndexingConfigMessage : ClientMessage { public ulong Id { get; set; } }
+public sealed class SetIndexingConfigMessage : ClientMessage
+{
+    public ulong Id { get; set; }
+    public IndexingConfig Config { get; set; } = new();
+}
+
 // ---------------------------------------------------------------------------
 // Engine -> client
 // ---------------------------------------------------------------------------
@@ -93,10 +179,13 @@ public sealed class SetConfigMessage : ClientMessage
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
 [JsonDerivedType(typeof(HelloAckMessage), "hello_ack")]
 [JsonDerivedType(typeof(PongMessage), "pong")]
+[JsonDerivedType(typeof(ResolvedEntryMessage), "resolved_entry")]
+[JsonDerivedType(typeof(EntryPreviewMessage), "entry_preview")]
 [JsonDerivedType(typeof(ResultsMessage), "results")]
 [JsonDerivedType(typeof(StatusMessage), "status")]
 [JsonDerivedType(typeof(ModelStatusMessage), "model_status")]
 [JsonDerivedType(typeof(ConfigMessage), "config")]
+[JsonDerivedType(typeof(IndexingConfigMessage), "indexing_config")]
 [JsonDerivedType(typeof(ErrorMessage), "error")]
 public abstract class ServerMessage;
 
@@ -112,11 +201,24 @@ public sealed class PongMessage : ServerMessage
     public ulong Id { get; set; }
 }
 
+public sealed class ResolvedEntryMessage : ServerMessage
+{
+    public ulong Id { get; set; }
+    public ResolvedEntry Entry { get; set; } = new();
+}
+
+public sealed class EntryPreviewMessage : ServerMessage
+{
+    public ulong Id { get; set; }
+    public EntryPreview Preview { get; set; } = new();
+}
+
 public sealed class ResultsMessage : ServerMessage
 {
     public ulong Id { get; set; }
     public List<SearchResult> Batch { get; set; } = new();
     public bool Done { get; set; }
+    public SearchOutcome? Outcome { get; set; }
 }
 
 public sealed class StatusMessage : ServerMessage
@@ -138,6 +240,38 @@ public sealed class ConfigMessage : ServerMessage
     /// <summary>Set when answering GetConfig/SetConfig.</summary>
     public ulong? Id { get; set; }
     public EngineConfig Config { get; set; } = new();
+}
+
+public sealed class IndexingConfigMessage : ServerMessage
+{
+    public ulong? Id { get; set; }
+    public IndexingConfig Config { get; set; } = new();
+}
+
+public enum IndexingMode { Always, Scheduled, Manual }
+public sealed class IndexingConfig
+{
+    public List<string> Roots { get; set; } = new();
+    public List<RootPolicy> RootPolicies { get; set; } = new();
+    public List<string> ExcludedPaths { get; set; } = new();
+    public List<string> ExcludedExtensions { get; set; } = new();
+    public bool CodeEnabled { get; set; }
+    public List<string> CodeRoots { get; set; } = new();
+    public bool Paused { get; set; }
+    public IndexingMode Mode { get; set; } = IndexingMode.Always;
+    public bool IndexOnBattery { get; set; } = true;
+    public bool RespectBatterySaver { get; set; } = true;
+    public ushort HoursStart { get; set; } = 60;
+    public ushort HoursEnd { get; set; } = 420;
+}
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed class RootPolicy
+{
+    public string Root { get; set; } = "";
+    public List<string> Exclusions { get; set; } = new();
+    public bool IncludeHidden { get; set; }
+    public ulong MaxFileSizeBytes { get; set; }
 }
 
 public sealed class ErrorMessage : ServerMessage
@@ -200,12 +334,15 @@ public sealed class SearchQuery
     public uint Limit { get; set; } = 20;
     public bool IncludeSemantic { get; set; }
     public List<ResultKind> Categories { get; set; } = new();
+    public List<string> Extensions { get; set; } = new();
+    public List<FileKind> FileKinds { get; set; } = new();
 }
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
 [JsonDerivedType(typeof(PageLocation), "page")]
 [JsonDerivedType(typeof(TimestampLocation), "timestamp")]
 [JsonDerivedType(typeof(LineLocation), "line")]
+[JsonDerivedType(typeof(NotebookLocation), "notebook")]
 public abstract class MatchLocation;
 
 public sealed class PageLocation : MatchLocation
@@ -224,8 +361,16 @@ public sealed class LineLocation : MatchLocation
     public uint Line { get; set; }
 }
 
+public sealed class NotebookLocation : MatchLocation
+{
+    public uint CellOrdinal { get; set; }
+    public uint Line { get; set; }
+    public uint EndLine { get; set; }
+}
+
 public sealed class SearchResult
 {
+    public EntryReference? EntryReference { get; set; }
     public string Id { get; set; } = "";
     public ResultKind Kind { get; set; }
     public string Title { get; set; } = "";
@@ -235,10 +380,21 @@ public sealed class SearchResult
     public string? Path { get; set; }
     public MatchLocation? Location { get; set; }
     public string? ThumbnailPath { get; set; }
+    public string? Excerpt { get; set; }
+    public List<MatchingMoment> MatchingMoments { get; set; } = new();
+}
+
+public sealed class MatchingMoment
+{
+    public string Excerpt { get; set; } = "";
+    public MatchLocation? Location { get; set; }
+    public string? ThumbnailPath { get; set; }
 }
 
 public sealed class EngineStatus
 {
+    public string? IndexId { get; set; }
+    public string? CodeIndexId { get; set; }
     public EngineRunState State { get; set; }
     public string CurrentActivity { get; set; } = "";
     public ulong FilesDiscovered { get; set; }
@@ -286,6 +442,7 @@ public sealed class SearchBatch
 {
     public required IReadOnlyList<SearchResult> Results { get; init; }
     public bool Done { get; init; }
+    public SearchOutcome? Outcome { get; init; }
 }
 
 /// <summary>Raised when the engine rejects a request.</summary>

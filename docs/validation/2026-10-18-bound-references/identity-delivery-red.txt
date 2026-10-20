@@ -1,0 +1,39 @@
+rtk :    Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearchd
+)
+At <checkout>\artifacts\entry-reference-checks.ps1:12 char:20
++ ... e-red-v3' { rtk proxy cargo test -p winsearchd entry_reference_ -- -- ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling wi...ins\winsearchd):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.49s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-a1af7bf73df4d90a.exe)
+
+running 5 tests
+test engine::tests::code_entry_reference_resolves_current_native_hash_and_rejects_old_policy_and_source ... ok
+test engine::tests::entry_reference_delivery_binds_exact_and_semantic_files_without_rewriting_hit_ids ... FAILED
+test engine::tests::entry_reference_proof_cannot_revive_in_another_engine_with_the_same_store_and_models ... ok
+test engine::tests::entry_reference_rejects_a_replaced_file_before_native_inventory_reconciles ... FAILED
+test engine::tests::entry_reference_unavailable_incarnation_keeps_exact_name_search_available ... ok
+
+failures:
+
+---- engine::tests::entry_reference_delivery_binds_exact_and_semantic_files_without_rewriting_hit_ids stdout ----
+
+thread 'engine::tests::entry_reference_delivery_binds_exact_and_semantic_files_without_rewriting_hit_ids' (53720) panicked at bins\winsearchd\src\engine.rs:1458:54:
+exact file hits need a bound native reference
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- engine::tests::entry_reference_rejects_a_replaced_file_before_native_inventory_reconciles stdout ----
+
+thread 'engine::tests::entry_reference_rejects_a_replaced_file_before_native_inventory_reconciles' (33276) panicked at bins\winsearchd\src\engine.rs:1446:62:
+called `Result::unwrap_err()` on an `Ok` value: ResolvedEntry { result_id: "e1", root_path: "<user>\\AppData\\Local\\Temp\\winsearch-engine-test-76880-ThreadId(10)", path: "<user>\\AppData\\Local\\Temp\\winsearch-engine-test-76880-ThreadId(10)\\replace.txt", name: "replace.txt", kind: Document, size_bytes: 24, modified_unix_seconds: Some(1792317309), index_revision: None, source_revision: "<proof redacted>", content_sha256: None }
+
+
+failures:
+    engine::tests::entry_reference_delivery_binds_exact_and_semantic_files_without_rewriting_hit_ids
+    engine::tests::entry_reference_rejects_a_replaced_file_before_native_inventory_reconciles
+
+test result: FAILED. 3 passed; 2 failed; 0 ignored; 0 measured; 202 filtered out; finished in 0.48s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

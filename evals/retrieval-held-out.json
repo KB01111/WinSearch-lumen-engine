@@ -1,0 +1,53 @@
+{
+  "name": "retrieval-held-out-v1",
+  "description": "Frozen before calibration. Do not use scores or answers for parameter selection. Same unchanged acceptance gates; distinct names, topics, languages, generated media and code definition.",
+  "thresholds": {"min_recall_at_5": 0.9, "min_mrr": 0.85, "max_false_positive_rate": 0.0},
+  "entries": [
+    {"path":"C:\\Eval\\violin-practice-exercises.pdf","name":"violin-practice-exercises.pdf"},
+    {"path":"C:\\Eval\\hundens-vaccinationsintyg.pdf","name":"hundens-vaccinationsintyg.pdf"},
+    {"path":"C:\\Eval\\guia-reparacion-lavadora.docx","name":"guia-reparacion-lavadora.docx"},
+    {"path":"C:\\Eval\\出張-精算書.xlsx","name":"出張-精算書.xlsx"},
+    {"path":"C:\\Eval\\Geburtstag-Einladung.png","name":"Geburtstag-Einladung.png"},
+    {"path":"C:\\Eval\\Audacity.lnk","name":"Audacity.lnk","is_app":true},
+    {"path":"C:\\Eval\\document-064.txt","name":"document-064.txt","segments":[{"kind":"doc","text":"The apartment recycling room is behind the east staircase. Glass bottles belong in the green container; batteries must be taken to the collection point at the supermarket."}]},
+    {"path":"C:\\Eval\\memo-072.md","name":"memo-072.md","segments":[{"kind":"doc","text":"The telescope tripod must stand on level ground before alignment. Tighten all three leg clamps and point the finder at the bright star before tracking the night sky."}]},
+    {"path":"C:\\Eval\\pages-081.pdf","name":"pages-081.pdf","segments":[{"kind":"pdf","page":11,"text":"The emergency evacuation assembly point is the far end of the north car park. Leave belongings behind, use the nearest marked exit and never use the lift during a fire alarm."}]},
+    {"path":"C:\\Eval\\capture-089.png","name":"capture-089.png","segments":[{"kind":"ocr","text":"DISK SPACE LOW. Only 180 megabytes remain on the system drive. Remove unused files or move large videos to external storage. Alert STORAGE-7631."},{"kind":"image","asset":"artifacts/retrieval-fixtures/held-out/screen.png"}]},
+    {"path":"C:\\Eval\\image-093.png","name":"image-093.png","segments":[{"kind":"ocr","text":"HARBOR HARDWARE. Paint roller 7.00. Masking tape 3.50. Total 10.50. Cash received 20.00. Change 9.50."},{"kind":"image","asset":"artifacts/retrieval-fixtures/held-out/receipt.png"}]},
+    {"path":"C:\\Eval\\voice-102.wav","name":"voice-102.wav","segments":[{"kind":"audio","asset":"artifacts/retrieval-fixtures/held-out/speech.wav","start_ms":0,"end_ms":30000}]},
+    {"path":"C:\\Eval\\movie-117.mp4","name":"movie-117.mp4","segments":[{"kind":"video","asset":"artifacts/retrieval-fixtures/held-out/frame.png","start_ms":45000,"end_ms":45000},{"kind":"audio","asset":"artifacts/retrieval-fixtures/held-out/soundtrack.wav","start_ms":50000,"end_ms":65000}]},
+    {"path":"C:\\Eval\\payment.py","name":"payment.py","segments":[{"kind":"code","line":1,"text":"def retry_payment(request, attempts=3):\n    \"\"\"Retry a failed card charge up to three times with exponential delay.\"\"\"\n    for attempt in range(attempts):\n        if charge_card(request):\n            return True\n        sleep(2 ** attempt)\n    return False"}]}
+  ],
+  "media_generation": {
+    "screen": ["DISK SPACE LOW", "System drive has 180 MB free", "Move large videos to external storage", "Alert STORAGE-7631"],
+    "receipt": ["HARBOR HARDWARE", "Paint roller 7.00", "Masking tape 3.50", "TOTAL 10.50", "Cash 20.00", "Change 9.50"],
+    "speech": "Your appointment with the dentist is on Thursday at half past two. Please arrive ten minutes early and bring your insurance card. Call the clinic if you need to reschedule.",
+    "frame": ["FILE UPLOAD COMPLETE", "Cloud backup successful", "All photographs synchronized", "Last sync 14:35"],
+    "soundtrack": "The orchestra rehearsal will take place in the school auditorium on Tuesday evening. Musicians should bring their instruments and the printed sheet music for the winter concert."
+  },
+  "queries": [
+    {"query":"improving technique on a bowed string instrument","category":"name-en","expected_any":["violin-practice-exercises.pdf"]},
+    {"query":"proof that my pet received its shots","category":"name-sv-crosslingual","expected_any":["hundens-vaccinationsintyg.pdf"]},
+    {"query":"washing machine repair instructions","category":"name-es-crosslingual","expected_any":["guia-reparacion-lavadora.docx"]},
+    {"query":"business trip expense reimbursement","category":"name-ja-crosslingual","expected_any":["出張-精算書.xlsx"]},
+    {"query":"invitation to a birthday celebration","category":"name-de-crosslingual","expected_any":["Geburtstag-Einladung.png"]},
+    {"query":"edit a sound recording","category":"application","expected_any":["Audacity.lnk"]},
+    {"query":"where should used batteries be disposed of","category":"doc","expected_any":["document-064.txt"]},
+    {"query":"set up equipment for looking at the stars","category":"doc","expected_any":["memo-072.md"]},
+    {"query":"where do staff gather after leaving a burning building","category":"pdf","expected_any":["pages-081.pdf"]},
+    {"query":"warning that the computer has almost no storage left","category":"ocr","expected_any":["capture-089.png"]},
+    {"query":"bill for decorating supplies","category":"receipt","expected_any":["image-093.png"]},
+    {"query":"STORAGE-7631","category":"ocr-exact","include_semantic":false,"expected_any":["capture-089.png"]},
+    {"query":"when is the dental visit scheduled","category":"audio","expected_any":["voice-102.wav"]},
+    {"query":"screen confirming photos were backed up online","category":"video-frame","expected_any":["movie-117.mp4"]},
+    {"query":"what do musicians need for the practice session","category":"video-soundtrack","expected_any":["movie-117.mp4"]},
+    {"query":"try a declined bank card transaction again with increasing waits","category":"code","mode":"code","expected_any":["payment.py"]},
+    {"query":"how to lay a brick chimney","category":"negative-distant","expect_empty":true},
+    {"query":"quarterly cryptocurrency trading tax gains","category":"negative-finance","expect_empty":true},
+    {"query":"symptoms of a respiratory infection in parrots","category":"negative-medical","expect_empty":true},
+    {"query":"rules for serving in a tennis match","category":"negative-near-sport","expect_empty":true},
+    {"query":"ingredients and baking time for apple pie","category":"negative-near-home","expect_empty":true},
+    {"query":"STORAGE-1111","category":"negative-exact-identifier","include_semantic":false,"expect_empty":true},
+    {"query":"compress an image using a discrete cosine transform","category":"negative-code","mode":"code","expect_empty":true}
+  ]
+}

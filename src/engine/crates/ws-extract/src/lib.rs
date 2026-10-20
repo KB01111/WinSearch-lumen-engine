@@ -1,11 +1,18 @@
 //! Content extraction trait, per-file budgets, overlapping text chunker,
 //! and baseline plain-text extraction for WinSearch (Phase 4, P4.1).
 
+pub mod audio;
 pub mod budget;
 pub mod chunk;
+pub mod code;
+pub mod decoder;
 pub mod docs;
 pub mod image;
 pub mod ocr;
+pub mod pdf;
+pub mod source;
+pub mod video;
+pub mod worker;
 
 use std::path::{Path, PathBuf};
 
@@ -17,7 +24,7 @@ pub use budget::{
     ExtractBudget, DEFAULT_EXTRACT_TIMEOUT, DEFAULT_MAX_FILE_BYTES, DEFAULT_MAX_SEGMENTS,
 };
 pub use chunk::{
-    chunk_text, chunk_text_default, chunk_text_with_lines, select_excerpt, TextChunk,
+    chunk_text, chunk_text_default, chunk_text_with_lines, select_excerpt, select_excerpt_at, TextChunk,
     DEFAULT_CHUNK_CHARS, DEFAULT_EXCERPT_CHARS, DEFAULT_OVERLAP_CHARS, DEFAULT_OVERLAP_RATIO,
 };
 pub use docs::{build_document_output, is_numeric_dominated, strip_rtf, DocumentExtractor};
@@ -29,15 +36,18 @@ pub use ocr::{
     build_ocr_segments, OcrProvider, OcrResultData, OcrWordBox, WinRtOcrProvider,
     DEFAULT_MAX_OCR_LANGUAGES,
 };
+pub use ws_index::model::DraftEmbeddingInput;
 
 /// Outcome status of running an [`Extractor`] on a file.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ExtractionStatus {
     /// Content was extracted (into embeddable and/or FTS-indexed segments).
     Extracted,
     /// Content is exact-only (indexed in FTS, no semantic vectors emitted —
     /// e.g. numeric-dominated tables or unsupported binary formats).
     ExactOnly,
+    /// The admitted source changed during extraction; discard and retry without poisoning it.
+    SourceChanged,
     /// File format is not supported by this extractor; keep name-only indexing.
     Unsupported,
     /// Extraction failed; caller records diagnostics and falls back to name-only.
@@ -45,7 +55,7 @@ pub enum ExtractionStatus {
 }
 
 /// One extracted segment draft before embedding / storage in `ws-index`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SegmentDraft {
     pub kind: String,
     pub text: String,
@@ -58,6 +68,8 @@ pub struct SegmentDraft {
     /// FTS content indexing when `text` is non-empty). False for `ExactOnly`
     /// segments that only feed FTS.
     pub embed: bool,
+    #[serde(default)]
+    pub embedding_input: DraftEmbeddingInput,
 }
 
 impl SegmentDraft {
@@ -72,12 +84,13 @@ impl SegmentDraft {
             line: None,
             thumbnail_hint: None,
             embed: true,
+            embedding_input: DraftEmbeddingInput::Text,
         }
     }
 }
 
 /// Output produced by an [`Extractor::extract`] call.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ExtractOutput {
     pub status: ExtractionStatus,
     pub segments: Vec<SegmentDraft>,
@@ -113,6 +126,8 @@ pub enum ExtractError {
     Io(#[from] std::io::Error),
     #[error("extraction deadline exceeded")]
     DeadlineExceeded,
+    #[error("source bytes changed during extraction")]
+    SourceChanged,
     #[error("file size {size} exceeds budget {max_bytes} bytes")]
     FileTooLarge { size: u64, max_bytes: u64 },
     #[error("segment count {count} exceeds budget {max_segments}")]
@@ -127,6 +142,42 @@ pub enum ExtractError {
 pub trait Extractor: Send + Sync {
     /// Extracts [`SegmentDraft`]s from `path` while respecting `budget`.
     fn extract(&self, path: &Path, budget: &ExtractBudget) -> Result<ExtractOutput, ExtractError>;
+
+    /// Stable chunk ordinal cursor. Parsing stays within the original byte/deadline bounds;
+    /// only the requested window crosses the process boundary.
+    fn extract_batch(
+        &self,
+        path: &Path,
+        budget: &ExtractBudget,
+        cursor: u64,
+    ) -> Result<worker::ExtractResponse, ExtractError> {
+        let full_budget = ExtractBudget {
+            max_segments: usize::MAX,
+            ..budget.clone()
+        };
+        let mut output = self.extract(path, &full_budget)?;
+        budget.check_deadline()?;
+        let total = output.segments.len() as u64;
+        let start = usize::try_from(cursor)
+            .unwrap_or(usize::MAX)
+            .min(output.segments.len());
+        let end = start
+            .saturating_add(budget.max_segments.min(30))
+            .min(output.segments.len());
+        output.segments = output.segments.drain(start..end).collect();
+        let successful = matches!(
+            output.status,
+            ExtractionStatus::Extracted | ExtractionStatus::ExactOnly
+        );
+        Ok(worker::ExtractResponse { source_sha256: None, code: None,
+            output,
+            next_cursor: (successful && (end as u64) < total).then_some(end as u64),
+            total_units: successful.then_some(total),
+            diagnostics: Vec::new(),
+            media: None,
+            video_selection: None,
+        })
+    }
 }
 
 /// Maps a lowercase file extension (without dot) to the `extract_jobs.kind`
@@ -206,6 +257,7 @@ impl Extractor for PlainTextExtractor {
                 line: Some(chunk.line),
                 thumbnail_hint: None,
                 embed: true,
+                embedding_input: DraftEmbeddingInput::Text,
             });
         }
         Ok(ExtractOutput::extracted(segments))

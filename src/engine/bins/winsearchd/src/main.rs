@@ -4,16 +4,18 @@
 //! the per-user named pipe even when no frontend is connected.
 
 mod catalog;
+mod code;
 mod crawl;
 mod embed_client;
 mod engine;
 mod extract;
+mod extract_client;
 mod indexer;
 mod model;
+mod policy;
 mod server;
 mod watcher;
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use tracing::{info, warn};
@@ -30,6 +32,13 @@ use indexer::Indexer;
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
+    #[cfg(debug_assertions)]
+    if args.iter().any(|a| a == "--test-stdin-gate") {
+        // Native acceptance assigns the daemon before eager catalog children.
+        let mut gate = [0u8];
+        std::io::Read::read_exact(&mut std::io::stdin(), &mut gate)?;
+        anyhow::ensure!(gate == [1], "test startup gate not released");
+    }
     if args.iter().any(|a| a == "--version") {
         println!("winsearchd {}", server::ENGINE_VERSION);
         return Ok(());
@@ -43,6 +52,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     paths::ensure_layout()?;
+    identity::instance_suffix()?;
     init_logging();
     info!(version = server::ENGINE_VERSION, "winsearchd starting");
 
@@ -57,7 +67,11 @@ fn main() -> anyhow::Result<()> {
     };
 
     let store = IndexStore::open(&paths::index_db_path())?;
-    let indexer = Indexer::open(store, &default_roots())?;
+    let indexer = if args.iter().any(|arg| arg == "--defer-root-admission") {
+        Indexer::open_deferred(store)?
+    } else {
+        Indexer::open(store, &[])?
+    };
     indexer.start_background()?;
 
     let pipe_name = identity::pipe_name()?;
@@ -80,8 +94,9 @@ fn main() -> anyhow::Result<()> {
     // priority order (small + recent files first) under per-file budgets.
     indexer.start_extract_workers(
         engine.embed_supervisor(),
-        Arc::new(extract::ExtractorRegistry::default()),
+        engine.extraction_registry(),
     );
+    engine.start_code_scheduler()?;
     spawn_status_pusher(Arc::clone(&engine));
     // Model progress/completion pushes fan out to every connected client.
     {
@@ -154,21 +169,6 @@ fn run_crawl_bench(file_count: usize) -> anyhow::Result<()> {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&db_dir);
     Ok(())
-}
-
-/// Default indexing roots: the user's standard content folders. Configurable
-/// roots land with the Settings "Folders" section (Phase 6).
-fn default_roots() -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    if let Some(profile) = std::env::var_os("USERPROFILE") {
-        for dir in ["Desktop", "Documents", "Downloads", "Pictures", "Music", "Videos"] {
-            let path = PathBuf::from(&profile).join(dir);
-            if path.is_dir() {
-                roots.push(path);
-            }
-        }
-    }
-    roots
 }
 
 /// Pushes an engine-status update to connected clients whenever the indexing

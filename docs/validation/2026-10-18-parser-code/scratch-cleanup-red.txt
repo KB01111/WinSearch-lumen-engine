@@ -1,0 +1,29 @@
+cargo :    Compiling winsearchd v0.1.0 (<checkout>\src\engine\bins\winsearc
+hd)
+At line:1 char:27
++ ... src/engine; cargo test -p winsearchd --bin winsearchd scratch_cleanup ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling wi...ins\winsearchd):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.51s
+     Running unittests src\main.rs (target\debug\deps\winsearchd-ea492ede1f9fd55e.exe)
+
+running 1 test
+test extract_client::tests::scratch_cleanup_failure_retains_parser_slot_until_the_owned_cache_is_clean ... FAILED
+
+failures:
+
+---- extract_client::tests::scratch_cleanup_failure_retains_parser_slot_until_the_owned_cache_is_clean stdout ----
+
+thread 'extract_client::tests::scratch_cleanup_failure_retains_parser_slot_until_the_owned_cache_is_clean' (75440) panicked at bins\winsearchd\src\extract_client.rs:1240:9:
+Err(Worker("Det går inte att hitta filen. (os error 2)"))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    extract_client::tests::scratch_cleanup_failure_retains_parser_slot_until_the_owned_cache_is_clean
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 192 filtered out; finished in 1.58s
+
+error: test failed, to rerun pass `-p winsearchd --bin winsearchd`

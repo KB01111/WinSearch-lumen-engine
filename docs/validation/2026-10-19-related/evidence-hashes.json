@@ -1,0 +1,132 @@
+[
+  {
+    "file": "rust-workspace.txt",
+    "local_raw_sha256": "138acb322974c0f8c1aba071194a98517b4d818913ff1c22a8fa2bc0062f1f62",
+    "published_sha256": "66bd463da3b55dc3b695f2ee8f3047bd324e063ace9848b3ad9863124c1127b9"
+  },
+  {
+    "file": "retained-first-workspace-failure.txt",
+    "local_raw_sha256": "df0cb46dfeb9582003a7fa60d4b8a2576a6c03c7464395c749441a7b39ac8e52",
+    "published_sha256": "4f01555e15fda8376a055809e04487b56bc337c95d2a654bdfa91208af1b9557"
+  },
+  {
+    "file": "protocol-red.txt",
+    "local_raw_sha256": "08d3f83c63b6cfd7ed9ffdffb27008357b0851c6bdc4d8694bb74f175a8dda4d",
+    "published_sha256": "798ba3df316ad4c8e4c50bec4a9fdbe8a6fe36de1c6e439a6e1d37ee5db1e6fe"
+  },
+  {
+    "file": "rust-client-red.txt",
+    "local_raw_sha256": "91531c43abe2bd1f09f15d68c87e0ddfb80dc1ccc2d89a992f7afecd686db9b5",
+    "published_sha256": "45723125127dd0f4769bc78cf1795a3ef2d11cd5d61e40ab82c06166fe09c24c"
+  },
+  {
+    "file": "dotnet-client-red.txt",
+    "local_raw_sha256": "dc4d1863d6e87f54929d04b85bcf85434a3da8c55aa7ab9e8b40e1eb830389c2",
+    "published_sha256": "7644c06381403ff1f3cfb7aceb7fc8f3288293f12f7e92ace99aa0f0f976ec15"
+  },
+  {
+    "file": "daemon-red.txt",
+    "local_raw_sha256": "7c5524cd8194638e9fbfe6fbbf275e77156644903eefde5f8b13a69e291425f4",
+    "published_sha256": "d2c4307a92fbbd321b04684dae5c792ce9fce5bb1ba34f882ddc439cfa2762cf"
+  },
+  {
+    "file": "control-red.txt",
+    "local_raw_sha256": "8416842c5bbc92f959e2462f1758d041edefe385859f5176a9b36c5fe71e0bbe",
+    "published_sha256": "30d7b15c9cb0d99f2b2bde3bdfdba457e54fc8e038ed9ed2c318753fc367e601"
+  },
+  {
+    "file": "fixture-diagnostic.txt",
+    "local_raw_sha256": "cbb2cde9848cc4a0d2224f8f7c4a01122f3f93b112de3d8c62519a9f7a03914a",
+    "published_sha256": "f539538733c5a8dd148e2d4f2aab6905286142603d80f9b5b92a13492cced37e"
+  },
+  {
+    "file": "error-fence-red.txt",
+    "local_raw_sha256": "5f1d0ef7e3d6576bd516206dcaa721d7821aac4741d492abd99c44a34a1768f9",
+    "published_sha256": "e774914f0be49c40f22b8cdc6bdefe387104f2e8f013d62e96a7d5c526121c4e"
+  },
+  {
+    "file": "error-fence-green.txt",
+    "local_raw_sha256": "cdf600f5dbe1050651f6cba1ff0cebadbef9ce0cf58e3f4530ba6aa30baa3dc5",
+    "published_sha256": "c608d21b2fa1d3f7c6ec8bece77679a37bc6b473e22b679242d19a7c979294f3"
+  },
+  {
+    "file": "reuse-error-red.txt",
+    "local_raw_sha256": "c56a71699450c965f47c6af680e70e8d5d7d0f4eb85bb0c244f261e088930a1c",
+    "published_sha256": "6dea4ba43a0fd045a697718479c5c19a5873007242212fec6ad377b8eb81e2eb"
+  },
+  {
+    "file": "reuse-error-green.txt",
+    "local_raw_sha256": "1f52adfd733c03499bed6e785f5e702c663a6f98abfde32c531b639bfdeaf9f9",
+    "published_sha256": "1df8955214180a9bbc026cefc9c6d9df384028ce1c5706f642b0b0f91a8b693a"
+  },
+  {
+    "file": "cache-policy-red.txt",
+    "local_raw_sha256": "fc629600a1ce146f032235c2860a50cf9c891e1880cf4404360d33627a9fff36",
+    "published_sha256": "9a506deeaecfe617b4fd152a1a8d96de62750e28f0a1a0428a46015070a9fcc9"
+  },
+  {
+    "file": "cache-policy-green.txt",
+    "local_raw_sha256": "f17710715eaeed07357489d491b54f17fa7da3087814114a4d9dc1809301fea6",
+    "published_sha256": "5d791e09b8e35aad563784556943eb3a9a459f232801bf0e5ee9232285f95dd1"
+  },
+  {
+    "file": "real-worker.txt",
+    "local_raw_sha256": "27fd504eb9e066c5341edb6318de04925acd28d2efd7261c61ad06eae98320d4",
+    "published_sha256": "632db34030534e5f09f67c4c3b04e3b9b66d832107dbdea42a2c0c81858c9a81"
+  },
+  {
+    "file": "dotnet-tests.txt",
+    "local_raw_sha256": "141c494b7cbeb4e13a95aba7d5709982357753f74908b79adf1826cc76954222",
+    "published_sha256": "d4efdecd7d93742eb35a89dba19a359962b4e92f6bbb001d9e40cad17adf826c"
+  },
+  {
+    "file": "x64-build.txt",
+    "local_raw_sha256": "90e474a5868df67bc62e18c69831fc000e30500e6d3bd60c6ab6c39995e3b06a",
+    "published_sha256": "1227b5ca1eebea09d0f41cca8255af98a20c2d7de307e52c5b4990e8f93c25a6"
+  },
+  {
+    "file": "coherent-build.txt",
+    "local_raw_sha256": "812c2b14c59646e083f6d5613d30b501641bded3d5d12c116c5311d4785e3a5e",
+    "published_sha256": "a378dcc29f1edd77ddb8be28c826aa679ce47c1388531372e379f02ecaefb80f"
+  },
+  {
+    "file": "embedding-model-tests.txt",
+    "local_raw_sha256": "1db504e752fb267d23a13ce0e24d1f053ed4e7442e9adbc57421c15952b4a96a",
+    "published_sha256": "f7b76b52cafabdca703b4aafe528012ba2c4b21243b8629f056d014155f152d7"
+  },
+  {
+    "file": "native-no-model.json",
+    "local_raw_sha256": "725e42b67ab54d371b4e1032731fb1abd088b8cbf759020a359e2c1b151ceb7b",
+    "published_sha256": "01f5c9182eeb69c11595c6c21d9d0aac633af84c3e5b409e7b51467eb64104c8"
+  },
+  {
+    "file": "native-no-model-client.txt",
+    "local_raw_sha256": "6d8903b7b36dfba3d22e719ed90eee067650afe7ac23df4b92ebc47af5095755",
+    "published_sha256": "74ddbf0a1ba4c431d312e7a0a82dcdab12e6d6fb6ac88e72914301ca76efa2c2"
+  },
+  {
+    "file": "native-managed-cpu.json",
+    "local_raw_sha256": "5399f59b6dcaca3c31a7e15d7abf93c0d85f08520bae700d0c5f127c39bcae3b",
+    "published_sha256": "6e466e82d567aec0ca7d2c598bb656142b3f64f922358dd7a10af390a7213fb8"
+  },
+  {
+    "file": "native-managed-cpu-client.txt",
+    "local_raw_sha256": "e2b509da9227924da708353039bcd177c827908201f22fa950a8ad4a63a5e00a",
+    "published_sha256": "80d6ca20bed7fd8cd76de990c7662f1671c707dab7b96640cb8d3845b7078616"
+  },
+  {
+    "file": "retained-native-no-model-failure.json",
+    "local_raw_sha256": "121e52994671ec718259e1072edb3213e848ef47a94e5968e85061482f0a142d",
+    "published_sha256": "33a23e587c8a25a8d5170eade080a14e01179927db9181d74f5dc524d1cd3947"
+  },
+  {
+    "file": "retained-native-client-failure.txt",
+    "local_raw_sha256": "7acef6cf4a08a99d27af8380b361c79445ad7c1e9e0e54b2f79f76a507b9d6c0",
+    "published_sha256": "7acef6cf4a08a99d27af8380b361c79445ad7c1e9e0e54b2f79f76a507b9d6c0"
+  },
+  {
+    "file": "retained-native-cache-state.json",
+    "local_raw_sha256": "9e80add5d58c4f9b21db906c3b695e94ed573d3b51dfaad2eaa18771b172e255",
+    "published_sha256": "2b7cb0791481034406ea6e677de273c7a96e729285805d025ffb4ac7e13079e5"
+  }
+]

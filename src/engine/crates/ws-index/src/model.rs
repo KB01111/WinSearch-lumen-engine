@@ -149,6 +149,216 @@ pub struct SearchHit {
     pub explanation: String,
     /// Optional cached thumbnail path on disk.
     pub thumbnail_path: Option<String>,
+    pub matches: Vec<ContentMatch>,
+    /// The result depends on extracted content rather than its name/path.
+    pub content_only: bool,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct ContentMatch {
+    pub excerpt: String,
+    /// Original UTF-8 byte offset of the first FTS match; independent of query normalization.
+    #[serde(default)]
+    pub match_byte: Option<usize>,
+    pub page: Option<u32>,
+    pub start_ms: Option<u64>,
+    pub end_ms: Option<u64>,
+    pub line: Option<u32>,
+    pub thumbnail_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum DraftEmbeddingInput {
+    #[default]
+    Text,
+    Image {
+        path: std::path::PathBuf,
+        token_budget: u32,
+    },
+    Audio {
+        path: std::path::PathBuf,
+    },
+}
+
+/// Exact content persists independently of optional vectors. Chunk ordinals are
+/// stable within one source revision and shared by cursor and vector writes.
+#[derive(Debug, Clone)]
+pub struct ContentChunk {
+    pub id: i64,
+    pub entry_id: i64,
+    pub job_kind: String,
+    pub kind: String,
+    pub chunk_index: i64,
+    pub text: String,
+    pub location: ContentMatch,
+    pub embed: bool,
+    pub visual: bool,
+    pub embedding_input: DraftEmbeddingInput,
+    pub attempts: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContentProgress {
+    pub cursor: u64,
+    pub complete: bool,
+    pub revision: i64,
+    pub source: String,
+    pub source_sha256: Option<String>,
+    pub model_generation: i64,
+    pub media_plan: Option<MediaPlan>,
+    pub video_selection: Option<VideoSelection>,
+}
+
+pub const MAX_MEDIA_DURATION_MS: u64 = 366 * 24 * 60 * 60 * 1000;
+pub const MAX_MEDIA_FRAMES: usize = 1200;
+pub const MAX_VIDEO_SHOT_SAMPLES: usize = 14400;
+pub const VIDEO_GRAY_PIXELS: usize = 32 * 18;
+pub const VIDEO_SELECTION_SPAN_MS: u64 = 15_000;
+pub const MAX_VIDEO_SELECTION_SPAN_MS: u64 = VIDEO_SELECTION_SPAN_MS * 30;
+
+/// Small, revision-scoped scan checkpoint; no derived file path crosses the worker boundary.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VideoSelection {
+    pub duration_ms: u64,
+    #[serde(default = "default_video_selection_span")]
+    pub scan_span_ms: u64,
+    pub has_audio: bool,
+    pub next_ms: u64,
+    pub last_sample_ms: Option<u64>,
+    pub last_gray: Vec<u8>,
+    pub candidates_ms: Vec<u64>,
+    pub next_periodic_ms: u64,
+    pub sample_count: u32,
+}
+
+fn default_video_selection_span() -> u64 {
+    VIDEO_SELECTION_SPAN_MS
+}
+
+impl VideoSelection {
+    /// Validate one scan step at both the worker and durable commit boundaries.
+    pub fn validate_successor(&self, previous: Option<&Self>) -> Result<(), &'static str> {
+        self.validate()?;
+        if let Some(old) = previous {
+            old.validate()?;
+        }
+        let start = previous.map_or(0, |state| state.next_ms);
+        let before = previous.map_or(0, |state| state.sample_count);
+        if self.next_ms != (start + self.scan_span_ms).min(self.duration_ms)
+            || self.sample_count < before
+            || u64::from(self.sample_count - before) > self.scan_span_ms / 1000 + 2
+        {
+            return Err("video selection skipped a scan slice");
+        }
+        if let Some(old) = previous {
+            if self.duration_ms != old.duration_ms
+                || self.has_audio != old.has_audio
+                || self.scan_span_ms != old.scan_span_ms
+                || !self.candidates_ms.starts_with(&old.candidates_ms)
+                || self.next_periodic_ms < old.next_periodic_ms
+                || self.last_sample_ms < old.last_sample_ms
+            {
+                return Err("worker mutated video selection checkpoint");
+            }
+            if self.sample_count == before {
+                let added = &self.candidates_ms[old.candidates_ms.len()..];
+                // At EOF the known last sample and one accurately sought tail
+                // may be appended even when audio outlasts the video frames.
+                let valid_tail = added.is_empty()
+                    || (self.next_ms == self.duration_ms
+                        && added.len() <= 2
+                        && old.last_sample_ms.is_some_and(|last| {
+                            added[0] >= last && (added.len() == 1 || added[0] == last)
+                        }));
+                if self.last_sample_ms != old.last_sample_ms
+                    || self.last_gray != old.last_gray
+                    || self.next_periodic_ms != old.next_periodic_ms
+                    || !valid_tail
+                {
+                    return Err("worker mutated video selection checkpoint");
+                }
+            } else if self.last_sample_ms <= old.last_sample_ms {
+                return Err("video samples did not advance");
+            }
+        }
+        if self.sample_count > before
+            && (self.last_sample_ms.is_none_or(|time| time < start)
+                || self
+                    .candidates_ms
+                    .iter()
+                    .skip(previous.map_or(0, |old| old.candidates_ms.len()))
+                    .any(|time| *time < start))
+        {
+            return Err("video samples precede scan slice");
+        }
+        Ok(())
+    }
+
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.duration_ms == 0
+            || self.duration_ms > MAX_MEDIA_DURATION_MS
+            || self.scan_span_ms < VIDEO_SELECTION_SPAN_MS
+            || self.scan_span_ms > MAX_VIDEO_SELECTION_SPAN_MS
+            || self.scan_span_ms % VIDEO_SELECTION_SPAN_MS != 0
+            || self.next_ms == 0
+            || self.next_ms > self.duration_ms
+            || (self.next_ms != self.duration_ms && self.next_ms % self.scan_span_ms != 0)
+            || self.sample_count as usize > MAX_VIDEO_SHOT_SAMPLES
+            || self.candidates_ms.len() > MAX_VIDEO_SHOT_SAMPLES + 2
+            || self.last_gray.len()
+                != if self.last_sample_ms.is_some() {
+                    VIDEO_GRAY_PIXELS
+                } else {
+                    0
+                }
+            || self.last_sample_ms.is_some_and(|t| t >= self.next_ms)
+            || self.candidates_ms.iter().any(|t| *t >= self.next_ms)
+            || self.candidates_ms.windows(2).any(|p| p[0] >= p[1])
+            || (self.sample_count == 0) != self.last_sample_ms.is_none()
+            || (self.sample_count == 0
+                && (!self.candidates_ms.is_empty() || self.next_periodic_ms != 0))
+            || (self.sample_count > 0 && self.candidates_ms.is_empty())
+            || (self.next_ms < self.duration_ms
+                && self
+                    .last_sample_ms
+                    .is_some_and(|t| self.candidates_ms.last().is_some_and(|c| *c > t)))
+            || self.next_periodic_ms
+                > self.duration_ms.saturating_add(
+                    self.duration_ms
+                        .div_ceil((MAX_MEDIA_FRAMES - 1) as u64)
+                        .max(5000),
+                )
+        {
+            return Err("invalid video selection checkpoint");
+        }
+        Ok(())
+    }
+}
+
+/// Pure data, scoped to the source revision; no worker-controlled manifest path.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MediaPlan {
+    pub duration_ms: u64,
+    #[serde(default)]
+    pub frames_ms: Vec<u64>,
+    pub has_audio: bool,
+}
+
+impl MediaPlan {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.duration_ms == 0 || self.duration_ms > MAX_MEDIA_DURATION_MS
+            || self.frames_ms.len() > MAX_MEDIA_FRAMES
+            || (!self.has_audio && self.frames_ms.is_empty()) {
+            return Err("invalid media duration/stream/frame bound");
+        }
+        if !self.frames_ms.is_empty()
+            && (self.frames_ms.iter().any(|t| *t >= self.duration_ms)
+                || self.frames_ms.windows(2).any(|p| p[1] <= p[0] + 500)) {
+            return Err("media selection is outside source or not deduplicated");
+        }
+        Ok(())
+    }
 }
 
 /// Search request against the index (calculator and settings results are
@@ -156,6 +366,8 @@ pub struct SearchHit {
 #[derive(Debug, Clone, Default)]
 pub struct SearchRequest {
     pub text: String,
+    pub extensions: Vec<String>,
+    pub file_kinds: Vec<ws_protocol::FileKind>,
     /// Restrict to applications (`Some(true)`) or to non-apps (`Some(false)`).
     pub apps_only: bool,
     pub files_only: bool,

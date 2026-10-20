@@ -1,0 +1,30 @@
+rtk :    Compiling ws-protocol v0.1.0 (<checkout>\src\engine\crates\ws-prot
+ocol)
+At line:1 char:39
++ ... src/engine; rtk proxy cargo test -p ws-client search_outcomes_are_req ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...es\ws-protocol):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+   Compiling ws-client v0.1.0 (<checkout>\src\engine\crates\ws-client)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.74s
+     Running unittests src\lib.rs (target\debug\deps\ws_client-554fa414f259563f.exe)
+
+running 1 test
+test client::tests::search_outcomes_are_required_when_advertised_and_validated_before_delivery ... FAILED
+
+failures:
+
+---- client::tests::search_outcomes_are_required_when_advertised_and_validated_before_delivery stdout ----
+
+thread 'client::tests::search_outcomes_are_required_when_advertised_and_validated_before_delivery' (125568) panicked at crates\ws-client\src\client.rs:782:24:
+case0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    client::tests::search_outcomes_are_required_when_advertised_and_validated_before_delivery
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 44 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p ws-client --lib`

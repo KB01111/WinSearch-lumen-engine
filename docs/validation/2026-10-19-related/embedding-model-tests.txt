@@ -1,0 +1,44 @@
+Selected test/reference lines; full raw log hash is recorded in evidence-hashes.json.
+cargo : warning: ws-embed@0.1.0: ws-embed: CUDA backend enabled
+    + CategoryInfo          : NotSpecified: (warning: ws-emb...backend enabled:String) [], RemoteException
+warning: ws-embed@0.1.0: ws-embed: Vulkan backend skipped (SDK not found)
+running 16 tests
+test backends::tests::auto_prefers_cuda_then_vulkan_then_cpu ... ok
+test backends::tests::cpu_preference_ignores_gpus ... ok
+test backends::tests::explicit_preference_falls_back_to_cpu_when_missing ... ok
+test backends::tests::maps_registry_names ... ok
+test backends::tests::parses_preference_strings ... ok
+test image::tests::bicubic_matches_independent_pillow_pixels ... ok
+test image::tests::budgets_fill_aligned_pixels_and_bound_invalid_inputs ... ok
+test runtime::tests::default_cpu_threads_preserve_interactive_headroom ... ok
+test runtime::tests::sub_batches_respect_token_budget_and_max_seqs ... ok
+test vector::tests::identical_vectors_have_cosine_one ... ok
+test vector::tests::l2_normalize_produces_unit_norm ... ok
+test vector::tests::opposite_vectors_have_cosine_minus_one ... ok
+test vector::tests::orthogonal_vectors_have_cosine_zero ... ok
+test vector::tests::reference_match_accepts_tiny_noise_and_rejects_drift ... ok
+test vector::tests::rejects_mismatched_or_degenerate_input ... ok
+test vector::tests::scale_invariant ... ok
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+running 3 tests
+screen-280 reference cosine=0.9999420468
+test distinct_images_and_pinned_screen_reference ... ok
+synthetic-speech reference cosine=0.9997505007
+test public_synthetic_audio_matches_pinned_reference ... ok
+photo-140 reference cosine=0.9998148076
+frame-70 reference cosine=0.9996982675
+test reduced_frame_budgets_match_independent_references ... ok
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.86s
+running 4 tests
+test backends_load_and_cpu_device_is_present ... ok
+test cpu_load_embed_release_roundtrip ... ok
+test embedding_is_deterministic_on_cpu ... ok
+test missing_model_is_reported ... ok
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.13s
+running 2 tests
+reference check: 10 cases, worst drift 1.32e-4 ("function that retries with exponential backoff")
+test embeddinggemma2_matches_reference_vectors ... ok
+test fixture_is_well_formed ... ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.81s
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

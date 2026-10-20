@@ -1,0 +1,16 @@
+rtk :    Compiling ws-extract v0.1.0 (<checkout>\src\engine\crates\ws-extra
+ct)
+At <checkout>\artifacts\code-provenance-checks.ps1:12 char:20
++ ... er-green' { rtk proxy cargo test -p ws-extract code::tests -- --test- ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ws...tes\ws-extract):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.77s
+     Running unittests src\lib.rs (target\debug\deps\ws_extract-2abb4d74555c6300.exe)
+
+running 2 tests
+test code::tests::code_provenance_batch_carries_exact_source_hash_in_every_continuation ... ok
+test code::tests::parent_rejects_skipped_ordinals_and_forged_locations_or_payloads ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 44 filtered out; finished in 0.02s
