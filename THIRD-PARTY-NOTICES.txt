@@ -164,6 +164,9 @@ WinSearch incorporates or references the following third-party software.
     Usage:    Replays the IRON EmbeddingGemma 2 kernels on an AMD Ryzen AI NPU2
               through XRT (ws-embed's NPU runtime). Local changes are listed in
               src/engine/third_party/taconite.md.
+    Notices:  notices/taconite-LICENSE, notices/taconite-bundle-LICENSE,
+              notices/embeddinggemma2-LICENSE, notices/embeddinggemma2-LICENSE-PILLOW,
+              notices/embeddinggemma2-LICENSE-PYTORCH.
 
 22. IRON EmbeddingGemma 2 NPU2 bundle (model files, downloaded at run time)
     Project:  https://huggingface.co/brishen/iron-embeddinggemma2-npu2
@@ -173,3 +176,11 @@ WinSearch incorporates or references the following third-party software.
     Usage:    Primary text/image embedding model on PCs with an AMD NPU2. It is
               never committed or bundled; ws-modelmgr downloads and hash-checks
               it into the model directory.
+
+23. XRT Windows SDK 2.21.75 (build headers/import library)
+    Project:  https://github.com/Xilinx/XRT
+    License:  Apache-2.0 for Xilinx/AMD userspace code.
+    Usage:    Builds iron_xrt_shim.dll. The AMD driver/XRT remains a system
+              prerequisite and is not redistributed in the engine payload.
+    Notices:  notices/XRT-LICENSE; SDK checksum pin is in
+              src/engine/third_party/xrt-sdk.json.

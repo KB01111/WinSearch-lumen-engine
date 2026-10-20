@@ -127,6 +127,11 @@
                                 IsEnabled="False" />
                         </StackPanel>
 
+                        <TextBlock x:Name="NpuBundleStatusText" FontSize="12" TextWrapping="Wrap"
+                            Text="Optional AMD NPU bundle (1,085,278,625 bytes)" />
+                        <Button x:Name="InstallNpuBundleButton" Content="Install NPU bundle"
+                            Click="OnInstallNpuBundleClick" IsEnabled="False" />
+
                         <TextBlock
                             x:Name="ModelErrorTextBlock"
                             FontSize="12"

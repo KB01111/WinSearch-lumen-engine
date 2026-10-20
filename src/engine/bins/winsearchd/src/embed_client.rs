@@ -3,7 +3,7 @@
 //! The supervisor owns the worker's lifetime on behalf of the engine and is
 //! the worker's only client (one connection at a time, enforced by holding
 //! [`Slot`] across a whole request). It:
-//! - spawns the worker on the first embed request (never before —
+//! - spawns the worker on the first embed request (never before â€”
 //!   `EngineService::status` must stay spawn-free),
 //! - handshakes every connection (`hello` doubles as the health ping and
 //!   refreshes the cached `model_loaded`/`stub` flags),
@@ -25,15 +25,14 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use tracing::{debug, info, warn};
+use windows::Win32::System::Threading::{GetCurrentThreadId, OpenThread, THREAD_ALL_ACCESS};
 use windows::Win32::System::IO::CancelSynchronousIo;
-use windows::Win32::System::Threading::{
-    GetCurrentThreadId, OpenThread, THREAD_ALL_ACCESS,
-};
 use ws_embed_protocol::{
     EmbedErrorCode, EmbedRequest, EmbedResponse, EMBED_PROTOCOL_VERSION, MAX_TEXTS_PER_JOB,
+    NPU_RETIRE_EXIT_CODE,
 };
 use ws_platform::{identity, pipe::PipeStream};
-use ws_protocol::{read_message, write_message};
+use ws_protocol::{read_message, write_message, EmbeddingDiagnostics, NpuState};
 
 use crate::server::ENGINE_VERSION;
 
@@ -48,7 +47,7 @@ const MAX_BACKOFF: Duration = Duration::from_secs(5);
 const SPAWN_WAIT: Duration = Duration::from_secs(30);
 /// Connect retries inside one request. Covers the pipe-busy race: a readiness
 /// probe (or a previous request) consumes the worker's current instance, and
-/// the next instance appears a breath later — or seconds later on a loaded
+/// the next instance appears a breath later â€” or seconds later on a loaded
 /// machine. Bounded so a truly dead worker still surfaces as `Transport`
 /// (restart path) instead of hanging the caller.
 const CONNECT_RETRY: Duration = Duration::from_secs(15);
@@ -204,18 +203,35 @@ struct Slot {
     child: Option<Child>,
 }
 
+struct PendingReply {
+    stream: PipeStream,
+    handshake: WorkerHandshake,
+}
+
+struct WorkerHandshake {
+    model_loaded: bool,
+    stub: bool,
+    npu: Option<String>,
+}
+
 #[derive(Default)]
 struct BoundedCalls {
     active: usize,
     epoch: u64,
 }
 
+#[derive(Clone, Copy)]
+enum RetirementReason {
+    Cancelled,
+    TimedOut,
+}
+
 pub struct EmbedSupervisor {
     config: EmbedConfig,
     /// Serializes whole requests on the legacy direct path (`transact`,
     /// used by `embed_texts`/`ping`). The pipeline's bounded path
-    /// (`transact_bounded`) holds this only across ensure+connect+send —
-    /// never across the blocking reply read — so a hung worker cannot wedge
+    /// (`transact_bounded`) holds this only across ensure+connect+send â€”
+    /// never across the blocking reply read â€” so a hung worker cannot wedge
     /// later batches behind a leaked holder.
     conn: Mutex<()>,
     slot: Mutex<Slot>,
@@ -233,6 +249,8 @@ pub struct EmbedSupervisor {
     failures: AtomicU32,
     model_loaded: AtomicBool,
     stub: AtomicBool,
+    npu_quarantined: AtomicBool,
+    diagnostics: Mutex<EmbeddingDiagnostics>,
     stats: Mutex<EmbedStats>,
 }
 
@@ -242,6 +260,12 @@ impl EmbedSupervisor {
     }
 
     pub fn with_config(config: EmbedConfig) -> Self {
+        let requested_backend = config
+            .worker_args
+            .windows(2)
+            .find(|args| args[0] == "--backend")
+            .map(|args| args[1].clone())
+            .unwrap_or_else(|| "auto".into());
         Self {
             config,
             conn: Mutex::new(()),
@@ -255,6 +279,14 @@ impl EmbedSupervisor {
             failures: AtomicU32::new(0),
             model_loaded: AtomicBool::new(false),
             stub: AtomicBool::new(false),
+            npu_quarantined: AtomicBool::new(false),
+            diagnostics: Mutex::new(EmbeddingDiagnostics {
+                requested_backend,
+                text_backend: None,
+                image_backend: None,
+                audio_backend: None,
+                npu: NpuState::Untried,
+            }),
             stats: Mutex::new(EmbedStats::default()),
         }
     }
@@ -281,10 +313,46 @@ impl EmbedSupervisor {
                 true
             }
         };
-        let idle = self.bounded_calls.lock().unwrap_or_else(|p| p.into_inner()).active == 0;
-        if changed && idle {
-            self.terminate_worker();
+        if changed {
+            self.reset_model();
+            let requested = self
+                .config
+                .worker_args
+                .windows(2)
+                .find(|args| args[0] == "--backend")
+                .map(|args| args[1].clone())
+                .unwrap_or_else(|| backend.trim().to_ascii_lowercase());
+            self.diagnostics
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .requested_backend = requested;
         }
+    }
+
+    /// Deliberate model/backend reconfiguration invalidates in-flight replies
+    /// and permits a new NPU attempt. Status reads never call this or spawn.
+    pub fn reset_model(&self) {
+        let mut slot = self.slot.lock().unwrap_or_else(|p| p.into_inner());
+        if let Err(error) = self.remove_worker_locked(&mut slot, false) {
+            warn!(%error, "cannot stop worker after model change");
+        }
+        self.worker_gen.fetch_add(1, Ordering::Release);
+        let mut diagnostics = self.diagnostics.lock().unwrap_or_else(|p| p.into_inner());
+        self.npu_quarantined.store(false, Ordering::Release);
+        diagnostics.npu = NpuState::Untried;
+        diagnostics.text_backend = None;
+        diagnostics.image_backend = None;
+        diagnostics.audio_backend = None;
+        self.model_loaded.store(false, Ordering::Relaxed);
+        self.stub.store(false, Ordering::Relaxed);
+        self.failures.store(0, Ordering::Relaxed);
+    }
+
+    pub fn diagnostics(&self) -> EmbeddingDiagnostics {
+        self.diagnostics
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
     }
 
     pub fn worker_bin(&self) -> &PathBuf {
@@ -313,10 +381,13 @@ impl EmbedSupervisor {
         match slot.child.as_mut() {
             Some(child) => match child.try_wait() {
                 Ok(None) => true,
-                _ => {
+                Ok(Some(status)) => {
                     slot.child = None;
+                    self.worker_gen.fetch_add(1, Ordering::Release);
+                    self.observe_worker_exit(status.code());
                     false
                 }
+                Err(_) => false,
             },
             None => false,
         }
@@ -328,14 +399,64 @@ impl EmbedSupervisor {
     /// die must be visible; the watchdog path depends on this break).
     pub fn terminate_worker(&self) {
         let mut slot = self.slot.lock().unwrap_or_else(|p| p.into_inner());
-        match kill_locked(&mut slot) {
+        match self.remove_worker_locked(&mut slot, false) {
             Ok(true) => {
-                self.worker_gen.fetch_add(1, Ordering::Release);
                 info!("embed worker killed");
             }
             Ok(false) => {}
             Err(e) => warn!(error = %e, "embed worker kill failed"),
         }
+    }
+
+    fn observe_worker_exit(&self, code: Option<i32>) {
+        let mut diagnostics = self.diagnostics.lock().unwrap_or_else(|p| p.into_inner());
+        let could_have_used_npu = !self.stub.load(Ordering::Relaxed)
+            && matches!(diagnostics.requested_backend.as_str(), "auto" | "npu")
+            && matches!(diagnostics.npu, NpuState::Untried | NpuState::Ready);
+        if code == Some(NPU_RETIRE_EXIT_CODE)
+            || (code.is_some_and(|value| value != 0) && could_have_used_npu)
+        {
+            self.npu_quarantined.store(true, Ordering::Release);
+            warn!("NPU worker retired; quarantining NPU until model/backend reconfiguration");
+        }
+        diagnostics.npu = if self.npu_quarantined.load(Ordering::Acquire) {
+            NpuState::Quarantined
+        } else {
+            NpuState::Untried
+        };
+        self.model_loaded.store(false, Ordering::Relaxed);
+        self.stub.store(false, Ordering::Relaxed);
+    }
+
+    /// EOF can precede the child's signaled exit by a scheduling quantum.
+    /// Preserve its retirement code before force-killing/reaping on retry.
+    fn remove_worker_locked(&self, slot: &mut Slot, await_exit: bool) -> std::io::Result<bool> {
+        let deadline = Instant::now()
+            + if await_exit {
+                Duration::from_millis(250)
+            } else {
+                Duration::ZERO
+            };
+        if let Some(child) = slot.child.as_mut() {
+            loop {
+                if let Some(status) = child.try_wait()? {
+                    slot.child = None;
+                    self.worker_gen.fetch_add(1, Ordering::Release);
+                    self.observe_worker_exit(status.code());
+                    return Ok(true);
+                }
+                if Instant::now() >= deadline {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        let removed = kill_locked(slot)?;
+        if removed {
+            self.worker_gen.fetch_add(1, Ordering::Release);
+            self.observe_worker_exit(None);
+        }
+        Ok(removed)
     }
 
     fn begin_bounded(&self) {
@@ -344,10 +465,13 @@ impl EmbedSupervisor {
         calls.epoch += 1;
     }
 
-    fn finish_bounded(self: &std::sync::Arc<Self>, timed_out: bool) {
+    fn finish_bounded(self: &std::sync::Arc<Self>, retirement: Option<RetirementReason>) {
         let mut calls = self.bounded_calls.lock().unwrap_or_else(|p| p.into_inner());
         calls.active -= 1;
-        if !timed_out || calls.active != 0 {
+        let Some(reason) = retirement else {
+            return;
+        };
+        if calls.active != 0 {
             return;
         }
         let epoch = calls.epoch;
@@ -356,30 +480,38 @@ impl EmbedSupervisor {
         // Startup may hold `slot` for 30s. Cleanup must never extend the caller's
         // deadline, and a newer caller must invalidate deferred cleanup.
         let sup = std::sync::Arc::clone(self);
-        if let Err(e) = std::thread::Builder::new().name("winsearch-embed-cleanup".into()).spawn(move || {
-            sup.retire_timed_out_worker(epoch, worker_gen);
-        }) {
+        if let Err(e) = std::thread::Builder::new()
+            .name("winsearch-embed-cleanup".into())
+            .spawn(move || {
+                sup.retire_timed_out_worker(epoch, worker_gen, reason);
+            })
+        {
             warn!(error = %e, "cannot spawn embed timeout cleanup");
         }
     }
 
-    fn retire_timed_out_worker(&self, epoch: u64, worker_gen: u64) {
-        let child = {
+    fn retire_timed_out_worker(&self, epoch: u64, worker_gen: u64, reason: RetirementReason) {
+        {
             let mut slot = self.slot.lock().unwrap_or_else(|p| p.into_inner());
             let calls = self.bounded_calls.lock().unwrap_or_else(|p| p.into_inner());
-            if calls.active != 0 || calls.epoch != epoch
-                || self.worker_gen.load(Ordering::Acquire) != worker_gen {
+            if calls.active != 0
+                || calls.epoch != epoch
+                || self.worker_gen.load(Ordering::Acquire) != worker_gen
+            {
                 return;
             }
-            let child = slot.child.take();
-            if child.is_some() {
-                self.worker_gen.fetch_add(1, Ordering::Release);
+            if let Err(error) = self.remove_worker_locked(&mut slot, true) {
+                warn!(%error, "embed worker timeout retirement failed");
             }
-            child
-        };
-        if let Some(mut child) = child {
-            if let Err(e) = child.kill().and_then(|()| child.wait().map(|_| ())) {
-                warn!(error = %e, "embed worker kill failed");
+            // Also cover a driver stall that outlives the worker watchdog.
+            // The cleanup generation/epoch fence above prevents quarantining
+            // a newer worker after deliberate reconfiguration.
+            let mut diagnostics = self.diagnostics.lock().unwrap_or_else(|p| p.into_inner());
+            if matches!(reason, RetirementReason::TimedOut)
+                && matches!(diagnostics.requested_backend.as_str(), "auto" | "npu")
+            {
+                self.npu_quarantined.store(true, Ordering::Release);
+                diagnostics.npu = NpuState::Quarantined;
             }
         }
     }
@@ -445,8 +577,8 @@ impl EmbedSupervisor {
     /// 1/5: leak-free watchdog).
     ///
     /// Runs the whole call on a helper thread and waits `timeout`
-    /// ([`EMBED_JOB_TIMEOUT`] in production). A hung worker — handshake done
-    /// but no `embeddings` answer — surfaces as `Transport("... timed out
+    /// ([`EMBED_JOB_TIMEOUT`] in production). A hung worker â€” handshake done
+    /// but no `embeddings` answer â€” surfaces as `Transport("... timed out
     /// after ...")` instead of stalling the scheduler thread forever.
     /// Takes `Arc<Self>` so the helper thread owns a share.
     ///
@@ -504,7 +636,7 @@ impl EmbedSupervisor {
                 let _ = tx.send(r);
             });
         if let Err(e) = spawned {
-            self.finish_bounded(false);
+            self.finish_bounded(None);
             return Err(EmbedError::Transport(format!(
                 "cannot spawn embed helper: {e}"
             )));
@@ -513,7 +645,7 @@ impl EmbedSupervisor {
             if !valid() {
                 cancel.store(true, Ordering::Relaxed);
                 self.cancel_inflight_read_for(call_id);
-                self.finish_bounded(true);
+                self.finish_bounded(Some(RetirementReason::Cancelled));
                 return Err(EmbedError::Transport("embed caller cancelled".into()));
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -527,7 +659,7 @@ impl EmbedSupervisor {
         };
         match outcome {
             Ok(r) => {
-                self.finish_bounded(false);
+                self.finish_bounded(None);
                 r
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -536,14 +668,14 @@ impl EmbedSupervisor {
                 // if this was the last active bounded caller.
                 cancel.store(true, Ordering::Relaxed);
                 self.cancel_inflight_read_for(call_id);
-                self.finish_bounded(true);
+                self.finish_bounded(Some(RetirementReason::TimedOut));
                 warn!("embed job timed out after {timeout:?}; helper cancelled, batch fails for retry");
                 Err(EmbedError::Transport(format!(
                     "embed job timed out after {timeout:?}"
                 )))
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
-                self.finish_bounded(false);
+                self.finish_bounded(None);
                 Err(EmbedError::Transport(
                     "embed helper died before answering".into(),
                 ))
@@ -592,13 +724,9 @@ impl EmbedSupervisor {
                         id: retry_id,
                         texts: chunk.to_vec(),
                     };
-                    match self.transact_bounded_after_restart(
-                        call_id,
-                        retry,
-                        cancel,
-                        deadline,
-                        used_gen,
-                    ) {
+                    match self
+                        .transact_bounded_after_restart(call_id, retry, cancel, deadline, used_gen)
+                    {
                         Ok(EmbedResponse::Embeddings { vecs, .. }) => {
                             self.stats.lock().unwrap_or_else(|p| p.into_inner()).jobs += 1;
                             all.extend(vecs);
@@ -696,7 +824,7 @@ impl EmbedSupervisor {
                 let _ = tx.send(r);
             });
         if let Err(e) = spawned {
-            self.finish_bounded(false);
+            self.finish_bounded(None);
             return Err(EmbedError::Transport(format!(
                 "cannot spawn media embed helper: {e}"
             )));
@@ -704,20 +832,20 @@ impl EmbedSupervisor {
         let outcome = rx.recv_timeout(timeout);
         match outcome {
             Ok(r) => {
-                self.finish_bounded(false);
+                self.finish_bounded(None);
                 r
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 cancel.store(true, Ordering::Relaxed);
                 self.cancel_inflight_read_for(call_id);
-                self.finish_bounded(true);
+                self.finish_bounded(Some(RetirementReason::TimedOut));
                 warn!("media embed job timed out after {timeout:?}; helper cancelled");
                 Err(EmbedError::Transport(format!(
                     "media embed job timed out after {timeout:?}"
                 )))
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
-                self.finish_bounded(false);
+                self.finish_bounded(None);
                 Err(EmbedError::Transport(
                     "media embed helper died before answering".into(),
                 ))
@@ -801,19 +929,15 @@ impl EmbedSupervisor {
                 jobs_served,
                 npu,
                 ..
-            }) => {
-                self.model_loaded.store(model_loaded, Ordering::Relaxed);
-                self.stub.store(stub, Ordering::Relaxed);
-                Ok(WorkerSnapshot {
-                    model_loaded,
-                    backend,
-                    stub,
-                    dim,
-                    uptime_secs,
-                    jobs_served,
-                    npu,
-                })
-            }
+            }) => Ok(WorkerSnapshot {
+                model_loaded,
+                backend,
+                stub,
+                dim,
+                uptime_secs,
+                jobs_served,
+                npu,
+            }),
             Ok(other) => Err(EmbedError::Protocol(format!(
                 "unexpected reply to status: {}",
                 response_kind(&other)
@@ -855,7 +979,7 @@ impl EmbedSupervisor {
         let _conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
         {
             let mut slot = self.slot.lock().unwrap_or_else(|p| p.into_inner());
-            if let Err(e) = kill_locked(&mut slot) {
+            if let Err(e) = self.remove_worker_locked(&mut slot, true) {
                 debug!(error = %e, "restart-path kill of presumed-dead child failed");
             }
         }
@@ -890,6 +1014,8 @@ impl EmbedSupervisor {
                 Some(status) => {
                     info!(%status, "embed worker exited; will respawn on demand");
                     slot.child = None;
+                    self.worker_gen.fetch_add(1, Ordering::Release);
+                    self.observe_worker_exit(status.code());
                 }
             }
         }
@@ -905,6 +1031,9 @@ impl EmbedSupervisor {
         }
         let mut cmd = Command::new(&self.config.worker_bin);
         cmd.args(&self.config.worker_args);
+        if self.npu_quarantined.load(Ordering::Acquire) {
+            cmd.arg("--disable-npu");
+        }
         if !self.config.worker_args.iter().any(|a| a == "--backend") {
             if let Some(ref pref) = *self
                 .preferred_backend
@@ -947,14 +1076,17 @@ impl EmbedSupervisor {
     /// the job, read the reply. Any IO/EOF problem is `Transport` (retryable);
     /// worker `Error` answers are definitive.
     fn round_trip(&self, req: &EmbedRequest) -> Result<EmbedResponse, EmbedError> {
-        let mut stream = self.connect_and_send(req)?;
-        Self::read_reply(&mut stream)
+        let generation = self.worker_gen.load(Ordering::Acquire);
+        let mut pending = self.connect_and_send(req)?;
+        self.cache_handshake(&pending.handshake, generation);
+        let response = Self::read_reply(&mut pending.stream)?;
+        self.accept_response(req, response, &pending.handshake, generation, None)
     }
 
     /// Phase A of a round trip: ensure a worker, connect, handshake, send.
     /// Callers that hold `conn` across this must release it before the
     /// blocking reply read (see `transact_bounded`).
-    fn connect_and_send(&self, req: &EmbedRequest) -> Result<PipeStream, EmbedError> {
+    fn connect_and_send(&self, req: &EmbedRequest) -> Result<PendingReply, EmbedError> {
         let mut stream = connect_with_retry(&self.config.pipe_name)?;
         let hello = EmbedRequest::Hello {
             protocol_version: EMBED_PROTOCOL_VERSION,
@@ -964,11 +1096,12 @@ impl EmbedSupervisor {
         write_message(&mut stream, &hello).map_err(EmbedError::transport)?;
         let handshake: Option<EmbedResponse> =
             read_message(&mut stream).map_err(EmbedError::transport)?;
-        match handshake {
+        let handshake = match handshake {
             Some(EmbedResponse::HelloAck {
                 protocol_version,
                 model_loaded,
                 stub,
+                npu,
                 ..
             }) => {
                 if protocol_version != EMBED_PROTOCOL_VERSION {
@@ -976,8 +1109,11 @@ impl EmbedSupervisor {
                         "worker speaks v{protocol_version}, supervisor speaks v{EMBED_PROTOCOL_VERSION}"
                     )));
                 }
-                self.model_loaded.store(model_loaded, Ordering::Relaxed);
-                self.stub.store(stub, Ordering::Relaxed);
+                WorkerHandshake {
+                    model_loaded,
+                    stub,
+                    npu,
+                }
             }
             Some(EmbedResponse::Error { code, message, .. }) => {
                 return Err(EmbedError::from_worker(code, message));
@@ -993,22 +1129,91 @@ impl EmbedSupervisor {
                     "worker closed during handshake".into(),
                 ))
             }
-        }
+        };
         write_message(&mut stream, req).map_err(EmbedError::transport)?;
-        Ok(stream)
+        Ok(PendingReply { stream, handshake })
     }
 
     /// Phase B of a round trip: blocking read of the reply on an already-sent
     /// stream. Never called with `conn` held on the bounded path.
     fn read_reply(stream: &mut PipeStream) -> Result<EmbedResponse, EmbedError> {
-        let reply: Option<EmbedResponse> =
-            read_message(stream).map_err(EmbedError::transport)?;
+        let reply: Option<EmbedResponse> = read_message(stream).map_err(EmbedError::transport)?;
         match reply {
-            Some(EmbedResponse::Error { code, message, .. }) => {
-                Err(EmbedError::from_worker(code, message))
-            }
             Some(resp) => Ok(resp),
             None => Err(EmbedError::Transport("worker closed mid-job".into())),
+        }
+    }
+
+    fn accept_response(
+        &self,
+        req: &EmbedRequest,
+        response: EmbedResponse,
+        handshake: &WorkerHandshake,
+        generation: u64,
+        cancellation: Option<(&AtomicBool, Instant)>,
+    ) -> Result<EmbedResponse, EmbedError> {
+        let mut diagnostics = self.diagnostics.lock().unwrap_or_else(|p| p.into_inner());
+        if cancellation.is_some_and(|(cancel, deadline)| {
+            cancel.load(Ordering::Acquire) || Instant::now() >= deadline
+        }) {
+            return Err(EmbedError::Transport("embed job cancelled".into()));
+        }
+        if self.worker_gen.load(Ordering::Acquire) != generation {
+            return Err(EmbedError::Protocol(
+                "reply belongs to a retired worker generation".into(),
+            ));
+        }
+        validate_reply(req, &response)?;
+        if let EmbedResponse::Error { code, message, .. } = response {
+            return Err(EmbedError::from_worker(code, message));
+        }
+        let (loaded, stub) = match &response {
+            EmbedResponse::Embeddings { stub, .. } => (!stub, *stub),
+            EmbedResponse::WorkerStatus {
+                model_loaded, stub, ..
+            } => (*model_loaded, *stub),
+            _ => (handshake.model_loaded, handshake.stub),
+        };
+        self.model_loaded.store(loaded, Ordering::Relaxed);
+        self.stub.store(stub, Ordering::Relaxed);
+        let mut observation = handshake.npu.as_deref();
+        if let EmbedResponse::Embeddings { backend, npu, .. } = &response {
+            match req {
+                EmbedRequest::EmbedTexts { .. } => diagnostics.text_backend = Some(backend.clone()),
+                EmbedRequest::EmbedImage { .. } => {
+                    diagnostics.image_backend = Some(backend.clone())
+                }
+                EmbedRequest::EmbedAudio { .. } => {
+                    diagnostics.audio_backend = Some(backend.clone())
+                }
+                _ => {}
+            }
+            observation = npu.as_deref().or(observation);
+            if backend == "npu" || backend.starts_with("npu+") {
+                diagnostics.npu = NpuState::Ready;
+            }
+        } else if let EmbedResponse::WorkerStatus { npu, .. } = &response {
+            observation = npu.as_deref().or(observation);
+        }
+        if self.npu_quarantined.load(Ordering::Acquire) {
+            diagnostics.npu = NpuState::Quarantined;
+        } else if let Some(state) = observation.and_then(npu_state_from_code) {
+            // A handshake/status that says ready is not NPU output evidence.
+            if state != NpuState::Ready {
+                diagnostics.npu = state;
+            }
+        }
+        Ok(response)
+    }
+
+    /// A current handshake can report residency before an in-flight job
+    /// completes. It does not prove any successful modality/backend route.
+    fn cache_handshake(&self, handshake: &WorkerHandshake, generation: u64) {
+        let _diagnostics = self.diagnostics.lock().unwrap_or_else(|p| p.into_inner());
+        if self.worker_gen.load(Ordering::Acquire) == generation {
+            self.model_loaded
+                .store(handshake.model_loaded, Ordering::Relaxed);
+            self.stub.store(handshake.stub, Ordering::Relaxed);
         }
     }
 
@@ -1042,7 +1247,7 @@ impl EmbedSupervisor {
                 ensure.and_then(|()| self.connect_and_send(&req))
             }
         };
-        let mut stream = match phase_a {
+        let mut pending = match phase_a {
             Ok(s) => s,
             Err(e) => {
                 self.unregister_inflight(call_id);
@@ -1053,7 +1258,16 @@ impl EmbedSupervisor {
             self.unregister_inflight(call_id);
             return Err(EmbedError::Transport("embed job cancelled".into()));
         }
-        let out = match Self::read_reply(&mut stream) {
+        self.cache_handshake(&pending.handshake, *used_gen);
+        let out = match Self::read_reply(&mut pending.stream).and_then(|response| {
+            self.accept_response(
+                &req,
+                response,
+                &pending.handshake,
+                *used_gen,
+                Some((cancel, deadline)),
+            )
+        }) {
             Ok(resp) => {
                 self.failures.store(0, Ordering::Relaxed);
                 Ok(resp)
@@ -1086,6 +1300,7 @@ impl EmbedSupervisor {
             return Err(EmbedError::Transport("embed job cancelled".into()));
         }
         self.register_inflight_for(call_id);
+        let mut used_gen = failed_worker_gen;
         let phase_a = {
             let _conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
             if cancel.load(Ordering::Relaxed) || Instant::now() >= deadline {
@@ -1093,11 +1308,8 @@ impl EmbedSupervisor {
             } else {
                 if self.worker_gen.load(Ordering::Acquire) == failed_worker_gen {
                     let mut slot = self.slot.lock().unwrap_or_else(|p| p.into_inner());
-                    match kill_locked(&mut slot) {
-                        Ok(true) => {
-                            self.worker_gen.fetch_add(1, Ordering::Release);
-                        }
-                        Ok(false) => {}
+                    match self.remove_worker_locked(&mut slot, true) {
+                        Ok(_) => {}
                         Err(e) => {
                             debug!(error = %e, "bounded-restart kill of presumed-dead child failed");
                         }
@@ -1107,10 +1319,11 @@ impl EmbedSupervisor {
                     let mut slot = self.slot.lock().unwrap_or_else(|p| p.into_inner());
                     self.ensure_worker_locked(&mut slot)
                 };
+                used_gen = self.worker_gen.load(Ordering::Acquire);
                 ensure.and_then(|()| self.connect_and_send(&req))
             }
         };
-        let mut stream = match phase_a {
+        let mut pending = match phase_a {
             Ok(s) => s,
             Err(e) => {
                 self.unregister_inflight(call_id);
@@ -1121,7 +1334,16 @@ impl EmbedSupervisor {
             self.unregister_inflight(call_id);
             return Err(EmbedError::Transport("embed job cancelled".into()));
         }
-        let out = match Self::read_reply(&mut stream) {
+        self.cache_handshake(&pending.handshake, used_gen);
+        let out = match Self::read_reply(&mut pending.stream).and_then(|response| {
+            self.accept_response(
+                &req,
+                response,
+                &pending.handshake,
+                used_gen,
+                Some((cancel, deadline)),
+            )
+        }) {
             Ok(resp) => {
                 self.failures.store(0, Ordering::Relaxed);
                 Ok(resp)
@@ -1165,7 +1387,10 @@ impl EmbedSupervisor {
             .unwrap_or_else(|p| p.into_inner())
             .remove(&call_id);
         let Some(tid) = tid else {
-            debug!(call_id, "watchdog: no in-flight read registered; helper already settled");
+            debug!(
+                call_id,
+                "watchdog: no in-flight read registered; helper already settled"
+            );
             return;
         };
         unsafe {
@@ -1204,8 +1429,98 @@ fn response_kind(resp: &EmbedResponse) -> &'static str {
     }
 }
 
+/// The worker is a process boundary: malformed or stale vectors cannot enter
+/// the shared index or become evidence of a successful backend.
+fn validate_reply(req: &EmbedRequest, resp: &EmbedResponse) -> Result<(), EmbedError> {
+    if let EmbedResponse::Embeddings { backend, stub, .. } = resp {
+        let valid = if *stub {
+            backend == "stub"
+        } else {
+            matches!(
+                backend.as_str(),
+                "cpu" | "cuda" | "vulkan" | "npu" | "npu+cpu" | "npu+cuda" | "npu+vulkan"
+            )
+        };
+        if !valid || (matches!(req, EmbedRequest::EmbedAudio { .. }) && backend.contains("npu")) {
+            return Err(EmbedError::Protocol(
+                "invalid execution backend for modality/stub state".into(),
+            ));
+        }
+    }
+    let expected_id = match req {
+        EmbedRequest::EmbedTexts { id, .. }
+        | EmbedRequest::EmbedAudio { id, .. }
+        | EmbedRequest::EmbedImage { id, .. }
+        | EmbedRequest::Status { id }
+        | EmbedRequest::Shutdown { id } => Some(*id),
+        EmbedRequest::Hello { .. } => None,
+    };
+    if resp.id() != expected_id {
+        return Err(EmbedError::Protocol(
+            "reply request ID does not match".into(),
+        ));
+    }
+    if matches!(resp, EmbedResponse::Error { .. }) {
+        return Ok(());
+    }
+    match (req, resp) {
+        (EmbedRequest::EmbedTexts { texts, .. }, EmbedResponse::Embeddings { vecs, dim, .. }) => {
+            validate_vectors(vecs, *dim, texts.len())
+        }
+        (
+            EmbedRequest::EmbedImage { .. } | EmbedRequest::EmbedAudio { .. },
+            EmbedResponse::Embeddings { vecs, dim, .. },
+        ) => validate_vectors(vecs, *dim, 1),
+        (EmbedRequest::Status { .. }, EmbedResponse::WorkerStatus { .. })
+        | (EmbedRequest::Shutdown { .. }, EmbedResponse::ShutdownAck { .. }) => Ok(()),
+        _ => Err(EmbedError::Protocol(
+            "reply kind does not match the request".into(),
+        )),
+    }
+}
+
+fn validate_vectors(vecs: &[Vec<f32>], dim: usize, count: usize) -> Result<(), EmbedError> {
+    if dim != ws_embed_protocol::STUB_DIM || vecs.len() != count {
+        return Err(EmbedError::Protocol(
+            "embedding vector count or dimension does not match".into(),
+        ));
+    }
+    for vector in vecs {
+        if vector.len() != dim || vector.iter().any(|value| !value.is_finite()) {
+            return Err(EmbedError::Protocol(
+                "embedding vector has invalid width or values".into(),
+            ));
+        }
+        let norm = vector
+            .iter()
+            .map(|value| f64::from(*value).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        if (norm - 1.0).abs() > 1e-3 {
+            return Err(EmbedError::Protocol(
+                "embedding vector is not unit normalized".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn npu_state_from_code(code: &str) -> Option<NpuState> {
+    Some(match code {
+        "untried" => NpuState::Untried,
+        "no_npu" => NpuState::NoNpu,
+        "build_missing" => NpuState::BuildMissing,
+        "bundle_missing" => NpuState::BundleMissing,
+        "load_failed" => NpuState::LoadFailed,
+        "disabled" => NpuState::Disabled,
+        "quarantined" => NpuState::Quarantined,
+        "ready" => NpuState::Ready,
+        _ => return None,
+    })
+}
+
 /// Instant readiness check: one connect attempt, immediately dropped. Note
-/// this consumes a pipe instance — never assert on two back-to-back probes
+/// this consumes a pipe instance â€” never assert on two back-to-back probes
 /// (the successor needs a scheduling quantum); `connect_with_retry` and the
 /// spaced polls below are the turnover-safe primitives.
 fn probe(pipe_name: &str) -> bool {
@@ -1306,6 +1621,193 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
     use std::sync::Arc;
 
+    #[test]
+    fn cached_diagnostics_do_not_spawn_and_retirement_requires_deliberate_reset() {
+        let sup = test_supervisor("unused-diagnostics-pipe".into());
+        for _ in 0..100 {
+            assert_eq!(sup.diagnostics().npu, NpuState::Untried);
+            assert!(!sup.model_loaded());
+        }
+        assert_eq!(sup.stats().spawns, 0);
+        sup.observe_worker_exit(Some(NPU_RETIRE_EXIT_CODE));
+        assert!(sup.npu_quarantined.load(Ordering::Acquire));
+        assert_eq!(sup.diagnostics().npu, NpuState::Quarantined);
+        sup.observe_worker_exit(Some(0));
+        assert_eq!(sup.diagnostics().npu, NpuState::Quarantined);
+        sup.reset_model();
+        assert!(!sup.npu_quarantined.load(Ordering::Acquire));
+        assert_eq!(sup.diagnostics().npu, NpuState::Untried);
+        assert_eq!(sup.stats().spawns, 0);
+    }
+
+    #[test]
+    fn residency_handshake_cannot_resurrect_a_retired_worker_or_claim_npu_success() {
+        let sup = test_supervisor("unused-handshake-generation".into());
+        let generation = sup.worker_gen.load(Ordering::Acquire);
+        let handshake = WorkerHandshake {
+            model_loaded: true,
+            stub: false,
+            npu: Some("ready".into()),
+        };
+        sup.cache_handshake(&handshake, generation);
+        assert!(sup.model_loaded());
+        assert_eq!(sup.diagnostics().npu, NpuState::Untried);
+        assert!(sup.diagnostics().text_backend.is_none());
+        sup.reset_model();
+        sup.cache_handshake(&handshake, generation);
+        assert!(!sup.model_loaded());
+        assert!(sup.diagnostics().text_backend.is_none());
+    }
+
+    #[test]
+    fn user_cancellation_does_not_quarantine_a_healthy_accelerator() {
+        for reason in [RetirementReason::Cancelled, RetirementReason::TimedOut] {
+            let sup = test_supervisor("unused-retirement-reason".into());
+            let generation = sup.worker_gen.load(Ordering::Acquire);
+            sup.retire_timed_out_worker(0, generation, reason);
+            assert_eq!(
+                sup.npu_quarantined.load(Ordering::Acquire),
+                matches!(reason, RetirementReason::TimedOut)
+            );
+        }
+    }
+
+    #[test]
+    fn abnormal_native_exit_during_npu_initialization_also_quarantines() {
+        for code in [1, -1073741819] {
+            let sup = test_supervisor("unused-native-exit".into());
+            sup.observe_worker_exit(Some(code));
+            assert_eq!(sup.diagnostics().npu, NpuState::Quarantined);
+        }
+        let cpu = test_supervisor("unused-cpu-exit".into());
+        cpu.set_preferred_backend("cpu");
+        cpu.observe_worker_exit(Some(1));
+        assert!(!cpu.npu_quarantined.load(Ordering::Acquire));
+        let stub = test_supervisor("unused-stub-exit".into());
+        stub.stub.store(true, Ordering::Relaxed);
+        stub.observe_worker_exit(Some(1));
+        assert!(!stub.npu_quarantined.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn invalid_route_cannot_become_successful_backend_evidence() {
+        let req = EmbedRequest::EmbedAudio {
+            id: 1,
+            path: "unused".into(),
+            window_ms: None,
+        };
+        for (backend, stub) in [
+            ("npu", false),
+            ("cpu", true),
+            ("stub", false),
+            ("private", false),
+        ] {
+            let resp = EmbedResponse::Embeddings {
+                id: 1,
+                vecs: vec![ws_embed_protocol::stub_vector("shape", 768)],
+                dim: 768,
+                backend: backend.into(),
+                stub,
+                npu: None,
+            };
+            assert!(validate_reply(&req, &resp).is_err());
+        }
+    }
+
+    #[test]
+    #[ignore = "requires real NPU2, WS_EMBED_TEST_WORKER, WS_EMBED_TEST_MODEL and WS_EMBED_TEST_NPU_BUNDLE"]
+    fn actual_npu_device_loss_retries_cpu_and_quarantines_until_reset() {
+        use std::os::windows::io::AsRawHandle;
+        use windows::Win32::Foundation::HANDLE;
+        use windows::Win32::System::Threading::TerminateProcess;
+        let worker =
+            PathBuf::from(std::env::var_os("WS_EMBED_TEST_WORKER").expect("explicit real worker"));
+        let model = std::env::var("WS_EMBED_TEST_MODEL").expect("explicit model");
+        let bundle = std::env::var("WS_EMBED_TEST_NPU_BUNDLE").expect("explicit bundle");
+        let pipe = format!(r"\\.\pipe\winsearch-npu-loss-{}", std::process::id());
+        let sup = Arc::new(EmbedSupervisor::with_config(EmbedConfig {
+            worker_bin: worker,
+            pipe_name: pipe.clone(),
+            worker_args: vec![
+                "--pipe".into(),
+                pipe,
+                "--model".into(),
+                model,
+                "--npu-bundle".into(),
+                bundle,
+                "--backend".into(),
+                "npu".into(),
+            ],
+            backoff_base: Duration::from_millis(10),
+            sleeper: None,
+        }));
+        let short = vec!["task: search result | query: memory safety".to_string()];
+        let fail_owned_worker = |pid, code| {
+            let mut slot = sup.slot.lock().unwrap();
+            let child = slot.child.as_mut().expect("owned worker");
+            assert_eq!(child.id(), pid);
+            assert!(child.try_wait().unwrap().is_none());
+            // SAFETY: use the retained owned process handle, never a reopened PID.
+            unsafe { TerminateProcess(HANDLE(child.as_raw_handle()), code) }.unwrap();
+        };
+        let initial = Arc::clone(&sup);
+        let inputs = short.clone();
+        let initial_job =
+            std::thread::spawn(move || initial.embed_texts_bounded(&inputs, EMBED_JOB_TIMEOUT));
+        let startup_deadline = Instant::now() + Duration::from_secs(10);
+        let initial_pid = loop {
+            if let Some(pid) = sup.slot.lock().unwrap().child.as_ref().map(Child::id) {
+                break pid;
+            }
+            assert!(Instant::now() < startup_deadline, "worker did not start");
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        std::thread::sleep(Duration::from_millis(100));
+        // Simulated insufficient resources during context/model initialization.
+        fail_owned_worker(initial_pid, 0xc000009a);
+        assert_eq!(
+            initial_job
+                .join()
+                .unwrap()
+                .expect("initialization CPU fallback")
+                .len(),
+            1
+        );
+        assert_eq!(sup.diagnostics().text_backend.as_deref(), Some("cpu"));
+        assert_eq!(sup.diagnostics().npu, NpuState::Quarantined);
+        sup.reset_model();
+        sup.embed_texts_bounded(&short, EMBED_JOB_TIMEOUT)
+            .expect("real NPU warmup");
+        assert_eq!(sup.diagnostics().text_backend.as_deref(), Some("npu"));
+        assert_eq!(sup.diagnostics().npu, NpuState::Ready);
+        let pid = sup.slot.lock().unwrap().child.as_ref().unwrap().id();
+        let other = Arc::clone(&sup);
+        let job = std::thread::spawn(move || {
+            other.embed_texts_bounded(
+                &vec!["memory safety ownership borrowing compiler ".repeat(150); 64],
+                EMBED_JOB_TIMEOUT,
+            )
+        });
+        std::thread::sleep(Duration::from_millis(500));
+        // Simulate device-loss retirement of this exact owned real worker.
+        // The actual driver watchdog uses the same code, without DLL teardown.
+        fail_owned_worker(pid, NPU_RETIRE_EXIT_CODE as u32);
+        assert_eq!(job.join().unwrap().expect("CPU retry").len(), 64);
+        assert_eq!(sup.diagnostics().text_backend.as_deref(), Some("cpu"));
+        assert_eq!(sup.diagnostics().npu, NpuState::Quarantined);
+        assert_eq!(sup.stats().retries, 2);
+        assert_eq!(sup.stats().spawns, 4);
+        sup.embed_texts_bounded(&short, EMBED_JOB_TIMEOUT).unwrap();
+        assert_eq!(sup.stats().spawns, 4);
+        sup.reset_model();
+        sup.embed_texts_bounded(&short, EMBED_JOB_TIMEOUT)
+            .expect("deliberate reset permits NPU");
+        assert_eq!(sup.diagnostics().text_backend.as_deref(), Some("npu"));
+        sup.terminate_worker();
+        assert!(!sup.is_worker_running());
+        eprintln!("Simulated initialization resource failure -> CPU/quarantine -> reset -> actual NPU -> simulated device loss -> CPU/quarantine -> reset -> NPU; Stop passed");
+    }
+
     /// Scripted in-process fake worker: answers handshakes, then behaves per
     /// `mode` so retry/backoff paths are deterministic without a real binary.
     struct FakeWorker {
@@ -1329,6 +1831,11 @@ mod tests {
         /// First job connection hangs (watchdog must fire and free `conn`
         /// for the next batch); later ones serve stub vectors immediately.
         HangFirst,
+        WrongId,
+        WrongCount,
+        WrongWidth,
+        NonUnit,
+        Delayed,
     }
 
     #[test]
@@ -1470,6 +1977,7 @@ mod tests {
                                 features: vec!["embed_texts".into()],
                                 model_loaded: false,
                                 stub: true,
+                                npu: None,
                             },
                         )
                         .ok();
@@ -1528,17 +2036,30 @@ mod tests {
                                         // Crash: close without answering.
                                     }
                                     _ => {
+                                        if mode == Mode::Delayed {
+                                            std::thread::sleep(Duration::from_millis(250));
+                                        }
+                                        let mut vecs = ws_embed_protocol::stub_embed_texts(
+                                            &texts,
+                                            ws_embed_protocol::STUB_DIM,
+                                        );
+                                        match mode {
+                                            Mode::WrongCount => vecs.clear(),
+                                            Mode::WrongWidth => {
+                                                vecs[0].pop();
+                                            }
+                                            Mode::NonUnit => vecs[0].fill(0.5),
+                                            _ => {}
+                                        }
                                         write_message(
                                             &mut stream,
                                             &EmbedResponse::Embeddings {
-                                                id,
-                                                vecs: ws_embed_protocol::stub_embed_texts(
-                                                    &texts,
-                                                    ws_embed_protocol::STUB_DIM,
-                                                ),
+                                                id: if mode == Mode::WrongId { id + 1 } else { id },
+                                                vecs,
                                                 dim: ws_embed_protocol::STUB_DIM,
                                                 backend: "stub".into(),
                                                 stub: true,
+                                                npu: None,
                                             },
                                         )
                                         .ok();
@@ -1616,6 +2137,45 @@ mod tests {
     }
 
     #[test]
+    fn malformed_embeddings_never_reach_callers_or_count_as_success() {
+        for mode in [
+            Mode::WrongId,
+            Mode::WrongCount,
+            Mode::WrongWidth,
+            Mode::NonUnit,
+        ] {
+            let fake = FakeWorker::start(mode);
+            let sup = Arc::new(test_supervisor(fake.pipe_name));
+            assert!(matches!(
+                sup.embed_texts_bounded(&["untrusted response".into()], Duration::from_secs(5)),
+                Err(EmbedError::Protocol(_))
+            ));
+            assert_eq!(sup.stats().jobs, 0);
+        }
+    }
+
+    #[test]
+    fn replaced_worker_reply_is_rejected_before_success_is_recorded() {
+        let fake = FakeWorker::start(Mode::Delayed);
+        let sup = Arc::new(test_supervisor(fake.pipe_name.clone()));
+        let other = Arc::clone(&sup);
+        let call = std::thread::spawn(move || {
+            other.embed_texts_bounded(&["old generation".into()], Duration::from_secs(5))
+        });
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while fake.jobs_seen.lock().unwrap().is_empty() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(!fake.jobs_seen.lock().unwrap().is_empty());
+        sup.worker_gen.fetch_add(1, Ordering::Release);
+        assert!(
+            call.join().unwrap().is_err(),
+            "a retired generation returned vectors"
+        );
+        assert_eq!(sup.stats().jobs, 0);
+    }
+
+    #[test]
     fn live_worker_reuse_never_sleeps() {
         // Retrying against an already-serving worker costs no backoff: the
         // single sleep lives on the spawn path (see the respawn test below).
@@ -1631,7 +2191,9 @@ mod tests {
             })),
         );
 
-        let vecs = sup.embed_texts(&["retry me".to_string()]).expect("retry succeeds");
+        let vecs = sup
+            .embed_texts(&["retry me".to_string()])
+            .expect("retry succeeds");
         assert_eq!(vecs.len(), 1);
         assert_eq!(sup.stats().retries, 1);
         assert!(
@@ -1684,24 +2246,38 @@ mod tests {
         for newer_caller in [false, true] {
             let sup = Arc::new(test_supervisor("unused-cleanup-pipe".into()));
             sup.begin_bounded();
-            sup.finish_bounded(false);
+            sup.finish_bounded(None);
             let epoch = sup.bounded_calls.lock().unwrap().epoch;
             let worker_gen = sup.worker_gen.load(Ordering::Acquire);
             let child = Command::new("powershell.exe")
-                .args(["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"])
-                .spawn().unwrap();
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "Start-Sleep -Seconds 30",
+                ])
+                .spawn()
+                .unwrap();
             sup.slot.lock().unwrap().child = Some(child);
             if newer_caller {
                 sup.begin_bounded();
-                sup.finish_bounded(false);
+                sup.finish_bounded(None);
             } else {
                 sup.worker_gen.fetch_add(1, Ordering::Release);
             }
-            sup.retire_timed_out_worker(epoch, worker_gen);
-            let preserved = sup.slot.lock().unwrap().child.as_mut()
+            sup.retire_timed_out_worker(epoch, worker_gen, RetirementReason::TimedOut);
+            let preserved = sup
+                .slot
+                .lock()
+                .unwrap()
+                .child
+                .as_mut()
                 .is_some_and(|child| child.try_wait().unwrap().is_none());
             sup.terminate_worker();
-            assert!(preserved, "stale timeout cleanup killed a newer worker/caller");
+            assert!(
+                preserved,
+                "stale timeout cleanup killed a newer worker/caller"
+            );
         }
     }
 
@@ -1714,9 +2290,13 @@ mod tests {
             let other = Arc::clone(&sup);
             let caller = std::thread::spawn(move || {
                 let result = if image {
-                    other.embed_image_bounded(std::path::Path::new("fixture.png"), Duration::from_millis(50))
+                    other.embed_image_bounded(
+                        std::path::Path::new("fixture.png"),
+                        Duration::from_millis(50),
+                    )
                 } else {
-                    other.embed_texts_bounded(&["fixture".into()], Duration::from_millis(50))
+                    other
+                        .embed_texts_bounded(&["fixture".into()], Duration::from_millis(50))
                         .map(|_| Vec::new())
                 };
                 tx.send(result.is_err()).unwrap();
@@ -1724,7 +2304,11 @@ mod tests {
             let outcome = rx.recv_timeout(Duration::from_secs(1));
             drop(slot);
             caller.join().unwrap();
-            assert_eq!(outcome.unwrap(), true, "caller outlived its deadline waiting for slot");
+            assert_eq!(
+                outcome.unwrap(),
+                true,
+                "caller outlived its deadline waiting for slot"
+            );
         }
     }
 
@@ -1737,15 +2321,18 @@ mod tests {
         let other = Arc::clone(&sup);
         let helper = std::thread::spawn(move || {
             other.begin_bounded();
-            other.finish_bounded(false);
+            other.finish_bounded(None);
             other.begin_bounded();
-            other.finish_bounded(true);
+            other.finish_bounded(Some(RetirementReason::TimedOut));
             tx.send(()).unwrap();
         });
         let result = rx.recv_timeout(Duration::from_secs(1));
         drop(slot);
         helper.join().unwrap();
-        assert!(result.is_ok(), "bounded accounting waited on the worker slot");
+        assert!(
+            result.is_ok(),
+            "bounded accounting waited on the worker slot"
+        );
     }
 
     #[test]
@@ -1777,7 +2364,7 @@ mod tests {
     #[test]
     fn bounded_second_batch_proceeds_while_first_hangs() {
         // Fix round 1/5 (I1): the timed-out helper must not hold `conn`
-        // across its blocked read — a second bounded batch starts and
+        // across its blocked read â€” a second bounded batch starts and
         // completes while the first is still stuck, and the watchdog cancels
         // the first helper's IO (no leaked holder wedges the pipeline).
         let fake = FakeWorker::start(Mode::HangFirst);
@@ -1787,10 +2374,7 @@ mod tests {
         let first = std::thread::Builder::new()
             .name("test-first-hung-batch".into())
             .spawn(move || {
-                sup2.embed_texts_bounded(
-                    &["hung batch".to_string()],
-                    Duration::from_millis(800),
-                )
+                sup2.embed_texts_bounded(&["hung batch".to_string()], Duration::from_millis(800))
             })
             .unwrap();
         // Let the first batch get through its handshake+send and block in the
@@ -1944,7 +2528,7 @@ mod tests {
             let bin = p.join(format!("winsearch-embed{}", std::env::consts::EXE_SUFFIX));
             assert!(
                 bin.is_file(),
-                "worker binary missing at {} — run a workspace build first (`cargo build --workspace`)",
+                "worker binary missing at {} â€” run a workspace build first (`cargo build --workspace`)",
                 bin.display()
             );
             bin
@@ -2018,13 +2602,37 @@ mod tests {
             let snap = sup.ping().expect("health ping");
             assert!(snap.stub);
             assert!(snap.jobs_served >= 2);
-            let image = sup.embed_image_with_budget_bounded(std::path::Path::new(r"C:\fixture.png"), 70, Duration::from_secs(5)).unwrap();
-            let audio = sup.embed_audio_bounded(std::path::Path::new(r"C:\fixture.wav"), Some((0,30_000)), Duration::from_secs(5)).unwrap();
+            let image = sup
+                .embed_image_with_budget_bounded(
+                    std::path::Path::new(r"C:\fixture.png"),
+                    70,
+                    Duration::from_secs(5),
+                )
+                .unwrap();
+            let audio = sup
+                .embed_audio_bounded(
+                    std::path::Path::new(r"C:\fixture.wav"),
+                    Some((0, 30_000)),
+                    Duration::from_secs(5),
+                )
+                .unwrap();
             assert_eq!(image.len(), ws_embed_protocol::STUB_DIM);
             assert_eq!(audio.len(), ws_embed_protocol::STUB_DIM);
             assert_ne!(image, audio);
-            assert!(sup.embed_image_with_budget_bounded(std::path::Path::new(r"C:\fixture.png"), 71, Duration::from_secs(5)).is_err());
-            assert!(sup.embed_audio_bounded(std::path::Path::new(r"C:\fixture.wav"), Some((0,30_001)), Duration::from_secs(5)).is_err());
+            assert!(sup
+                .embed_image_with_budget_bounded(
+                    std::path::Path::new(r"C:\fixture.png"),
+                    71,
+                    Duration::from_secs(5)
+                )
+                .is_err());
+            assert!(sup
+                .embed_audio_bounded(
+                    std::path::Path::new(r"C:\fixture.wav"),
+                    Some((0, 30_001)),
+                    Duration::from_secs(5)
+                )
+                .is_err());
             sup.terminate_worker();
         }
 
@@ -2054,7 +2662,7 @@ mod tests {
             assert!(stats.retries >= 1, "expected a retry, got {stats:?}");
             assert!(stats.restarts >= 1, "expected a restart, got {stats:?}");
             // Single backoff on the respawn path (I2): exactly one wait of
-            // `backoff_for(1, base)` for the whole kill → restart → retry.
+            // `backoff_for(1, base)` for the whole kill â†’ restart â†’ retry.
             assert_eq!(
                 *sleeps.lock().unwrap(),
                 vec![backoff_for(1, Duration::from_millis(10))],

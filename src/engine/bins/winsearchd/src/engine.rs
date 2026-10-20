@@ -252,6 +252,7 @@ impl EngineService {
         // weights resident, or stub vectors flowing in test setups). Reading
         // the cache never spawns a worker.
         status.model_loaded = self.embed.model_loaded();
+        status.embedding = Some(self.embed.diagnostics());
         status.code_index_id = self.code_service().map(|code| {
             code.store.lock().unwrap_or_else(|p| p.into_inner()).database_id().to_owned()
         });
@@ -522,9 +523,20 @@ impl EngineService {
         });
     }
 
-    pub fn model_download_start(&self, client: &ClientHandle, id: RequestId) {
-        self.models.start_download();
-        self.answer_model_status(client, id);
+    pub fn model_download_start(&self, client: &ClientHandle, id: RequestId, include_npu: bool) {
+        match self.models.try_start_download_with_npu(include_npu) {
+            Ok(_) => {
+                self.embed.reset_model();
+                self.answer_model_status(client, id);
+            }
+            Err(message) => {
+                let _ = client.send(&ServerMessage::Error {
+                    id: Some(id),
+                    code: ErrorCode::InvalidRequest,
+                    message,
+                });
+            }
+        }
     }
 
     pub fn model_download_cancel(&self, client: &ClientHandle, id: RequestId) {
@@ -532,9 +544,14 @@ impl EngineService {
         self.answer_model_status(client, id);
     }
 
-    pub fn model_import(&self, client: &ClientHandle, id: RequestId, path: String) {
-        match self.models.start_import(std::path::PathBuf::from(path)) {
-            Ok(_) => self.answer_model_status(client, id),
+    pub fn model_import(&self, client: &ClientHandle, id: RequestId, path: String,
+        include_npu: bool,
+    ) {
+        match self.models.start_import_with_npu(std::path::PathBuf::from(path), include_npu) {
+            Ok(_) => {
+                self.embed.reset_model();
+                self.answer_model_status(client, id);
+            }
             Err(e) => {
                 let _ = client.send(&ServerMessage::Error {
                     id: Some(id),
@@ -546,6 +563,7 @@ impl EngineService {
     }
 
     pub fn model_delete(&self, client: &ClientHandle, id: RequestId) {
+        self.embed.reset_model();
         match self.models.delete() {
             Ok(status) => {
                 let _ = client.send(&ServerMessage::ModelStatus {
@@ -565,6 +583,19 @@ impl EngineService {
 
     pub fn model_status(&self, client: &ClientHandle, id: RequestId) {
         self.answer_model_status(client, id);
+    }
+
+    pub fn model_lifecycle_update(&self, message: &ServerMessage) {
+        if let ServerMessage::ModelStatus { status, .. } = message {
+            if status.state != ws_modelmgr::ModelState::Downloading
+                && !status.npu_bundle.as_ref().is_some_and(|component| {
+                    component.state == ws_modelmgr::ModelState::Downloading
+                })
+            {
+                self.embed.reset_model();
+            }
+        }
+        self.push_to_all(message);
     }
 
     // ---- engine config (P3.6) ----

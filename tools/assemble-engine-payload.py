@@ -17,6 +17,46 @@ import zipfile
 ENGINE_COMMIT = "d4f1448068d93d51120f7ec1e2a17395f88089f7"
 MAX_FILE_BYTES = 256 * 1024 * 1024
 ROOT = Path(__file__).resolve().parents[1]
+NATIVE_PROOF = Path('docs/validation/2026-10-20-npu-completion/release-native-inputs.json')
+REQUIRED_NPU_SOURCES = {
+    'src/engine/third_party/taconite/shim/iron_xrt_shim.cpp',
+    'src/engine/third_party/taconite/build.rs',
+    'src/engine/crates/ws-embed/src/npu.rs',
+    'src/engine/bins/winsearch-embed/src/server.rs',
+    'src/engine/bins/winsearchd/src/embed_client.rs',
+    'src/engine/Cargo.lock',
+}
+
+
+def verified_native_inputs():
+    inputs = json.loads((ROOT / NATIVE_PROOF).read_text(encoding='utf-8'))
+    if inputs.get('source_commit') != ENGINE_COMMIT or inputs.get('npu_runtime_compiled') is not True:
+        raise ValueError('NPU source proof or real-shim build mismatch')
+    if inputs.get('qualified_routes') != {'text': True, 'imageTokenBudgets': [140, 280],
+                                        'cosineThreshold': .999, 'retrievalPassed': True}:
+        raise ValueError('NPU reference/retrieval qualification is incomplete')
+    sources = inputs.get('native_source_sha256', {})
+    if not REQUIRED_NPU_SOURCES <= sources.keys():
+        raise ValueError('missing native source proof')
+    for name, expected in sources.items():
+        safe_archive_path(name)
+        with no_links(ROOT / name).open('rb') as stream:
+            if hashlib.file_digest(stream, 'sha256').hexdigest() != expected:
+                raise ValueError('native source does not match tested binary proof')
+    if 'iron_xrt_shim.dll' not in inputs['adjacent_native_dll_sha256']:
+        raise ValueError('real NPU shim is missing from binary proof')
+    return inputs
+
+
+def verify_real_npu_runtime(candidate):
+    # Run only the hashed copied binary. No inference/model access is needed.
+    system = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32'
+    env = {key: value for key, value in os.environ.items() if not key.startswith(('WS_', 'TACONITE_', 'XRT_'))}
+    env['PATH'] = str(system)
+    result = subprocess.run([str(candidate / 'winsearch-embed.exe'), '--runtime-info'],
+                            cwd=candidate, env=env, capture_output=True, check=True, timeout=10)
+    if json.loads(result.stdout).get('npu_runtime_compiled') is not True:
+        raise ValueError('NPU payload refuses a stub runtime build')
 
 
 def no_links(path):
@@ -177,7 +217,7 @@ def assemble(binaries, ffmpeg_archive, pdfium_archive, msvc_archive, llama_sourc
     ffmpeg = json.loads((pins / "ffmpeg.json").read_text(encoding="utf-8"))
     pdfium = json.loads((pins / "pdfium.json").read_text(encoding="utf-8"))
     msvc = json.loads((pins / "msvc-runtime.json").read_text(encoding="utf-8"))
-    inputs = json.loads((ROOT / "docs/validation/2026-10-20-extraction-claims/release-native-inputs.json").read_text(encoding="utf-8"))["cpu"]
+    inputs = verified_native_inputs()
     archive_libraries = {"pdfium.dll", *ffmpeg["required_binaries"], *msvc["required_binaries"]}
     candidate = Path(tempfile.mkdtemp(prefix=".engine-payload-", dir=output.parent))
     try:
@@ -212,11 +252,17 @@ def assemble(binaries, ffmpeg_archive, pdfium_archive, msvc_archive, llama_sourc
             pins / "msvc-runtime.md": "notices/msvc/REDISTRIBUTION.md",
             pins / "code-grammars-LICENSES.txt": "notices/code-grammars-LICENSES.txt",
             ROOT / "src/engine/crates/ws-embed/tests/fixtures/media/LICENSE-DigUp.txt": "notices/DigUp-LICENSE.txt",
+            pins / 'taconite/LICENSE': 'notices/taconite-LICENSE',
+            **{pins / 'licenses/taconite-embeddinggemma2' / name: 'notices/embeddinggemma2-' + name
+               for name in ['LICENSE', 'LICENSE-PILLOW', 'LICENSE-PYTORCH']},
+            pins / 'licenses/taconite-bundle/LICENSE': 'notices/taconite-bundle-LICENSE',
+            pins / 'licenses/XRT-LICENSE': 'notices/XRT-LICENSE',
         }
         for source, target in notices.items():
             records.append({"path": target, **checked_copy(source, archive_destination(candidate, target), None)})
         target = "notices/llama.cpp-LICENSE"
         records.append({"path": target, **write_stream(io.BytesIO(license_bytes), archive_destination(candidate, target))})
+        verify_real_npu_runtime(candidate)
         manifest = {"schemaVersion": 1, "engineCommit": ENGINE_COMMIT,
                     "target": "x86_64-pc-windows-msvc", "files": sorted(records, key=lambda item: item["path"])}
         encoded = (json.dumps(manifest, indent=2, ensure_ascii=True) + "\n").encode("utf-8")

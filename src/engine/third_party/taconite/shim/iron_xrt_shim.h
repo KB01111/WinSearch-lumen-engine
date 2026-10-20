@@ -28,6 +28,8 @@ typedef struct iron_buffer iron_buffer;
 /* Open NPU `device_index` (0 on a laptop). NULL on failure, message in err. */
 iron_session *iron_open(int device_index, char *err, size_t err_len);
 void iron_close(iron_session *s);
+/* Set this thread's total NPU execution budget; 0 restores the45second cap. */
+void iron_set_deadline_ms(uint64_t timeout_ms);
 
 /* Register `xclbin_path`, create a hardware context for it (resident until
  * freed), look up `kernel_name` (NULL: the xclbin's first kernel) and load the

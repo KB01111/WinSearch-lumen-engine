@@ -131,6 +131,7 @@ public sealed class GetStatusMessage : ClientMessage
 public sealed class ModelDownloadStartMessage : ClientMessage
 {
     public ulong Id { get; set; }
+    public bool IncludeNpu { get; set; }
 }
 
 public sealed class ModelDownloadCancelMessage : ClientMessage
@@ -142,6 +143,7 @@ public sealed class ModelImportMessage : ClientMessage
 {
     public ulong Id { get; set; }
     public string Path { get; set; } = "";
+    public bool IncludeNpu { get; set; }
 }
 
 public sealed class ModelDeleteMessage : ClientMessage
@@ -402,7 +404,29 @@ public sealed class EngineStatus
     public ulong SegmentsIndexed { get; set; }
     public ulong QueueDepth { get; set; }
     public bool ModelLoaded { get; set; }
+    public EmbeddingDiagnostics? Embedding { get; set; }
     public ulong IndexSizeBytes { get; set; }
+}
+
+public sealed class EmbeddingDiagnostics
+{
+    public string RequestedBackend { get; set; } = "auto";
+    public string? TextBackend { get; set; }
+    public string? ImageBackend { get; set; }
+    public string? AudioBackend { get; set; }
+    public NpuState Npu { get; set; }
+}
+
+public enum NpuState
+{
+    Untried,
+    NoNpu,
+    BuildMissing,
+    BundleMissing,
+    LoadFailed,
+    Disabled,
+    Quarantined,
+    Ready,
 }
 
 public enum ModelState
@@ -420,9 +444,18 @@ public sealed class ModelStatus
     public ulong Bytes { get; set; }
     public ulong TotalBytes { get; set; }
     public string? Error { get; set; }
+    public ModelComponentStatus? NpuBundle { get; set; }
 
     /// <summary>Fraction downloaded in [0, 1]; 0.0 when <see cref="TotalBytes"/> is zero.</summary>
     public double Fraction => TotalBytes == 0 ? 0 : (double)Bytes / TotalBytes;
+}
+
+public sealed class ModelComponentStatus
+{
+    public ModelState State { get; set; }
+    public ulong Bytes { get; set; }
+    public ulong TotalBytes { get; set; }
+    public string? Error { get; set; }
 }
 
 /// <summary>

@@ -24,6 +24,7 @@ iron_session *iron_open(int device_index, char *err, size_t err_len) {
     return NULL;
 }
 void iron_close(iron_session *s) { (void)s; }
+void iron_set_deadline_ms(uint64_t timeout_ms) { (void)timeout_ms; }
 
 iron_kernel *iron_kernel_load(iron_session *s, const char *xclbin_path, const char *insts_path,
                               const char *kernel_name, uint32_t gops, char *err, size_t err_len) {

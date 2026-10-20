@@ -269,7 +269,7 @@ pub struct WorkerModelEmbedder {
     model_path: PathBuf,
     pipe_name: String,
     verified_label: OnceLock<String>,
-    verified_backend: OnceLock<String>,
+    forced_backend: Option<String>,
     child: Mutex<Option<Child>>,
     next_id: AtomicU64,
 }
@@ -289,7 +289,7 @@ impl WorkerModelEmbedder {
             model_path,
             pipe_name,
             verified_label: OnceLock::new(),
-            verified_backend: OnceLock::new(),
+            forced_backend: None,
             child: Mutex::new(None),
             next_id: AtomicU64::new(1),
         }
@@ -329,7 +329,11 @@ impl WorkerModelEmbedder {
             );
         }
 
-        let child = Command::new(&worker_bin)
+        let mut command = Command::new(&worker_bin);
+        if let Some(backend) = &self.forced_backend {
+            command.arg("--backend").arg(backend);
+        }
+        let child = command
             .arg("--pipe")
             .arg(&self.pipe_name)
             .arg("--model")
@@ -470,10 +474,22 @@ impl WorkerModelEmbedder {
         let reply: Option<ws_embed_protocol::EmbedResponse> =
             ws_protocol::read_message(&mut stream)?;
         let (vectors, backend) = real_worker_vectors(reply, id, count)?;
-        let observed = self.verified_backend.get_or_init(|| backend.clone());
+        let requested = self.forced_backend.clone()
+            .or_else(|| std::env::var("WS_EMBED_BACKEND").ok())
+            .unwrap_or_else(|| "auto".into());
+        let fallback = matches!(
+            request,
+            ws_embed_protocol::EmbedRequest::EmbedAudio { .. }
+                | ws_embed_protocol::EmbedRequest::EmbedImage {
+                    token_budget: Some(70),
+                    ..
+                }
+        );
         anyhow::ensure!(
-            observed == &backend,
-            "real-model worker backend changed during evaluation"
+            requested_route_matches(&requested, fallback, &backend),
+            "requested {requested}, observed unexpected {backend} for {feature}"
+        );
+        eprintln!("Verified execution: {feature} backend={backend} stub=false dim=768"
         );
         self.verified_label.get_or_init(|| {
             format!(
@@ -482,6 +498,15 @@ impl WorkerModelEmbedder {
             )
         });
         Ok(vectors)
+    }
+}
+
+fn requested_route_matches(requested: &str, fallback_only: bool, actual: &str) -> bool {
+    if requested == "npu" && fallback_only {
+        matches!(actual, "cpu" | "cuda" | "vulkan")
+    } else {
+        requested == "auto" || requested == actual ||
+            (requested == "npu" && matches!(actual, "npu+cpu" | "npu+cuda" | "npu+vulkan"))
     }
 }
 
@@ -497,13 +522,14 @@ fn real_worker_vectors(
             dim,
             backend,
             stub,
+            ..
         }) => {
             anyhow::ensure!(
                 !stub && backend != "stub",
                 "real-model evaluation refuses stub vectors"
             );
             anyhow::ensure!(
-                matches!(backend.as_str(), "cpu" | "cuda" | "vulkan"),
+                matches!(backend.as_str(), "cpu" | "cuda" | "vulkan" | "npu" | "npu+cpu" | "npu+cuda" | "npu+vulkan"),
                 "unknown real-model backend: {backend}"
             );
             anyhow::ensure!(id == expected_id, "real-model response ID mismatch");
@@ -536,6 +562,39 @@ fn real_worker_vectors(
     }
 }
 
+/// Acceptance-only alternating workers put CPU and NPU vectors into the same
+/// frozen index. Each worker still verifies the actual execution route.
+struct MixedModelEmbedder {
+    cpu: WorkerModelEmbedder,
+    npu: WorkerModelEmbedder,
+    sequence: AtomicU64,
+}
+
+impl MixedModelEmbedder {
+    fn next(&self) -> &WorkerModelEmbedder {
+        if self.sequence.fetch_add(1, Ordering::Relaxed).is_multiple_of(2) {
+            &self.npu
+        } else {
+            &self.cpu
+        }
+    }
+}
+
+impl EvalEmbedder for MixedModelEmbedder {
+    fn label(&self) -> &str {
+        "MixedModelEmbedder (alternating verified CPU/NPU workers)"
+    }
+    fn embed_texts(&self, texts: &[String]) -> anyhow::Result<Vec<Vec<f32>>> {
+        self.next().embed_texts(texts)
+    }
+    fn embed_image(&self, path: &Path, tokens: u32) -> anyhow::Result<Vec<f32>> {
+        self.next().embed_image(path, tokens)
+    }
+    fn embed_audio(&self, path: &Path) -> anyhow::Result<Vec<f32>> {
+        self.cpu.embed_audio(path)
+    }
+}
+
 fn select_embedder() -> anyhow::Result<Box<dyn EvalEmbedder>> {
     if let Some(os_path) = std::env::var_os("WS_EMBED_TEST_MODEL") {
         let p = PathBuf::from(os_path);
@@ -544,7 +603,19 @@ fn select_embedder() -> anyhow::Result<Box<dyn EvalEmbedder>> {
             "WS_EMBED_TEST_MODEL explicitly requested a missing/non-file model: {}",
             p.display()
         );
-        return Ok(Box::new(WorkerModelEmbedder::new(p.canonicalize()?)));
+        let path = p.canonicalize()?;
+        if std::env::var("WS_EVAL_MIXED_BACKENDS").as_deref() == Ok("1") {
+            let mut cpu = WorkerModelEmbedder::new(path.clone());
+            cpu.forced_backend = Some("cpu".into());
+            let mut npu = WorkerModelEmbedder::new(path);
+            npu.forced_backend = Some("npu".into());
+        return Ok(Box::new(MixedModelEmbedder {
+                cpu,
+                npu,
+                sequence: AtomicU64::new(0),
+            }));
+        }
+        return Ok(Box::new(WorkerModelEmbedder::new(path)));
     }
     Ok(Box::new(ConceptStubEmbedder))
 }
@@ -826,9 +897,8 @@ pub fn execute_code_query(
         ])?;
         anyhow::ensure!(vectors.len() == 2, "code query embedding count mismatch");
         for hit in
-            store.search_semantic(&vectors[0], &vectors[1], SEMANTIC_TOP_K.max(limit).saturating_mul(8), |_| {
-                true
-            }, |score|semantic_admitted("code",score))?
+            store.search_semantic(&vectors[0], &vectors[1], SEMANTIC_TOP_K.max(limit).saturating_mul(8), |_|
+                true, |score|semantic_admitted("code",score))?
         {
             if exact.iter().any(|e| {
                     e.file.id == hit.file.id
@@ -1497,6 +1567,16 @@ fn fnv1a64(s: &str) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn qualified_npu_routes_keep_cpu_cuda_and_vulkan_fallbacks_truthful() {
+        for backend in ["cpu", "cuda", "vulkan"] {
+            assert!(super::requested_route_matches("npu", true, backend));
+            assert!(!super::requested_route_matches("npu", false, backend));
+        }
+        assert!(super::requested_route_matches("npu", false, "npu+cpu"));
+        assert!(!super::requested_route_matches("npu", true, "npu"));
+        assert!(!super::requested_route_matches("cpu", false, "npu"));
+    }
     use super::*;
 
     #[test]
@@ -1790,6 +1870,7 @@ mod tests {
             dim: 768,
             backend: "cpu".into(),
             stub: false,
+            npu: None,
         };
         assert!(real_worker_vectors(Some(valid.clone()), 7, 1).is_ok());
         for case in 0..8 {
@@ -1800,6 +1881,7 @@ mod tests {
                 dim,
                 backend,
                 stub,
+                ..
             } = &mut reply
             else {
                 unreachable!()

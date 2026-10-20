@@ -44,6 +44,7 @@ struct ActiveOp {
     id: u64,
     kind: OpKind,
     cancel: Arc<AtomicBool>,
+    include_npu: bool,
 }
 
 #[derive(Default)]
@@ -109,15 +110,9 @@ pub struct ModelService {
 }
 
 impl ModelService {
-    /// On a PC with an AMD NPU2 the model set also holds the IRON NPU bundle
-    /// (downloaded first; the embed worker's primary text/image model). The
-    /// GGUFs stay in the set for audio and the GPU/CPU fallback.
+    /// Track the optional bundle on every PC; only an explicit request installs it.
     pub fn new(model_dir: PathBuf, indexer: Arc<Indexer>) -> Arc<Self> {
-        let mut manager = ModelManager::new(model_dir);
-        if let Some(npu) = ws_platform::npu::detect_npu2() {
-            info!(device = %npu.instance, "AMD NPU2 detected: the NPU model is part of the model download");
-            manager = manager.with_npu_bundle();
-        }
+        let manager = ModelManager::new(model_dir).with_npu_bundle();
         Self::with_manager(manager, indexer)
     }
 
@@ -209,11 +204,26 @@ impl ModelService {
         if self.active.lock().unwrap_or_else(|p| p.into_inner()).is_some() {
             return self.progress.lock().unwrap_or_else(|p| p.into_inner()).clone();
         }
-        if let Some(Outcome::Failed(msg)) = self.outcome.lock().unwrap_or_else(|p| p.into_inner()).clone() {
-            let mut s = self.manager.status();
-            s.state = ModelState::Error;
-            s.error = Some(msg);
-            return s;
+        if let Some(Outcome::Failed(_)) = self.outcome.lock().unwrap_or_else(|p| p.into_inner()).clone() {
+            let failed = self
+                .progress
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .clone();
+            let mut current = self.manager.status();
+            if failed.state == ModelState::Error {
+                current.state = ModelState::Error;
+                current.error = failed.error;
+            }
+            if let (Some(failure), Some(component)) =
+                (failed.npu_bundle, current.npu_bundle.as_mut())
+            {
+                if failure.state == ModelState::Error {
+                    component.state = ModelState::Error;
+                    component.error = failure.error;
+                }
+            }
+            return current;
         }
         self.manager.status()
     }
@@ -221,7 +231,22 @@ impl ModelService {
     /// Starts (or resumes) the download. Idempotent while running: returns
     /// the live snapshot instead of spawning a second thread.
     pub fn start_download(self: &Arc<Self>) -> ModelStatus {
-        self.start_op(OpKind::Download, None)
+        self.start_download_with_npu(false)
+    }
+
+    pub fn start_download_with_npu(self: &Arc<Self>, include_npu: bool) -> ModelStatus {
+        self.start_op(OpKind::Download, None, include_npu)
+    }
+
+    pub fn try_start_download_with_npu(
+        self: &Arc<Self>,
+        include_npu: bool,
+    ) -> Result<ModelStatus, String> {
+        if !include_npu {
+            // Legacy downloads are idempotent during any active operation.
+            return Ok(self.start_download());
+        }
+        self.start_op_result(OpKind::Download, None, include_npu)
     }
 
     /// Signals the running op to stop; partial files stay for resume.
@@ -238,8 +263,17 @@ impl ModelService {
 
     /// Imports from a local path on the background thread (copies can be
     /// hundreds of MB; never block the IPC loop on them).
+    #[cfg(test)]
     pub fn start_import(self: &Arc<Self>, path: PathBuf) -> Result<ModelStatus, String> {
-        self.start_op_result(OpKind::Import, Some(path))
+        self.start_import_with_npu(path, false)
+    }
+
+    pub fn start_import_with_npu(
+        self: &Arc<Self>,
+        path: PathBuf,
+        include_npu: bool,
+    ) -> Result<ModelStatus, String> {
+        self.start_op_result(OpKind::Import, Some(path), include_npu)
     }
 
     /// Deletes the model files. Refused while an op runs.
@@ -275,12 +309,24 @@ impl ModelService {
         }
     }
 
-    fn start_op(self: &Arc<Self>, kind: OpKind, path: Option<PathBuf>) -> ModelStatus {
-        self.start_op_result(kind, path)
-            .unwrap_or_else(|e| ModelStatus {
+    fn start_op(self: &Arc<Self>, kind: OpKind, path: Option<PathBuf>,
+        include_npu: bool,
+    ) -> ModelStatus {
+        self.start_op_result(kind, path, include_npu)
+            .unwrap_or_else(|e| {
+                if self
+                    .active
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .is_some()
+                {
+                    return self.status();
+                }
+                ModelStatus {
                 state: ModelState::Error,
                 error: Some(e),
                 ..self.manager.status()
+                }
             })
     }
 
@@ -288,17 +334,14 @@ impl ModelService {
         self: &Arc<Self>,
         kind: OpKind,
         path: Option<PathBuf>,
+        include_npu: bool,
     ) -> Result<ModelStatus, String> {
         let mut active = self.active.lock().unwrap_or_else(|p| p.into_inner());
-        if active.is_some() {
-            return match kind {
-                // A second start is the same resumable work: idempotent.
-                OpKind::Download => {
+        if let Some(op) = active.as_ref() {
+            return if kind == OpKind::Download && op.kind == kind && op.include_npu == include_npu {
                     Ok(self.progress.lock().unwrap_or_else(|p| p.into_inner()).clone())
-                }
-                // Import is not idempotent (it copies), so a concurrent
-                // import is refused and surfaces as Error{invalid_request}.
-                OpKind::Import => Err("a model download/import is already running".into()),
+                } else {
+                Err("a different model download/import is already running".into())
             };
         }
         if kind == OpKind::Import && path.is_none() {
@@ -312,26 +355,24 @@ impl ModelService {
             id
         };
         *self.outcome.lock().unwrap_or_else(|p| p.into_inner()) = None;
-        let total = self.manager.total_bytes();
-        let started = ModelStatus {
-            state: ModelState::Downloading,
-            total_bytes: total,
-            ..Default::default()
-        };
+        let mut started = self.manager.status();
+        let npu_first = include_npu && started.state == ModelState::Ready;
+        set_component(&mut started, npu_first, ModelState::Downloading, None);
         *self.progress.lock().unwrap_or_else(|p| p.into_inner()) = started.clone();
         let this = Arc::clone(self);
         let thread_cancel = Arc::clone(&cancel);
         if let Err(e) = std::thread::Builder::new()
             .name("winsearch-model".into())
-            .spawn(move || this.run_op(id, kind, path.as_deref(), &thread_cancel))
+            .spawn(move || this.run_op(id, kind, path.as_deref(), include_npu, &thread_cancel))
         {
             let msg = format!("cannot spawn model thread: {e}");
-            let failed_status = ModelStatus {
-                state: ModelState::Error,
-                total_bytes: total,
-                error: Some(msg.clone()),
-                ..Default::default()
-            };
+            let mut failed_status = started.clone();
+            set_component(
+                &mut failed_status,
+                npu_first,
+                ModelState::Error,
+                Some(msg.clone()),
+            );
             *self.progress.lock().unwrap_or_else(|p| p.into_inner()) = failed_status.clone();
             *self.outcome.lock().unwrap_or_else(|p| p.into_inner()) =
                 Some(Outcome::Failed(msg.clone()));
@@ -341,7 +382,9 @@ impl ModelService {
             self.push_pending_notifications();
             return Err(msg);
         }
-        *active = Some(ActiveOp { id, kind, cancel });
+        *active = Some(ActiveOp { id, kind, cancel,
+            include_npu,
+        });
         self.queue_notification(started.clone());
         drop(active);
         self.push_pending_notifications();
@@ -350,15 +393,22 @@ impl ModelService {
         Ok(started)
     }
 
-    fn run_op(&self, id: u64, kind: OpKind, path: Option<&Path>, cancel: &AtomicBool) {
+    fn run_op(&self, id: u64, kind: OpKind, path: Option<&Path>,
+        include_npu: bool,
+        cancel: &AtomicBool) {
         let last_push = Mutex::new(Instant::now());
-        let progress_cb = |downloaded: u64, total: u64| {
-            let snapshot = ModelStatus {
-                state: ModelState::Downloading,
-                bytes: downloaded,
-                total_bytes: total,
-                error: None,
-            };
+        let progress_cb = |npu: bool, downloaded: u64, total: u64| {
+            let mut snapshot = self.manager.status();
+            set_component(&mut snapshot, npu, ModelState::Downloading, None);
+            if npu {
+                if let Some(component) = snapshot.npu_bundle.as_mut() {
+                    component.bytes = downloaded;
+                    component.total_bytes = total;
+                }
+            } else {
+                snapshot.bytes = downloaded;
+                snapshot.total_bytes = total;
+            }
             let active = self.active.lock().unwrap_or_else(|p| p.into_inner());
             if !active.as_ref().is_some_and(|op| op.id == id) {
                 return;
@@ -374,19 +424,47 @@ impl ModelService {
             }
         };
 
-        let result: Result<(), OpError> = match kind {
+        let mut npu_phase = false;
+        let mut result: Result<(), OpError> = match kind {
             OpKind::Download => self
                 .manager
-                .download_all(&progress_cb, cancel)
+                .download_all(&|d, t| progress_cb(false, d, t), cancel)
                 .map_err(OpError::from_download),
             OpKind::Import => {
                 let path = path.expect("import path checked at start");
-                self.manager
-                    .import(path, cancel)
+                if include_npu && !self.manager
+                    .has_import_files(path, false) {
+                    Ok(())
+                } else {
+                    self.manager
+                        .import(path, cancel)
                     .map(|_| ())
                     .map_err(OpError::from_manager)
             }
+        }
         };
+        if result.is_ok() && include_npu {
+            if self.manager.status().state == ModelState::Ready {
+                if let Err(e) = self.record_compat() {
+                    warn!(error = %e, "cannot write base embedding compat record");
+                }
+            }
+            npu_phase = true;
+            let snapshot = self.manager.status();
+            let component = snapshot.npu_bundle.as_ref().cloned().unwrap_or_default();
+            progress_cb(true, component.bytes, component.total_bytes);
+            result = match kind {
+                OpKind::Download => self
+                    .manager
+                    .download_npu_bundle(&|d, t| progress_cb(true, d, t), cancel)
+                    .map_err(OpError::from_download),
+                OpKind::Import => self
+                    .manager
+                    .import_npu_bundle(path.expect("import path checked at start"), cancel)
+                    .map(|_| ())
+                    .map_err(OpError::from_manager),
+            };
+        }
 
         // Publish terminal bookkeeping before allowing another operation to start.
         let mut active = self.active.lock().unwrap_or_else(|p| p.into_inner());
@@ -397,8 +475,10 @@ impl ModelService {
         let status = match result {
             Ok(()) => {
                 *self.outcome.lock().unwrap_or_else(|p| p.into_inner()) = Some(Outcome::Ok);
-                if let Err(e) = self.record_compat() {
+                if self.manager.status().state == ModelState::Ready {
+                    if let Err(e) = self.record_compat() {
                     warn!(error = %e, "cannot write embedding compat record");
+                }
                 }
                 let status = self.manager.status();
                 info!("model operation complete: {:?}", status.state);
@@ -417,8 +497,7 @@ impl ModelService {
                     Some(Outcome::Failed(msg.clone()));
                 warn!(error = %msg, "model operation failed");
                 let mut status = self.manager.status();
-                status.state = ModelState::Error;
-                status.error = Some(msg);
+                set_component(&mut status, npu_phase, ModelState::Error, Some(msg));
                 status
             }
         };
@@ -433,6 +512,18 @@ impl ModelService {
         self.indexer
             .meta_set(EMBEDDING_MODEL_META_KEY, &ModelCompat::current().to_json())
             .map_err(|e| e.to_string())
+    }
+}
+
+fn set_component(status: &mut ModelStatus, npu: bool, state: ModelState, error: Option<String>) {
+    if npu {
+        if let Some(component) = status.npu_bundle.as_mut() {
+            component.state = state;
+            component.error = error;
+        }
+    } else {
+        status.state = state;
+        status.error = error;
     }
 }
 
@@ -557,8 +648,7 @@ mod tests {
     fn tiny_service(
         dir: PathBuf,
         fx: &Fixture,
-        blobs: &[(String, Vec<u8>)],
-    ) -> Arc<ModelService> {
+        blobs: &[(String, Vec<u8>)]) -> Arc<ModelService> {
         use sha2::{Digest, Sha256};
         let files: Vec<ExpectedFile> = blobs
             .iter()
@@ -645,7 +735,7 @@ mod tests {
             _thread: std::thread::spawn(move || {
                 let (mut stream, _) = listener.accept().unwrap();
                 let mut request = [0u8; 8192];
-                stream.read(&mut request).unwrap();
+                assert!(stream.read(&mut request).unwrap() > 0);
                 download_started_tx.send(()).unwrap();
                 download_release_rx.recv().unwrap();
                 write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
@@ -678,13 +768,17 @@ mod tests {
         let source = srcdir.join("tiny.gguf");
         let caller = std::thread::spawn(move || other.start_import(source));
         entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        let imported = wait_until(Duration::from_secs(2), || service.active.lock().unwrap().is_none());
+        let imported = wait_until(Duration::from_secs(2), || {
+            service.active.lock().unwrap().is_none()
+        });
         std::fs::remove_file(dir.join("tiny.gguf")).unwrap();
         assert_eq!(service.start_download().state, ModelState::Downloading);
         download_started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
         release_tx.send(()).unwrap();
         caller.join().unwrap().unwrap();
-        let delivered = wait_until(Duration::from_secs(2), || statuses.lock().unwrap().len() >= 3);
+        let delivered = wait_until(Duration::from_secs(2), || {
+            statuses.lock().unwrap().len() >= 3
+        });
         let observed = statuses.lock().unwrap().clone();
         download_release_tx.send(()).unwrap();
         assert!(wait_until(Duration::from_secs(2), || service.status().state == ModelState::Ready));
@@ -735,9 +829,11 @@ mod tests {
             id: 2,
             kind: OpKind::Import,
             cancel: Arc::new(AtomicBool::new(false)),
+            include_npu: false,
         });
         *service.outcome.lock().unwrap() = Some(Outcome::Ok);
-        service.run_op(1, OpKind::Import, Some(&dir.join("absent")), &AtomicBool::new(false));
+        service.run_op(1, OpKind::Import, Some(&dir.join("absent")),
+            false, &AtomicBool::new(false));
         assert_eq!(*service.outcome.lock().unwrap(), Some(Outcome::Ok));
         assert_eq!(service.active.lock().unwrap().as_ref().unwrap().id, 2);
         let _ = std::fs::remove_dir_all(dir);
@@ -879,8 +975,7 @@ mod tests {
         store.set_indexing_config(&config).unwrap();
         let indexer = crate::indexer::Indexer::open(
             store,
-            &[root.clone()],
-        )
+            &[root.clone()])
         .unwrap();
         assert!(indexer.indexing_pause_reason().is_none(), "fixture scan paused: {:?}", indexer.indexing_pause_reason());
         indexer.enqueue_initial_scan().unwrap();
@@ -978,8 +1073,12 @@ mod tests {
         let cancel = Arc::new(AtomicBool::new(false));
         *service.active.lock().unwrap() = Some(ActiveOp {
             id: 1, kind: OpKind::Import, cancel: Arc::clone(&cancel),
+            include_npu: false,
         });
         service.cancel_download();
+        assert!(!cancel.load(Ordering::Relaxed));
+        assert!(service.try_start_download_with_npu(false).is_ok());
+        assert!(service.try_start_download_with_npu(true).is_err());
         assert!(!cancel.load(Ordering::Relaxed));
     }
 
@@ -988,6 +1087,128 @@ mod tests {
         let service = ModelService::new(temp_dir("idle-cancel"), test_indexer());
         assert_eq!(service.status().state, ModelState::NotDownloaded);
         assert_eq!(service.cancel_download().state, ModelState::NotDownloaded);
+    }
+
+    #[test]
+    fn optional_npu_download_failure_keeps_base_ready() {
+        let base = ("base.gguf".to_string(), b"base".to_vec());
+        let npu = (
+            "iron-embeddinggemma2-npu2/fixture.bin".to_string(),
+            b"npu".to_vec(),
+        );
+        let fx = Fixture::serve([base.clone()].into_iter().collect(), Duration::ZERO);
+        let dir = temp_dir("optional-npu-error");
+        let service = tiny_service(dir.clone(), &fx, &[base.clone(), npu.clone()]);
+        service.start_download();
+        assert!(wait_until(Duration::from_secs(10), || service
+            .status()
+            .state
+            == ModelState::Ready));
+        assert!(
+            !dir.join(&npu.0).exists(),
+            "default request must not install the bundle"
+        );
+        assert_eq!(service.status().total_bytes, 4);
+        assert_eq!(
+            service.status().npu_bundle.unwrap().state,
+            ModelState::NotDownloaded
+        );
+
+        service.start_download_with_npu(true);
+        assert!(wait_until(Duration::from_secs(10), || service
+            .status()
+            .npu_bundle
+            .as_ref()
+            .is_some_and(|s| s.state == ModelState::Error)));
+        let status = service.status();
+        assert_eq!(status.state, ModelState::Ready);
+        assert_eq!(status.bytes, 4);
+        assert!(status.error.is_none());
+        assert!(status.npu_bundle.unwrap().error.is_some());
+        assert_eq!(service.check_compat().unwrap(), CompatCheck::Compatible);
+        std::fs::remove_file(dir.join(&base.0)).unwrap();
+        assert_eq!(
+            service.status().state,
+            ModelState::NotDownloaded,
+            "an optional failure must not freeze the base filesystem snapshot"
+        );
+        service.delete().unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn explicit_npu_request_cannot_be_silently_merged_into_base_only_operation() {
+        let service = ModelService::new(temp_dir("npu-busy-opt-in"), test_indexer());
+        *service.active.lock().unwrap() = Some(ActiveOp {
+            id: 1,
+            kind: OpKind::Download,
+            cancel: Arc::new(AtomicBool::new(false)),
+            include_npu: false,
+        });
+        let result = service.start_op_result(OpKind::Download, None, true);
+        assert!(
+            result.is_err(),
+            "an opt-in must not acknowledge base-only work as an NPU install"
+        );
+    }
+
+    #[test]
+    fn optional_npu_cancel_resumes_and_import_rejects_corrupt_bundle() {
+        let base = ("base.gguf".to_string(), b"base".to_vec());
+        let npu = (
+            "iron-embeddinggemma2-npu2/fixture.bin".to_string(),
+            vec![5; 512 * 1024],
+        );
+        let blobs = [base.clone(), npu.clone()];
+        let fx = Fixture::serve(
+            blobs.clone().into_iter().collect(),
+            Duration::from_millis(2),
+        );
+        let dir = temp_dir("optional-npu-resume");
+        std::fs::write(dir.join(&base.0), &base.1).unwrap();
+        let service = tiny_service(dir.clone(), &fx, &blobs);
+        service.start_download_with_npu(true);
+        assert!(wait_until(Duration::from_secs(10), || service
+            .status()
+            .npu_bundle
+            .as_ref()
+            .is_some_and(|s| s.bytes > 0)));
+        service.cancel_download();
+        assert!(wait_until(Duration::from_secs(10), || service
+            .status()
+            .npu_bundle
+            .as_ref()
+            .is_some_and(|s| s.state == ModelState::Paused)));
+        let paused = service.status();
+        assert_eq!(paused.state, ModelState::Ready);
+        assert!(paused.npu_bundle.unwrap().bytes > 0);
+        service.start_download_with_npu(true);
+        assert!(wait_until(Duration::from_secs(20), || service
+            .status()
+            .npu_bundle
+            .as_ref()
+            .is_some_and(|s| s.state == ModelState::Ready)));
+        assert_eq!(std::fs::read(dir.join(&npu.0)).unwrap(), npu.1);
+
+        let source = temp_dir("optional-npu-corrupt");
+        std::fs::write(source.join("fixture.bin"), vec![9; npu.1.len()]).unwrap();
+        service.start_import_with_npu(source.clone(), true).unwrap();
+        assert!(wait_until(Duration::from_secs(10), || service
+            .status()
+            .npu_bundle
+            .as_ref()
+            .is_some_and(|s| s.state == ModelState::Error)));
+        assert_eq!(service.status().state, ModelState::Ready);
+        assert_eq!(
+            std::fs::read(dir.join(&npu.0)).unwrap(),
+            npu.1,
+            "failed import must preserve verified files"
+        );
+        service.delete().unwrap();
+        assert!(!dir.join(&base.0).exists());
+        assert!(!dir.join(&npu.0).exists());
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(source);
     }
 
     #[test]

@@ -20,6 +20,7 @@
 #include <exception>
 #include <fstream>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -29,6 +30,32 @@ namespace
 
 // IRON's kernels take (opcode, instructions, instruction bytes, args...).
 constexpr int kOpcode = 3;
+using clock_type = std::chrono::steady_clock;
+thread_local clock_type::time_point job_deadline;
+
+void check_deadline()
+{
+    if (job_deadline != clock_type::time_point{} && clock_type::now() >= job_deadline)
+        throw std::runtime_error("NPU execution budget exhausted");
+}
+
+ert_cmd_state wait_bounded(xrt::run &run)
+{
+    const auto deadline = job_deadline == clock_type::time_point{}
+        ? clock_type::now() + std::chrono::seconds(45) : job_deadline;
+    while (clock_type::now() < deadline) {
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - clock_type::now());
+        const auto state = run.wait(std::max(std::chrono::milliseconds(1),
+            std::min(std::chrono::milliseconds(100), left)));
+        if (state != ERT_CMD_STATE_TIMEOUT && state != ERT_CMD_STATE_RUNNING
+            && state != ERT_CMD_STATE_SUBMITTED && state != ERT_CMD_STATE_QUEUED
+            && state != ERT_CMD_STATE_NEW)
+            return state;
+    }
+    // The owner must retire the worker before releasing possibly active buffers.
+    // Its independent watchdog also handles XRT drivers that mask wait timeouts.
+    throw std::runtime_error("NPU execution budget exhausted");
+}
 
 void set_err(char *err, size_t err_len, const std::string &msg)
 {
@@ -154,6 +181,12 @@ cached_run *acquire_run(iron_kernel *k, iron_buffer **bufs, size_t n)
 } // namespace
 
 extern "C" {
+
+void iron_set_deadline_ms(uint64_t timeout_ms)
+{
+    job_deadline = clock_type::now() + std::chrono::milliseconds(
+        timeout_ms == 0 ? 45000 : std::min<uint64_t>(timeout_ms, 45000));
+}
 
 iron_session *iron_open(int device_index, char *err, size_t err_len)
 {
@@ -400,6 +433,7 @@ int iron_kernel_run(iron_kernel *k, iron_buffer **bufs, size_t n, uint64_t *elap
         return 1;
     }
     try {
+        check_deadline();
         cached_run *cached = acquire_run(k, bufs, n);
         xrt::run fresh;
         if (!cached)
@@ -407,7 +441,7 @@ int iron_kernel_run(iron_kernel *k, iron_buffer **bufs, size_t n, uint64_t *elap
         xrt::run &run = cached ? cached->run : fresh;
         auto t0 = std::chrono::steady_clock::now();
         run.start();
-        auto state = run.wait();
+        auto state = wait_bounded(run);
         auto t1 = std::chrono::steady_clock::now();
         if (cached)
             cached->in_flight = false;
@@ -432,6 +466,7 @@ iron_run *iron_kernel_start(iron_kernel *k, iron_buffer **bufs, size_t n, char *
         return nullptr;
     }
     try {
+        check_deadline();
         auto *r = new iron_run;
         r->cached = acquire_run(k, bufs, n);
         if (!r->cached)
@@ -453,7 +488,7 @@ int iron_run_wait(iron_run *r, uint64_t *elapsed_ns, char *err, size_t err_len)
     }
     int rc = 0;
     try {
-        auto state = r->run().wait();
+        auto state = wait_bounded(r->run());
         auto t1 = std::chrono::steady_clock::now();
         if (r->cached)
             r->cached->in_flight = false;
