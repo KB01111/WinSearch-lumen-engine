@@ -137,6 +137,27 @@ public sealed class SettingsViewModelTests
     }
 
     [Fact]
+    public async Task NpuBackend_IsSelectableAndAutoPrefersTheNpu()
+    {
+        var fake = new FakeEngineClient
+        {
+            CurrentConfig = new EngineConfig { SemanticEnabled = true, PreferredBackend = "npu" },
+        };
+        using var vm = new SettingsViewModel(new AppSettings(), fake);
+
+        await vm.InitializeAsync();
+
+        Assert.Contains("npu", SettingsViewModel.BackendOptions);
+        Assert.Equal("npu", vm.SelectedBackend);
+        Assert.Contains("NPU", vm.DetectedBackendDisplay);
+        Assert.Contains("falls back", vm.DetectedBackendDisplay);
+
+        vm.SelectedBackend = "auto";
+        Assert.Equal("auto", fake.SetConfigCalls.Single().PreferredBackend);
+        Assert.StartsWith("Auto (AMD NPU >", vm.DetectedBackendDisplay);
+    }
+
+    [Fact]
     public async Task RejectedSetConfig_RevertsUiToEngineConfig_AndSetsErrorText()
     {
         var fake = new FakeEngineClient

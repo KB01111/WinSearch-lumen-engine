@@ -17,7 +17,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         Enum.GetValues<AppTheme>();
 
     public static IReadOnlyList<string> BackendOptions { get; } =
-        ["auto", "cuda", "vulkan", "cpu"];
+        ["auto", "npu", "cuda", "vulkan", "cpu"];
 
     private readonly AppSettings _settings;
     private readonly IEngineClient? _client;
@@ -112,7 +112,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     private string _selectedBackend = "auto";
 
     [ObservableProperty]
-    private string _detectedBackendDisplay = "Auto (CUDA > Vulkan > CPU)";
+    private string _detectedBackendDisplay = "Auto (AMD NPU > CUDA > Vulkan > CPU)";
 
     public void Initialize()
     {
@@ -361,10 +361,11 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     {
         DetectedBackendDisplay = SelectedBackend switch
         {
+            "npu" => "AMD NPU (Ryzen AI — falls back to GPU, then CPU, if unavailable)",
             "cuda" => "CUDA (NVIDIA GPU — falls back to CPU if unavailable)",
             "vulkan" => "Vulkan (GPU — falls back to CPU if unavailable)",
             "cpu" => "CPU only",
-            _ => "Auto (CUDA > Vulkan > CPU)",
+            _ => "Auto (AMD NPU > CUDA > Vulkan > CPU)",
         };
     }
 

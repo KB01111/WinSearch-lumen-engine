@@ -645,7 +645,7 @@ impl EngineService {
                 id: Some(id),
                 code: ErrorCode::InvalidRequest,
                 message: format!(
-                    "preferred_backend must be auto|cuda|vulkan|cpu, got {:?}",
+                    "preferred_backend must be auto|npu|cuda|vulkan|cpu, got {:?}",
                     config.preferred_backend
                 ),
             });

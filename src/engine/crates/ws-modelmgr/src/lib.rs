@@ -21,5 +21,6 @@ pub use download::{download_file, DownloadError, DownloadOptions, ProgressFn};
 pub use manager::{ModelManager, ModelState, ModelStatus, ManagerError};
 pub use manifest::{
     ExpectedFile, ModelCompat, EMBEDDING_DIM, EMBEDDING_MODEL_META_KEY, EXPECTED_FILES,
-    MMPROJ_FILE, MODEL_ID, REPO_COMMIT, TEXT_FILE,
+    MMPROJ_FILE, MODEL_ID, NPU_BUNDLE_DIR, NPU_BUNDLE_FILES, NPU_MODEL_ID, NPU_REPO_COMMIT,
+    REPO_COMMIT, TEXT_FILE,
 };

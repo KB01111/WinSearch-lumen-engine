@@ -783,6 +783,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "taconite"
+version = "0.1.1"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "taconite-bundle"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef1291f1d87a82393d93ef899d4b97a73e803bf26627312748332e0b403b41fa"
+
+[[package]]
+name = "taconite-embeddinggemma2"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b9abd0596b3674612bd545b04faf1f0fd6094b8fcc83488bcfcdd139d36b76e"
+dependencies = [
+ "taconite",
+ "taconite-bundle",
+]
+
+[[package]]
 name = "thiserror"
 version = "2.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1631,6 +1654,8 @@ dependencies = [
  "cmake",
  "serde",
  "serde_json",
+ "taconite",
+ "taconite-embeddinggemma2",
  "thiserror",
  "tracing",
  "ws-platform",

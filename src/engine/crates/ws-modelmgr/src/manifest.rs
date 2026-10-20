@@ -50,14 +50,43 @@ pub struct ExpectedFile {
 }
 
 impl ExpectedFile {
-    /// `https://huggingface.co/<MODEL_ID>/resolve/<REPO_COMMIT>/<name>`.
+    /// `https://huggingface.co/<repo>/resolve/<commit>/<path>`: the GGUFs come
+    /// from [`MODEL_ID`] at [`REPO_COMMIT`]; files under [`NPU_BUNDLE_DIR`]
+    /// come from [`NPU_MODEL_ID`] at [`NPU_REPO_COMMIT`], without the prefix.
     pub fn url(&self) -> String {
-        format!(
-            "https://huggingface.co/{MODEL_ID}/resolve/{REPO_COMMIT}/{}",
-            self.name
-        )
+        match self.npu_bundle_path() {
+            Some(path) => {
+                format!("https://huggingface.co/{NPU_MODEL_ID}/resolve/{NPU_REPO_COMMIT}/{path}")
+            }
+            None => format!(
+                "https://huggingface.co/{MODEL_ID}/resolve/{REPO_COMMIT}/{}",
+                self.name
+            ),
+        }
+    }
+
+    /// The repository-relative path of an NPU bundle file, `None` for a GGUF.
+    pub fn npu_bundle_path(&self) -> Option<&'static str> {
+        self.name
+            .strip_prefix(NPU_BUNDLE_DIR)
+            .and_then(|rest| rest.strip_prefix('/'))
     }
 }
+
+/// AMD Ryzen AI NPU2 (AIE2P: Strix Point, Strix Halo, Krackan) export of the
+/// same `google/embeddinggemma-2` weights: compiled IRON kernels plus packed
+/// bf16 weights, replayed by `taconite-embeddinggemma2`. It is the primary
+/// text/image model when an NPU2 is present; the GGUFs above stay required
+/// for audio and as the GPU/CPU fallback.
+pub const NPU_MODEL_ID: &str = "brishen/iron-embeddinggemma2-npu2";
+
+/// Bundle revision the sizes and hashes in [`NPU_BUNDLE_FILES`] were read at.
+pub const NPU_REPO_COMMIT: &str = "052b6a44fe2478d86aec2cd65fbd03ea24279a9e";
+
+/// Subdirectory of the model directory that holds the bundle.
+pub const NPU_BUNDLE_DIR: &str = "iron-embeddinggemma2-npu2";
+
+include!("npu_bundle_files.rs");
 
 /// Both GGUFs, in download order (text weights first).
 pub const EXPECTED_FILES: [ExpectedFile; 2] = [
@@ -183,6 +212,36 @@ mod tests {
             EXPECTED_FILES[1].sha256,
             Some("c4a8a52691ecef40618438928bdf9e68379b854e24166f292592353db0aab64f")
         );
+    }
+
+    #[test]
+    fn npu_bundle_is_pinned_and_served_from_its_own_repo() {
+        assert_eq!(NPU_BUNDLE_FILES.len(), NPU_BUNDLE_FILE_COUNT);
+        assert_eq!(
+            NPU_BUNDLE_FILES.iter().map(|f| f.size).sum::<u64>(),
+            NPU_BUNDLE_TOTAL_BYTES
+        );
+        let mut names = std::collections::HashSet::new();
+        for f in &NPU_BUNDLE_FILES {
+            assert!(names.insert(f.name), "duplicate {}", f.name);
+            let path = f.npu_bundle_path().expect("bundle files live under NPU_BUNDLE_DIR");
+            assert!(!path.contains(".."));
+            assert_eq!(
+                f.url(),
+                format!("https://huggingface.co/{NPU_MODEL_ID}/resolve/{NPU_REPO_COMMIT}/{path}")
+            );
+            let hash = f.sha256.expect("bundle files must pin SHA-256");
+            assert_eq!(hash.len(), 64);
+            assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+        }
+        for required in ["manifest.txt", "tensors.txt", "tensors.bin", "kernels/tgemm.xclbin"] {
+            assert!(
+                NPU_BUNDLE_FILES.iter().any(|f| f.npu_bundle_path() == Some(required)),
+                "{required} missing"
+            );
+        }
+        // GGUFs keep their own repository.
+        assert!(EXPECTED_FILES.iter().all(|f| f.npu_bundle_path().is_none()));
     }
 
     #[test]

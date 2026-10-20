@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "bins/*"]
+members = ["crates/*", "bins/*", "third_party/taconite"]
 
 [workspace.package]
 version = "0.1.0"
@@ -22,6 +22,7 @@ tracing-appender = "0.2"
 windows = { version = "0.61", features = [
     "Foundation",
     "Foundation_Collections",
+    "Win32_Devices_DeviceAndDriverInstallation",
     "Globalization",
     "Graphics_Imaging",
     "Media_Ocr",
@@ -58,6 +59,15 @@ ws-embed-protocol = { path = "crates/ws-embed-protocol" }
 ws-extract = { path = "crates/ws-extract" }
 ws-code = { path = "crates/ws-code" }
 ignore = "0.4"
+# AMD NPU2 runtime for the IRON EmbeddingGemma 2 bundle. `xrt` only: the
+# `direct` amdxdna ioctl path is Linux-only.
+taconite = { version = "0.1.1", default-features = false, features = ["xrt"] }
+taconite-embeddinggemma2 = { version = "0.2.0", default-features = false, features = ["xrt"] }
+
+# taconite's own build script is Linux/g++-only; the vendored copy builds the
+# XRT shim on Windows (MSVC) and falls back to a stub without an XRT SDK.
+[patch.crates-io]
+taconite = { path = "third_party/taconite" }
 
 [profile.release]
 lto = "thin"

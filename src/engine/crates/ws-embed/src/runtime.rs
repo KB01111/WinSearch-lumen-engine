@@ -41,6 +41,8 @@ pub enum EmbedError {
     BadPath(String),
     #[error("embedding batch is empty")]
     EmptyBatch,
+    #[error("NPU inference failed: {0}")]
+    NpuFailed(String),
 }
 
 /// Options for [`EmbedRuntime::load`].

@@ -14,6 +14,10 @@
 //! - `embed_image {id, path, token_budget?}` → real70/140/280token image embeddings
 //! - `hello` / `status` / `shutdown` for handshake, health, and teardown.
 //!
+//! `backend` names what served a job: `npu` (AMD NPU, IRON bundle), `cuda`,
+//! `vulkan`, `cpu`, or `npu+<gpu/cpu>` when the NPU's time budget ran out
+//! mid-batch and the rest fell back.
+//!
 //! [`stub_vector`] provides the deterministic fake-embedding path used when no
 //! model file is available (`WS_EMBED_STUB=1` / `--stub`): seeded by the input
 //! text, L2-normalized, [`STUB_DIM`] wide. Tests use it; production never does.
@@ -105,6 +109,12 @@ pub enum EmbedResponse {
         dim: usize,
         uptime_secs: u64,
         jobs_served: u64,
+        /// AMD NPU use: `"ready"` while it serves text/image jobs, otherwise
+        /// why it does not (no NPU, preference, bundle missing, load or run
+        /// failure). Absent before the first job probes it, and from workers
+        /// that predate the NPU runtime.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        npu: Option<String>,
     },
     Error {
         id: Option<RequestId>,
@@ -237,6 +247,28 @@ mod tests {
         let back: EmbedResponse = serde_json::from_str(&json).unwrap();
         assert_eq!(resp, back);
         assert_eq!(back.id(), Some(7));
+    }
+
+    #[test]
+    fn worker_status_npu_field_is_optional_on_the_wire() {
+        let legacy = r#"{"type":"worker_status","id":1,"model_loaded":true,"backend":"cpu","stub":false,"dim":768,"uptime_secs":3,"jobs_served":2}"#;
+        let EmbedResponse::WorkerStatus { npu, .. } = serde_json::from_str(legacy).unwrap() else {
+            panic!("expected worker_status");
+        };
+        assert_eq!(npu, None);
+        let current = EmbedResponse::WorkerStatus {
+            id: 1,
+            model_loaded: true,
+            backend: Some("npu".into()),
+            stub: false,
+            dim: 768,
+            uptime_secs: 3,
+            jobs_served: 2,
+            npu: Some("ready".into()),
+        };
+        let json = serde_json::to_string(&current).unwrap();
+        assert!(json.contains(r#""npu":"ready""#));
+        assert_eq!(serde_json::from_str::<EmbedResponse>(&json).unwrap(), current);
     }
 
     #[test]

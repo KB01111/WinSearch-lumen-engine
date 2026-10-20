@@ -36,6 +36,8 @@ fn main() {
     println!("cargo:rerun-if-env-changed=WS_EMBED_NO_CUDA");
     println!("cargo:rerun-if-env-changed=WS_EMBED_NO_VULKAN");
 
+    delay_load_npu_shim();
+
     if env::var_os("WS_EMBED_SKIP_NATIVE").is_some() {
         println!("cargo:warning=ws-embed: WS_EMBED_SKIP_NATIVE set, native build skipped");
         return;
@@ -50,6 +52,18 @@ fn main() {
     let install = build_llama(&src, cuda, vulkan);
     build_shim(&src, &install);
     link(&install);
+}
+
+/// The NPU runtime's XRT shim (`iron_xrt_shim.dll`, see
+/// `third_party/taconite/build.rs`) is delay-loaded so this crate's tests and
+/// examples start on PCs without the AMD NPU driver; `delayimp` reaches every
+/// dependent binary, which adds its own `/DELAYLOAD` (`winsearch-embed`).
+/// A stub build has no such import; MSVC then only warns (LNK4199).
+fn delay_load_npu_shim() {
+    if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        println!("cargo:rustc-link-lib=delayimp");
+        println!("cargo:rustc-link-arg=/DELAYLOAD:iron_xrt_shim.dll");
+    }
 }
 
 fn on_off(b: bool) -> &'static str {

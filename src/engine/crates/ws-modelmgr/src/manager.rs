@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::download::{download_file, verify_file, DownloadError, DownloadOptions, ProgressFn};
-use crate::manifest::{ExpectedFile, EXPECTED_FILES};
+use crate::manifest::{ExpectedFile, EXPECTED_FILES, NPU_BUNDLE_DIR, NPU_BUNDLE_FILES};
 
 /// Lifecycle of the on-disk model, mirrored 1:1 on the IPC wire
 /// (`model_status`) and in `WinSearch.Core`.
@@ -91,6 +91,24 @@ impl ModelManager {
             files,
             verified: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Adds the AMD NPU2 bundle ([`NPU_BUNDLE_FILES`]) ahead of the GGUFs: it
+    /// is the primary text/image model on NPU machines and downloads first.
+    /// The GGUFs stay part of the set (audio and the GPU/CPU fallback), so
+    /// `Ready` means every runtime the worker may pick is installed.
+    pub fn with_npu_bundle(mut self) -> Self {
+        if !self.files.iter().any(|f| f.npu_bundle_path().is_some()) {
+            let mut files = NPU_BUNDLE_FILES.to_vec();
+            files.append(&mut self.files);
+            self.files = files;
+        }
+        self
+    }
+
+    /// Whether this manager's file set includes the NPU bundle.
+    pub fn includes_npu_bundle(&self) -> bool {
+        self.files.iter().any(|f| f.npu_bundle_path().is_some())
     }
 
     pub fn dir(&self) -> &Path {
@@ -204,7 +222,12 @@ impl ModelManager {
                         self.total_bytes(),
                     )));
                 }
-                let src = path.join(f.name);
+                // A bundle directory may be imported as-is (`hf download
+                // ... --local-dir <dir>` puts its files at the top level).
+                let src = Some(path.join(f.name))
+                    .filter(|p| p.is_file())
+                    .or_else(|| f.npu_bundle_path().map(|rel| path.join(rel)))
+                    .unwrap_or_else(|| path.join(f.name));
                 if src.is_file() {
                     self.import_one(f, &src, cancel)?;
                     any = true;
@@ -263,6 +286,12 @@ impl ModelManager {
                 fs::remove_file(&import_tmp)?;
             }
         }
+        if self.includes_npu_bundle() {
+            // Only directories the bundle created, and only once empty.
+            for sub in ["kernels", ""] {
+                let _ = fs::remove_dir(self.dir.join(NPU_BUNDLE_DIR).join(sub));
+            }
+        }
         Ok(self.status())
     }
 
@@ -288,6 +317,7 @@ impl ModelManager {
         // never leaves a truncated model file behind.
         let dest = self.dir.join(expected.name);
         let tmp = self.dir.join(format!("{}.import-tmp", expected.name));
+        fs::create_dir_all(dest.parent().unwrap_or(&self.dir))?;
         let mut reader = fs::File::open(src)?;
         let copy_res = (|| -> Result<Option<Sha256>, ManagerError> {
             let mut out = fs::File::create(&tmp)?;
@@ -564,6 +594,51 @@ mod tests {
 
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&src);
+    }
+
+    /// An NPU bundle directory imports from its flat `hf download` layout into
+    /// `<model dir>/<bundle>/...`, and delete removes the created directories.
+    #[test]
+    fn npu_bundle_imports_flat_layout_and_deletes_its_directories() {
+        use sha2::{Digest, Sha256};
+        let dir = temp_dir("npu-bundle");
+        let src = temp_dir("npu-bundle-src");
+        let bodies = vec![
+            (leak("iron-embeddinggemma2-npu2/manifest.txt"), vec![1u8; 100]),
+            (leak("iron-embeddinggemma2-npu2/kernels/k.insts.bin"), vec![2u8; 300]),
+        ];
+        let files: Vec<ExpectedFile> = bodies
+            .iter()
+            .map(|(name, body)| ExpectedFile {
+                name: *name,
+                size: body.len() as u64,
+                sha256: Some(Box::leak(format!("{:x}", Sha256::digest(body)).into_boxed_str())),
+            })
+            .collect();
+        fs::create_dir_all(src.join("kernels")).unwrap();
+        fs::write(src.join("manifest.txt"), &bodies[0].1).unwrap();
+        fs::write(src.join("kernels").join("k.insts.bin"), &bodies[1].1).unwrap();
+        let mgr = ModelManager::with_files(dir.clone(), DownloadOptions::default(), files);
+        assert!(mgr.includes_npu_bundle());
+        let s = mgr.import(&src, &AtomicBool::new(false)).unwrap();
+        assert_eq!(s.state, ModelState::Ready);
+        assert_eq!(
+            fs::read(dir.join(NPU_BUNDLE_DIR).join("kernels").join("k.insts.bin")).unwrap(),
+            bodies[1].1
+        );
+        mgr.delete().unwrap();
+        assert!(!dir.join(NPU_BUNDLE_DIR).exists());
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&src);
+    }
+
+    #[test]
+    fn npu_bundle_downloads_before_the_ggufs() {
+        let mgr = ModelManager::new(PathBuf::from("unused")).with_npu_bundle().with_npu_bundle();
+        assert_eq!(mgr.files.len(), NPU_BUNDLE_FILES.len() + EXPECTED_FILES.len());
+        assert!(mgr.files[0].npu_bundle_path().is_some());
+        assert_eq!(mgr.files.last().unwrap().name, EXPECTED_FILES[1].name);
+        assert!(!ModelManager::new(PathBuf::from("unused")).includes_npu_bundle());
     }
 
     /// A pre-set cancel flag aborts the import immediately (deterministic),

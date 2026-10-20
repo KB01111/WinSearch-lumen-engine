@@ -577,16 +577,19 @@ pub struct ScoredSegment {
 pub enum PreferredBackend {
     #[default]
     Auto,
+    /// AMD NPU first; GPU/CPU without one (same order as `Auto` after it).
+    Npu,
     Cuda,
     Vulkan,
     Cpu,
 }
 
 impl PreferredBackend {
-    /// Canonical wire/store spelling (`auto|cuda|vulkan|cpu`).
+    /// Canonical wire/store spelling (`auto|npu|cuda|vulkan|cpu`).
     pub fn as_str(self) -> &'static str {
         match self {
             PreferredBackend::Auto => "auto",
+            PreferredBackend::Npu => "npu",
             PreferredBackend::Cuda => "cuda",
             PreferredBackend::Vulkan => "vulkan",
             PreferredBackend::Cpu => "cpu",
@@ -598,6 +601,7 @@ impl PreferredBackend {
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_ascii_lowercase().as_str() {
             "auto" => Some(PreferredBackend::Auto),
+            "npu" => Some(PreferredBackend::Npu),
             "cuda" => Some(PreferredBackend::Cuda),
             "vulkan" => Some(PreferredBackend::Vulkan),
             "cpu" => Some(PreferredBackend::Cpu),
@@ -680,6 +684,8 @@ mod tests {
     fn backend_spellings_round_trip_and_reject_unknown() {
         for (text, want) in [
             ("auto", PreferredBackend::Auto),
+            ("npu", PreferredBackend::Npu),
+            ("NPU", PreferredBackend::Npu),
             ("cuda", PreferredBackend::Cuda),
             ("vulkan", PreferredBackend::Vulkan),
             ("cpu", PreferredBackend::Cpu),

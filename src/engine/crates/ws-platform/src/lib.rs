@@ -6,6 +6,7 @@ pub mod source_guard;
 pub mod content;
 pub mod child_job;
 pub mod ifilter;
+pub mod npu;
 pub mod ocr;
 pub mod paths;
 pub mod pdfium;

@@ -428,7 +428,7 @@ public sealed class ModelStatus
 /// <summary>
 /// Engine search policy (mirrors the Rust EngineConfig verbatim).
 /// PreferredBackend is a plain string on the wire (canonical
-/// "auto|cuda|vulkan|cpu"); the engine refuses unknown spellings with
+/// "auto|npu|cuda|vulkan|cpu"); the engine refuses unknown spellings with
 /// invalid_request at set_config time.
 /// </summary>
 public sealed class EngineConfig
