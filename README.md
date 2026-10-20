@@ -90,10 +90,11 @@ failures are retained.
 - [ ] Verify consumer handling of empty/superseded results and the full
   pause/resume/revoke matrix after the cache-retention fix; preserve current
   source fences and retained failure evidence.
-- [ ] Implement the typed WinSearch adapter behind Lumen's existing SearchService.
-  Forward accumulated streaming snapshots through the catalogue wrapper and
-  launcher controller; preserve latest-request selection, cancellation and empty
-  Recent queries. Keep secured IPC, grants and actions in Lumen's Rust host.
+- [ ] Implement the typed native WinSearch adapter behind Lumen's existing
+  SearchService. Connect it to the
+  [verified catalogue/launcher streaming consumer](https://github.com/KB01111/Lumen/blob/codex/winsearch-engine-adapter/docs/reports/2026-10-20-winsearch-stream-consumer.md),
+  preserving latest-request selection, native cancellation and empty Recent
+  queries. Keep secured IPC, grants and actions in Lumen's Rust host.
 - [ ] Complete consumer/restart/installed verification of process-bound pipe
   authentication, retaining the verified process handle through every connection.
 - [ ] Launch Lumen's engine with deferred root admission and verify current
@@ -104,7 +105,9 @@ failures are retained.
   must remain pinnable without fabricated content hashes or extraction records.
 - [ ] Preserve Recent/Related results, pins, history and answer-context admission,
   with current source/root checks before previews, actions and answers. Preserve
-  consented OCR/transcription enrichment in the authoritative engine path.
+  consented OCR/transcription enrichment in the authoritative engine path;
+  complete source-bound enrichment ingestion and explicit engine index reset
+  before retiring their legacy routes.
 - [ ] Integrate owned engine startup/shutdown, streaming, cancellation, status,
   indexing progress, model management and recoverable errors. Verify launcher
   input, result selection and native Stop remain responsive.

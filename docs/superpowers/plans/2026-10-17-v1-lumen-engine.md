@@ -99,6 +99,30 @@ Route preview/open through current admitted identities and native confinement.
 - [ ] Full required Lumen tests/typecheck/lint/native build and isolated native
   UI evidence; commit and independently review before publication.
 
+### Cutover ordering verified against the current consumer
+
+At Lumen `79460cc`, `IndexRuntime::open` starts the inventory/content worker
+itself; `lib.rs` separately starts the embedding/enrichment lifecycle. Removing
+only that lifecycle call would retain a second crawler. `stop_index_worker`
+also invalidates the generation/Stop guards used by previews and commits, and
+worker threads join only on final ownership drop. Use a metadata-only startup
+path with independent current engine admission/Stop state, rather than treating
+the stopped legacy runtime as the active source authority.
+
+Before migration, create an integrity-checked recoverable database backup.
+Transactionally retain the existing IDs, metadata, pin timestamps and open
+history in the host ledger. Bind engine IDs in both directions using the host
+profile and the correct ordinary/code database namespace. A retained path or
+ledger row never authorizes a source read: resolve the current engine reference
+and recheck grants for Recent, Related, previews, actions, answers, MCP and
+Windows AI callers. Preserve legacy content until migration/recovery checks pass.
+
+After settings hydration, acknowledge the current canonical folder policy before
+admitting results. Complete source-bound consented enrichment ingestion and the
+explicit engine index-reset contract before retiring their legacy routes; the
+current `d4f1448` protocol has neither operation. Keep content/jobs in the one
+authoritative engine, and user metadata/history in the host ledger.
+
 ## Task 3: Engine-only payload and installed Lumen acceptance
 
 Reuse the final WinSearch release assembly's daemon/workers/DLLs/notices/hashes

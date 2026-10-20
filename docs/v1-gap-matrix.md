@@ -17,7 +17,14 @@ baseline is refreshed to `3b60ba4`; owned startup is published, while the search
 adapter and data migration remain pending. The
 [optimized release package](validation/2026-10-20-release-runtime/README.md) now
 passes actual-model, both native profiles, frozen retrieval and outside-checkout
-functional gates; consumer pinning, controlled performance and installed gates remain.
+functional gates; consumer query/migration, controlled performance and installed gates remain.
+
+Lumen `ec8ec9c` now publishes the
+[accumulated-snapshot consumer](https://github.com/KB01111/Lumen/blob/codex/winsearch-engine-adapter/docs/reports/2026-10-20-winsearch-stream-consumer.md):
+787 configured unit tests, 131 Edge functional tests, four unchanged production
+profiling tests, typecheck/lint and frontend build pass. Native query/root/grant
+forwarding, user-data migration and the single-index cutover remain open. These
+fixture/browser checks do not replace native or installed acceptance.
 
 Paths below are repository-relative. `engine` means `src/engine`, `app` means
 `src/app`. “Scoped verified” means the named implementation/tests passed for
