@@ -24,6 +24,20 @@ Each message is a frame:
 - A clean end-of-stream (0 bytes at a frame boundary) means the peer closed.
 - A truncated frame is an error and tears down the connection.
 
+Server frame writes have a five-second absolute deadline from the first write
+through codec flush. Partial reads do not restart it. The server uses overlapped
+pipe I/O, cancels and drains pending writes before releasing their buffers, and
+closes the endpoint after transport failure or expiry. A partial frame is never
+reused. Successful flush resets the budget for the next frame; idle time between
+frames does not expire a connection. This is a transport deadline, independent
+of search/model computation and client request deadlines.
+
+Broadcasts snapshot the client list before writing and unregister failed peers,
+canceling their outstanding requests without holding the global registry during
+I/O. Delivery to the snapshot remains serial. The
+[native writer checkpoint](validation/2026-10-20-ipc-writer/README.md) records
+the tests and the pending release-package/consumer checks.
+
 The payload encoding is JSON for debuggability; a compact binary encoding is
 only adopted if profiling shows a measurable benefit.
 

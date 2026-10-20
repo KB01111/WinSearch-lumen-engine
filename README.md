@@ -72,6 +72,10 @@ deadlines. [Lumen PR #27](https://github.com/KB01111/Lumen/pull/27) now pins and
 stages that release with a passing two-profile native contract/PID/Stop test.
 Consumer integration and controlled performance acceptance remain open; earlier
 failures are retained.
+The [IPC writer checkpoint](docs/validation/2026-10-20-ipc-writer/README.md)
+bounds server frame writes, closes partial transports and removes failed
+broadcast clients without holding the global client registry. Its native
+regressions pass; the staged release still uses the earlier verified engine.
 
 ### Lumen integration and native contract
 
@@ -157,8 +161,10 @@ failures are retained.
   fullscreen/gaming and CPU/GPU pressure while preserving search responsiveness.
 - [ ] Complete the combined crash/restart, worker cancellation, interrupted model
   download/resumption, database migration, low-disk and disconnected-drive matrix.
-- [ ] Bound stalled raw IPC writers and verify control/cancellation/resource
-  behavior; client deadlines alone do not prove server-side responsiveness.
+- [ ] Rebuild and stage the bounded IPC transport, then complete packaged,
+  concurrent-client and installed control/cancellation/resource checks. Native
+  frame-deadline and failed-broadcast cleanup regressions now pass; client
+  deadlines alone do not prove server-side responsiveness.
 - [ ] Run the final unchanged Rust workspace, .NET, Windows IPC/watcher,
   real-model/reference and retrieval suites, including negative controls.
 
@@ -174,7 +180,8 @@ failures are retained.
 - [ ] Test outside the checkout and through clean install/upgrade/uninstall on
   Windows, including the installed Lumen consumer and missing/corrupt dependencies.
 - [ ] Resolve valid outstanding review findings and complete the broad final
-  security, privacy, reliability and accessibility review.
+  security, privacy, reliability and accessibility review. Clear the recorded
+  strict Clippy failures in unchanged model-manager and daemon code.
 - [ ] Reconcile the feature checklist, benchmarks and PR with final-source
   evidence and remaining limitations before declaring v1.0 complete.
 

@@ -30,6 +30,10 @@ use crate::embed_client::EmbedSupervisor;
 use crate::indexer::Indexer;
 use crate::model::ModelService;
 
+#[cfg(test)]
+#[path = "ipc_writer_tests.rs"]
+mod ipc_writer_tests;
+
 use ws_index::retrieval::{hybrid_score, semantic_admitted};
 #[cfg(test)]
 use ws_index::retrieval::{hybrid_base_score, exact_token_boost, recency_boost, MIN_SEMANTIC_COSINE};
@@ -311,10 +315,11 @@ impl EngineService {
     /// Sends one message to every connected client (used by the model
     /// service's progress pushes as well as status broadcasts).
     pub fn push_to_all(&self, msg: &ServerMessage) {
-        let clients = self.clients.lock().unwrap_or_else(|p| p.into_inner());
-        for client in clients.iter() {
+        let clients = self.clients.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        for client in &clients {
             if let Err(e) = client.send(msg) {
                 info!(client = client.id, error = %e, "dropping unreachable client");
+                self.unregister_client(client);
             }
         }
     }

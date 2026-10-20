@@ -1,0 +1,193 @@
+{
+  "date": "2026-10-20",
+  "platform": "Windows x64",
+  "baseCommit": "92b6509b9d183e0049d4ddf6c2b41c3674ede002",
+  "testedWorktreeSourceSha256": {
+    "src/engine/crates/ws-platform/src/pipe.rs": "ff913a863824000ec0a63b99889f4bcde0f95a79380b9f4e364e23c584ba7be4",
+    "src/engine/crates/ws-platform/src/pipe_tests.rs": "8b8b32ae568c503fce338228f0bc51e55e734c673b7afaff965c83e6e56ec2cf",
+    "src/engine/bins/winsearchd/src/engine.rs": "9d99a811a6e0e98f208a6cdbeea4cacba37fb84d9b99d255ad2c6b62afa2fa6e",
+    "src/engine/bins/winsearchd/src/ipc_writer_tests.rs": "b43556e2ab1c86260f5322f507f82ac61baf8d38b64968a8df5341185522dbef"
+  },
+  "committedLfSourceSha256": {
+    "src/engine/crates/ws-platform/src/pipe.rs": "ff913a863824000ec0a63b99889f4bcde0f95a79380b9f4e364e23c584ba7be4",
+    "src/engine/crates/ws-platform/src/pipe_tests.rs": "8b8b32ae568c503fce338228f0bc51e55e734c673b7afaff965c83e6e56ec2cf",
+    "src/engine/bins/winsearchd/src/engine.rs": "9d99a811a6e0e98f208a6cdbeea4cacba37fb84d9b99d255ad2c6b62afa2fa6e",
+    "src/engine/bins/winsearchd/src/ipc_writer_tests.rs": "b43556e2ab1c86260f5322f507f82ac61baf8d38b64968a8df5341185522dbef"
+  },
+  "affectedTests": {
+    "passed": 365,
+    "failed": 0,
+    "ignored": 0,
+    "perTargetPassed": [
+      252,
+      59,
+      0,
+      24,
+      20,
+      5,
+      2,
+      3
+    ],
+    "exitCode": 0
+  },
+  "commands": [
+    {
+      "command": "cargo test --locked -p ws-platform writer_tests -- --test-threads=1",
+      "stage": "red",
+      "exitCode": 1
+    },
+    {
+      "command": "cargo test --locked -p ws-platform writer_tests -- --test-threads=1",
+      "stage": "green",
+      "exitCode": 0
+    },
+    {
+      "command": "cargo test --locked -p winsearchd ipc_writer_tests -- --test-threads=1",
+      "stage": "registry-red",
+      "exitCode": 1
+    },
+    {
+      "command": "cargo test --locked -p ws-platform frame_expiring_before_flush -- --test-threads=1",
+      "stage": "flush-red",
+      "exitCode": 1
+    },
+    {
+      "command": "cargo test --locked -p ws-platform -p ws-protocol -p ws-client -p winsearchd --all-targets -- --test-threads=1",
+      "stage": "affected",
+      "exitCode": 0
+    },
+    {
+      "command": "cargo clippy --locked -p ws-platform -p winsearchd --all-targets -- -D warnings",
+      "stage": "lint",
+      "exitCode": 1
+    },
+    {
+      "command": "cargo clippy --locked -p ws-platform -p winsearchd --all-targets --no-deps -- -D warnings",
+      "stage": "scoped-lint",
+      "exitCode": 1
+    },
+    {
+      "command": "cargo clippy --locked -p ws-platform --all-targets --no-deps -- -D warnings",
+      "stage": "platform-lint",
+      "exitCode": 0
+    },
+    {
+      "command": "rustfmt --edition 2021 --config skip_children=true --check src/engine/crates/ws-platform/src/pipe.rs src/engine/crates/ws-platform/src/pipe_tests.rs src/engine/bins/winsearchd/src/ipc_writer_tests.rs",
+      "exitCode": 0
+    }
+  ],
+  "shellNote": "Invoked through rtk proxy with VS x64 environment; exit codes are observed wrapper/tool exits; nested Cargo failure codes were not independently captured.",
+  "logs": {
+    "red": {
+      "sha256": "2f85022a28b16754820bb0e4f443f3ee4460ca8f90e49a3b77c88feacb1dd664",
+      "bytes": 4748,
+      "encoding": "utf-16"
+    },
+    "green": {
+      "sha256": "da55e6715daf7d906392c54b16eadb48d4348c8da5ff1408016711b94e275cd5",
+      "bytes": 2194,
+      "encoding": "utf-16"
+    },
+    "registry-red": {
+      "sha256": "d2c8cc403d56a23d4e973b0bce21e70c8b9cfd030f1424818a6318f9d127ecee",
+      "bytes": 6546,
+      "encoding": "utf-16"
+    },
+    "flush-red": {
+      "sha256": "ba404c132e35c878b1688fab14b9586b1c3a289c2278e1a0ff694c81ddcedede",
+      "bytes": 3170,
+      "encoding": "utf-16"
+    },
+    "affected": {
+      "sha256": "eb43c594312a7a7b326bdf59754a77d9db52610c401498f6e987483d801b335b",
+      "bytes": 69254,
+      "encoding": "utf-16"
+    },
+    "lint": {
+      "sha256": "9d14dc4d90039cadacea57a2fa702d0acba9d02da79e2c8ac82942c7b56357dd",
+      "bytes": 5080,
+      "encoding": "utf-16"
+    },
+    "scoped-lint": {
+      "sha256": "1fc3a9881c52bf0d67ca93a2bf7f8cb7da869e902f7780e9592990ef4dc29b47",
+      "bytes": 65646,
+      "encoding": "utf-16"
+    },
+    "platform-lint": {
+      "sha256": "29c26f0c4ad91e7640574b7e3e811ed963386c5414585e9fd8bb6798def2235b",
+      "bytes": 2210,
+      "encoding": "utf-16"
+    }
+  },
+  "strictBranchLint": {
+    "status": "failed",
+    "suppressed": false,
+    "reportedLocationLinesVerifiedUnchanged": 63,
+    "baselineCommandRerun": false,
+    "sourceSha256": {
+      "src/engine/crates/ws-modelmgr/src/download.rs": {
+        "baseSha256": "4f546112b11b43a7261c0583a6ce46c113081ab679aaa1841e37507f467999ce",
+        "currentSha256": "4f546112b11b43a7261c0583a6ce46c113081ab679aaa1841e37507f467999ce"
+      },
+      "src/engine/bins/winsearchd/src/extract.rs": {
+        "baseSha256": "9915a0c3a2d7480b38952c1e462310484010bc4322f2012ba7ab66ef3d5c97c7",
+        "currentSha256": "9915a0c3a2d7480b38952c1e462310484010bc4322f2012ba7ab66ef3d5c97c7"
+      },
+      "src/engine/bins/winsearchd/src/catalog.rs": {
+        "baseSha256": "56fc23452249d7e9a7740a25fa7010d37d0c858a3af0c658c814b89db60942c4",
+        "currentSha256": "56fc23452249d7e9a7740a25fa7010d37d0c858a3af0c658c814b89db60942c4"
+      },
+      "src/engine/bins/winsearchd/src/embed_client.rs": {
+        "baseSha256": "8bab594c8daa0c8984816ce899fff51153d918e1d79b7a282ae164e6d4e4104c",
+        "currentSha256": "8bab594c8daa0c8984816ce899fff51153d918e1d79b7a282ae164e6d4e4104c"
+      },
+      "src/engine/bins/winsearchd/src/engine.rs": {
+        "baseSha256": "3833c6433c2d195e1d0831cff4cc3a7128f999e21aa262efc84f215b1745bdc7",
+        "currentSha256": "9d99a811a6e0e98f208a6cdbeea4cacba37fb84d9b99d255ad2c6b62afa2fa6e"
+      },
+      "src/engine/bins/winsearchd/src/indexer.rs": {
+        "baseSha256": "458596a634122a85772bfe38834137fe45e0a879e8704e686004d24579ec6a24",
+        "currentSha256": "458596a634122a85772bfe38834137fe45e0a879e8704e686004d24579ec6a24"
+      },
+      "src/engine/bins/winsearchd/src/extract_client.rs": {
+        "baseSha256": "d2baf09c659d2228768d21a378a882d80fd51c26954e71f0571e4c5bb6b970e2",
+        "currentSha256": "d2baf09c659d2228768d21a378a882d80fd51c26954e71f0571e4c5bb6b970e2"
+      },
+      "src/engine/bins/winsearchd/src/model.rs": {
+        "baseSha256": "9b225e3a537064365e24158f38f17f7510b5cfd497ac7429622f11ded51d1904",
+        "currentSha256": "9b225e3a537064365e24158f38f17f7510b5cfd497ac7429622f11ded51d1904"
+      },
+      "src/engine/bins/winsearchd/src/root_policy_tests.rs": {
+        "baseSha256": "38ee4ae7f856a663f01837812e5366d9c9af8c7039c2e4a760bd21f67e1fe058",
+        "currentSha256": "38ee4ae7f856a663f01837812e5366d9c9af8c7039c2e4a760bd21f67e1fe058"
+      },
+      "src/engine/bins/winsearchd/src/policy.rs": {
+        "baseSha256": "b21f90f168dfd49813035f89789259761b10dd317b0b4d61ad94d65605ddacf8",
+        "currentSha256": "b21f90f168dfd49813035f89789259761b10dd317b0b4d61ad94d65605ddacf8"
+      },
+      "src/engine/bins/winsearchd/src/server.rs": {
+        "baseSha256": "9cbc05a8d25f0a36f64a4339a816691208c3f1ca56610f0f67efb0173190f86b",
+        "currentSha256": "9cbc05a8d25f0a36f64a4339a816691208c3f1ca56610f0f67efb0173190f86b"
+      },
+      "src/engine/bins/winsearchd/src/watcher.rs": {
+        "baseSha256": "f31c74386747a951454d7e980ad96397b7a4249a8395f840e6afaa504290bbfe",
+        "currentSha256": "f31c74386747a951454d7e980ad96397b7a4249a8395f840e6afaa504290bbfe"
+      }
+    }
+  },
+  "review": {
+    "model": "GPT-6.1 Sol",
+    "mode": "read-only",
+    "remainingScopedFindings": 0,
+    "resolvedFinding": "expire and close at codec flush"
+  },
+  "unchangedStagedEngineCommit": "d4f1448068d93d51120f7ec1e2a17395f88089f7",
+  "limits": [
+    "no new release rebuild/package adoption",
+    "no actual-model rerun",
+    "no full workspace/.NET/WinUI rerun",
+    "no installed, scale or GPU acceptance",
+    "broadcast fan-out remains serial",
+    "full v1.0 incomplete"
+  ]
+}

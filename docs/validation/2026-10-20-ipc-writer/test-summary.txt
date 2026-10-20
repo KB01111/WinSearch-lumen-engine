@@ -1,0 +1,42 @@
+STAGE red; raw log SHA-256 2f85022a28b16754820bb0e4f443f3ee4460ca8f90e49a3b77c88feacb1dd664
+test pipe::writer_tests::completed_frames_allow_idle_time_before_the_next_frame ... ok
+test pipe::writer_tests::stalled_frame_write_times_out_and_closes_the_endpoint ... FAILED
+test pipe::writer_tests::trickling_reader_cannot_extend_the_frame_deadline ... FAILED
+server write must expire while the peer stays open: Timeout
+test result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 20 filtered out; finished in 22.17s
+
+STAGE green; raw log SHA-256 da55e6715daf7d906392c54b16eadb48d4348c8da5ff1408016711b94e275cd5
+test pipe::writer_tests::completed_frames_allow_idle_time_before_the_next_frame ... ok
+test pipe::writer_tests::stalled_frame_write_times_out_and_closes_the_endpoint ... ok
+test pipe::writer_tests::trickling_reader_cannot_extend_the_frame_deadline ... ok
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 20 filtered out; finished in 16.20s
+
+STAGE registry-red; raw log SHA-256 d2c8cc403d56a23d4e973b0bce21e70c8b9cfd030f1424818a6318f9d127ecee
+test engine::ipc_writer_tests::stalled_broadcast_does_not_lock_registration_and_removes_only_the_failed_client ... FAILED
+a stalled writer held the global client registry
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 251 filtered out; finished in 0.28s
+
+STAGE flush-red; raw log SHA-256 ba404c132e35c878b1688fab14b9586b1c3a289c2278e1a0ff694c81ddcedede
+test pipe::writer_tests::frame_expiring_before_flush_closes_instead_of_reporting_success ... FAILED
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 23 filtered out; finished in 6.00s
+
+STAGE affected; raw log SHA-256 eb43c594312a7a7b326bdf59754a77d9db52610c401498f6e987483d801b335b
+test engine::ipc_writer_tests::stalled_broadcast_does_not_lock_registration_and_removes_only_the_failed_client ... ok
+test result: ok. 252 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 323.06s
+test result: ok. 59 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.93s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test pipe::writer_tests::completed_frames_allow_idle_time_before_the_next_frame ... ok
+test pipe::writer_tests::frame_expiring_before_flush_closes_instead_of_reporting_success ... ok
+test pipe::writer_tests::stalled_frame_write_times_out_and_closes_the_endpoint ... ok
+test pipe::writer_tests::trickling_reader_cannot_extend_the_frame_deadline ... ok
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 22.44s
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+STAGE lint; raw log SHA-256 9d14dc4d90039cadacea57a2fa702d0acba9d02da79e2c8ac82942c7b56357dd
+
+STAGE scoped-lint; raw log SHA-256 1fc3a9881c52bf0d67ca93a2bf7f8cb7da869e902f7780e9592990ef4dc29b47
+
+STAGE platform-lint; raw log SHA-256 29c26f0c4ad91e7640574b7e3e811ed963386c5414585e9fd8bb6798def2235b
