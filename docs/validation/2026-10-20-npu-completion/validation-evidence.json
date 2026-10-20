@@ -1,0 +1,90 @@
+{
+  "sourceCommit": "85a915d460b1fa751bbe86f289ff77c18c032c25",
+  "scope": "Actual NPU, CPU, synthetic/native fault fixtures and consumer evidence are separate; ignored gates are not passes.",
+  "rustPassed": 721,
+  "rustIgnored": 11,
+  "referenceTestSeconds": "48.57",
+  "recoveryTestSeconds": "49.20",
+  "logs": {
+    "rustWorkspace": {
+      "localLog": "artifacts/npu-final2-workspace.log",
+      "sha256": "8933ed443ed7a623ebe836e0e1d34c1d6a7ec054171858be97b5a09e476a1180",
+      "result": "721 passed;11 ignored;34 suites"
+    },
+    "clippy": {
+      "localLog": "artifacts/npu-final2-clippy.log",
+      "sha256": "06a6c5c87f0e1ae3b62d8f366d103b937eddd8181c124ce8c8b48480d1a94d46",
+      "result": "pass; existing warnings"
+    },
+    "releaseBuild": {
+      "localLog": "artifacts/npu-final2-release-build.log",
+      "sha256": "55b80c24a617c1c10be8d6c76dab324cdb22e619e7c2d516a49e7df03f6859c3",
+      "result": "pass; real Windows SDK shim"
+    },
+    "actualNpuReferences": {
+      "localLog": "artifacts/npu-final2-release-reference.log",
+      "sha256": "87ff17cf0e4a222b9c6bf8a09838ddfd008cf96cd0e43a0097c8e6fde2a5f0f3",
+      "result": "pass;18 application text;17 independent in-contract text;4 independent image;8 application image"
+    },
+    "actualExpiredDispatch": {
+      "localLog": "artifacts/npu-final2-deadline.log",
+      "sha256": "6d9c545172d1429f67ed80752ea6ad56faf4c6eba73e4af95089567cbffb7c5f",
+      "result": "pass;pre-launch expiration;forced75"
+    },
+    "nativeSupervisorRecovery": {
+      "localLog": "artifacts/npu-final2-recovery.log",
+      "sha256": "495a4c1f4d4123b382c411d1cc6452fa96830c470278a3f5dda92aa95bebdb05",
+      "result": "pass;simulated initialization/resource loss and active worker loss;actual NPU reset;CPU fallback;Stop"
+    },
+    "nativeGuardUnprotected": {
+      "localLog": "artifacts/npu-dispatch-guard-red.log",
+      "sha256": "0126ae895c8cda9af3ebd4c3cd44612cf6ee8635a4b05b165202a32636537245",
+      "result": "expected failure;8 post-launch failure cases"
+    },
+    "nativeGuardProtected": {
+      "localLog": "artifacts/npu-dispatch-guard-green.log",
+      "sha256": "94a3173a5eb3245a9a971983a319725e04224434f4ce5affb53ee972eeef65e6",
+      "result": "pass;3 tests;11 native child cases"
+    },
+    "python": {
+      "localLog": "artifacts/npu-python-final.log",
+      "sha256": "b2685cbd08e417d5aa5645f8cf37f0fc5819d61c8097d2e9449a9a50e8427ffb",
+      "result": "21 tests pass"
+    },
+    "dotnet": {
+      "localLog": "artifacts/npu-dotnet-final.log",
+      "sha256": "603af2ef338e3827e0f292454648f7a6ca0ede026c305acf1c675dca39ddcf00",
+      "result": "170 pass;no skips"
+    },
+    "winuiRelease": {
+      "localLog": "artifacts/npu-winui-release-final.log",
+      "sha256": "fa7cbf9ec38d5b39b2d2c91092d2fd64e72c01c48e94a26c8b8c474578dbedae",
+      "result": "pass;zero warnings/errors"
+    },
+    "globalFormatting": {
+      "localLog": "artifacts/npu-final2-fmt.log",
+      "sha256": "88d0dd1a025df3d74e0082357701bb52070e2053a0dcc0aa13a3e1d467bcc30f",
+      "result": "existing failure;baseline independently reproduced"
+    },
+    "baselineFormatting": {
+      "localLog": "artifacts/npu-fmt-baseline.log",
+      "sha256": "4633949c93f99b9a99b2e8423bebacc53db0b63a6f52a717a196e86c0dceea34",
+      "result": "same existing failure at b12a452"
+    },
+    "dllDetachUnprotected": {
+      "localLog": "artifacts/npu-native-teardown-red.log",
+      "sha256": "fd5c70fad00082e7bd5f5d85ec8881fb9e0eb2a9bdb7f03c3f62405299bec053",
+      "result": "expected failure;blocked DLL detach exceeds5s parent deadline"
+    },
+    "dllDetachProtected": {
+      "localLog": "artifacts/npu-native-teardown-green.log",
+      "sha256": "7a5b414a3b095d2432b01549ee720fa6ea6660ab65b37f76d42dee7938f3b52b",
+      "result": "pass;forced termination skips blocked DLL detach"
+    },
+    "liveHardware": {
+      "localLog": "artifacts/npu-final2-hardware.log",
+      "sha256": "a1b472b71979c5519e2eaa4d947e43721b73f4029254b73fc81e224bde2af0ae",
+      "result": "NPU Strix;installed XRT2.21.0;driver32.0.20102.3930;firmware1.1.2.64"
+    }
+  }
+}

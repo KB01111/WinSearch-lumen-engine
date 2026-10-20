@@ -13,9 +13,9 @@ initial IRON integration). Lumen's existing PR #27 is the package consumer.
 - [x] Additive Rust/C# diagnostics, cached status, actual modality backends.
 - [x] Bounded NPU initialization/execution, worker retirement and fallback
       quarantine, existing120second supervisor limit and independent Stop.
-- [ ] Verified engine-only package with real shim, licenses, native binary
+- [x] Verified engine-only package with real shim, licenses, native binary
       proof, independent manifest pin and outside-checkout execution.
-- [ ] PR #27 dependency/lock/package pin and allowlist update with native
+- [x] PR #27 dependency/lock/package pin and allowlist update with native
       two-profile ownership checks and required Lumen verification.
 
 ## Boundaries

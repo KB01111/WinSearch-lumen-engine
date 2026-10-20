@@ -63,7 +63,7 @@ def main():
         environment = {**os.environ, 'WS_EMBED_STUB': '0'}
         if args.clean_env:
             environment = {key: value for key, value in os.environ.items()
-                if not key.startswith(('WS_', 'LLAMA_', 'XRT_', 'TACONITE_', 'GGML_', 'VK_', 'CUDA_'))}
+                if not key.startswith(('WS_', 'WINSEARCH_', 'LLAMA_', 'XRT_', 'XILINX_', 'TACONITE_', 'GGML_', 'VK_', 'VULKAN_', 'CUDA_'))}
             environment['PATH'] = str(Path(os.environ['SystemRoot']) / 'System32')
         environment.update(WINSEARCH_DATA_DIR=str(data), WINSEARCH_INSTANCE_ID='media-runtime-test')
         environment['RUST_LOG'] = 'ws_embed=info,winsearch_embed=info'

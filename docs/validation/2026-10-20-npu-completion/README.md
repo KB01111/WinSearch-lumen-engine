@@ -1,8 +1,10 @@
 # Windows NPU completion evidence
 
 This report separates actual NPU inference, CPU references, synthetic recovery
-fixtures and the Lumen consumer. Package/consumer acceptance is pending until
-the final source, binary and independently pinned payload hashes are recorded.
+fixtures and the Lumen consumer. Runtime source is frozen at
+`85a915d460b1fa751bbe86f289ff77c18c032c25`; subsequent evidence/tooling commits
+do not change that source. The independently pinned package manifest SHA-256 is
+`171aedbb142c712520b768f524ca848a79aab519081cfc0209e8781e96d7390d`.
 
 ## Actual hardware and model
 
@@ -42,35 +44,107 @@ lowered or replaced. Audio remains on llama.cpp.
 ## Verification ledger
 
 - .NET170tests passed, no skips.
-- Python package/media contract18tests passed; includes stub/missing/stale shim,
+- Download cancellation retains resumable component partials. Import
+  cancellation/resume is covered through the model manager and replacement/
+  deletion; the existing download-cancel IPC remains download-only.
+- Python package/media/native-guard contract21tests passed; includes stub/missing/stale shim,
   changed source/commit, incomplete qualification and copied runtime-info checks.
-- Full Rust workspace:716passed,11ignored; final focused lifecycle and
+- Full final-source Rust workspace:721passed,11ignored; final focused lifecycle and
   supervisor suites also pass. A residency-handshake regression was corrected
   without allowing retired responses to record a successful backend.
-- Actual release reference test passed in105.60seconds, including CPU
+- Final source-checkpoint release reference test passed in48.57seconds, including CPU
   comparisons; this duration is not a latency benchmark.
 - All five frozen retrieval suites pass on NPU-requested and alternating
   CPU/NPU indexes. Negative-control false positives remain zero; pipeline2,
   semantic floor.65 and every frozen acceptance threshold are unchanged.
-- A real worker survived simulated device loss through CPU retry/quarantine,
-  deliberate reset back to NPU and Stop (103seconds, including a64-input
-  long-text fallback). Final exact-package recovery is recorded separately.
+- The final native supervisor recovery test passed in49.20seconds: simulated
+  initialization resource failure, CPU retry/quarantine, deliberate reset to
+  actual NPU, simulated device loss,64 long-text inputs retried on CPU,
+  quarantine/reset back to NPU and independent Stop. Faults terminate exact
+  retained owned process handles; they do not claim physical device removal.
 - A DLL with deliberately blocked process-detach cleanup made ordinary worker
   exit fail its5second independent parent deadline. Forced self-termination
   passed in.54seconds. This fixture tests driver/loader-lock recovery; it does
   not claim a physical driver failure was induced.
+- Final independent review found that a native wait error could destroy an
+  active cached run while Rust propagated the error. Windows start/wait and
+  terminal failure guards now force75 before caller run/buffer destruction.
+  A shared-header MSVC fixture failed all eight unprotected failure cases;
+  all11 guarded child cases pass, including success/pre-launch controls and
+  stack/run/global destructor sentinels. Linux retains its error behavior.
 - Clippy completes successfully with existing workspace warnings. Global
   rustfmt already fails on refreshed `b12a452`; native runtime files are
   formatted, and unrelated compact source formatting is preserved.
 
-Local raw logs are under ignored `artifacts/npu-*`. Final checked-in proof will
-record exact binary/source hashes and compact measured results. No model
-weights, AMD driver, or build SDK is redistributed with the engine.
+The [validation ledger](validation-evidence.json) records scope and hashes of
+the raw logs, including negative controls and the baseline formatting failure.
+Local raw logs are under ignored `artifacts/npu-*`. No model weights, AMD
+driver, or build SDK is redistributed with the engine. This payload contains
+CPU and NPU runtimes. CUDA/Vulkan fallback source paths are preserved; live
+CUDA/Vulkan execution is not part of this hardware/package evidence.
 
-## Open acceptance
+## Exact package and measurements
 
-Frozen NPU/mixed retrieval, real worker recovery/deadline tests, final copied
-package inference, measured cold/warm behavior, strict payload staging and
-Lumen's two-profile PID/admission/independent Stop test remain pending here.
+[Native proof](release-native-inputs.json) binds150 source files, the four Rust
+executables,32 adjacent libraries, SDK pin, reference log and all10 frozen
+retrieval runs. [Manifest](payload.json) declares69 files/221,486,715 bytes;
+[dependency closure](package-dependencies.json) audits all37 PE files, including
+FFmpeg/ffprobe, with zero unresolved imports. XRT is a trusted system prerequisite.
+The real shim and taconite/model-runtime license notices are included. Assembly
+rejects stub, absent/stale shim, mismatched source and incomplete qualification.
+
+[Copied-package results](package-inference.json) run the exact package from a
+temporary directory outside WinSearch and Lumen. Weights and test media are
+separate external copies. PATH contains only System32 and developer overrides
+are removed. Actual NPU text and140/280 images, CPU70 images/audio, CPU-only
+references and four cross-modal retrieval rankings pass; responses explicitly
+report non-stub actual routes. Missing shim, missing bundle and corrupt bundle
+each retain usable CPU inference on repeated requests. Every owned Job Object
+is empty after shutdown; original package/model bytes remain unchanged.
+
+Fixed short-query process-cold and warm measurements on this shared HX370 host:
+
+| Measurement | NPU requested | CPU |
+| --- | ---: | ---: |
+| First text request, process cold |4.257s|2.279s|
+| Warm text, median of5 |107.29ms|24.13ms|
+| Four-text batch throughput |9.30 items/s|36.10 items/s|
+| Peak working set, complete mixed-media run |3,443,261,440B|1,352,183,808B|
+| Peak private memory, complete mixed-media run |3,897,962,496B|1,793,654,784B|
+
+CPU is faster for this short text input. Cold means a fresh worker, with the OS
+file cache uncontrolled. The NPU-requested memory peak includes CPU residency
+for fallback images/audio. Worker traces separate host processing/attention
+from NPU operator dispatch; warm text dispatch is approximately76-92ms. These
+are host wall times including driver waits, not device cycle/utilization data.
+No hardware timing counter or exclusive-machine performance claim is made.
+
+Reproduce using `tools/test-npu-package.py` with `--payload`, independently pinned
+`--manifest-sha256`, external `--models`, `--fixtures`, `--spoken`,
+`--consumer-root` and fresh `--output`. The original no-model native package
+test retains its90second runtime watchdog and unchanged1,000/1,100-result checks.
+The [final idle-host run](package-native.json) passed in66.443seconds: all nine
+checks passed, no timeout, owned job empty. No test inputs or deadlines changed.
+The prior-source98ba190 [compilation-contention timeout](package-native-concurrent-timeout.json)
+and its [66.016second isolated pass](package-native-before-native-guard.json)
+are preserved. Final-source85a915d also [passed under compilation load](package-native-under-load.json)
+in91.502seconds including setup before the runtime watchdog, then
+[timed out during installer compression](package-native-installer-timeout.json).
+All attempts emptied their owned jobs. This gate is sensitive to concurrent
+host load; the idle-host pass does not establish a search-latency guarantee
+under build/installer contention. Neither the watchdog nor result assertions
+were relaxed.
+
+## Lumen handoff and remaining acceptance
+
+Lumen staging accepts the exact pinned manifest. Its explicit two-profile native
+test passes against the updated payload, retaining wrong-PID authentication
+refusal, distinct process/index identities, paused/unadmitted roots and
+independent Stop (13.09seconds). Its final locked full Rust suite passed413
+tests/27 ignored; strict Clippy, formatting,22 staging tests and the final
+locked Tauri/NSIS build passed. UI sources/configuration are unchanged from
+the787 Vitest,131 Edge and4 profiling passes. The
+[consumer evidence](https://github.com/KB01111/Lumen/blob/codex/winsearch-engine-adapter/docs/reports/2026-10-20-winsearch-npu-handoff.md)
+records source/log/binary hashes and the exact staged/debug/release payloads.
 Lumen live SearchService routing, migration, local answer generation, signing,
 installed-app acceptance and broader v1 acceptance are outside this delivery.

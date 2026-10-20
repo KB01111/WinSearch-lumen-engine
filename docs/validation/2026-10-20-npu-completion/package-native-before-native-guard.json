@@ -1,0 +1,191 @@
+{
+  "scope": "Run the actual pinned payload outside the checkout, with only Windows on PATH.\n\nThis is no-model package acceptance, not installed Lumen or model-quality evidence.\n",
+  "manifestSha256": "4ab442e33790a220e121d1441c98a9b9601f634ceb851beb2c6f5bbf4e641ad6",
+  "engineCommit": "98ba1908c09231454aba2c29c82fcbc75def470a",
+  "checks": [
+    "ffmpeg.exe starts outside checkout with System32-only PATH",
+    "ffprobe.exe starts outside checkout with System32-only PATH",
+    "winsearch-embed.exe starts outside checkout with System32-only PATH",
+    "identity, per-folder policy and search-limit capabilities are active",
+    "actual confined text/PDF extraction and public exact search: notes.txt",
+    "actual confined text/PDF extraction and public exact search: pages.pdf",
+    "per-folder hidden, size and exclusion restrictions apply; hidden opt-in reconciles",
+    "1000 exact results stream in bounded frames; a 10000 limit preserves 1100 eligible files",
+    "deferred startup admits only explicit generated root"
+  ],
+  "ownedJobEmpty": true,
+  "passed": true,
+  "timedOut": false,
+  "queryFrames": [
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 3.324
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 4.758
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 4.962
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 5.168
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 5.375
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 5.58
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 5.785
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 5.99
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 6.195
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 6.402
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 6.609
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 6.821
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 7.03
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 7.271
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 1,
+      "done": true,
+      "elapsedSeconds": 7.657
+    },
+    {
+      "query": "pdfparitytoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 7.672
+    },
+    {
+      "query": "pdfparitytoken",
+      "count": 1,
+      "done": true,
+      "elapsedSeconds": 8.034
+    },
+    {
+      "query": "policy",
+      "count": 1,
+      "done": true,
+      "elapsedSeconds": 8.145
+    },
+    {
+      "query": "policy-hidden",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 8.256
+    },
+    {
+      "query": "policy-hidden",
+      "count": 1,
+      "done": true,
+      "elapsedSeconds": 9.496
+    },
+    {
+      "query": "budget-source",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 25.67
+    },
+    {
+      "query": "budget-source",
+      "count": 512,
+      "done": false,
+      "elapsedSeconds": 39.73
+    },
+    {
+      "query": "budget-source",
+      "count": 488,
+      "done": true,
+      "elapsedSeconds": 45.584
+    },
+    {
+      "query": "budget-source",
+      "count": 512,
+      "done": false,
+      "elapsedSeconds": 58.875
+    },
+    {
+      "query": "budget-source",
+      "count": 512,
+      "done": false,
+      "elapsedSeconds": 65.181
+    },
+    {
+      "query": "budget-source",
+      "count": 76,
+      "done": true,
+      "elapsedSeconds": 66.001
+    }
+  ],
+  "supersededRetries": 1,
+  "activeQuery": "budget-source",
+  "files": 69,
+  "elapsedSeconds": 66.016,
+  "databaseCounts": {
+    "code.db": {
+      "code_files": 0
+    },
+    "index.db": {
+      "entries": 1668,
+      "segments": 0,
+      "content_chunks": 5
+    }
+  }
+}

@@ -1,0 +1,184 @@
+{
+  "scope": "Run the actual pinned payload outside the checkout, with only Windows on PATH.\n\nThis is no-model package acceptance, not installed Lumen or model-quality evidence.\n",
+  "manifestSha256": "4ab442e33790a220e121d1441c98a9b9601f634ceb851beb2c6f5bbf4e641ad6",
+  "engineCommit": "98ba1908c09231454aba2c29c82fcbc75def470a",
+  "checks": [
+    "ffmpeg.exe starts outside checkout with System32-only PATH",
+    "ffprobe.exe starts outside checkout with System32-only PATH",
+    "winsearch-embed.exe starts outside checkout with System32-only PATH",
+    "identity, per-folder policy and search-limit capabilities are active",
+    "actual confined text/PDF extraction and public exact search: notes.txt",
+    "actual confined text/PDF extraction and public exact search: pages.pdf",
+    "per-folder hidden, size and exclusion restrictions apply; hidden opt-in reconciles"
+  ],
+  "ownedJobEmpty": true,
+  "passed": false,
+  "timedOut": true,
+  "queryFrames": [
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 3.319
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 4.456
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 4.662
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 4.867
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 5.073
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 5.28
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 5.485
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 5.692
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 5.899
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 6.105
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 6.319
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 6.58
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 1,
+      "done": true,
+      "elapsedSeconds": 7.064
+    },
+    {
+      "query": "pdfparitytoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 7.14
+    },
+    {
+      "query": "pdfparitytoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 7.381
+    },
+    {
+      "query": "pdfparitytoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 7.603
+    },
+    {
+      "query": "pdfparitytoken",
+      "count": 1,
+      "done": true,
+      "elapsedSeconds": 8.076
+    },
+    {
+      "query": "policy",
+      "count": 1,
+      "done": true,
+      "elapsedSeconds": 8.349
+    },
+    {
+      "query": "policy-hidden",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 8.46
+    },
+    {
+      "query": "policy-hidden",
+      "count": 1,
+      "done": true,
+      "elapsedSeconds": 10.739
+    },
+    {
+      "query": "budget-source",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 26.109
+    },
+    {
+      "query": "budget-source",
+      "count": 512,
+      "done": false,
+      "elapsedSeconds": 48.511
+    },
+    {
+      "query": "budget-source",
+      "count": 488,
+      "done": true,
+      "elapsedSeconds": 57.375
+    },
+    {
+      "query": "budget-source",
+      "count": 512,
+      "done": false,
+      "elapsedSeconds": 81.765
+    },
+    {
+      "query": "budget-source",
+      "count": 512,
+      "done": false,
+      "elapsedSeconds": 91.565
+    }
+  ],
+  "supersededRetries": 1,
+  "activeQuery": "budget-source",
+  "failure": "AssertionError: daemon closed pipe",
+  "childExitBeforeCleanup": null,
+  "elapsedSeconds": 91.72,
+  "databaseCounts": {
+    "code.db": {
+      "code_files": 0
+    },
+    "index.db": {
+      "entries": 1668,
+      "segments": 0,
+      "content_chunks": 5
+    }
+  }
+}
