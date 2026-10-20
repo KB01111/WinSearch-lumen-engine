@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: Copyright (C) 2026 Brishen Hawkins
+# SPDX-License-Identifier: Apache-2.0
+#
+# Vendored taconite 0.1.1 (https://github.com/Brishen/taconite, crates.io
+# checksum recorded in third_party/taconite.md), patched in for WinSearch via
+# `[patch.crates-io]`. Rust sources are upstream's except where
+# third_party/taconite.md lists a change; build.rs is rewritten so the XRT
+# shim builds on Windows (MSVC, as a delay-loaded DLL) and falls back to a
+# stub when no XRT SDK is installed.
+
+[package]
+name = "taconite"
+version = "0.1.1"
+edition = "2024"
+rust-version = "1.85"
+description = "Replays IRON (mlir-aie) kernels on an AMD XDNA NPU through XRT (WinSearch's Windows port)"
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/Brishen/taconite"
+links = "taconite_xrt"
+publish = false
+
+[features]
+default = ["xrt"]
+xrt = []
+
+[build-dependencies]
+cc = "1.8"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(taconite_xrt_stub)"] }

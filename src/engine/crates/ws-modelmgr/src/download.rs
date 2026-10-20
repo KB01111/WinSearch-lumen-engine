@@ -84,9 +84,10 @@ pub fn download_file(
     progress: &ProgressFn<'_>,
     cancel: &AtomicBool,
 ) -> Result<PathBuf, DownloadError> {
-    fs::create_dir_all(dir)?;
     let dest = dir.join(expected.name);
     let part = dir.join(format!("{}.part", expected.name));
+    // Bundle files live in subdirectories (`<bundle>/kernels/...`).
+    fs::create_dir_all(dest.parent().unwrap_or(dir))?;
 
     // Already downloaded and valid: skip the network entirely.
     if dest.is_file() && verify_file(&dest, expected).is_ok() {

@@ -3,12 +3,14 @@ name = "ws-embed"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "WinSearch embedding runtime: llama.cpp FFI, backend loading (CUDA > Vulkan > CPU), text embeddings"
+description = "WinSearch embedding runtime: llama.cpp FFI, AMD NPU (IRON) with backend fallback (CUDA > Vulkan > CPU), text embeddings"
 build = "build.rs"
 
 [dependencies]
 thiserror.workspace = true
 tracing.workspace = true
+taconite.workspace = true
+taconite-embeddinggemma2.workspace = true
 
 [dev-dependencies]
 serde.workspace = true

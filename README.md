@@ -8,8 +8,10 @@ The feature reference is [ARahim3/DigUp](https://github.com/ARahim3/DigUp).
 **Status: v1.0 is in progress.** The implementation PR is
 [PR #2](https://github.com/KB01111/WinSearch-lumen-engine/pull/2). Existing engine
 features and passing subsystem tests do not establish complete or installed v1.0
-acceptance. CPU inference works locally; GPU calibration remains pending. NPU
-acceleration is optional and outside the current focus.
+acceptance. CPU inference works locally; GPU calibration remains pending. On PCs
+with an AMD Ryzen AI NPU2, the [IRON EmbeddingGemma 2 bundle](docs/hx370-npu.md)
+is the primary text/image model, with automatic GPU/CPU fallback. Its hardware
+acceptance is still pending.
 
 ## v1.0 TODO
 

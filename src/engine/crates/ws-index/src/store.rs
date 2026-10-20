@@ -1705,7 +1705,7 @@ COMMIT;
 
     /// Reads the engine search policy. Missing keys read back as defaults
     /// (`semantic_enabled = true`, `preferred_backend = auto`); a stored
-    /// `preferred_backend` outside `auto|cuda|vulkan|cpu` fails closed with
+    /// `preferred_backend` outside `auto|npu|cuda|vulkan|cpu` fails closed with
     /// `InvalidConfig` so typos surface instead of silently sticking.
     pub fn get_engine_config(&self) -> Result<EngineConfig, StoreError> {
         let defaults = EngineConfig::default();
@@ -1725,7 +1725,7 @@ COMMIT;
             None => defaults.preferred_backend,
             Some(v) => PreferredBackend::parse(&v).ok_or_else(|| {
                 StoreError::InvalidConfig(format!(
-                    "config {CONFIG_KEY_PREFERRED_BACKEND} must be auto|cuda|vulkan|cpu, got {v:?}"
+                    "config {CONFIG_KEY_PREFERRED_BACKEND} must be auto|npu|cuda|vulkan|cpu, got {v:?}"
                 ))
             })?,
         };
@@ -1736,7 +1736,7 @@ COMMIT;
     }
 
     /// Persists the engine search policy in canonical spellings
-    /// (`"1"`/`"0"`, `auto|cuda|vulkan|cpu`).
+    /// (`"1"`/`"0"`, `auto|npu|cuda|vulkan|cpu`).
     pub fn set_engine_config(&mut self, config: &EngineConfig) -> Result<(), StoreError> {
         self.config_set(
             CONFIG_KEY_SEMANTIC_ENABLED,

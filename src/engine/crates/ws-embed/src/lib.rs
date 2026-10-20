@@ -3,17 +3,20 @@
 //! Layers:
 //! - [`ffi`]: hand-written declarations for the llama.cpp / ggml / mtmd C API
 //!   (pinned to the tag recorded in `third_party/llama.cpp.md`).
-//! - [`backends`]: backend kind + selection policy (CUDA > Vulkan > CPU).
+//! - [`backends`]: backend kind + selection policy (NPU > CUDA > Vulkan > CPU).
+//! - [`npu`]: `NpuRuntime`, the IRON EmbeddingGemma 2 bundle on an AMD NPU2.
 //! - [`vector`]: cosine helpers used for reference-vector verification.
 //! - [`runtime`]: `EmbedRuntime`, the owned model/context wrapper.
 //!
-//! The crate never assumes a GPU. CPU is always available.
+//! The crate never assumes a GPU or an NPU. CPU is always available.
 
 pub mod backends;
 pub mod ffi;
 mod image;
+pub mod npu;
 pub mod runtime;
 pub mod vector;
 
 pub use backends::{select_backend, BackendKind, BackendPreference};
+pub use npu::{npu_runtime_compiled, NpuRuntime};
 pub use runtime::{EmbedError, EmbedRuntime, LoadOptions};

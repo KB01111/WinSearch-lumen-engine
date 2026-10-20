@@ -117,6 +117,8 @@ pub struct WorkerSnapshot {
     pub dim: usize,
     pub uptime_secs: u64,
     pub jobs_served: u64,
+    /// AMD NPU use as the worker reports it (`"ready"` or why not).
+    pub npu: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -797,6 +799,7 @@ impl EmbedSupervisor {
                 dim,
                 uptime_secs,
                 jobs_served,
+                npu,
                 ..
             }) => {
                 self.model_loaded.store(model_loaded, Ordering::Relaxed);
@@ -808,6 +811,7 @@ impl EmbedSupervisor {
                     dim,
                     uptime_secs,
                     jobs_served,
+                    npu,
                 })
             }
             Ok(other) => Err(EmbedError::Protocol(format!(
@@ -1482,6 +1486,7 @@ mod tests {
                                         dim: ws_embed_protocol::STUB_DIM,
                                         uptime_secs: 7,
                                         jobs_served: jobs2.lock().unwrap().len() as u64,
+                                        npu: None,
                                     },
                                 )
                                 .ok();
@@ -1894,6 +1899,7 @@ mod tests {
         assert_eq!(snap.backend.as_deref(), Some("stub"));
         assert_eq!(snap.dim, ws_embed_protocol::STUB_DIM);
         assert!(snap.uptime_secs <= 120);
+        assert_eq!(snap.npu, None, "a pre-NPU worker reports no NPU state");
         assert!(sup.model_loaded());
     }
 

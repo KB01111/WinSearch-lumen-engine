@@ -109,8 +109,16 @@ pub struct ModelService {
 }
 
 impl ModelService {
+    /// On a PC with an AMD NPU2 the model set also holds the IRON NPU bundle
+    /// (downloaded first; the embed worker's primary text/image model). The
+    /// GGUFs stay in the set for audio and the GPU/CPU fallback.
     pub fn new(model_dir: PathBuf, indexer: Arc<Indexer>) -> Arc<Self> {
-        Self::with_manager(ModelManager::new(model_dir), indexer)
+        let mut manager = ModelManager::new(model_dir);
+        if let Some(npu) = ws_platform::npu::detect_npu2() {
+            info!(device = %npu.instance, "AMD NPU2 detected: the NPU model is part of the model download");
+            manager = manager.with_npu_bundle();
+        }
+        Self::with_manager(manager, indexer)
     }
 
     pub fn with_manager(manager: ModelManager, indexer: Arc<Indexer>) -> Arc<Self> {

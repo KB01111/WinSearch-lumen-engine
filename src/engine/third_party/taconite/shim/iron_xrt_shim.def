@@ -1,0 +1,19 @@
+; Exports of iron_xrt_shim.dll (the C surface of iron_xrt_shim.h). Only
+; functions: no data exports, so the DLL is safe to delay-load.
+LIBRARY iron_xrt_shim
+EXPORTS
+    iron_open
+    iron_close
+    iron_kernel_load
+    iron_kernel_free
+    iron_buffer_alloc
+    iron_buffer_map
+    iron_buffer_size
+    iron_buffer_sync_to_device
+    iron_buffer_sync_from_device
+    iron_buffer_free
+    iron_buffer_sub
+    iron_kernel_run
+    iron_kernel_set_insts_words
+    iron_kernel_start
+    iron_run_wait

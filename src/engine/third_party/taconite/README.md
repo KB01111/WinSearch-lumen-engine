@@ -1,0 +1,207 @@
+<!--
+SPDX-FileCopyrightText: Copyright (C) 2026 Brishen Hawkins
+SPDX-License-Identifier: Apache-2.0
+-->
+
+# `taconite` — replay IRON kernels on the NPU from Rust
+
+[IRON](https://github.com/amd/IRON) is an ahead-of-time compiler. What it
+leaves behind for a kernel is an `.xclbin` plus an instruction stream
+(`*.insts.bin`). This crate runs those two ways: through a small C shim
+over XRT's C++ API (`iron_xrt_shim.cpp`, compiled by `build.rs` with no `cc`
+crate, so it builds offline), or with no XRT at all through the `amdxdna`
+driver's ioctls (`direct`, below). Both provide the same three types:
+
+- **`Session`**: the NPU.
+- **`Kernel`**: a resident hardware context, shared by every kernel loaded
+  from the same xclbin and released when the last of them is dropped. Runs
+  are cached per argument tuple, with a blocking `run` and an async
+  `start`/`wait`.
+- **`Buffer`**: a host-visible BO the host writes in place, with `sub`-buffer
+  views.
+
+## Building
+
+The crate targets Linux on x86-64 with an XDNA NPU (the `amdxdna` driver).
+The XRT types above need the `xrt` feature, on by default. Without it
+(`default-features = false`) nothing below applies: the crate is plain Rust
+(`compile`, `direct`, `Error`, the bf16 helpers) and builds with no XRT, no
+C++ compiler and no system headers:
+
+```toml
+taconite = { version = "0.1", default-features = false }
+```
+
+With `xrt`, building needs [XRT](https://github.com/Xilinx/XRT): `g++`,
+`ar`, XRT's headers and libuuid's (`uuid/uuid.h`). `build.rs` compiles the
+shim itself, with no build dependencies, so it also builds offline. It links
+XRT one of two ways:
+
+- **Dynamically** (the usual case), from `$XRT_ROOT` (default
+  `/opt/xilinx/xrt`). The binary then needs XRT's lib dir on the loader path,
+  e.g. after sourcing XRT's `setup.sh`.
+- **Statically**, from `$XRT_STATIC_ROOT` (default `~/npu/xrt-static`) when
+  it holds `lib/libxrt_coreutil.a`, an XRT tree built with static archives.
+  The binary then starts on a machine without XRT, and only opening the NPU
+  needs XRT's driver plug-in. Set `XRT_STATIC_ROOT=` (empty) to force the
+  dynamic link.
+
+Linker arguments don't propagate across crates, so `build.rs` publishes what a
+binary needs for a dependent's build script to re-emit: `DEP_TACONITE_XRT_LIBDIR`
+(dynamic; the rpath) and `DEP_TACONITE_XRT_DYNLIST` (static; the symbol list the
+driver plug-ins bind to):
+
+```rust
+// build.rs of a crate that depends on taconite
+fn main() {
+    if let Ok(dir) = std::env::var("DEP_TACONITE_XRT_LIBDIR") {
+        println!("cargo:rustc-link-arg=-Wl,-rpath,{dir}");
+    }
+    if let Ok(list) = std::env::var("DEP_TACONITE_XRT_DYNLIST") {
+        println!("cargo:rustc-link-arg=-Wl,--dynamic-list={list}");
+    }
+}
+```
+
+## Building kernels: `compile`
+
+`taconite::compile` builds the kernels too. It runs
+the two tools IRON's Python drives as subprocesses, with the flags IRON and
+mlir-aie pass them:
+
+- **`Toolchain::compile_kernel`**: compiles an AIE kernel (`aie_kernels/…/*.cc`)
+  to an object with Peano's `clang++`, for `Arch::Aie2` (NPU1) or
+  `Arch::Aie2p` (NPU2).
+- **`Toolchain::compile_design`**: compiles a design's MLIR (what `design.py`
+  generates) to the `.xclbin` + instruction stream that `load_kernel` takes,
+  with the native `aiecc` binary. It links the design's `link_with` objects.
+
+```rust
+use taconite::compile::{Arch, Design, KernelSource, Toolchain};
+
+let tc = Toolchain::from_env()?; // $MLIR_AIE_INSTALL_DIR (+ $PEANO_INSTALL_DIR, $AIECC_PATH)
+tc.compile_kernel(&KernelSource::new("aie_kernels/generic/mul.cc", Arch::Aie2p), "out/mul.o".as_ref())?;
+tc.compile_design(&Design::new("mul.mlir", "out/work").link("out/mul.o"),
+                  "out/mul.xclbin".as_ref(), "out/mul.insts.bin".as_ref())?;
+```
+
+aiecc packages the xclbin with XRT's `xclbinutil`, so that must be on its
+`PATH`. mlir-aie's binaries are built for a generic Linux. Where they can't
+run as-is (NixOS, say), run them in a container instead: `Toolchain::with_launcher` prefixes every tool
+invocation with a command, for example a script that runs
+`podman run … --entrypoint "$1" <image> "${@:2}"` with the same paths mounted.
+
+`examples/eltwise_mul.rs` goes from source to NPU. It builds `mul.cc` and an
+`ElementwiseMul` design MLIR, runs the result, and checks it against the
+CPU. Built this way, the object and the instruction stream are byte-identical
+to IRON's. The xclbin differs only in its timestamps and UUIDs.
+
+Adapted from [RLX](https://github.com/MIT-RLX/rlx)'s `rlx-xdna` `compile.rs`
+(MIT OR Apache-2.0).
+
+## Running without XRT: `direct`
+
+`taconite::direct` runs the same kernels with no XRT and no C++ (build with
+`default-features = false` to leave XRT out entirely). It is
+Linux/x86-64 only, and it talks to the `amdxdna` driver's ioctls on
+`/dev/accel/accel0` itself. Its types and methods match the XRT API, so a
+model switches paths by changing its `use` line:
+
+- **`Session`**: the accel node, plus the process's 64 MiB device heap.
+- **`Kernel`**: an xclbin and an instruction stream. Kernels loaded from the
+  same xclbin (and kernel name) share one hardware context. `run` waits for
+  the kernel; `start` returns a `Run` to `wait` on, and several can be in
+  flight at once.
+- **`Buffer`**: shared buffers the host fills in place, with `sub`-buffer
+  views. A kernel takes up to five of them, the `MLIR_AIE` kernel's
+  `bo0`…`bo4`.
+- **Sharing with another device.** `Buffer::export_dmabuf` hands a buffer
+  to another device as a dma-buf, for example to a GPU through Vulkan's
+  `VK_EXT_external_memory_dma_buf`. `Session::import_dmabuf` takes one in
+  as a kernel argument.
+  - GPU and NPU then read each other's output in place, with no copy and
+    no cache maintenance, just a fence wait in between (measured in
+    `taconite-gpu-spike`).
+  - The host still flushes around the NPU, as before.
+
+It issues the same ioctl sequence XRT does. The sequence and the command
+packet were captured by tracing this crate's XRT path, and `direct` reproduces
+it, so each run is one `EXEC_CMD` plus one fence wait. `Session` can also
+query the firmware version and the hardware contexts (with their command
+counters and fault state), and set the NPU power mode (this needs root).
+
+On an NPU2 it computes the same results as XRT at the same speed:
+
+- **Complete models.** Switched over by their `use` line, a VGG16-based
+  image-cropping model (73 dispatches per image) gives the same boxes and
+  scores as through XRT at ~50 ms per image, and SAM3 and CLIP ViT-H/14 give
+  identical outputs at the same speed.
+- **A single kernel.** `examples/direct_eltwise_mul.rs` multiplies 1,638,400
+  bf16 values with a median run of 235 µs through `direct` and 232 µs through
+  XRT, with 0 mismatches either way.
+- **Hardware tests.** `tests/direct_hw.rs` (`--ignored`, needs an NPU) covers
+  context sharing and release (60 contexts), sub-buffers with runs in flight,
+  the argument limit, and a dma-buf round trip: one session exports its
+  buffers, and a second imports them and runs a kernel on them.
+
+It does not cover xclbins with more than one PDI.
+
+Adapted from [RLX](https://github.com/MIT-RLX/rlx)'s `rlx-xdna` `direct.rs`
+(MIT OR Apache-2.0). RLX never saw a command complete on NPU1. The likely
+cause is its fence wait's timeout: the DRM syncobj ioctls read the timeout as
+an absolute deadline, and RLX passed a relative one. That makes the wait
+return at once with the command still `NEW`, and it reproduces here.
+
+## Python-exact front-end helpers: `json`, `unicode`, `pyre`
+
+Model runtimes built on this crate port Python front ends (tokenizers, word
+splitters, request formats) whose output depends on Python's exact
+behaviour. Three std-only modules reproduce it:
+
+- **`json`** reads and writes JSON as Python's `json` module does: its
+  separators, string escapes, float `repr`, arbitrary-size ints and key
+  order (`parse` + `dumps` = `json.dumps(json.loads(s), ensure_ascii=False)`),
+  and `py_round` is `round(x, n)`.
+- **`unicode`** answers Python's `str` predicates (`isalnum`, `isspace`,
+  `lower`, NFC, ...) from Python 3.12's Unicode 15.0 tables, plus the HF
+  `tokenizers` variants (Oniguruma's `\p{L}` / `\p{N}`, its NFC).
+- **`pyre`** matches regular expressions as Python's `re` does
+  (`fullmatch`, `search`, `match`): its syntax -- classes, groups,
+  backreferences, lookarounds, lazy and possessive quantifiers, inline
+  flags -- and its Unicode semantics (`\d` / `\w` / `\s` as `str`
+  predicates, `IGNORECASE` by simple lowercase plus `sre`'s extra
+  equivalences such as `ı`/`i` and `ſ`/`s`). A backtracking matcher, for
+  short texts (a model's spans).
+
+`src/unicode_data.rs` is generated by `scripts/gen_unicode.py`; the
+fixtures `tests/json.rs`, `tests/unicode.rs` and `tests/pyre.rs` check
+against come from `scripts/gen_*_fixtures.py` (`pyre`: 82 patterns x 69
+texts x 4 flag sets, every answer Python's).
+
+## The host's side of a model: `cpu`, `Timing`, `gpu`
+
+What the model crates run around their kernels lives here too:
+
+- **`cpu`**: the threaded f32 host math -- a scoped worker pool
+  (`par_rows`, `set_threads`), linear layers over f32 or bf16 weights,
+  LayerNorm, the activations, softmax and multi-head attention -- written
+  so the inner loops vectorise.
+- **`Timing`**: wall time per stage in first-seen order, NPU dispatches
+  under `npu:<kernel>`; it prints as `stages: ... ms; npu ... ms: ...`.
+- **`gpu`** (feature `gpu`, Linux/x86-64; pulls in `ash` and `naga`):
+  Vulkan compute on the iGPU (RADV) for the work between a model's NPU
+  kernels. `Vk::import_npu` imports a `direct::Buffer` as a dma-buf, so the
+  GPU reads and writes the NPU's buffers in place. WGSL shaders, compiled in
+  process, are recorded once into a `Plan` and replayed with one submit.
+  `TACONITE_GPU_PROFILE=1` prints each plan's GPU time per op. libvulkan is
+  loaded at run time, only when a `Vk` is opened. Where the device has
+  16 x 16 x 16 f16 cooperative matrices (`VK_KHR_cooperative_matrix`),
+  f16, the Vulkan memory model and 64-wide subgroups, `Vk::coop_f16` is
+  set. A shader with `enable wgpu_cooperative_matrix;` is then built as
+  SPIR-V 1.5 at subgroup size 64 (naga 29). `TACONITE_GPU_COOP=0` leaves
+  them off. An `Arena` takes
+  device-local host-visible memory where there is room, else system
+  memory; `Vk::arena_readback` takes cached memory for what the host reads
+  back (the host reading the uncached device-local mapping is several
+  times slower). `taconite-sam3` and `taconite-gliner2` build their `npu+gpu`
+  modes on it, and `taconite-gliner2` its NPU-free `gpu` mode too.

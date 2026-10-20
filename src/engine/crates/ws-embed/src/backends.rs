@@ -1,8 +1,12 @@
 //! Backend discovery and selection.
 //!
-//! Selection policy (never assumes a GPU):
-//! `CUDA > Vulkan > CPU`, overridable with an explicit [`BackendPreference`].
-//! An explicit preference that is not available falls back to CPU rather than
+//! Selection policy (never assumes a GPU or an NPU):
+//! `NPU > CUDA > Vulkan > CPU`, overridable with an explicit
+//! [`BackendPreference`]. The NPU is a separate runtime (the IRON bundle, see
+//! [`crate::npu`]) tried first by the worker when [`BackendPreference::wants_npu`];
+//! [`select_backend`] picks the llama.cpp device that serves everything the
+//! NPU does not (audio, and every job once the NPU is unavailable). An
+//! explicit preference that is not available falls back to CPU rather than
 //! failing, so the CPU path is always reachable.
 
 use std::fmt;
@@ -11,6 +15,8 @@ use std::str::FromStr;
 /// The backend family a device belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BackendKind {
+    /// AMD NPU2 through XRT (never in the ggml registry).
+    Npu,
     Cuda,
     Vulkan,
     Cpu,
@@ -31,6 +37,7 @@ impl BackendKind {
 impl fmt::Display for BackendKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
+            Self::Npu => "npu",
             Self::Cuda => "cuda",
             Self::Vulkan => "vulkan",
             Self::Cpu => "cpu",
@@ -41,8 +48,11 @@ impl fmt::Display for BackendKind {
 /// User-configurable backend preference (`preferred_backend` config key).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BackendPreference {
+    /// NPU when present, else CUDA > Vulkan > CPU.
     #[default]
     Auto,
+    /// The AMD NPU, falling back like `Auto` (GPU, then CPU) without one.
+    Npu,
     Cuda,
     Vulkan,
     Cpu,
@@ -54,6 +64,7 @@ impl FromStr for BackendPreference {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim().to_ascii_lowercase().as_str() {
             "auto" | "" => Ok(Self::Auto),
+            "npu" => Ok(Self::Npu),
             "cuda" => Ok(Self::Cuda),
             "vulkan" => Ok(Self::Vulkan),
             "cpu" => Ok(Self::Cpu),
@@ -62,15 +73,23 @@ impl FromStr for BackendPreference {
     }
 }
 
-/// Pick the backend to use from the set of kinds actually available.
+impl BackendPreference {
+    /// Whether the worker should try the NPU runtime first.
+    pub fn wants_npu(self) -> bool {
+        matches!(self, Self::Auto | Self::Npu)
+    }
+}
+
+/// Pick the llama.cpp backend to use from the set of kinds actually available.
 ///
 /// `available` lists every kind with at least one usable device.
-/// - `Auto` returns the first of CUDA, Vulkan, CPU that is available.
+/// - `Auto` and `Npu` return the first of CUDA, Vulkan, CPU that is available
+///   (the GPU/CPU fallback behind the NPU).
 /// - An explicit preference returns that kind when available, otherwise CPU.
 pub fn select_backend(pref: BackendPreference, available: &[BackendKind]) -> BackendKind {
     let has = |k: BackendKind| available.contains(&k);
     match pref {
-        BackendPreference::Auto => {
+        BackendPreference::Auto | BackendPreference::Npu => {
             if has(BackendKind::Cuda) {
                 BackendKind::Cuda
             } else if has(BackendKind::Vulkan) {
@@ -122,6 +141,20 @@ mod tests {
     }
 
     #[test]
+    fn npu_preference_falls_back_to_gpu_then_cpu() {
+        use BackendKind::*;
+        assert_eq!(select_backend(BackendPreference::Npu, &[Cpu, Vulkan, Cuda]), Cuda);
+        assert_eq!(select_backend(BackendPreference::Npu, &[Cpu, Vulkan]), Vulkan);
+        assert_eq!(select_backend(BackendPreference::Npu, &[Cpu]), Cpu);
+        assert!(BackendPreference::Npu.wants_npu());
+        assert!(BackendPreference::Auto.wants_npu());
+        assert!(!BackendPreference::Cuda.wants_npu());
+        assert!(!BackendPreference::Vulkan.wants_npu());
+        assert!(!BackendPreference::Cpu.wants_npu());
+        assert_eq!(BackendKind::Npu.to_string(), "npu");
+    }
+
+    #[test]
     fn cpu_preference_ignores_gpus() {
         use BackendKind::*;
         assert_eq!(select_backend(BackendPreference::Cpu, &[Cuda, Vulkan, Cpu]), Cpu);
@@ -133,6 +166,7 @@ mod tests {
         assert_eq!(" CUDA ".parse::<BackendPreference>().unwrap(), BackendPreference::Cuda);
         assert_eq!("vulkan".parse::<BackendPreference>().unwrap(), BackendPreference::Vulkan);
         assert_eq!("cpu".parse::<BackendPreference>().unwrap(), BackendPreference::Cpu);
+        assert_eq!(" NPU ".parse::<BackendPreference>().unwrap(), BackendPreference::Npu);
         assert!("metal".parse::<BackendPreference>().is_err());
     }
 

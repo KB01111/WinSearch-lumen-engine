@@ -154,3 +154,22 @@ WinSearch incorporates or references the following third-party software.
               verifies the Microsoft redistributable archive before copying.
     Notices:  Retain notices/msvc/REDISTRIBUTION.md; final release redistribution
               eligibility remains a separate release-review requirement.
+
+21. taconite 0.1.1 (vendored, Windows port), taconite-bundle 0.1.0 and
+    taconite-embeddinggemma2 0.2.0
+    Project:  https://github.com/Brishen/taconite
+    License:  Apache-2.0; taconite-embeddinggemma2's preprocess.rs resampler
+              also carries BSD-3-Clause (PyTorch) and MIT-CMU (Pillow) terms.
+    Copyright (C) 2026 Brishen Hawkins
+    Usage:    Replays the IRON EmbeddingGemma 2 kernels on an AMD Ryzen AI NPU2
+              through XRT (ws-embed's NPU runtime). Local changes are listed in
+              src/engine/third_party/taconite.md.
+
+22. IRON EmbeddingGemma 2 NPU2 bundle (model files, downloaded at run time)
+    Project:  https://huggingface.co/brishen/iron-embeddinggemma2-npu2
+              (revision 052b6a44fe2478d86aec2cd65fbd03ea24279a9e)
+    License:  Apache-2.0; the upstream google/embeddinggemma-2 terms also apply
+              to the weights.
+    Usage:    Primary text/image embedding model on PCs with an AMD NPU2. It is
+              never committed or bundled; ws-modelmgr downloads and hash-checks
+              it into the model directory.

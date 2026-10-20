@@ -83,7 +83,7 @@ pub enum ClientMessage {
     /// Persist the engine search policy. Answered by `Config` with `id` set;
     /// an unknown `preferred_backend` spelling is refused with
     /// `Error{invalid_request}` (the typed store only holds
-    /// `auto|cuda|vulkan|cpu`).
+    /// `auto|npu|cuda|vulkan|cpu`).
     SetConfig {
         id: RequestId,
         config: EngineConfig,
@@ -216,7 +216,7 @@ impl Default for IndexingConfig {
 /// recorded inference-backend preference.
 ///
 /// `preferred_backend` is deliberately a plain string on the wire (canonical
-/// `auto|cuda|vulkan|cpu`) rather than an enum: an unknown spelling from a
+/// `auto|npu|cuda|vulkan|cpu`) rather than an enum: an unknown spelling from a
 /// newer peer still parses, and validation happens at application time
 /// (`set_config` refuses it with `invalid_request`). The typed
 /// `ws_index::PreferredBackend` is the store-side counterpart.
@@ -227,7 +227,7 @@ pub struct EngineConfig {
     /// additionally requires the embedding model to be ready).
     #[serde(default = "default_semantic_enabled")]
     pub semantic_enabled: bool,
-    /// Canonical `auto|cuda|vulkan|cpu`.
+    /// Canonical `auto|npu|cuda|vulkan|cpu`.
     #[serde(default = "default_preferred_backend")]
     pub preferred_backend: String,
 }
