@@ -852,7 +852,6 @@ fn probe_npu(shared: &Shared) -> Result<PathBuf, &'static str> {
     if !bundle.join("manifest.txt").is_file() {
         return Err("bundle_missing");
     }
-    arm_npu_budget(shared).map_err(|_| "load_failed")?;
     verify_npu_bundle(&bundle)?;
     info!(device = %device.instance, bundle = %bundle.display(), "loading NPU embedding model");
     Ok(bundle)

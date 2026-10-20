@@ -5,29 +5,29 @@
 The Windows XRT port now executes the pinned IRON bundle on this HX370.
 See [the completion evidence](validation/2026-10-20-npu-completion/README.md)
 for actual reference comparisons and the remaining package/consumer gates.
-Qualified NPU routes are text and140/280-token images.70-token images use
+Qualified NPU routes are text and 140/280-token images. 70-token images use
 CPU/GPU after two comparisons failed the unchanged .999 gate. Audio stays
-on llama.cpp. The application keeps768-dimensional normalized vectors,
-512 text tokens and vector pipeline version2.
+on llama.cpp. The application keeps 768-dimensional normalized vectors,
+512 text tokens and vector pipeline version 2.
 
 Base-model download/import installs only GGUFs unless `include_npu:true` is
 explicitly requested. Optional NPU status/progress is `ModelStatus.npu_bundle`;
 an incomplete accelerator component does not disable a verified fallback.
-Settings offers a separate1,085,278,625-byte NPU installation action.
+Settings offers a separate 1,085,278,625-byte NPU installation action.
 
-SDK2.21.75 is checksum-pinned in `src/engine/third_party/xrt-sdk.json`.
+SDK 2.21.75 is checksum-pinned in `src/engine/third_party/xrt-sdk.json`.
 The real shim loads only beside the executable, and XRT loads only from
 trusted Windows system locations. Missing dependencies are recoverable.
-NPU initialization/execution has one45second worker budget plus bounded
-native waits; the supervisor retains its120second overall deadline. Device
+NPU initialization/execution has one 45-second worker budget plus bounded
+native waits; the supervisor retains its 120-second overall deadline. Device
 failures retire the worker and quarantine NPU until deliberate reconfiguration
 or restart. Cached public diagnostics report actual successful modality routes.
 
 ## Availability assessment (2026-10-17, kept for history)
 
 Checked 2026-10-17. The development laptop's AMD Ryzen AI 9 HX 370 has a healthy
-NPU device. The installed AMD driver is32.0.20102.3930; native `xrt-smi examine`
-reports XRT2.21.0, firmware1.1.2.64 and an accessible `NPU Strix` device.
+NPU device. The installed AMD driver is 32.0.20102.3930; native `xrt-smi examine`
+reports XRT 2.21.0, firmware 1.1.2.64 and an accessible `NPU Strix` device.
 Device discovery is not evidence of EmbeddingGemma 2 inference.
 
 [FastFlowLM's Windows embedding documentation](https://fastflowlm.com/docs/models/embeddinggemma/)

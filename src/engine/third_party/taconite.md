@@ -38,7 +38,7 @@ upstream's Rust and C++ shim sources and changes only:
 
 ## Windows build and qualification
 
-`xrt-sdk.json` pins AMD's native Windows guide SDK: release2.21.75,
+`xrt-sdk.json` pins AMD's native Windows guide SDK: release 2.21.75,
 70,834,080 bytes, SHA-256
 `ccc244c2c423588972ade76142cdc01049477aaa39a35be97e782b97eb7c5295`.
 Verify the archive before extraction, and set `XRT_ROOT` to its `xrt_sdk/xrt`
@@ -48,17 +48,17 @@ headers. A locked stale shim fails staging instead of silently surviving it.
 The installed driver is a system prerequisite; its DLLs and model weights
 are excluded from the payload. SDK/header license: `licenses/XRT-LICENSE`.
 
-The shim bounds XRT waits in100ms slices and carries a job deadline. XRT can
+The shim bounds XRT waits in 100 ms slices and carries a job deadline. XRT can
 mask a timed wait while another command completes, so the worker also has an
-independent45second process watchdog covering initialization and execution.
+independent 45-second process watchdog covering initialization and execution.
 Device errors retire the process before native buffer teardown; the supervisor
 retries once through fallback and quarantines NPU until deliberate model/backend
-reconfiguration or restart. The overall supervisor deadline remains120seconds.
+reconfiguration or restart. The overall supervisor deadline remains 120 seconds.
 
 Real Windows/HX370 execution is recorded in `docs/validation/2026-10-20-npu-completion/`.
-Qualified application routes are text and140/280-token images.70-token images
+Qualified application routes are text and 140/280-token images. 70-token images
 retain CPU/GPU execution because two pinned comparisons failed the unchanged
-.999 gate. The public recipe remains768-dimensional normalized vectors,
-512 text tokens and pipeline version2. The assembler requires real-shim
+.999 gate. The public recipe remains 768-dimensional normalized vectors,
+512 text tokens and pipeline version 2. The assembler requires real-shim
 runtime information, matching binary/source hashes and reference/retrieval
 qualification before an NPU payload can be published locally.

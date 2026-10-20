@@ -3,7 +3,7 @@
 //! The supervisor owns the worker's lifetime on behalf of the engine and is
 //! the worker's only client (one connection at a time, enforced by holding
 //! [`Slot`] across a whole request). It:
-//! - spawns the worker on the first embed request (never before â€”
+//! - spawns the worker on the first embed request (never before —
 //!   `EngineService::status` must stay spawn-free),
 //! - handshakes every connection (`hello` doubles as the health ping and
 //!   refreshes the cached `model_loaded`/`stub` flags),
@@ -47,7 +47,7 @@ const MAX_BACKOFF: Duration = Duration::from_secs(5);
 const SPAWN_WAIT: Duration = Duration::from_secs(30);
 /// Connect retries inside one request. Covers the pipe-busy race: a readiness
 /// probe (or a previous request) consumes the worker's current instance, and
-/// the next instance appears a breath later â€” or seconds later on a loaded
+/// the next instance appears a breath later — or seconds later on a loaded
 /// machine. Bounded so a truly dead worker still surfaces as `Transport`
 /// (restart path) instead of hanging the caller.
 const CONNECT_RETRY: Duration = Duration::from_secs(15);
@@ -224,14 +224,15 @@ struct BoundedCalls {
 enum RetirementReason {
     Cancelled,
     TimedOut,
+    AudioTimedOut,
 }
 
 pub struct EmbedSupervisor {
     config: EmbedConfig,
     /// Serializes whole requests on the legacy direct path (`transact`,
     /// used by `embed_texts`/`ping`). The pipeline's bounded path
-    /// (`transact_bounded`) holds this only across ensure+connect+send â€”
-    /// never across the blocking reply read â€” so a hung worker cannot wedge
+    /// (`transact_bounded`) holds this only across ensure+connect+send —
+    /// never across the blocking reply read — so a hung worker cannot wedge
     /// later batches behind a leaked holder.
     conn: Mutex<()>,
     slot: Mutex<Slot>,
@@ -500,6 +501,13 @@ impl EmbedSupervisor {
             {
                 return;
             }
+            let quarantine_npu = {
+                let diagnostics = self.diagnostics.lock().unwrap_or_else(|p| p.into_inner());
+                matches!(reason, RetirementReason::TimedOut)
+                    && !self.stub.load(Ordering::Relaxed)
+                    && matches!(diagnostics.requested_backend.as_str(), "auto" | "npu")
+                    && matches!(diagnostics.npu, NpuState::Untried | NpuState::Ready)
+            };
             if let Err(error) = self.remove_worker_locked(&mut slot, true) {
                 warn!(%error, "embed worker timeout retirement failed");
             }
@@ -507,9 +515,7 @@ impl EmbedSupervisor {
             // The cleanup generation/epoch fence above prevents quarantining
             // a newer worker after deliberate reconfiguration.
             let mut diagnostics = self.diagnostics.lock().unwrap_or_else(|p| p.into_inner());
-            if matches!(reason, RetirementReason::TimedOut)
-                && matches!(diagnostics.requested_backend.as_str(), "auto" | "npu")
-            {
+            if quarantine_npu {
                 self.npu_quarantined.store(true, Ordering::Release);
                 diagnostics.npu = NpuState::Quarantined;
             }
@@ -577,8 +583,8 @@ impl EmbedSupervisor {
     /// 1/5: leak-free watchdog).
     ///
     /// Runs the whole call on a helper thread and waits `timeout`
-    /// ([`EMBED_JOB_TIMEOUT`] in production). A hung worker â€” handshake done
-    /// but no `embeddings` answer â€” surfaces as `Transport("... timed out
+    /// ([`EMBED_JOB_TIMEOUT`] in production). A hung worker — handshake done
+    /// but no `embeddings` answer — surfaces as `Transport("... timed out
     /// after ...")` instead of stalling the scheduler thread forever.
     /// Takes `Arc<Self>` so the helper thread owns a share.
     ///
@@ -810,6 +816,11 @@ impl EmbedSupervisor {
         if path.is_empty() {
             return Err(EmbedError::InvalidRequest("empty media path".into()));
         }
+        let timeout_reason = if matches!(request, EmbedRequest::EmbedAudio { .. }) {
+            RetirementReason::AudioTimedOut
+        } else {
+            RetirementReason::TimedOut
+        };
         let call_id = self.cancel_seq.fetch_add(1, Ordering::Relaxed);
         self.begin_bounded();
         let sup = std::sync::Arc::clone(self);
@@ -838,7 +849,7 @@ impl EmbedSupervisor {
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 cancel.store(true, Ordering::Relaxed);
                 self.cancel_inflight_read_for(call_id);
-                self.finish_bounded(Some(RetirementReason::TimedOut));
+                self.finish_bounded(Some(timeout_reason));
                 warn!("media embed job timed out after {timeout:?}; helper cancelled");
                 Err(EmbedError::Transport(format!(
                     "media embed job timed out after {timeout:?}"
@@ -1520,7 +1531,7 @@ fn npu_state_from_code(code: &str) -> Option<NpuState> {
 }
 
 /// Instant readiness check: one connect attempt, immediately dropped. Note
-/// this consumes a pipe instance â€” never assert on two back-to-back probes
+/// this consumes a pipe instance — never assert on two back-to-back probes
 /// (the successor needs a scheduling quantum); `connect_with_retry` and the
 /// spaced polls below are the turnover-safe primitives.
 fn probe(pipe_name: &str) -> bool {
@@ -1660,15 +1671,43 @@ mod tests {
     }
 
     #[test]
-    fn user_cancellation_does_not_quarantine_a_healthy_accelerator() {
-        for reason in [RetirementReason::Cancelled, RetirementReason::TimedOut] {
-            let sup = test_supervisor("unused-retirement-reason".into());
-            let generation = sup.worker_gen.load(Ordering::Acquire);
-            sup.retire_timed_out_worker(0, generation, reason);
-            assert_eq!(
-                sup.npu_quarantined.load(Ordering::Acquire),
-                matches!(reason, RetirementReason::TimedOut)
-            );
+    fn timeout_quarantine_requires_a_possible_npu_route() {
+        for reason in [
+            RetirementReason::Cancelled,
+            RetirementReason::TimedOut,
+            RetirementReason::AudioTimedOut,
+        ] {
+            for backend in ["auto", "npu", "cpu", "vulkan"] {
+                for state in [
+                    NpuState::Untried,
+                    NpuState::Ready,
+                    NpuState::NoNpu,
+                    NpuState::BuildMissing,
+                    NpuState::BundleMissing,
+                    NpuState::LoadFailed,
+                    NpuState::Disabled,
+                ] {
+                    for stub in [false, true] {
+                        let sup = test_supervisor("unused-retirement-reason".into());
+                        {
+                            let mut diagnostics = sup.diagnostics.lock().unwrap();
+                            diagnostics.requested_backend = backend.into();
+                            diagnostics.npu = state;
+                        }
+                        sup.stub.store(stub, Ordering::Relaxed);
+                        let generation = sup.worker_gen.load(Ordering::Acquire);
+                        sup.retire_timed_out_worker(0, generation, reason);
+                        assert_eq!(
+                            sup.npu_quarantined.load(Ordering::Acquire),
+                            matches!(reason, RetirementReason::TimedOut)
+                                && !stub
+                                && matches!(backend, "auto" | "npu")
+                                && matches!(state, NpuState::Untried | NpuState::Ready),
+                            "backend={backend}, state={state:?}, stub={stub}"
+                        );
+                    }
+                }
+            }
         }
     }
 
@@ -2364,7 +2403,7 @@ mod tests {
     #[test]
     fn bounded_second_batch_proceeds_while_first_hangs() {
         // Fix round 1/5 (I1): the timed-out helper must not hold `conn`
-        // across its blocked read â€” a second bounded batch starts and
+        // across its blocked read — a second bounded batch starts and
         // completes while the first is still stuck, and the watchdog cancels
         // the first helper's IO (no leaked holder wedges the pipeline).
         let fake = FakeWorker::start(Mode::HangFirst);
@@ -2528,7 +2567,7 @@ mod tests {
             let bin = p.join(format!("winsearch-embed{}", std::env::consts::EXE_SUFFIX));
             assert!(
                 bin.is_file(),
-                "worker binary missing at {} â€” run a workspace build first (`cargo build --workspace`)",
+                "worker binary missing at {} — run a workspace build first (`cargo build --workspace`)",
                 bin.display()
             );
             bin
@@ -2662,7 +2701,7 @@ mod tests {
             assert!(stats.retries >= 1, "expected a retry, got {stats:?}");
             assert!(stats.restarts >= 1, "expected a restart, got {stats:?}");
             // Single backoff on the respawn path (I2): exactly one wait of
-            // `backoff_for(1, base)` for the whole kill â†’ restart â†’ retry.
+            // `backoff_for(1, base)` for the whole kill → restart → retry.
             assert_eq!(
                 *sleeps.lock().unwrap(),
                 vec![backoff_for(1, Duration::from_millis(10))],

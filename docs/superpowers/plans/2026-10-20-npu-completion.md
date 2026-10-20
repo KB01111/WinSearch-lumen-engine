@@ -6,13 +6,14 @@ initial IRON integration). Lumen's existing PR #27 is the package consumer.
 ## Required outcomes
 
 - [x] Real Windows XRT shim build and verified, pinned NPU2 model execution.
-- [x] Existing 768-dimensional recipe v2, text cap512 and image budgets70/140/280;
-      actual NPU and CPU agreement >=.999, unchanged retrieval thresholds.
+- [x] Existing 768-dimensional recipe v2, text cap 512 and image budgets 70/140/280;
+      actual NPU and CPU agreement >=.999 for text and 140/280-token images;
+      70-token images use CPU/GPU, unchanged retrieval thresholds.
 - [x] Independent base/NPU model readiness; explicit opt-in download/import,
       resumable cancellation and complete deletion.
 - [x] Additive Rust/C# diagnostics, cached status, actual modality backends.
 - [x] Bounded NPU initialization/execution, worker retirement and fallback
-      quarantine, existing120second supervisor limit and independent Stop.
+      quarantine, existing 120-second supervisor limit and independent Stop.
 - [x] Verified engine-only package with real shim, licenses, native binary
       proof, independent manifest pin and outside-checkout execution.
 - [x] PR #27 dependency/lock/package pin and allowlist update with native
@@ -26,9 +27,9 @@ current source consent, deferred roots and owned process lifetimes remain.
 Failed parity blocks NPU release and vector mixing; it does not justify
 changing recipes or lowering thresholds.
 
-User-approved qualification adjustment:70-token image requests use CPU/GPU.
-Only text and140/280-token images may use NPU after the unchanged parity and
-retrieval gates pass. Preserve the failed70-token comparisons in the report.
+User-approved qualification adjustment: 70-token image requests use CPU/GPU.
+Only text and 140/280-token images may use NPU after the unchanged parity and
+retrieval gates pass. Preserve the failed 70-token comparisons in the report.
 
 ## Verification
 

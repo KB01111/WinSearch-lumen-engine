@@ -356,7 +356,9 @@ impl ModelService {
         };
         *self.outcome.lock().unwrap_or_else(|p| p.into_inner()) = None;
         let mut started = self.manager.status();
-        let npu_first = include_npu && started.state == ModelState::Ready;
+        let npu_first = include_npu && started.state == ModelState::Ready
+            && (kind == OpKind::Download
+                || self.manager.has_import_files(path.as_deref().expect("import path checked"), true));
         set_component(&mut started, npu_first, ModelState::Downloading, None);
         *self.progress.lock().unwrap_or_else(|p| p.into_inner()) = started.clone();
         let this = Arc::clone(self);
@@ -398,7 +400,11 @@ impl ModelService {
         cancel: &AtomicBool) {
         let last_push = Mutex::new(Instant::now());
         let progress_cb = |npu: bool, downloaded: u64, total: u64| {
-            let mut snapshot = self.manager.status();
+            let active = self.active.lock().unwrap_or_else(|p| p.into_inner());
+            if !active.as_ref().is_some_and(|op| op.id == id) {
+                return;
+            }
+            let mut snapshot = self.progress.lock().unwrap_or_else(|p| p.into_inner()).clone();
             set_component(&mut snapshot, npu, ModelState::Downloading, None);
             if npu {
                 if let Some(component) = snapshot.npu_bundle.as_mut() {
@@ -408,10 +414,6 @@ impl ModelService {
             } else {
                 snapshot.bytes = downloaded;
                 snapshot.total_bytes = total;
-            }
-            let active = self.active.lock().unwrap_or_else(|p| p.into_inner());
-            if !active.as_ref().is_some_and(|op| op.id == id) {
-                return;
             }
             *self.progress.lock().unwrap_or_else(|p| p.into_inner()) = snapshot.clone();
             let mut last = last_push.lock().unwrap_or_else(|p| p.into_inner());
@@ -444,26 +446,33 @@ impl ModelService {
         }
         };
         if result.is_ok() && include_npu {
-            if self.manager.status().state == ModelState::Ready {
-                if let Err(e) = self.record_compat() {
-                    warn!(error = %e, "cannot write base embedding compat record");
+            if kind == OpKind::Import
+                && !self.manager.has_import_files(path.expect("import path checked at start"), true)
+            {
+                info!("no NPU bundle files in source");
+            } else {
+                let snapshot = self.manager.status();
+                if snapshot.state == ModelState::Ready {
+                    if let Err(e) = self.record_compat() {
+                        warn!(error = %e, "cannot write base embedding compat record");
+                    }
                 }
+                npu_phase = true;
+                let component = snapshot.npu_bundle.as_ref().cloned().unwrap_or_default();
+                *self.progress.lock().unwrap_or_else(|p| p.into_inner()) = snapshot;
+                progress_cb(true, component.bytes, component.total_bytes);
+                result = match kind {
+                    OpKind::Download => self
+                        .manager
+                        .download_npu_bundle(&|d, t| progress_cb(true, d, t), cancel)
+                        .map_err(OpError::from_download),
+                    OpKind::Import => self
+                        .manager
+                        .import_npu_bundle(path.expect("import path checked at start"), cancel)
+                        .map(|_| ())
+                        .map_err(OpError::from_manager),
+                };
             }
-            npu_phase = true;
-            let snapshot = self.manager.status();
-            let component = snapshot.npu_bundle.as_ref().cloned().unwrap_or_default();
-            progress_cb(true, component.bytes, component.total_bytes);
-            result = match kind {
-                OpKind::Download => self
-                    .manager
-                    .download_npu_bundle(&|d, t| progress_cb(true, d, t), cancel)
-                    .map_err(OpError::from_download),
-                OpKind::Import => self
-                    .manager
-                    .import_npu_bundle(path.expect("import path checked at start"), cancel)
-                    .map(|_| ())
-                    .map_err(OpError::from_manager),
-            };
         }
 
         // Publish terminal bookkeeping before allowing another operation to start.
@@ -1134,6 +1143,115 @@ mod tests {
         );
         service.delete().unwrap();
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn base_only_import_with_npu_opt_in_skips_the_optional_phase() {
+        let base = ("base.gguf".to_string(), b"base".to_vec());
+        let npu = (
+            "iron-embeddinggemma2-npu2/fixture.bin".to_string(),
+            b"npu".to_vec(),
+        );
+        let fx = Fixture::serve(HashMap::new(), Duration::ZERO);
+        for installed in [false, true] {
+            for directory in [false, true] {
+                let tag = format!("base-only-{installed}-{directory}");
+                let dir = temp_dir(&tag);
+                let source = temp_dir(&format!("{tag}-source"));
+                std::fs::write(source.join(&base.0), &base.1).unwrap();
+                if installed {
+                    std::fs::write(dir.join(&base.0), &base.1).unwrap();
+                }
+                let service = tiny_service(dir.clone(), &fx, &[base.clone(), npu.clone()]);
+                let pushed = Arc::new(StdMutex::new(Vec::new()));
+                let observed = Arc::clone(&pushed);
+                service.set_notifier(Arc::new(move |message| {
+                    if let ServerMessage::ModelStatus { status, .. } = message {
+                        observed.lock().unwrap().push(status);
+                    }
+                }));
+                let path = if directory {
+                    source.clone()
+                } else {
+                    source.join(&base.0)
+                };
+                service.start_import_with_npu(path, true).unwrap();
+                assert!(wait_until(Duration::from_secs(5), || service
+                    .active
+                    .lock()
+                    .unwrap()
+                    .is_none()));
+                assert_eq!(*service.outcome.lock().unwrap(), Some(Outcome::Ok));
+                let status = service.status();
+                assert_eq!(status.state, ModelState::Ready);
+                assert!(status.error.is_none());
+                assert_eq!(status.npu_bundle.unwrap().state, ModelState::NotDownloaded);
+                assert!(pushed.lock().unwrap().iter().all(|status| {
+                    let component = status.npu_bundle.as_ref().unwrap();
+                    component.state == ModelState::NotDownloaded && component.error.is_none()
+                }));
+                assert_eq!(std::fs::read(dir.join(&base.0)).unwrap(), base.1);
+                assert!(!dir.join(&npu.0).exists());
+                assert_eq!(service.check_compat().unwrap(), CompatCheck::Compatible);
+                service.delete().unwrap();
+                std::fs::remove_dir_all(dir).unwrap();
+                std::fs::remove_dir_all(source).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn combined_download_progress_keeps_the_completed_base_ready() {
+        let base = ("base.gguf".to_string(), b"base".to_vec());
+        let npu = (
+            "iron-embeddinggemma2-npu2/fixture.bin".to_string(),
+            vec![5; 512 * 1024],
+        );
+        let blobs = [base.clone(), npu.clone()];
+        let fx = Fixture::serve(
+            blobs.clone().into_iter().collect(),
+            Duration::from_millis(2),
+        );
+        let dir = temp_dir("combined-progress");
+        let service = tiny_service(dir.clone(), &fx, &blobs);
+        let pushed = Arc::new(StdMutex::new(Vec::new()));
+        let observed = Arc::clone(&pushed);
+        service.set_notifier(Arc::new(move |message| {
+            if let ServerMessage::ModelStatus { status, .. } = message {
+                observed.lock().unwrap().push(status);
+            }
+        }));
+        service.start_download_with_npu(true);
+        assert!(wait_until(Duration::from_secs(10), || pushed
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|status| {
+                status.npu_bundle.as_ref().is_some_and(|component| {
+                    component.state == ModelState::Downloading && component.bytes > 0
+                })
+            })));
+        assert!(wait_until(Duration::from_secs(10), || service
+            .active
+            .lock()
+            .unwrap()
+            .is_none()));
+        for status in pushed.lock().unwrap().iter().filter(|status| {
+            status
+                .npu_bundle
+                .as_ref()
+                .is_some_and(|component| component.state == ModelState::Downloading)
+        }) {
+            assert_eq!(status.state, ModelState::Ready);
+            assert_eq!(status.bytes, base.1.len() as u64);
+            assert!(status.error.is_none());
+        }
+        assert_eq!(
+            service.status().npu_bundle.unwrap().state,
+            ModelState::Ready
+        );
+        service.delete().unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
