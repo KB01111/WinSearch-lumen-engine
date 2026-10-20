@@ -6,6 +6,7 @@
 // buffer `cacheable` in the kernel's group 1, argument buffers `host_only`)
 // — the same calls, with the buffers mapped once and reused.
 #include "iron_xrt_shim.h"
+#include "iron_run_guard.h"
 
 #include "xrt/detail/ert.h"
 #include "xrt/experimental/xrt_xclbin.h"
@@ -52,8 +53,8 @@ ert_cmd_state wait_bounded(xrt::run &run)
             && state != ERT_CMD_STATE_NEW)
             return state;
     }
-    // The owner must retire the worker before releasing possibly active buffers.
-    // Its independent watchdog also handles XRT drivers that mask wait timeouts.
+    // The native guard retires Windows workers before caller resources unwind.
+    // The independent watchdog handles XRT drivers that mask wait timeouts.
     throw std::runtime_error("NPU execution budget exhausted");
 }
 
@@ -440,8 +441,8 @@ int iron_kernel_run(iron_kernel *k, iron_buffer **bufs, size_t n, uint64_t *elap
             fresh = build_run(k, bufs, n);
         xrt::run &run = cached ? cached->run : fresh;
         auto t0 = std::chrono::steady_clock::now();
-        run.start();
-        auto state = wait_bounded(run);
+        iron_run_guard::invoke([&] { run.start(); });
+        auto state = iron_run_guard::wait([&] { return wait_bounded(run); }, ERT_CMD_STATE_COMPLETED);
         auto t1 = std::chrono::steady_clock::now();
         if (cached)
             cached->in_flight = false;
@@ -472,7 +473,7 @@ iron_run *iron_kernel_start(iron_kernel *k, iron_buffer **bufs, size_t n, char *
         if (!r->cached)
             r->fresh = build_run(k, bufs, n);
         r->started = std::chrono::steady_clock::now();
-        r->run().start();
+        iron_run_guard::invoke([&] { r->run().start(); });
         return r;
     } catch (const std::exception &e) {
         set_err(err, err_len, std::string("kernel start: ") + e.what());
@@ -488,7 +489,7 @@ int iron_run_wait(iron_run *r, uint64_t *elapsed_ns, char *err, size_t err_len)
     }
     int rc = 0;
     try {
-        auto state = wait_bounded(r->run());
+        auto state = iron_run_guard::wait([&] { return wait_bounded(r->run()); }, ERT_CMD_STATE_COMPLETED);
         auto t1 = std::chrono::steady_clock::now();
         if (r->cached)
             r->cached->in_flight = false;
