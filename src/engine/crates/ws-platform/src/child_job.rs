@@ -13,7 +13,22 @@ use windows::Win32::System::JobObjects::{
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_JOB_MEMORY,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
-use windows::Win32::System::Threading::{WaitForSingleObject, CREATE_NO_WINDOW};
+use windows::Win32::System::Threading::{
+    GetCurrentProcess, TerminateProcess, WaitForSingleObject, CREATE_NO_WINDOW,
+};
+
+/// Retires only this process, bypassing DLL detach/exit handlers which can
+/// deadlock after a driver failure. Use only in disposable native workers.
+pub fn terminate_current_process(code: u32) -> ! {
+    // SAFETY: the pseudo-handle names only this process; the caller intends
+    // unconditional termination, with no Rust or native cleanup callbacks.
+    unsafe {
+        let _ = TerminateProcess(GetCurrentProcess(), code);
+    }
+    // Successful self-termination never returns. Keep a failed API call from
+    // resuming a process whose native state may already be compromised.
+    std::process::abort()
+}
 
 pub struct ChildJob {
     child: Child,

@@ -216,14 +216,17 @@ impl DaemonClient {
                     if batch.iter().any(|hit| !ws_protocol::search_file_kind_result_allowed(&file_kinds,hit)) {
                         return Err(IpcError::UnselectedSearchFileKind);
                     }
-                    if !extensions.is_empty() && batch.iter().any(|hit|
-                        hit.kind == ws_protocol::ResultKind::Folder || !hit.path.as_deref().is_some_and(|path|
+                    if !extensions.is_empty() && batch.iter().any(|hit| {
+                        hit.kind == ws_protocol::ResultKind::Folder || !hit.path.as_deref().is_some_and(|path| {
                             ws_protocol::search_extension_allowed(&extensions,
-                                std::path::Path::new(path).extension().and_then(|extension| extension.to_str()).unwrap_or("")))) {
+                                std::path::Path::new(path).extension().and_then(|extension| extension.to_str()).unwrap_or(""),)
+                                })
+                        }) {
                         return Err(IpcError::UnselectedSearchExtension);
                     }
                     if (done && require_outcome && outcome.is_none()) || outcome.as_ref()
-                        .is_some_and(|state|!state.valid_for(done,batch.is_empty(),requested_semantic)) {
+                        .is_some_and(|state| {!state.valid_for(done,batch.is_empty(),requested_semantic)
+                        }) {
                         return Err(IpcError::InvalidSearchOutcome);
                     }
                     results.extend(batch);
@@ -250,8 +253,17 @@ impl DaemonClient {
         &mut self,
         progress: impl FnMut(&ModelStatus),
     ) -> Result<ModelStatus, IpcError> {
+        self.start_model_download_with_npu(false, progress)
+    }
+
+    pub fn start_model_download_with_npu(
+        &mut self,
+        include_npu: bool,
+        progress: impl FnMut(&ModelStatus),
+    ) -> Result<ModelStatus, IpcError> {
+        self.require_npu_bundle(include_npu)?;
         let id = self.alloc_id();
-        write_message(&mut self.stream, &ClientMessage::ModelDownloadStart { id })?;
+        write_message(&mut self.stream, &ClientMessage::ModelDownloadStart { id, include_npu },)?;
         self.await_model_terminal(id, progress)
     }
 
@@ -260,8 +272,20 @@ impl DaemonClient {
         path: String,
         progress: impl FnMut(&ModelStatus),
     ) -> Result<ModelStatus, IpcError> {
+        self.import_model_with_npu( path, false, progress)
+    }
+
+    pub
+
+    fn import_model_with_npu(
+        &mut self,
+        path: String,
+        include_npu: bool, progress: impl FnMut(&ModelStatus),
+    ) -> Result<ModelStatus, IpcError> {
+        self.require_npu_bundle(include_npu)?;
         let id = self.alloc_id();
-        write_message(&mut self.stream, &ClientMessage::ModelImport { id, path })?;
+        write_message(&mut self.stream, &ClientMessage::ModelImport { id, path,
+                include_npu, },)?;
         self.await_model_terminal(id, progress)
     }
 
@@ -277,7 +301,11 @@ impl DaemonClient {
                     status,
                 }) if resp_id.is_none() || resp_id == Some(id) => {
                     progress(&status);
-                    if status.state != ws_modelmgr::ModelState::Downloading {
+                    if status.state != ws_modelmgr::ModelState::Downloading
+                        && !status
+                            .npu_bundle
+                            .as_ref()
+                            .is_some_and(|s| s.state == ws_modelmgr::ModelState::Downloading) {
                         return Ok(status);
                     }
                 }
@@ -292,5 +320,17 @@ impl DaemonClient {
                 None => return Err(IpcError::UnexpectedEof),
             }
         }
+    }
+
+    fn require_npu_bundle(&self, include_npu: bool) -> Result<(), IpcError> {
+        if include_npu
+            && !self
+                .features
+                .iter()
+                .any(|feature| feature == "model.npu_bundle")
+        {
+            return Err(IpcError::UnsupportedFeature("model.npu_bundle"));
+}
+        Ok(())
     }
 }

@@ -28,6 +28,10 @@ use serde::{Deserialize, Serialize};
 /// changes to the messages below; independent of the frontend `PROTOCOL_VERSION`.
 pub const EMBED_PROTOCOL_VERSION: u32 = 1;
 
+/// Retire the process without dropping potentially broken native NPU objects.
+/// The owning supervisor quarantines NPU use before its one fresh-worker retry.
+pub const NPU_RETIRE_EXIT_CODE: i32 = 75;
+
 /// Embedding width produced by [`stub_vector`]. Matches the production
 /// `EMBEDDING_DIM` (768, unified EmbeddingGemma 2 space) so stub vectors flow
 /// through the same vector store without shape special-cases.
@@ -90,6 +94,9 @@ pub enum EmbedResponse {
         model_loaded: bool,
         /// True when vectors are deterministic fakes ([`stub_vector`]).
         stub: bool,
+        /// Closed availability code (see frontend `NpuState`), never a path.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        npu: Option<String>,
     },
     Embeddings {
         id: RequestId,
@@ -100,6 +107,8 @@ pub enum EmbedResponse {
         dim: usize,
         backend: String,
         stub: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        npu: Option<String>,
     },
     WorkerStatus {
         id: RequestId,
@@ -207,6 +216,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn successful_responses_preserve_optional_npu_observation() {
+        for json in [
+            r#"{"type":"hello_ack","protocol_version":1,"worker_version":"test","features":[],"model_loaded":false,"stub":false,"npu":"bundle_missing"}"#,
+            r#"{"type":"embeddings","id":1,"vecs":[],"dim":768,"backend":"cpu","stub":false,"npu":"bundle_missing"}"#,
+        ] {
+            let response: EmbedResponse = serde_json::from_str(json).unwrap();
+            assert_eq!(
+                serde_json::to_value(response).unwrap()["npu"],
+                "bundle_missing"
+            );
+        }
+    }
+
+    #[test]
     fn request_response_json_round_trip() {
         for req in [
             EmbedRequest::Hello {
@@ -241,6 +264,7 @@ mod tests {
             dim: 2,
             backend: "cpu".into(),
             stub: true,
+            npu: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"type\":\"embeddings\""));

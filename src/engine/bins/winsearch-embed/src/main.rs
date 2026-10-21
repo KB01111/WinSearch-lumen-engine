@@ -23,6 +23,13 @@ use server::WorkerConfig;
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
+    if args.get(1).is_some_and(|arg| arg == "--runtime-info") && args.len() == 2 {
+        println!(
+            "{}",
+            serde_json::json!({"npu_runtime_compiled": ws_embed::npu_runtime_compiled()})
+        );
+        return Ok(());
+    }
     if args.iter().any(|a| a == "--version") {
         println!("winsearch-embed {}", env!("CARGO_PKG_VERSION"));
         return Ok(());

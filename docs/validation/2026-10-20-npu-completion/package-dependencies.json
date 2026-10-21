@@ -1,0 +1,727 @@
+{
+  "engineCommit": "85a915d460b1fa751bbe86f289ff77c18c032c25",
+  "manifestSha256": "171aedbb142c712520b768f524ca848a79aab519081cfc0209e8781e96d7390d",
+  "allPeFiles": 37,
+  "unresolvedImports": [],
+  "files": {
+    "avcodec-63.dll": {
+      "sha256": "525060f60b3d0171bb9e0ea4b2074a2ff07f5d96b2483a82d9e08fe2ece58e9c",
+      "imports": {
+        "ADVAPI32.dll": "Windows system",
+        "bcrypt.dll": "Windows system",
+        "d2d1.dll": "Windows system",
+        "DNSAPI.dll": "Windows system",
+        "DWrite.dll": "Windows system",
+        "GDI32.dll": "Windows system",
+        "IPHLPAPI.DLL": "Windows system",
+        "KERNEL32.dll": "Windows system",
+        "MSIMG32.dll": "Windows system",
+        "api-ms-win-crt-conio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-environment-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-filesystem-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-locale-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-multibyte-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-private-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-process-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-time-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-utility-l1-1-0.dll": "Windows API set",
+        "ntdll.dll": "Windows system",
+        "ole32.dll": "Windows system",
+        "RPCRT4.dll": "Windows system",
+        "SHELL32.dll": "Windows system",
+        "SHLWAPI.dll": "Windows system",
+        "USER32.dll": "Windows system",
+        "USERENV.dll": "Windows system",
+        "USP10.dll": "Windows system",
+        "WS2_32.dll": "Windows system",
+        "api-ms-win-core-synch-l1-2-0.dll": "Windows API set",
+        "bcryptprimitives.dll": "Windows system",
+        "kernel32.dll": "Windows system",
+        "ws2_32.dll": "Windows system",
+        "avutil-61.dll": "payload",
+        "swresample-7.dll": "payload"
+      }
+    },
+    "avdevice-63.dll": {
+      "sha256": "e9e4306ac36778f2faceb1b3ee42152e9b16f10227d2315ae42d282d77c9105c",
+      "imports": {
+        "AVRT.dll": "Windows system",
+        "GDI32.dll": "Windows system",
+        "KERNEL32.dll": "Windows system",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-environment-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-filesystem-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-locale-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-private-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-time-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-utility-l1-1-0.dll": "Windows API set",
+        "ole32.dll": "Windows system",
+        "OLEAUT32.dll": "Windows system",
+        "SHELL32.dll": "Windows system",
+        "SHLWAPI.dll": "Windows system",
+        "USER32.dll": "Windows system",
+        "AVICAP32.dll": "Windows system",
+        "WINMM.dll": "Windows system",
+        "avcodec-63.dll": "payload",
+        "avfilter-12.dll": "payload",
+        "avformat-63.dll": "payload",
+        "avutil-61.dll": "payload"
+      }
+    },
+    "avfilter-12.dll": {
+      "sha256": "df6f94c43a04be9f3cedcf94b9c5085ae4186339b6828271d42055723eccc060",
+      "imports": {
+        "ADVAPI32.dll": "Windows system",
+        "bcrypt.dll": "Windows system",
+        "CFGMGR32.dll": "Windows system",
+        "GDI32.dll": "Windows system",
+        "IPHLPAPI.DLL": "Windows system",
+        "KERNEL32.dll": "Windows system",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-environment-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-filesystem-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-locale-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-multibyte-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-private-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-time-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-utility-l1-1-0.dll": "Windows API set",
+        "ole32.dll": "Windows system",
+        "RPCRT4.dll": "Windows system",
+        "SHLWAPI.dll": "Windows system",
+        "USER32.dll": "Windows system",
+        "USP10.dll": "Windows system",
+        "WS2_32.dll": "Windows system",
+        "avcodec-63.dll": "payload",
+        "avformat-63.dll": "payload",
+        "avutil-61.dll": "payload",
+        "swresample-7.dll": "payload",
+        "swscale-10.dll": "payload"
+      }
+    },
+    "avformat-63.dll": {
+      "sha256": "7275053ebb1dfa708d45d8544ad94bf664e0cb534cd0f2ed979fdf024bc190b3",
+      "imports": {
+        "ADVAPI32.dll": "Windows system",
+        "bcrypt.dll": "Windows system",
+        "CRYPT32.dll": "Windows system",
+        "GDI32.dll": "Windows system",
+        "IPHLPAPI.DLL": "Windows system",
+        "KERNEL32.dll": "Windows system",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-environment-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-filesystem-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-locale-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-private-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-time-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-utility-l1-1-0.dll": "Windows API set",
+        "ncrypt.dll": "Windows system",
+        "RPCRT4.dll": "Windows system",
+        "Secur32.dll": "Windows system",
+        "SHELL32.dll": "Windows system",
+        "USER32.dll": "Windows system",
+        "USP10.dll": "Windows system",
+        "WS2_32.dll": "Windows system",
+        "kernel32.dll": "Windows system",
+        "avcodec-63.dll": "payload",
+        "avutil-61.dll": "payload"
+      }
+    },
+    "avutil-61.dll": {
+      "sha256": "a34c7ef846a2d353c1a6a266b22a001ccd42f6654ab92631a7196e961bdedffd",
+      "imports": {
+        "ADVAPI32.dll": "Windows system",
+        "bcrypt.dll": "Windows system",
+        "CFGMGR32.dll": "Windows system",
+        "KERNEL32.dll": "Windows system",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-environment-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-filesystem-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-locale-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-private-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-time-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-utility-l1-1-0.dll": "Windows API set",
+        "ole32.dll": "Windows system",
+        "USER32.dll": "Windows system"
+      }
+    },
+    "concrt140.dll": {
+      "sha256": "a5b9af428829ab7b61ceae9d88a37ce1053551379ee007d8df53a7ba4d33c251",
+      "imports": {
+        "MSVCP140.dll": "payload",
+        "VCRUNTIME140_1.dll": "payload",
+        "VCRUNTIME140.dll": "payload",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "KERNEL32.dll": "Windows system"
+      }
+    },
+    "ffmpeg.exe": {
+      "sha256": "24fdada9908f7a231e9dfcc9f462273d3ddb698f5071f04c61496819ce3cfef0",
+      "imports": {
+        "KERNEL32.dll": "Windows system",
+        "api-ms-win-crt-conio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-environment-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-filesystem-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-locale-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-private-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-time-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-utility-l1-1-0.dll": "Windows API set",
+        "SHELL32.dll": "Windows system",
+        "avcodec-63.dll": "payload",
+        "avdevice-63.dll": "payload",
+        "avfilter-12.dll": "payload",
+        "avformat-63.dll": "payload",
+        "avutil-61.dll": "payload",
+        "swresample-7.dll": "payload",
+        "swscale-10.dll": "payload"
+      }
+    },
+    "ffprobe.exe": {
+      "sha256": "a77003c4628c7a414718623156280be47c1aaa2fa85c177d3d1d325d3d06358f",
+      "imports": {
+        "KERNEL32.dll": "Windows system",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-environment-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-filesystem-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-locale-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-private-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-time-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-utility-l1-1-0.dll": "Windows API set",
+        "SHELL32.dll": "Windows system",
+        "avcodec-63.dll": "payload",
+        "avdevice-63.dll": "payload",
+        "avfilter-12.dll": "payload",
+        "avformat-63.dll": "payload",
+        "avutil-61.dll": "payload",
+        "swresample-7.dll": "payload",
+        "swscale-10.dll": "payload"
+      }
+    },
+    "ggml-base.dll": {
+      "sha256": "8d0d73ea8cf06fd1a2087720d907be141b2428b3fc86c7050f5ec11f9eba45a7",
+      "imports": {
+        "KERNEL32.dll": "Windows system",
+        "MSVCP140.dll": "payload",
+        "VCRUNTIME140.dll": "payload",
+        "VCRUNTIME140_1.dll": "payload",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-environment-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-utility-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-time-l1-1-0.dll": "Windows API set"
+      }
+    },
+    "ggml-cpu-alderlake.dll": {
+      "sha256": "3b132f3a6766e0f2a54b704ef55c1401b9d374f07c130657c913cca3875abe5c",
+      "imports": {
+        "ggml-base.dll": "payload",
+        "KERNEL32.dll": "Windows system",
+        "ADVAPI32.dll": "Windows system",
+        "MSVCP140.dll": "payload",
+        "VCRUNTIME140.dll": "payload",
+        "VCRUNTIME140_1.dll": "payload",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-environment-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set"
+      }
+    },
+    "ggml-cpu-cannonlake.dll": {
+      "sha256": "1f1016b2ed780c2164dd6a7511d9711245e5541b63c0703dc1fac282ee7c5c1b",
+      "imports": {
+        "ggml-base.dll": "payload",
+        "KERNEL32.dll": "Windows system",
+        "ADVAPI32.dll": "Windows system",
+        "MSVCP140.dll": "payload",
+        "VCRUNTIME140.dll": "payload",
+        "VCRUNTIME140_1.dll": "payload",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-environment-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set"
+      }
+    },
+    "ggml-cpu-cascadelake.dll": {
+      "sha256": "759a047df8e17642d7f4b3b660b3a3c01ad60e7b19816e94f6a79e3cb5540fa3",
+      "imports": {
+        "ggml-base.dll": "payload",
+        "KERNEL32.dll": "Windows system",
+        "ADVAPI32.dll": "Windows system",
+        "MSVCP140.dll": "payload",
+        "VCRUNTIME140.dll": "payload",
+        "VCRUNTIME140_1.dll": "payload",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-environment-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set"
+      }
+    },
+    "ggml-cpu-haswell.dll": {
+      "sha256": "ce449510a3ad51adb70a5ba5d023a2a29729dc83677057406093b83ded4b7ddc",
+      "imports": {
+        "ggml-base.dll": "payload",
+        "KERNEL32.dll": "Windows system",
+        "ADVAPI32.dll": "Windows system",
+        "MSVCP140.dll": "payload",
+        "VCRUNTIME140.dll": "payload",
+        "VCRUNTIME140_1.dll": "payload",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-environment-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set"
+      }
+    },
+    "ggml-cpu-icelake.dll": {
+      "sha256": "359fa85ec1f74a8a278212af535eace53f65fbc44f64c6a97f8e71eadef0168e",
+      "imports": {
+        "ggml-base.dll": "payload",
+        "KERNEL32.dll": "Windows system",
+        "ADVAPI32.dll": "Windows system",
+        "MSVCP140.dll": "payload",
+        "VCRUNTIME140.dll": "payload",
+        "VCRUNTIME140_1.dll": "payload",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-environment-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set"
+      }
+    },
+    "ggml-cpu-sandybridge.dll": {
+      "sha256": "b13bc1357755c51eafb948de0c1c485e7dff573d60d0e60b84291de7e9f88efe",
+      "imports": {
+        "ggml-base.dll": "payload",
+        "KERNEL32.dll": "Windows system",
+        "ADVAPI32.dll": "Windows system",
+        "MSVCP140.dll": "payload",
+        "VCRUNTIME140.dll": "payload",
+        "VCRUNTIME140_1.dll": "payload",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-environment-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set"
+      }
+    },
+    "ggml-cpu-skylakex.dll": {
+      "sha256": "38762e8345e4a5fbd0d372c38f75b3d1118272d81cf81f5ae265f3a50045935f",
+      "imports": {
+        "ggml-base.dll": "payload",
+        "KERNEL32.dll": "Windows system",
+        "ADVAPI32.dll": "Windows system",
+        "MSVCP140.dll": "payload",
+        "VCRUNTIME140.dll": "payload",
+        "VCRUNTIME140_1.dll": "payload",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-environment-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set"
+      }
+    },
+    "ggml-cpu-sse42.dll": {
+      "sha256": "5749b7d70daa4cc984684d991853257e8ca62e885aeaf67ce1a729eb0446799c",
+      "imports": {
+        "ggml-base.dll": "payload",
+        "KERNEL32.dll": "Windows system",
+        "ADVAPI32.dll": "Windows system",
+        "MSVCP140.dll": "payload",
+        "VCRUNTIME140.dll": "payload",
+        "VCRUNTIME140_1.dll": "payload",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-environment-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set"
+      }
+    },
+    "ggml-cpu-x64.dll": {
+      "sha256": "dafb012d66759d87934729a0b29e39f008ca0d476c6a04226f87596bff570101",
+      "imports": {
+        "ggml-base.dll": "payload",
+        "KERNEL32.dll": "Windows system",
+        "ADVAPI32.dll": "Windows system",
+        "MSVCP140.dll": "payload",
+        "VCRUNTIME140.dll": "payload",
+        "VCRUNTIME140_1.dll": "payload",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-environment-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set"
+      }
+    },
+    "ggml.dll": {
+      "sha256": "70574faa240eff0a9df53afa8c7d530ee8f88a32a13f4ed4f6be877f143b1347",
+      "imports": {
+        "ggml-base.dll": "payload",
+        "KERNEL32.dll": "Windows system",
+        "MSVCP140.dll": "payload",
+        "VCRUNTIME140.dll": "payload",
+        "VCRUNTIME140_1.dll": "payload",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-environment-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-locale-l1-1-0.dll": "Windows API set"
+      }
+    },
+    "iron_xrt_shim.dll": {
+      "sha256": "bac3f5f0451ed87da800a70b9cb1eb13f4f58561ba7b2355859711f9dc0deb95",
+      "imports": {
+        "xrt_coreutil.dll": "AMD XRT system prerequisite",
+        "MSVCP140.dll": "payload",
+        "KERNEL32.dll": "Windows system",
+        "VCRUNTIME140.dll": "payload",
+        "VCRUNTIME140_1.dll": "payload",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-filesystem-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set"
+      }
+    },
+    "llama.dll": {
+      "sha256": "c1fbc60c33974d0d970ba40d09a164bc80d180a6525b3aefbcb60d6b97b77f1a",
+      "imports": {
+        "ggml.dll": "payload",
+        "ggml-base.dll": "payload",
+        "KERNEL32.dll": "Windows system",
+        "MSVCP140.dll": "payload",
+        "VCRUNTIME140.dll": "payload",
+        "VCRUNTIME140_1.dll": "payload",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-environment-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-filesystem-l1-1-0.dll": "Windows API set"
+      }
+    },
+    "msvcp140.dll": {
+      "sha256": "639342ea9a67c0009122238ce070a8257e2e04d367d627509fec29f8442afb42",
+      "imports": {
+        "VCRUNTIME140.dll": "payload",
+        "VCRUNTIME140_1.dll": "payload",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-locale-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-filesystem-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-time-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-environment-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-utility-l1-1-0.dll": "Windows API set",
+        "KERNEL32.dll": "Windows system"
+      }
+    },
+    "msvcp140_1.dll": {
+      "sha256": "456aebccb449fcba35f1109c259ba0aa10923e660f4de812a490d35f37f54fc9",
+      "imports": {
+        "MSVCP140.dll": "payload",
+        "VCRUNTIME140.dll": "payload",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "KERNEL32.dll": "Windows system"
+      }
+    },
+    "msvcp140_2.dll": {
+      "sha256": "7a403abf753d0bdf09776cf4bcb13b5a6ebe3a47670de124a3c621aa4b952f82",
+      "imports": {
+        "MSVCP140.dll": "payload",
+        "VCRUNTIME140.dll": "payload",
+        "VCRUNTIME140_1.dll": "payload",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-locale-l1-1-0.dll": "Windows API set",
+        "KERNEL32.dll": "Windows system"
+      }
+    },
+    "msvcp140_atomic_wait.dll": {
+      "sha256": "d759dd381bdbd6142372de4cb57acc382e1b80c106b7414a408816564ee1eb6a",
+      "imports": {
+        "MSVCP140.dll": "payload",
+        "VCRUNTIME140_1.dll": "payload",
+        "VCRUNTIME140.dll": "payload",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-locale-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "ADVAPI32.dll": "Windows system",
+        "api-ms-win-core-synch-l1-2-0.dll": "Windows API set",
+        "KERNEL32.dll": "Windows system"
+      }
+    },
+    "msvcp140_codecvt_ids.dll": {
+      "sha256": "f781e1e0133c397c3a2c73fd4dbcdb442378ba20fced56a2f7db5822436ddd2a",
+      "imports": {
+        "VCRUNTIME140.dll": "payload",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "KERNEL32.dll": "Windows system"
+      }
+    },
+    "mtmd.dll": {
+      "sha256": "62a965952cffe3576de3e679f5fd79341142fe5bf8f9a106f97c3eae0f0ba7e6",
+      "imports": {
+        "llama.dll": "payload",
+        "ggml.dll": "payload",
+        "ggml-base.dll": "payload",
+        "KERNEL32.dll": "Windows system",
+        "MSVCP140.dll": "payload",
+        "VCRUNTIME140.dll": "payload",
+        "VCRUNTIME140_1.dll": "payload",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-filesystem-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-environment-l1-1-0.dll": "Windows API set"
+      }
+    },
+    "pdfium.dll": {
+      "sha256": "1f2aee4286b8cf0413ab4562b7121aa454f9cfd9afd6ca8609bcef80927b3f80",
+      "imports": {
+        "KERNEL32.dll": "Windows system",
+        "ADVAPI32.dll": "Windows system",
+        "GDI32.dll": "Windows system",
+        "USER32.dll": "Windows system"
+      }
+    },
+    "swresample-7.dll": {
+      "sha256": "1fbcea031ada11a15e609e209e1cd71a9c632f39bc4794190137b67351db677f",
+      "imports": {
+        "KERNEL32.dll": "Windows system",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-environment-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-filesystem-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-locale-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-private-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-time-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-utility-l1-1-0.dll": "Windows API set",
+        "avutil-61.dll": "payload"
+      }
+    },
+    "swscale-10.dll": {
+      "sha256": "9ff8d80bc228f0e557553fd5cfcefc67b682098e9bd6ab08dc7a7d2dc8ad4699",
+      "imports": {
+        "KERNEL32.dll": "Windows system",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-locale-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-private-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-utility-l1-1-0.dll": "Windows API set",
+        "avutil-61.dll": "payload"
+      }
+    },
+    "vccorlib140.dll": {
+      "sha256": "9ce6f235791450717f8e05ecd729e95ec98e9630a9caae661ba6773b669ecbf7",
+      "imports": {
+        "KERNEL32.dll": "Windows system",
+        "VCRUNTIME140_1.dll": "payload",
+        "VCRUNTIME140.dll": "payload",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "MSVCP140.dll": "payload",
+        "ole32.dll": "Windows system",
+        "OLEAUT32.dll": "Windows system",
+        "api-ms-win-core-winrt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-core-winrt-error-l1-1-0.dll": "Windows API set",
+        "api-ms-win-core-winrt-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set"
+      }
+    },
+    "vcruntime140.dll": {
+      "sha256": "19c293ac482fdb882cd29d2b0e6d807419efdcada04068f03e5723670895e17d",
+      "imports": {
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-convert-l1-1-0.dll": "Windows API set",
+        "KERNEL32.dll": "Windows system"
+      }
+    },
+    "vcruntime140_1.dll": {
+      "sha256": "a253a12e4a8e9e23ebfe0ced829f7751e4f42c60066986bf20515ced8dcc68cd",
+      "imports": {
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "VCRUNTIME140.dll": "payload",
+        "KERNEL32.dll": "Windows system"
+      }
+    },
+    "vcruntime140_threads.dll": {
+      "sha256": "cd05a48a1183b074e81275d6c6472ecb5b09db8a0db8d1850b009ad041907ce9",
+      "imports": {
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-time-l1-1-0.dll": "Windows API set",
+        "VCRUNTIME140.dll": "payload",
+        "KERNEL32.dll": "Windows system"
+      }
+    },
+    "winsearch-embed.exe": {
+      "sha256": "daee53d6128221e50c7426a5abc7905812fcdeb782694900b7ef02a0a6589f89",
+      "imports": {
+        "api-ms-win-core-synch-l1-2-0.dll": "Windows API set",
+        "kernel32.dll": "Windows system",
+        "ntdll.dll": "Windows system",
+        "oleaut32.dll": "Windows system",
+        "advapi32.dll": "Windows system",
+        "propsys.dll": "Windows system",
+        "ole32.dll": "Windows system",
+        "cfgmgr32.dll": "Windows system",
+        "bcryptprimitives.dll": "Windows system",
+        "llama.dll": "payload",
+        "mtmd.dll": "payload",
+        "ggml.dll": "payload",
+        "ggml-base.dll": "payload",
+        "KERNEL32.dll": "Windows system",
+        "VCRUNTIME140.dll": "payload",
+        "VCRUNTIME140_1.dll": "payload",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-locale-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "iron_xrt_shim.dll": "payload"
+      }
+    },
+    "winsearch-extract.exe": {
+      "sha256": "7a934fb8f1a5f2aa664dc37175be1afdf1b1c53b472a5d947b205ce3d756153b",
+      "imports": {
+        "kernel32.dll": "Windows system",
+        "api-ms-win-core-synch-l1-2-0.dll": "Windows API set",
+        "ntdll.dll": "Windows system",
+        "ole32.dll": "Windows system",
+        "oleaut32.dll": "Windows system",
+        "propsys.dll": "Windows system",
+        "query.dll": "Windows system",
+        "api-ms-win-core-winrt-l1-1-0.dll": "Windows API set",
+        "bcryptprimitives.dll": "Windows system",
+        "KERNEL32.dll": "Windows system",
+        "VCRUNTIME140.dll": "payload",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-locale-l1-1-0.dll": "Windows API set"
+      }
+    },
+    "winsearchd.exe": {
+      "sha256": "0902bf6a0a472245d0325f96548c8fed6440d19413402d52a31ac6132cc1e54a",
+      "imports": {
+        "api-ms-win-core-synch-l1-2-0.dll": "Windows API set",
+        "kernel32.dll": "Windows system",
+        "ws2_32.dll": "Windows system",
+        "ntdll.dll": "Windows system",
+        "oleaut32.dll": "Windows system",
+        "advapi32.dll": "Windows system",
+        "ole32.dll": "Windows system",
+        "powrprof.dll": "Windows system",
+        "bcryptprimitives.dll": "Windows system",
+        "KERNEL32.dll": "Windows system",
+        "bcrypt.dll": "Windows system",
+        "ADVAPI32.dll": "Windows system",
+        "VCRUNTIME140.dll": "payload",
+        "api-ms-win-crt-string-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-math-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-heap-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-utility-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-time-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-runtime-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-stdio-l1-1-0.dll": "Windows API set",
+        "api-ms-win-crt-locale-l1-1-0.dll": "Windows API set"
+      }
+    }
+  }
+}

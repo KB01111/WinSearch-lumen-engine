@@ -37,6 +37,12 @@ pub struct NpuRuntime {
 }
 
 impl NpuRuntime {
+    /// Bounds initialization and every dispatch in one worker NPU attempt.
+    pub fn set_job_budget(budget: std::time::Duration) -> Result<(), EmbedError> {
+        taconite::set_execution_budget(budget)
+            .map_err(|e| EmbedError::LoadFailed(format!("npu: {e}")))
+    }
+
     /// Opens the NPU and loads the bundle at `bundle_dir` (the directory that
     /// holds `manifest.txt`), then runs one warm-up text.
     pub fn load(bundle_dir: &Path) -> Result<Self, EmbedError> {
@@ -49,9 +55,14 @@ impl NpuRuntime {
         if !manifest.is_file() {
             return Err(EmbedError::ModelNotFound(manifest));
         }
-        let model = EmbeddingGemma2::load(bundle_dir)
-            .map_err(|e| EmbedError::LoadFailed(format!("npu: {e}")))?;
-        if model.tokenizer.is_none() || model.cfg.max_text_tokens < NPU_MAX_TEXT_TOKENS {
+        let model = EmbeddingGemma2::load(bundle_dir).map_err(|e| match e {
+            taconite_embeddinggemma2::Error::Npu(message) => EmbedError::NpuFailed(message),
+            other => EmbedError::LoadFailed(format!("npu: {other}")),
+        })?;
+        if model.tokenizer.is_none()
+            || model.cfg.max_text_tokens < NPU_MAX_TEXT_TOKENS
+            || model.cfg.out != 768
+        {
             return Err(EmbedError::LoadFailed(
                 "npu: bundle has no text path (needs the 0.2.0 bundle)".into(),
             ));
@@ -60,7 +71,14 @@ impl NpuRuntime {
             model,
             bundle: bundle_dir.to_path_buf(),
         };
-        rt.embed_texts(&["warmup"])?;
+        if let Err(error) = rt.embed_texts(&["warmup"]) {
+            if matches!(error, EmbedError::NpuFailed(_)) {
+                // A failed dispatch may still own live device buffers. The
+                // worker exits on this error before any native teardown.
+                std::mem::forget(rt);
+            }
+            return Err(error);
+        }
         info!(bundle = %rt.bundle.display(), contexts = rt.model.contexts(), "NPU embedding model loaded");
         Ok(rt)
     }
@@ -81,9 +99,9 @@ impl NpuRuntime {
         }
         let mut out = Vec::with_capacity(texts.len());
         for (i, text) in texts.iter().enumerate() {
+            let started = std::time::Instant::now();
             let mut ids = self
-                .model
-                .tokenize(text.as_ref(), None)
+                .application_tokens(text.as_ref())
                 .map_err(|_| EmbedError::Tokenize(i))?;
             if ids.is_empty() {
                 return Err(EmbedError::Tokenize(i));
@@ -94,12 +112,32 @@ impl NpuRuntime {
                 .embed_ids(&ids)
                 .map_err(|e| EmbedError::NpuFailed(e.to_string()))?;
             checked_unit(&mut v)?;
+            info!(modality = "text", total_ms = started.elapsed().as_secs_f64() * 1000.0,
+                npu_dispatch_ms = self.model.timing.npu_total().as_secs_f64() * 1000.0,
+                stages = %self.model.timing, "NPU host wall timing (dispatch includes driver waits)");
             out.push(v);
         }
         Ok(out)
     }
 
-    /// Embeds an RGB8 image with at most `token_budget` (70/140/280) soft tokens.
+    fn application_tokens(&self, text: &str) -> Result<Vec<u32>, taconite_embeddinggemma2::Error> {
+        let mut ids = self.model.tokenize(text, None)?;
+        if text.starts_with("<bos>") {
+            // Recipe v2's llama_tokenize(add_special=true) always adds both;
+            // upstream's chat-template heuristic omits them for this prefix.
+            let tokenizer = self
+                .model
+                .tokenizer
+                .as_ref()
+                .expect("validated text bundle");
+            ids.insert(0, tokenizer.bos);
+            ids.push(tokenizer.eos);
+        }
+        Ok(ids)
+    }
+
+    /// Embeds an RGB8 image at a qualified140/280token budget.70token frames
+    /// retain the CPU/GPU recipe until this bundle meets cross-backend parity.
     pub fn embed_image_with_budget(
         &mut self,
         rgb: &[u8],
@@ -107,6 +145,9 @@ impl NpuRuntime {
         height: u32,
         token_budget: u32,
     ) -> Result<Vec<f32>, EmbedError> {
+        qualified_image_budget(token_budget)?;
+        let started = std::time::Instant::now();
+        let (rgb, width, height) = crate::image::prepare(rgb, width, height, token_budget)?;
         let (w, h) = (width as usize, height as usize);
         let cfg = &self.model.cfg;
         if !matches!(token_budget, 70 | 140 | 280)
@@ -120,7 +161,7 @@ impl NpuRuntime {
             ));
         }
         let patches = taconite_embeddinggemma2::preprocess::patches(
-            rgb,
+            &rgb,
             w,
             h,
             cfg.patch,
@@ -133,12 +174,24 @@ impl NpuRuntime {
             .embed_patches(&patches)
             .map_err(|e| EmbedError::NpuFailed(e.to_string()))?;
         checked_unit(&mut v)?;
+        info!(modality = "image", token_budget, total_ms = started.elapsed().as_secs_f64() * 1000.0,
+            npu_dispatch_ms = self.model.timing.npu_total().as_secs_f64() * 1000.0,
+            stages = %self.model.timing, "NPU host wall timing (dispatch includes driver waits)");
         Ok(v)
     }
 }
 
+fn qualified_image_budget(budget: u32) -> Result<(), EmbedError> {
+    if !matches!(budget, 140 | 280) {
+        return Err(EmbedError::MtmdFailed(
+            "NPU image budget is not qualified; use the GPU/CPU image runtime".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn checked_unit(v: &mut [f32]) -> Result<(), EmbedError> {
-    if v.is_empty() || v.iter().any(|x| !x.is_finite()) || v.iter().all(|x| *x == 0.0) {
+    if v.len() != 768 || v.iter().any(|x| !x.is_finite()) || v.iter().all(|x| *x == 0.0) {
         return Err(EmbedError::NpuFailed("invalid NPU vector".into()));
     }
     l2_normalize(v);
@@ -170,8 +223,258 @@ mod tests {
         assert!(checked_unit(&mut []).is_err());
         assert!(checked_unit(&mut [0.0, 0.0]).is_err());
         assert!(checked_unit(&mut [f32::NAN, 1.0]).is_err());
-        let mut v = [3.0, 4.0];
+        let mut v = [0.0; 768];
+        v[0] = 3.0;
+        v[1] = 4.0;
         checked_unit(&mut v).unwrap();
         assert!((v[0] - 0.6).abs() < 1e-6 && (v[1] - 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn wrong_embedding_width_cannot_enter_the_shared_index() {
+        assert!(checked_unit(&mut [1.0; 767]).is_err());
+        assert!(checked_unit(&mut [1.0; 769]).is_err());
+        assert!(checked_unit(&mut [1.0; 768]).is_ok());
+    }
+
+    #[test]
+    fn unqualified_image_budget_is_refused_for_cpu_fallback() {
+        assert!(qualified_image_budget(70).is_err());
+        assert!(qualified_image_budget(140).is_ok());
+        assert!(qualified_image_budget(280).is_ok());
+        assert!(qualified_image_budget(0).is_err());
+    }
+
+    #[test]
+    #[ignore = "requires actual NPU2 and WS_EMBED_TEST_NPU_BUNDLE; owns a disposable child"]
+    fn real_npu_expired_dispatch_retires_without_native_teardown() {
+        use std::time::{Duration, Instant};
+        if std::env::var_os("WS_TEST_NPU_DEADLINE_CHILD").is_some() {
+            assert!(npu_runtime_compiled());
+            let bundle = PathBuf::from(std::env::var_os("WS_EMBED_TEST_NPU_BUNDLE").unwrap());
+            NpuRuntime::set_job_budget(Duration::from_secs(45)).unwrap();
+            let mut npu = NpuRuntime::load(&bundle).expect("actual NPU initialization");
+            NpuRuntime::set_job_budget(Duration::from_millis(1)).unwrap();
+            std::thread::sleep(Duration::from_millis(2));
+            let started = Instant::now();
+            let result = npu.embed_texts(&["task: search result | query: memory safety"]);
+            assert!(
+                matches!(result, Err(EmbedError::NpuFailed(_))),
+                "{result:?}"
+            );
+            assert!(started.elapsed() < Duration::from_secs(2));
+            eprintln!(
+                "actual NPU expired dispatch returned a bounded error; retiring child with code75"
+            );
+            ws_platform::child_job::terminate_current_process(75);
+        }
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--ignored",
+                "--exact",
+                "npu::tests::real_npu_expired_dispatch_retires_without_native_teardown",
+                "--nocapture",
+            ])
+            .env("WS_TEST_NPU_DEADLINE_CHILD", "1")
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert_eq!(status.code(), Some(75));
+                break;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("native dispatch exceeded independent parent timeout");
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+
+    #[test]
+    #[ignore = "requires actual NPU2, WS_EMBED_TEST_NPU_BUNDLE and WS_EMBED_TEST_MODEL"]
+    fn real_npu_preserves_reference_tokens_vectors_and_image_budgets() {
+        use crate::runtime::test_support;
+        use crate::vector::cosine;
+        use crate::{BackendPreference, EmbedRuntime, LoadOptions};
+        let bundle = PathBuf::from(
+            std::env::var_os("WS_EMBED_TEST_NPU_BUNDLE").expect("explicit NPU bundle"),
+        );
+        let model =
+            PathBuf::from(std::env::var_os("WS_EMBED_TEST_MODEL").expect("explicit CPU model"));
+        assert!(
+            npu_runtime_compiled(),
+            "a stub build cannot satisfy native acceptance"
+        );
+        let mut cpu = EmbedRuntime::load(
+            &model,
+            &LoadOptions {
+                backend: BackendPreference::Cpu,
+                mmproj: Some(model.with_file_name("mmproj-embeddinggemma-2-Q8_0.gguf")),
+                ..Default::default()
+            },
+        )
+        .expect("CPU reference runtime");
+        let mut npu = NpuRuntime::load(&bundle).expect("actual Windows NPU");
+        let text_refs: Vec<(usize, String, String)> = npu
+            .model
+            .manifest
+            .tagged("tref")
+            .map(|row| {
+                let prompt = row.field(1).unwrap().to_string();
+                let raw = row.field(2).unwrap();
+                let bytes: Vec<u8> = (0..raw.len())
+                    .step_by(2)
+                    .map(|i| u8::from_str_radix(&raw[i..i + 2], 16).unwrap())
+                    .collect();
+                (
+                    row.field_as(0).unwrap(),
+                    prompt,
+                    String::from_utf8(bytes).unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            text_refs.len(),
+            18,
+            "independent pinned tokenizer references"
+        );
+        for (index, prompt, text) in text_refs {
+            NpuRuntime::set_job_budget(std::time::Duration::from_secs(45)).unwrap();
+            let prompt = (prompt != "-").then_some(prompt.as_str());
+            let full = match prompt {
+                Some(name) => format!(
+                    "{}{}",
+                    npu.model.tokenizer.as_ref().unwrap().prompt(name).unwrap(),
+                    text
+                ),
+                None => text.clone(),
+            };
+            let hf_ids: Vec<u32> = npu
+                .model
+                .store
+                .i32(&format!("tref.{index}.ids"))
+                .unwrap()
+                .iter()
+                .map(|&id| id as u32)
+                .collect();
+            assert_eq!(
+                npu.model.tokenize(&full, None).unwrap(),
+                hf_ids,
+                "HF token IDs case{index}"
+            );
+            assert_eq!(
+                test_support::tokens(&cpu, &full),
+                npu.application_tokens(&full).unwrap(),
+                "CPU/NPU application token IDs case{index}"
+            );
+            // The raw 1421-token upstream reference exceeds the application's
+            // 512-token contract and the bounded job budget. Check its full
+            // tokenizer IDs above and its truncated application vector below.
+            if hf_ids.len() <= NPU_MAX_TEXT_TOKENS {
+                let independent = npu
+                    .model
+                    .store
+                    .f32(&format!("tref.{index}.embedding"))
+                    .unwrap()
+                    .to_vec();
+                let actual = npu.model.embed_text(&text, prompt).unwrap();
+                let agreement = cosine(&actual, &independent).unwrap();
+                assert!(agreement >= 0.999, "independent text{index}: {agreement}");
+            }
+            NpuRuntime::set_job_budget(std::time::Duration::from_secs(45)).unwrap();
+            let actual = npu
+                .embed_texts(std::slice::from_ref(&full))
+                .unwrap()
+                .remove(0);
+            let expected = cpu
+                .embed_texts(std::slice::from_ref(&full))
+                .unwrap()
+                .remove(0);
+            let agreement = cosine(&actual, &expected).unwrap();
+            assert!(
+                agreement >= 0.999,
+                "application512token text{index}: {agreement}"
+            );
+            eprintln!(
+                "NPU text{index}: tokens{}, CPU/application cosine{agreement:.9}",
+                hf_ids.len()
+            );
+        }
+        let image_refs: Vec<(String, usize, usize)> = npu
+            .model
+            .manifest
+            .tagged("ref")
+            .map(|row| {
+                (
+                    row.field(0).unwrap().to_string(),
+                    row.get("w").unwrap(),
+                    row.get("h").unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(image_refs.len(), 4);
+        let mut image_failures = Vec::new();
+        for (name, width, height) in image_refs {
+            let rgb = npu
+                .model
+                .store
+                .u8(&format!("ref.{name}.rgb"))
+                .unwrap()
+                .to_vec();
+            let patches = npu.model.preprocess(&rgb, width, height).unwrap();
+            assert_eq!(
+                patches.pixels,
+                npu.model.store.f32(&format!("ref.{name}.pixels")).unwrap(),
+                "bit-exact preprocessing {name}"
+            );
+            let positions = npu
+                .model
+                .store
+                .i32(&format!("ref.{name}.positions"))
+                .unwrap();
+            assert_eq!(positions.len(), patches.positions.len() * 2);
+            for (i, &(x, y)) in patches.positions.iter().enumerate() {
+                assert_eq!(
+                    (x, y),
+                    (positions[i * 2] as usize, positions[i * 2 + 1] as usize)
+                );
+            }
+            NpuRuntime::set_job_budget(std::time::Duration::from_secs(45)).unwrap();
+            let reference = npu
+                .model
+                .store
+                .f32(&format!("ref.{name}.embedding"))
+                .unwrap()
+                .to_vec();
+            let actual = npu.model.embed_patches(&patches).unwrap();
+            let agreement = cosine(&actual, &reference).unwrap();
+            assert!(agreement >= 0.999, "independent image{name}: {agreement}");
+            assert!(
+                npu.embed_image_with_budget(&rgb, width as u32, height as u32, 70)
+                    .is_err(),
+                "70token images cannot enter the shared space from the unqualified NPU route"
+            );
+            for budget in [140, 280] {
+                NpuRuntime::set_job_budget(std::time::Duration::from_secs(45)).unwrap();
+                let actual = npu
+                    .embed_image_with_budget(&rgb, width as u32, height as u32, budget)
+                    .unwrap();
+                let expected = cpu
+                    .embed_image_with_budget(&rgb, width as u32, height as u32, budget)
+                    .unwrap();
+                let agreement = cosine(&actual, &expected).unwrap();
+                eprintln!("NPU image{name}/{budget}: CPU cosine{agreement:.9}");
+                if agreement < 0.999 {
+                    image_failures.push(format!("{name}/{budget}: {agreement:.9}"));
+                }
+            }
+        }
+        assert!(
+            image_failures.is_empty(),
+            "CPU/NPU image parity: {image_failures:?}"
+        );
     }
 }

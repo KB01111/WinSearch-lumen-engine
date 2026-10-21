@@ -22,21 +22,34 @@ class PayloadTests(unittest.TestCase):
         binaries.mkdir()
         (root / 'llama').mkdir()
         sha = lambda content: hashlib.sha256(content).hexdigest()
-        native = {'llama.dll': b'inference', 'pdfium.dll': b'pdf',
+        native = {'iron_xrt_shim.dll': b'real shim', 'llama.dll': b'inference', 'pdfium.dll': b'pdf',
                   'codec.dll': b'wrong codec' if mismatched_codec else b'codec',
                   'vcruntime140.dll': b'crt'}
         executables = {name: name.encode() for name in
                       ('winsearchd.exe', 'winsearch-embed.exe', 'winsearch-extract.exe')}
         for name, content in {**native, **executables}.items():
             (binaries / name).write_bytes(content)
-        inputs = root / 'docs/validation/2026-10-20-extraction-claims/release-native-inputs.json'
+        for name in payload.REQUIRED_NPU_SOURCES:
+            source = root / name
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_bytes(b'fixture source')
+        inputs = root / payload.NATIVE_PROOF
         inputs.parent.mkdir(parents=True)
-        inputs.write_text(json.dumps({'cpu': {
+        inputs.write_text(json.dumps({
+            'source_commit': payload.ENGINE_COMMIT, 'npu_runtime_compiled': True,
+            'qualified_routes': {'text': True, 'imageTokenBudgets': [140, 280], 'cosineThreshold': .999, 'retrievalPassed': True},
+            'native_source_sha256': {name: sha(b'fixture source') for name in payload.REQUIRED_NPU_SOURCES},
             'binary_sha256': {name: sha(content) for name, content in executables.items()},
-            'adjacent_native_dll_sha256': {name: sha(content) for name, content in native.items()}}}), encoding='utf-8')
+            'adjacent_native_dll_sha256': {name: sha(content) for name, content in native.items()}}), encoding='utf-8')
         for file in ('THIRD-PARTY-NOTICES.txt', 'src/engine/third_party/licenses/FFmpeg-GPLv3.txt',
                      'src/engine/third_party/ffmpeg-source.md', 'src/engine/third_party/msvc-runtime.md',
                      'src/engine/third_party/code-grammars-LICENSES.txt',
+                     'src/engine/third_party/taconite/LICENSE',
+                     'src/engine/third_party/licenses/taconite-embeddinggemma2/LICENSE',
+                     'src/engine/third_party/licenses/taconite-embeddinggemma2/LICENSE-PILLOW',
+                     'src/engine/third_party/licenses/taconite-embeddinggemma2/LICENSE-PYTORCH',
+                     'src/engine/third_party/licenses/taconite-bundle/LICENSE',
+                     'src/engine/third_party/licenses/XRT-LICENSE',
                      'src/engine/crates/ws-embed/tests/fixtures/media/LICENSE-DigUp.txt'):
             path = root / file
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,7 +81,7 @@ class PayloadTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             inputs = self.assembly_fixture(root)
-            with patch.object(payload, 'ROOT', root), patch.object(payload.subprocess, 'check_output', return_value=b'llama license'):
+            with patch.object(payload, 'ROOT', root), patch.object(payload, 'verify_real_npu_runtime'), patch.object(payload.subprocess, 'check_output', return_value=b'llama license'):
                 result = payload.assemble(*inputs)
             manifest_bytes = (root / 'output/payload.json').read_bytes()
             files = json.loads(manifest_bytes)['files']
@@ -85,6 +98,30 @@ class PayloadTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'native.*match'):
                     payload.assemble(*inputs)
             self.assertFalse((root / 'output').exists())
+
+    def test_npu_proof_rejects_stub_missing_shim_stale_binary_and_changed_source(self):
+        for mutation in ['stub', 'missing', 'binary', 'source', 'commit', 'parity']:
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                inputs = self.assembly_fixture(root)
+                proof_path = root / payload.NATIVE_PROOF
+                proof = json.loads(proof_path.read_text())
+                if mutation == 'stub': proof['npu_runtime_compiled'] = False
+                elif mutation == 'missing': del proof['adjacent_native_dll_sha256']['iron_xrt_shim.dll']
+                elif mutation == 'commit': proof['source_commit'] = '0' * 40
+                elif mutation == 'parity': proof['qualified_routes']['retrievalPassed'] = False
+                elif mutation == 'binary': (inputs[0] / 'iron_xrt_shim.dll').write_bytes(b'stale')
+                elif mutation == 'source': (root / next(iter(proof['native_source_sha256']))).write_bytes(b'changed')
+                proof_path.write_text(json.dumps(proof))
+                with patch.object(payload, 'ROOT', root), self.assertRaises(ValueError):
+                    payload.assemble(*inputs)
+                self.assertFalse((root / 'output').exists())
+
+    def test_runtime_info_refuses_stub_even_with_pinned_dll(self):
+        import subprocess
+        with patch.object(payload.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, b'{"npu_runtime_compiled":false}')):
+            with self.assertRaisesRegex(ValueError, 'stub'):
+                payload.verify_real_npu_runtime(Path('copied-package'))
 
     def test_publish_retries_transient_windows_lock_without_overwriting(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -5,7 +5,7 @@
 //! [`Buffer`] over the C shim `build.rs` compiles against XRT's C++ API.
 //! Re-exported from the crate root.
 
-use std::ffi::{CStr, CString, c_char, c_int, c_void};
+use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::marker::PhantomData;
 use std::path::Path;
 use std::ptr::NonNull;
@@ -37,6 +37,7 @@ mod ffi {
     unsafe extern "C" {
         pub fn iron_open(device_index: c_int, err: *mut c_char, err_len: usize) -> *mut iron_session;
         pub fn iron_close(s: *mut iron_session);
+        pub fn iron_set_deadline_ms(timeout_ms: u64);
         pub fn iron_kernel_load(
             s: *mut iron_session,
             xclbin: *const c_char,
@@ -87,6 +88,33 @@ mod ffi {
 }
 
 const ERR_LEN: usize = 1024;
+
+/// Bounds all subsequent NPU dispatches on this thread by one total budget.
+/// The owning worker must exit on a failed run before releasing native buffers.
+pub fn set_execution_budget(budget: Duration) -> Result<(), Error> {
+    if budget.is_zero() {
+        return Err(Error::Run("NPU execution budget must be positive".into()));
+    }
+    #[cfg(all(windows, not(taconite_xrt_stub)))]
+    crate::winload::ensure_loaded().map_err(Error::Device)?;
+    let millis = budget.as_millis().clamp(1, 45_000) as u64;
+    // SAFETY: updates only the calling thread's deadline and accepts no pointers.
+    unsafe { ffi::iron_set_deadline_ms(millis) };
+    Ok(())
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    #[test]
+    fn zero_budget_is_rejected_without_touching_the_driver() {
+        assert!(matches!(
+            set_execution_budget(Duration::ZERO),
+            Err(Error::Run(_))
+        ));
+    }
+}
 
 fn err_buf() -> Vec<c_char> {
     vec![0; ERR_LEN]

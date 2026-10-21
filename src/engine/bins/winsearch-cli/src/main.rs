@@ -38,8 +38,8 @@ pub enum CliCommand {
 pub enum ModelSubcommand {
     Status,
     Verify,
-    Download,
-    Import { path: PathBuf },
+    Download { include_npu: bool },
+    Import { path: PathBuf, include_npu: bool },
 }
 
 pub fn parse_args(args: &[String]) -> anyhow::Result<CliCommand> {
@@ -107,7 +107,8 @@ fn parse_search_args(args: &[String]) -> anyhow::Result<CliCommand> {
             "--extension" | "-e" => {
                 let value = args.get(i + 1)
                     .filter(|value| !value.starts_with('-'))
-                    .ok_or_else(|| anyhow::anyhow!("--extension requires a single extension (e.g. pdf)"))?;
+                    .ok_or_else(|| { anyhow::anyhow!("--extension requires a single extension (e.g. pdf)")
+                    })?;
                 extensions.push(value.clone());
                 i += 2;
             }
@@ -167,13 +168,27 @@ fn parse_model_args(args: &[String]) -> anyhow::Result<CliCommand> {
     match sub {
         "status" => Ok(CliCommand::Model(ModelSubcommand::Status)),
         "verify" => Ok(CliCommand::Model(ModelSubcommand::Verify)),
-        "download" => Ok(CliCommand::Model(ModelSubcommand::Download)),
+        "download" => {
+            anyhow::ensure!(
+                args[1..].iter().all(|arg| arg == "--include-npu"),
+                "unknown model download option"
+            ); Ok(CliCommand::Model(ModelSubcommand::Download {
+                include_npu: args[1..].iter().any(|arg| arg == "--include-npu"),
+            }))
+        }
         "import" => {
             let path = args
                 .get(1)
                 .ok_or_else(|| anyhow::anyhow!("`model import` requires a <path> argument"))?;
             Ok(CliCommand::Model(ModelSubcommand::Import {
                 path: PathBuf::from(path),
+                include_npu: {
+                    anyhow::ensure!(
+                        args[2..].iter().all(|arg| arg == "--include-npu"),
+                        "unknown model import option"
+                    );
+                    args[2..].iter().any(|arg| arg == "--include-npu")
+                },
             }))
         }
         other => anyhow::bail!(
@@ -210,10 +225,11 @@ SUBCOMMANDS:
         Show current model state and byte counters.
     model verify
         Verify on-disk model files against the pinned manifest sizes and SHA-256 hashes.
-    model download
+    model download [--include-npu]
         Download (or resume) EmbeddingGemma 2 GGUF files into the model directory.
-    model import <path>
-        Import and verify model file(s) from a local file or directory path.",
+    model import <path> [--include-npu]
+        Import and verify model file(s) from a local file or directory path.
+        --include-npu explicitly includes the optional AMD bundle (1,085,278,625 bytes).",
         ipc::CLI_VERSION
     );
 }
@@ -460,6 +476,32 @@ fn cmd_eval(suite_name: &str) -> anyhow::Result<()> {
     }
 }
 
+fn print_npu_progress(status: &ws_modelmgr::ModelStatus, include_npu: bool) {
+    if include_npu {
+        if let Some(npu) = &status.npu_bundle {
+            println!(
+                "  NPU bundle: {:?} ({}/{} bytes)",
+                npu.state, npu.bytes, npu.total_bytes
+            );
+        }
+    }
+}
+
+fn require_npu_ready(status: &ws_modelmgr::ModelStatus, include_npu: bool) -> anyhow::Result<()> {
+    if include_npu {
+        let component = status
+            .npu_bundle
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("engine omitted optional NPU bundle status"))?;
+        anyhow::ensure!(
+            component.state == ModelState::Ready,
+            "NPU bundle did not reach Ready: {}",
+            component.error.as_deref().unwrap_or("incomplete bundle")
+        );
+    }
+    Ok(())
+}
+
 fn cmd_model(sub: ModelSubcommand) -> anyhow::Result<()> {
     let pipe = std::env::var("WS_PIPE")
         .ok()
@@ -476,7 +518,7 @@ fn cmd_model_with_pipe(
     pipe_name: &str,
     model_dir: PathBuf,
 ) -> anyhow::Result<()> {
-    let mgr = ModelManager::new(model_dir.clone());
+    let mgr = ModelManager::new(model_dir.clone()).with_npu_bundle();
 
     match sub {
         ModelSubcommand::Status => {
@@ -486,6 +528,7 @@ fn cmd_model_with_pipe(
                     println!("model_dir:   {}", model_dir.display());
                     println!("state:       {:?}", status.state);
                     println!("bytes:       {} / {}", status.bytes, status.total_bytes);
+                    print_npu_progress(&status, true);
                     if let Some(err) = status.error {
                         println!("error:       {err}");
                     }
@@ -497,6 +540,7 @@ fn cmd_model_with_pipe(
             println!("model_dir:   {}", model_dir.display());
             println!("state:       {:?}", status.state);
             println!("bytes:       {} / {}", status.bytes, status.total_bytes);
+            print_npu_progress(&status, true);
             if let Some(err) = status.error {
                 println!("error:       {err}");
             }
@@ -540,14 +584,15 @@ fn cmd_model_with_pipe(
                 )
             }
         }
-        ModelSubcommand::Download => match DaemonClient::connect_pipe(pipe_name) {
+        ModelSubcommand::Download { include_npu } => match DaemonClient::connect_pipe(pipe_name) {
             Ok(mut client) => {
                 println!(
                     "downloading EmbeddingGemma 2 via daemon ({})...",
                     client.pipe_name()
                 );
                 let mut last_pct = 0u64;
-                let status = client.start_model_download(|s| {
+                let mut progress =|s: &ws_modelmgr::ModelStatus| {
+                    print_npu_progress(s, include_npu);
                     if s.total_bytes > 0 {
                         let pct = (s.bytes * 100) / s.total_bytes;
                         if pct >= last_pct + 10 || s.bytes == s.total_bytes {
@@ -555,7 +600,13 @@ fn cmd_model_with_pipe(
                             println!("  progress: {pct}% ({}/{} bytes)", s.bytes, s.total_bytes);
                         }
                     }
-                })?;
+                };
+                let status = if include_npu {
+                    client.start_model_download_with_npu(true, &mut progress)
+                } else {
+                    client.start_model_download(&mut progress)
+                }?;
+                require_npu_ready(&status, include_npu)?;
                 match status.state {
                     ModelState::Ready => {
                         println!("download complete: {:?}", status.state);
@@ -586,24 +637,35 @@ fn cmd_model_with_pipe(
                     }
                 };
                 mgr.download_all(&progress, &cancel)?;
+                if include_npu {
+                    mgr.download_npu_bundle(&progress, &cancel)?;
+                }
                 let status = mgr.status();
                 println!("download complete: {:?}", status.state);
                 Ok(())
             }
             Err(e) => Err(e.into()),
         },
-        ModelSubcommand::Import { path } => match DaemonClient::connect_pipe(pipe_name) {
+        ModelSubcommand::Import { path, include_npu } => { match DaemonClient::connect_pipe(pipe_name) {
             Ok(mut client) => {
                 println!(
                     "importing model from {} via daemon ({})...",
                     path.display(),
                     client.pipe_name()
                 );
-                let status = client.import_model(path.to_string_lossy().into_owned(), |s| {
+                let mut progress = |s: &ws_modelmgr::ModelStatus| {
+                        print_npu_progress(s, include_npu);
                     if s.total_bytes > 0 && s.state == ModelState::Downloading {
                         println!("  progress: {}/{} bytes", s.bytes, s.total_bytes);
                     }
-                })?;
+                };
+                    let path = path.to_string_lossy().into_owned();
+                    let status = if include_npu {
+                        client.import_model_with_npu(path, true, &mut progress)
+                    } else {
+                        client.import_model(path, &mut progress)
+                    }?;
+                    require_npu_ready(&status, include_npu)?;
                 match status.state {
                     ModelState::Ready => {
                         println!(
@@ -625,7 +687,12 @@ fn cmd_model_with_pipe(
                     model_dir.display()
                 );
                 let cancel = AtomicBool::new(false);
-                let status = mgr.import(&path, &cancel)?;
+                    if !include_npu || mgr.has_import_files(&path, false) { mgr.import(&path, &cancel)?;
+                    }
+                let status = if include_npu { mgr.import_npu_bundle(&path, &cancel)?
+                    } else {
+                        mgr.status()
+                    };
                 println!(
                     "import complete: state={:?} ({}/{} bytes)",
                     status.state, status.bytes, status.total_bytes
@@ -639,7 +706,8 @@ fn cmd_model_with_pipe(
                 Ok(())
             }
             Err(e) => Err(e.into()),
-        },
+        }
+        }
     }
 }
 
@@ -688,6 +756,29 @@ mod tests {
         assert!(
             matches!(command, CliCommand::Search { query, mode: SearchMode::Code, json: true, .. } if query == "needle")
         );
+    }
+
+    #[test]
+    fn model_optional_npu_flag_is_explicit_and_unknown_options_are_refused() {
+        assert_eq!(
+            parse_args(&vec_args(&["model", "download", "--include-npu"])).unwrap(),
+            CliCommand::Model(ModelSubcommand::Download { include_npu: true })
+        );
+        assert_eq!(
+            parse_args(&vec_args(&[
+                "model",
+                "import",
+                "C:/models",
+                "--include-npu"
+            ]))
+            .unwrap(),
+            CliCommand::Model(ModelSubcommand::Import {
+                path: PathBuf::from("C:/models"),
+                include_npu: true
+            })
+        );
+        assert!(parse_args(&vec_args(&["model", "download", "--npu"])).is_err());
+        assert!(parse_args(&vec_args(&["model", "import", "C:/models", "--npu"])).is_err());
     }
 
     #[test]
@@ -764,12 +855,13 @@ mod tests {
         );
         assert_eq!(
             parse_args(&vec_args(&["model", "download"])).unwrap(),
-            CliCommand::Model(ModelSubcommand::Download)
+            CliCommand::Model(ModelSubcommand::Download { include_npu: false })
         );
         assert_eq!(
             parse_args(&vec_args(&["model", "import", "C:\\tmp\\models"])).unwrap(),
             CliCommand::Model(ModelSubcommand::Import {
-                path: PathBuf::from("C:\\tmp\\models")
+                path: PathBuf::from("C:\\tmp\\models"),
+                include_npu: false,
             })
         );
     }
@@ -924,7 +1016,8 @@ mod tests {
                     &ServerMessage::HelloAck {
                         protocol_version: PROTOCOL_VERSION,
                         engine_version: "0.1.0-test".into(),
-                        features: vec!["search.exact".into(), "search.semantic".into()],
+                        features: vec!["search.exact".into(), "search.semantic".into(),
+                            "model.npu_bundle".into(),],
                     },
                 )
                 .unwrap();
@@ -932,7 +1025,39 @@ mod tests {
                 if let Ok(Some(msg)) = read_message::<_, ClientMessage>(&mut stream) {
                     seen_server.lock().unwrap().push(msg.clone());
                     match msg {
-                        ClientMessage::ModelDownloadStart { id } => {
+                        ClientMessage::ModelDownloadStart { id,
+                            include_npu: true,
+                        }
+                        | ClientMessage::ModelImport {
+                            id,
+                            include_npu: true,
+                            ..
+                        } => {
+                            for state in [ModelState::Downloading, ModelState::Ready] {
+                            write_message(
+                                &mut stream,
+                                &ServerMessage::ModelStatus {
+                                    id: Some(id),
+                                    status: ModelStatus {
+                                        state: ModelState::Ready,
+                                        bytes: 100,
+                                        total_bytes: 100,
+                                        error: None,
+                                            npu_bundle: Some(ws_modelmgr::ModelComponentStatus {
+                                                state,
+                                                bytes: 10,
+                                                total_bytes: 10,
+                                                error: None,
+                                            }),
+                                    },
+                                },
+                            )
+                            .unwrap();
+                            }
+                        }
+                        ClientMessage::ModelDownloadStart {
+                            id,
+                            include_npu: false, } => {
                             write_message(
                                 &mut stream,
                                 &ServerMessage::ModelStatus {
@@ -942,6 +1067,7 @@ mod tests {
                                         bytes: 0,
                                         total_bytes: 100,
                                         error: None,
+                                        npu_bundle: None,
                                     },
                                 },
                             )
@@ -955,6 +1081,7 @@ mod tests {
                                         bytes: 50,
                                         total_bytes: 100,
                                         error: None,
+                                        npu_bundle: None,
                                     },
                                 },
                             )
@@ -968,6 +1095,7 @@ mod tests {
                                         bytes: 100,
                                         total_bytes: 100,
                                         error: None,
+                                        npu_bundle: None,
                                     },
                                 },
                             )
@@ -983,6 +1111,7 @@ mod tests {
                                         bytes: 0,
                                         total_bytes: 100,
                                         error: None,
+                                        npu_bundle: None,
                                     },
                                 },
                             )
@@ -996,6 +1125,7 @@ mod tests {
                                         bytes: 100,
                                         total_bytes: 100,
                                         error: None,
+                                        npu_bundle: None,
                                     },
                                 },
                             )
@@ -1014,19 +1144,35 @@ mod tests {
             "winsearch-cli-model-test-dir-{}",
             std::process::id()
         ));
-        cmd_model_with_pipe(ModelSubcommand::Download, &pipe, dummy_dir.clone())
+        cmd_model_with_pipe(ModelSubcommand::Download { include_npu: false }, &pipe, dummy_dir.clone())
             .expect("daemon model download");
         cmd_model_with_pipe(
             ModelSubcommand::Import {
                 path: PathBuf::from(r"C:\fake\models"),
+                include_npu: false,
+            },
+            &pipe,
+            dummy_dir.clone(),
+        )
+        .expect("daemon model import");
+        cmd_model_with_pipe(
+            ModelSubcommand::Download { include_npu: true },
+            &pipe,
+            dummy_dir.clone(),
+        )
+        .expect("daemon NPU bundle download must wait for optional component Ready");
+        cmd_model_with_pipe(
+            ModelSubcommand::Import {
+                path: PathBuf::from(r"C:\fake\models"),
+                include_npu: true,
             },
             &pipe,
             dummy_dir,
         )
-        .expect("daemon model import");
+        .expect("daemon NPU bundle import");
 
         let recorded = seen.lock().unwrap();
-        assert_eq!(recorded.len(), 2);
+        assert_eq!(recorded.len(), 4);
         assert!(matches!(
             recorded[0],
             ClientMessage::ModelDownloadStart { .. }
@@ -1034,6 +1180,20 @@ mod tests {
         assert!(matches!(
             &recorded[1],
             ClientMessage::ModelImport { path, .. } if path == r"C:\fake\models"
+        ));
+        assert!(matches!(
+            recorded[2],
+            ClientMessage::ModelDownloadStart {
+                include_npu: true,
+                ..
+            }
+        ));
+        assert!(matches!(
+            recorded[3],
+            ClientMessage::ModelImport {
+                include_npu: true,
+                ..
+            }
         ));
     }
 }

@@ -1,0 +1,384 @@
+{
+  "engineCommit": "85a915d460b1fa751bbe86f289ff77c18c032c25",
+  "manifestSha256": "171aedbb142c712520b768f524ca848a79aab519081cfc0209e8781e96d7390d",
+  "outsideBothCheckouts": true,
+  "developerOverridesRemoved": true,
+  "modelFixtureStorage": "separate external copies, outside the engine package and both checkouts",
+  "fallback": [
+    {
+      "case": "missing-shim",
+      "expectedNpuReason": "load_failed",
+      "workerSha256": "daee53d6128221e50c7426a5abc7905812fcdeb782694900b7ef02a0a6589f89",
+      "backend": "cpu",
+      "stub": false,
+      "npu": "load_failed",
+      "passed": true,
+      "ownedJobEmpty": true
+    },
+    {
+      "case": "missing-bundle",
+      "expectedNpuReason": "bundle_missing",
+      "workerSha256": "daee53d6128221e50c7426a5abc7905812fcdeb782694900b7ef02a0a6589f89",
+      "backend": "cpu",
+      "stub": false,
+      "npu": "bundle_missing",
+      "passed": true,
+      "ownedJobEmpty": true
+    },
+    {
+      "case": "corrupt-bundle",
+      "expectedNpuReason": "bundle_missing",
+      "workerSha256": "daee53d6128221e50c7426a5abc7905812fcdeb782694900b7ef02a0a6589f89",
+      "backend": "cpu",
+      "stub": false,
+      "npu": "bundle_missing",
+      "passed": true,
+      "ownedJobEmpty": true
+    }
+  ],
+  "passed": true,
+  "npu": {
+    "backend": "npu",
+    "stub": false,
+    "references": {
+      "screen-280": 0.9997516189631351,
+      "photo-140": 0.9996640968214123,
+      "frame-70": 0.9996982675196524,
+      "speech": 0.999750500695376
+    },
+    "retrieval": [
+      {
+        "query": "a computer application screenshot with a red warning and a blue button",
+        "expected": 0,
+        "scores": [
+          0.641884259410923,
+          0.5387084771798466
+        ]
+      },
+      {
+        "query": "a landscape with a tree and green hills under a blue sky",
+        "expected": 1,
+        "scores": [
+          0.5783118437596405,
+          0.7600055201763001
+        ]
+      },
+      {
+        "query": "a train to Stockholm leaves the railway station from platform five",
+        "expected": 0,
+        "scores": [
+          0.8448965525614505,
+          0.5059362468822063
+        ]
+      },
+      {
+        "query": "baking a chocolate cake in the kitchen with flour butter eggs and sugar",
+        "expected": 1,
+        "scores": [
+          0.5021241649189765,
+          0.8138406571216164
+        ]
+      }
+    ],
+    "jobs": [
+      {
+        "kind": "embed_texts",
+        "backend": "npu",
+        "count": 1,
+        "elapsedSeconds": 4.256921400025021,
+        "itemsPerSecond": 0.23491154898798983
+      },
+      {
+        "kind": "embed_image",
+        "backend": "npu",
+        "count": 1,
+        "elapsedSeconds": 2.315767699969001,
+        "itemsPerSecond": 0.4318222419344505
+      },
+      {
+        "kind": "embed_image",
+        "backend": "npu",
+        "count": 1,
+        "elapsedSeconds": 1.0368922000052407,
+        "itemsPerSecond": 0.9644204093684432
+      },
+      {
+        "kind": "embed_image",
+        "backend": "cpu",
+        "count": 1,
+        "elapsedSeconds": 4.439066999999341,
+        "itemsPerSecond": 0.2252725629057071
+      },
+      {
+        "kind": "embed_audio",
+        "backend": "cpu",
+        "count": 1,
+        "elapsedSeconds": 0.390430599974934,
+        "itemsPerSecond": 2.5612746543539386
+      },
+      {
+        "kind": "embed_audio",
+        "backend": "cpu",
+        "count": 1,
+        "elapsedSeconds": 0.3498008999740705,
+        "itemsPerSecond": 2.8587690885704595
+      },
+      {
+        "kind": "embed_audio",
+        "backend": "cpu",
+        "count": 1,
+        "elapsedSeconds": 0.34529820003081113,
+        "itemsPerSecond": 2.8960475319905217
+      },
+      {
+        "kind": "embed_audio",
+        "backend": "cpu",
+        "count": 1,
+        "elapsedSeconds": 0.73822320002364,
+        "itemsPerSecond": 1.354603865020738
+      },
+      {
+        "kind": "embed_audio",
+        "backend": "cpu",
+        "count": 1,
+        "elapsedSeconds": 0.7729811000172049,
+        "itemsPerSecond": 1.2936926918106306
+      },
+      {
+        "kind": "embed_texts",
+        "backend": "npu",
+        "count": 4,
+        "elapsedSeconds": 0.43020260002231225,
+        "itemsPerSecond": 9.29794473532364
+      },
+      {
+        "kind": "embed_texts",
+        "backend": "npu",
+        "count": 1,
+        "elapsedSeconds": 0.09674089995678514,
+        "itemsPerSecond": 10.336889572525243
+      },
+      {
+        "kind": "embed_texts",
+        "backend": "npu",
+        "count": 1,
+        "elapsedSeconds": 0.1322494000196457,
+        "itemsPerSecond": 7.561470977194979
+      },
+      {
+        "kind": "embed_texts",
+        "backend": "npu",
+        "count": 1,
+        "elapsedSeconds": 0.10744459996931255,
+        "itemsPerSecond": 9.307121998551922
+      },
+      {
+        "kind": "embed_texts",
+        "backend": "npu",
+        "count": 1,
+        "elapsedSeconds": 0.10257399996044114,
+        "itemsPerSecond": 9.749059219545515
+      },
+      {
+        "kind": "embed_texts",
+        "backend": "npu",
+        "count": 1,
+        "elapsedSeconds": 0.10728520003613085,
+        "itemsPerSecond": 9.320950137234457
+      }
+    ],
+    "workerSha256": "daee53d6128221e50c7426a5abc7905812fcdeb782694900b7ef02a0a6589f89",
+    "modelSha256": "2188ac1deca4b77dffefd603c2776a9d76d9d74ec01841392982ebb840b09135",
+    "projectorSha256": "c4a8a52691ecef40618438928bdf9e68379b854e24166f292592353db0aab64f",
+    "bundleManifestSha256": "b9dedb9623bf72c5e93f4c148a78167ab60d734e45c623ff618e335554200baa",
+    "image_pair_cosine": 0.6970270375378214,
+    "workerStatus": {
+      "type": "worker_status",
+      "id": 19,
+      "model_loaded": true,
+      "backend": "npu",
+      "stub": false,
+      "dim": 768,
+      "uptime_secs": 15,
+      "jobs_served": 15,
+      "npu": "ready"
+    },
+    "worker_exit": 0,
+    "peakWorkingSetBytes": 3443261440,
+    "peakPrivateBytes": 3897962496,
+    "ownedJobEmpty": true,
+    "elapsed_seconds": 16.445
+  },
+  "cpu": {
+    "backend": "cpu",
+    "stub": false,
+    "references": {
+      "screen-280": 0.9999420467524335,
+      "photo-140": 0.9998148075830819,
+      "frame-70": 0.9996982675196524,
+      "speech": 0.999750500695376
+    },
+    "retrieval": [
+      {
+        "query": "a computer application screenshot with a red warning and a blue button",
+        "expected": 0,
+        "scores": [
+          0.6436432766475132,
+          0.5363543207245405
+        ]
+      },
+      {
+        "query": "a landscape with a tree and green hills under a blue sky",
+        "expected": 1,
+        "scores": [
+          0.5778621252715366,
+          0.7589841728360176
+        ]
+      },
+      {
+        "query": "a train to Stockholm leaves the railway station from platform five",
+        "expected": 0,
+        "scores": [
+          0.8444276691966782,
+          0.5048316051466761
+        ]
+      },
+      {
+        "query": "baking a chocolate cake in the kitchen with flour butter eggs and sugar",
+        "expected": 1,
+        "scores": [
+          0.5019086504886976,
+          0.8135445491469359
+        ]
+      }
+    ],
+    "jobs": [
+      {
+        "kind": "embed_texts",
+        "backend": "cpu",
+        "count": 1,
+        "elapsedSeconds": 2.2785541000193916,
+        "itemsPerSecond": 0.43887481100031356
+      },
+      {
+        "kind": "embed_image",
+        "backend": "cpu",
+        "count": 1,
+        "elapsedSeconds": 3.6931993999751285,
+        "itemsPerSecond": 0.2707679417490251
+      },
+      {
+        "kind": "embed_image",
+        "backend": "cpu",
+        "count": 1,
+        "elapsedSeconds": 1.4586639999761246,
+        "itemsPerSecond": 0.6855588401553531
+      },
+      {
+        "kind": "embed_image",
+        "backend": "cpu",
+        "count": 1,
+        "elapsedSeconds": 0.6993380999774672,
+        "itemsPerSecond": 1.4299235234462704
+      },
+      {
+        "kind": "embed_audio",
+        "backend": "cpu",
+        "count": 1,
+        "elapsedSeconds": 0.3345765999983996,
+        "itemsPerSecond": 2.988852179156532
+      },
+      {
+        "kind": "embed_audio",
+        "backend": "cpu",
+        "count": 1,
+        "elapsedSeconds": 0.35210059996461496,
+        "itemsPerSecond": 2.840097404265988
+      },
+      {
+        "kind": "embed_audio",
+        "backend": "cpu",
+        "count": 1,
+        "elapsedSeconds": 0.33095989999128506,
+        "itemsPerSecond": 3.021514086831463
+      },
+      {
+        "kind": "embed_audio",
+        "backend": "cpu",
+        "count": 1,
+        "elapsedSeconds": 0.6687861999962479,
+        "itemsPerSecond": 1.495246163879593
+      },
+      {
+        "kind": "embed_audio",
+        "backend": "cpu",
+        "count": 1,
+        "elapsedSeconds": 0.6862030000193045,
+        "itemsPerSecond": 1.4572947072103557
+      },
+      {
+        "kind": "embed_texts",
+        "backend": "cpu",
+        "count": 4,
+        "elapsedSeconds": 0.11081320000812411,
+        "itemsPerSecond": 36.09678269111212
+      },
+      {
+        "kind": "embed_texts",
+        "backend": "cpu",
+        "count": 1,
+        "elapsedSeconds": 0.02419139997800812,
+        "itemsPerSecond": 41.33700409687238
+      },
+      {
+        "kind": "embed_texts",
+        "backend": "cpu",
+        "count": 1,
+        "elapsedSeconds": 0.023592000012286007,
+        "itemsPerSecond": 42.38724989315149
+      },
+      {
+        "kind": "embed_texts",
+        "backend": "cpu",
+        "count": 1,
+        "elapsedSeconds": 0.02363900002092123,
+        "itemsPerSecond": 42.302973861625695
+      },
+      {
+        "kind": "embed_texts",
+        "backend": "cpu",
+        "count": 1,
+        "elapsedSeconds": 0.024126800009980798,
+        "itemsPerSecond": 41.447684715184735
+      },
+      {
+        "kind": "embed_texts",
+        "backend": "cpu",
+        "count": 1,
+        "elapsedSeconds": 0.028402800031471997,
+        "itemsPerSecond": 35.20779637542567
+      }
+    ],
+    "workerSha256": "daee53d6128221e50c7426a5abc7905812fcdeb782694900b7ef02a0a6589f89",
+    "modelSha256": "2188ac1deca4b77dffefd603c2776a9d76d9d74ec01841392982ebb840b09135",
+    "projectorSha256": "c4a8a52691ecef40618438928bdf9e68379b854e24166f292592353db0aab64f",
+    "bundleManifestSha256": "b9dedb9623bf72c5e93f4c148a78167ab60d734e45c623ff618e335554200baa",
+    "image_pair_cosine": 0.6926908050929034,
+    "workerStatus": {
+      "type": "worker_status",
+      "id": 19,
+      "model_loaded": true,
+      "backend": "cpu",
+      "stub": false,
+      "dim": 768,
+      "uptime_secs": 10,
+      "jobs_served": 15,
+      "npu": "disabled"
+    },
+    "worker_exit": 0,
+    "peakWorkingSetBytes": 1352183808,
+    "peakPrivateBytes": 1793654784,
+    "ownedJobEmpty": true,
+    "elapsed_seconds": 11.166
+  }
+}

@@ -27,8 +27,12 @@ public interface IEngineClient : IAsyncDisposable
     Task<ResolvedEntry> ResolveEntryAsync(EntryReference reference, CancellationToken cancellationToken = default);
     Task<EntryPreview> PreviewTextAsync(PreviewRequest request, CancellationToken cancellationToken = default);
     Task<ModelStatus> StartModelDownloadAsync(CancellationToken cancellationToken = default);
+    Task<ModelStatus> StartModelDownloadAsync(bool includeNpu, CancellationToken cancellationToken = default)
+        => includeNpu ? throw new EngineException(ErrorCode.Unsupported, "optional NPU bundle installation is unavailable") : StartModelDownloadAsync(cancellationToken);
     Task<ModelStatus> CancelModelDownloadAsync(CancellationToken cancellationToken = default);
     Task<ModelStatus> ImportModelAsync(string path, CancellationToken cancellationToken = default);
+    Task<ModelStatus> ImportModelAsync(string path, bool includeNpu, CancellationToken cancellationToken = default)
+        => includeNpu ? throw new EngineException(ErrorCode.Unsupported, "optional NPU bundle import is unavailable") : ImportModelAsync(path, cancellationToken);
     Task<ModelStatus> DeleteModelAsync(CancellationToken cancellationToken = default);
     Task<ModelStatus> GetModelStatusAsync(CancellationToken cancellationToken = default);
     Task<EngineConfig> GetConfigAsync(CancellationToken cancellationToken = default);
@@ -358,7 +362,13 @@ public sealed class EngineClient : IEngineClient
 
     /// <summary>Starts (or resumes) the embedding-model download; progress arrives via <see cref="ModelStatusChanged"/>.</summary>
     public Task<ModelStatus> StartModelDownloadAsync(CancellationToken cancellationToken = default)
-        => UnaryAsync(static id => new ModelDownloadStartMessage { Id = id }, static m => ((ModelStatusMessage)m).Status, cancellationToken);
+        => StartModelDownloadAsync(false, cancellationToken);
+
+    public Task<ModelStatus> StartModelDownloadAsync(bool includeNpu, CancellationToken cancellationToken = default)
+    {
+        RequireNpuBundle(includeNpu);
+        return UnaryAsync(id => new ModelDownloadStartMessage { Id = id, IncludeNpu = includeNpu }, static m => ((ModelStatusMessage)m).Status, cancellationToken);
+    }
 
     /// <summary>Cancels the in-flight model download; partial files stay for resume.</summary>
     public Task<ModelStatus> CancelModelDownloadAsync(CancellationToken cancellationToken = default)
@@ -366,7 +376,19 @@ public sealed class EngineClient : IEngineClient
 
     /// <summary>Imports model files from a local file or directory.</summary>
     public Task<ModelStatus> ImportModelAsync(string path, CancellationToken cancellationToken = default)
-        => UnaryAsync(id => new ModelImportMessage { Id = id, Path = path }, static m => ((ModelStatusMessage)m).Status, cancellationToken);
+        => ImportModelAsync(path, false, cancellationToken);
+
+    public Task<ModelStatus> ImportModelAsync(string path, bool includeNpu, CancellationToken cancellationToken = default)
+    {
+        RequireNpuBundle(includeNpu);
+        return UnaryAsync(id => new ModelImportMessage { Id = id, Path = path, IncludeNpu = includeNpu }, static m => ((ModelStatusMessage)m).Status, cancellationToken);
+    }
+
+    private void RequireNpuBundle(bool includeNpu)
+    {
+        if (includeNpu && !_features.Contains("model.npu_bundle", StringComparer.Ordinal))
+            throw new EngineException(ErrorCode.Unsupported, "engine does not support optional NPU bundle installation");
+    }
 
     /// <summary>Deletes the downloaded model files.</summary>
     public Task<ModelStatus> DeleteModelAsync(CancellationToken cancellationToken = default)

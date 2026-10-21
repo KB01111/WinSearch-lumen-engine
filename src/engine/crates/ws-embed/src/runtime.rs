@@ -223,8 +223,9 @@ impl EmbedRuntime {
         };
         rt.ctx = Some(
             NonNull::new(ctx_raw)
-                .ok_or_else(|| EmbedError::ContextFailed(format!("{kind} context returned null")))?,
-        );
+                .ok_or_else(|| {
+                EmbedError::ContextFailed(format!("{kind} context returned null"))
+            })?);
         // SAFETY: model is live.
         rt.n_embd = unsafe { ffi::wse_model_n_embd(model.as_ptr()) }.max(0) as usize;
 
@@ -575,6 +576,18 @@ fn plan_sub_batches(
         start = end;
     }
     ranges
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    pub fn tokens(runtime: &super::EmbedRuntime, text: &str) -> Vec<u32> {
+        runtime
+            .tokenize(text)
+            .expect("CPU tokenization")
+            .into_iter()
+            .map(|id| id as u32)
+            .collect()
+    }
 }
 
 #[cfg(test)]

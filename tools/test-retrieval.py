@@ -10,6 +10,7 @@ import subprocess
 import threading
 import time
 import uuid
+from collections import Counter
 
 root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
@@ -18,6 +19,8 @@ parser.add_argument('suite', choices=['names', 'retrieval-development', 'retriev
 parser.add_argument('output')
 parser.add_argument('--binary-dir', type=Path, default=root/'src/engine/target/debug',
     help='directory containing the coherent CLI, worker and native DLLs')
+parser.add_argument('--backend', choices=['cpu', 'npu', 'mixed'], default='cpu')
+parser.add_argument('--npu-bundle', type=Path)
 args = parser.parse_args()
 output = (root/args.output).resolve()
 assert output.is_relative_to(root/'artifacts') and not output.exists()
@@ -52,7 +55,7 @@ for asset in assets:
 lock = {
     'suite': args.suite, 'suite_sha256': digest(suite),
     'cli_sha256': digest(binary), 'model_sha256': digest(model),
-    'projector_sha256': digest(projector), 'backend_requested': 'cpu',
+    'projector_sha256': digest(projector), 'backend_requested': args.backend,
     'worker_sha256': digest(worker), 'generated_asset_sha256': asset_hashes,
     'recipe_frozen_commit': '4173543b8e434d9bef912623935cdc8b53aeeee6',
     'expected_pipeline_version': 2, 'expected_minimum_semantic_cosine': .65,
@@ -66,8 +69,12 @@ lock = {
     ]},
 }
 (output/'evaluation-lock.json').write_text(json.dumps(lock, indent=2), encoding='utf-8')
+assert args.backend == 'cpu' or args.npu_bundle is not None, 'explicit pinned NPU bundle required'
 environment = {**os.environ, 'WS_EMBED_TEST_MODEL': str(model), 'WS_EMBED_STUB': '0',
-    'WS_EMBED_BACKEND': 'cpu', 'WINSEARCH_DATA_DIR': str(output/'data'),
+    'WS_EMBED_BACKEND': 'npu' if args.backend == 'mixed' else args.backend,
+    'WS_EVAL_MIXED_BACKENDS': '1' if args.backend == 'mixed' else '0',
+    'WS_EMBED_NPU_BUNDLE': str(args.npu_bundle.resolve()) if args.npu_bundle else '',
+    'WINSEARCH_DATA_DIR': str(output/'data'),
     'WINSEARCH_INSTANCE_ID': 'eval-'+uuid.uuid4().hex,
     'WS_EVAL_EXE': str(binary), 'WS_EVAL_SUITE': str(suite)}
 # The fixed wrapper waits for input. It joins the owned job BEFORE it launches
@@ -119,7 +126,13 @@ finally:
         summary[metric] = float(found.group(1)) if found else None
     summary['failures'] = [line.strip() for line in log.splitlines()
         if line.strip().startswith(('[MISS]', '[FAIL (FP)]'))]
-    summary['real_worker_verified'] = 'real cpu; stub:false; dim:768;' in log
+    routes = Counter(re.findall(r'Verified execution: \w+ backend=([a-z+]+) stub=false dim=768', log))
+    summary['actual_backend_responses'] = dict(routes)
+    if args.backend == 'cpu':
+        summary['real_worker_verified'] = set(routes) == {'cpu'} and 'real cpu; stub:false; dim:768;' in log
+    else:
+        summary['real_worker_verified'] = any(route.startswith('npu') for route in routes)
+        if args.backend == 'mixed': summary['real_worker_verified'] &= 'cpu' in routes
     actual_pipeline = re.search(r'^vector pipeline:\s+(\d+)', log, re.M)
     actual_floor = re.search(r'^semantic floor:\s+([0-9.]+)', log, re.M)
     summary['actual_pipeline_version'] = int(actual_pipeline.group(1)) if actual_pipeline else None

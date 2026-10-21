@@ -1,0 +1,9 @@
+{
+  "version": "2.21.75",
+  "url": "https://github.com/Xilinx/XRT/releases/download/2.21.75/xrt_windows_sdk.zip",
+  "sha256": "ccc244c2c423588972ade76142cdc01049477aaa39a35be97e782b97eb7c5295",
+  "sizeBytes": 70834080,
+  "root": "xrt_sdk/xrt",
+  "guide": "https://github.com/Xilinx/mlir-aie/blob/main/docs/buildHostWinNative.md",
+  "license": "Apache-2.0"
+}

@@ -42,6 +42,18 @@ pub struct ModelStatus {
     pub total_bytes: u64,
     #[serde(default)]
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub npu_bundle: Option<ModelComponentStatus>,
+}
+
+/// Independent progress for an optional model component.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default)]
+pub struct ModelComponentStatus {
+    pub state: ModelState,
+    pub bytes: u64,
+    pub total_bytes: u64,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -93,15 +105,11 @@ impl ModelManager {
         }
     }
 
-    /// Adds the AMD NPU2 bundle ([`NPU_BUNDLE_FILES`]) ahead of the GGUFs: it
-    /// is the primary text/image model on NPU machines and downloads first.
-    /// The GGUFs stay part of the set (audio and the GPU/CPU fallback), so
-    /// `Ready` means every runtime the worker may pick is installed.
+    /// Tracks the optional AMD NPU2 bundle independently of the base GGUFs.
+    /// Tracking its status never installs it or changes base-model readiness.
     pub fn with_npu_bundle(mut self) -> Self {
         if !self.files.iter().any(|f| f.npu_bundle_path().is_some()) {
-            let mut files = NPU_BUNDLE_FILES.to_vec();
-            files.append(&mut self.files);
-            self.files = files;
+            self.files.extend_from_slice(&NPU_BUNDLE_FILES);
         }
         self
     }
@@ -115,9 +123,10 @@ impl ModelManager {
         &self.dir
     }
 
-    /// Combined size of every manifest file.
+    /// Size of the base GGUFs only.
     pub fn total_bytes(&self) -> u64 {
-        self.files.iter().map(|f| f.size).sum()
+        self.files.iter()
+            .filter(|f| f.npu_bundle_path().is_none()).map(|f| f.size).sum()
     }
 
     /// Filesystem-derived status (no in-flight knowledge — the service merges
@@ -125,11 +134,31 @@ impl ModelManager {
     /// anything else incomplete is `not_downloaded`; a stale marker is
     /// `error` only when files are present but invalid.
     pub fn status(&self) -> ModelStatus {
-        let total = self.total_bytes();
+        let base = self.component_status(false);
+        ModelStatus {
+            state: base.state,
+            bytes: base.bytes,
+            total_bytes: base.total_bytes,
+            error: base.error,
+            npu_bundle: self
+                .includes_npu_bundle()
+                .then(|| self.component_status(true)),
+        }
+    }
+
+    fn component_status(&self, npu: bool) -> ModelComponentStatus {
+        let total = self.files
+            .iter()
+            .filter(|f| f.npu_bundle_path().is_some() == npu)
+            .map(|f| f.size)
+            .sum();
         let mut bytes = 0u64;
         let mut complete = true;
         let mut partial = false;
-        for f in &self.files {
+        for f in self.files
+            .iter()
+            .filter(|f| f.npu_bundle_path().is_some() == npu)
+        {
             let dest = self.dir.join(f.name);
             match dest.metadata() {
                 Ok(m) if self.is_verified_meta(&dest, f, &m) => {
@@ -142,28 +171,29 @@ impl ModelManager {
                 Err(_) => {
                     self.invalidate_verified(f.name);
                     complete = false;
-                    if self.dir.join(format!("{}.part", f.name)).exists() {
+                    if let Ok(m) = self.dir.join(format!("{}.part", f.name)).metadata() {
                         partial = true;
+                        bytes += m.len().min(f.size);
                     }
                 }
             }
         }
         if complete {
-            ModelStatus {
+            ModelComponentStatus {
                 state: ModelState::Ready,
                 bytes: total,
                 total_bytes: total,
                 error: None,
             }
         } else if partial {
-            ModelStatus {
+            ModelComponentStatus {
                 state: ModelState::Paused,
                 bytes,
                 total_bytes: total,
                 error: None,
             }
         } else {
-            ModelStatus {
+            ModelComponentStatus {
                 state: ModelState::NotDownloaded,
                 bytes,
                 total_bytes: total,
@@ -172,7 +202,7 @@ impl ModelManager {
         }
     }
 
-    /// Downloads every manifest file (skipping ones already valid), in order.
+    /// Downloads the base GGUF files (skipping ones already valid), in order.
     /// Progress aggregates across files; cancel stops after the current chunk
     /// and leaves `.part` files for the next call to resume.
     pub fn download_all(
@@ -180,10 +210,30 @@ impl ModelManager {
         progress: &ProgressFn<'_>,
         cancel: &AtomicBool,
     ) -> Result<(), DownloadError> {
+        self.download_component(false, progress, cancel)
+    }
+
+    pub fn download_npu_bundle(
+        &self,
+        progress: &ProgressFn<'_>,
+        cancel: &AtomicBool,
+    ) -> Result<(), DownloadError> {
+        self.download_component(true, progress, cancel)
+    }
+
+    fn download_component(
+        &self,
+        npu: bool,
+        progress: &ProgressFn<'_>,
+        cancel: &AtomicBool,
+    ) -> Result<(), DownloadError> {
         fs::create_dir_all(&self.dir)?;
-        let total = self.total_bytes();
+        let total = self.component_status(npu).total_bytes;
         let mut done_before = 0u64;
-        for f in &self.files {
+        for f in self.files
+            .iter()
+            .filter(|f| f.npu_bundle_path().is_some() == npu)
+        {
             if self.is_file_valid(f) {
                 done_before += f.size;
                 continue;
@@ -205,17 +255,53 @@ impl ModelManager {
         Ok(())
     }
 
-    /// Imports model files from a local path: either a directory containing
+    /// Imports base GGUF files from a local path: either a directory containing
     /// (some of) the manifest files, or a single file whose name matches one
     /// manifest entry. Every copied file is verified (size + hash when
     /// pinned); failures abort with nothing half-written. Cancellation is
     /// honored per 1 MiB chunk: a cancelled import removes its temp file and
     /// reports [`DownloadError::Cancelled`], leaving no residue behind.
     pub fn import(&self, path: &Path, cancel: &AtomicBool) -> Result<ModelStatus, ManagerError> {
+        self.import_component(path, false, cancel)
+    }
+
+    pub fn import_npu_bundle(
+        &self,
+        path: &Path,
+        cancel: &AtomicBool,
+    ) -> Result<ModelStatus, ManagerError> {
+        self.import_component(path, true, cancel)
+    }
+
+    /// Whether a source contains files for the selected component (no writes).
+    pub fn has_import_files(&self, path: &Path, npu: bool) -> bool {
+        self.files
+            .iter()
+            .filter(|f| f.npu_bundle_path().is_some() == npu)
+            .any(|f| {
+                if path.is_dir() {
+                    path.join(f.name).is_file()
+                        || f.npu_bundle_path()
+                            .is_some_and(|rel| path.join(rel).is_file())
+                } else {
+                    path.is_file() && Path::new(f.name).file_name() == path.file_name()
+                }
+            })
+    }
+
+    fn import_component(
+        &self,
+        path: &Path,
+        npu: bool,
+        cancel: &AtomicBool,
+    ) -> Result<ModelStatus, ManagerError> {
         fs::create_dir_all(&self.dir)?;
         if path.is_dir() {
             let mut any = false;
-            for f in &self.files {
+            for f in self.files
+                .iter()
+                .filter(|f| f.npu_bundle_path().is_some() == npu)
+            {
                 if cancel.load(Ordering::Relaxed) {
                     return Err(ManagerError::Download(DownloadError::Cancelled(
                         0,
@@ -248,7 +334,10 @@ impl ModelManager {
             let entry = self
                 .files
                 .iter()
-                .find(|f| f.name == name)
+                .find(|f| {
+                    f.npu_bundle_path().is_some() == npu
+                        && Path::new(f.name).file_name() == path.file_name()
+                })
                 .ok_or_else(|| {
                     let known: Vec<&str> = self.files.iter().map(|f| f.name).collect();
                     ManagerError::Import(format!(
@@ -272,7 +361,7 @@ impl ModelManager {
         if let Ok(mut cache) = self.verified.lock() {
             cache.clear();
         }
-        for f in &self.files {
+        for f in self.files.iter().chain(NPU_BUNDLE_FILES.iter()) {
             let dest = self.dir.join(f.name);
             if dest.exists() {
                 fs::remove_file(&dest)?;
@@ -286,12 +375,10 @@ impl ModelManager {
                 fs::remove_file(&import_tmp)?;
             }
         }
-        if self.includes_npu_bundle() {
-            // Only directories the bundle created, and only once empty.
+        // Only directories the bundle created, and only once empty.
             for sub in ["kernels", ""] {
                 let _ = fs::remove_dir(self.dir.join(NPU_BUNDLE_DIR).join(sub));
             }
-        }
         Ok(self.status())
     }
 
@@ -451,6 +538,28 @@ mod tests {
     fn no_progress(_: u64, _: u64) {}
 
     #[test]
+    fn optional_npu_bundle_does_not_change_base_readiness_or_size() {
+        let dir = temp_dir("optional-npu");
+        fs::write(dir.join("base.gguf"), b"base").unwrap();
+        let mgr = ModelManager::with_files(
+            dir.clone(),
+            DownloadOptions::default(),
+            vec![ExpectedFile {
+                name: "base.gguf",
+                size: 4,
+                sha256: None,
+            }],
+        )
+        .with_npu_bundle();
+        let status = mgr.status();
+        assert_eq!(status.state, ModelState::Ready);
+        assert_eq!(status.bytes, 4);
+        assert_eq!(status.total_bytes, 4);
+        assert_eq!(mgr.total_bytes(), 4);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn status_reflects_filesystem() {
         use crate::manifest::TOTAL_BYTES;
         let dir = temp_dir("status");
@@ -570,7 +679,7 @@ mod tests {
         let files: Vec<ExpectedFile> = bodies
             .iter()
             .map(|(name, body)| ExpectedFile {
-                name: *name,
+                name,
                 size: body.len() as u64,
                 sha256: Some(Box::leak(
                     format!("{:x}", Sha256::digest(body)).into_boxed_str(),
@@ -603,14 +712,14 @@ mod tests {
         use sha2::{Digest, Sha256};
         let dir = temp_dir("npu-bundle");
         let src = temp_dir("npu-bundle-src");
-        let bodies = vec![
+        let bodies = [
             (leak("iron-embeddinggemma2-npu2/manifest.txt"), vec![1u8; 100]),
             (leak("iron-embeddinggemma2-npu2/kernels/k.insts.bin"), vec![2u8; 300]),
         ];
         let files: Vec<ExpectedFile> = bodies
             .iter()
             .map(|(name, body)| ExpectedFile {
-                name: *name,
+                name,
                 size: body.len() as u64,
                 sha256: Some(Box::leak(format!("{:x}", Sha256::digest(body)).into_boxed_str())),
             })
@@ -620,8 +729,8 @@ mod tests {
         fs::write(src.join("kernels").join("k.insts.bin"), &bodies[1].1).unwrap();
         let mgr = ModelManager::with_files(dir.clone(), DownloadOptions::default(), files);
         assert!(mgr.includes_npu_bundle());
-        let s = mgr.import(&src, &AtomicBool::new(false)).unwrap();
-        assert_eq!(s.state, ModelState::Ready);
+        let s = mgr.import_npu_bundle(&src, &AtomicBool::new(false)).unwrap();
+        assert_eq!(s.npu_bundle.unwrap().state, ModelState::Ready);
         assert_eq!(
             fs::read(dir.join(NPU_BUNDLE_DIR).join("kernels").join("k.insts.bin")).unwrap(),
             bodies[1].1
@@ -633,11 +742,12 @@ mod tests {
     }
 
     #[test]
-    fn npu_bundle_downloads_before_the_ggufs() {
+    fn npu_bundle_is_optional_and_registered_once() {
         let mgr = ModelManager::new(PathBuf::from("unused")).with_npu_bundle().with_npu_bundle();
         assert_eq!(mgr.files.len(), NPU_BUNDLE_FILES.len() + EXPECTED_FILES.len());
-        assert!(mgr.files[0].npu_bundle_path().is_some());
-        assert_eq!(mgr.files.last().unwrap().name, EXPECTED_FILES[1].name);
+        assert!(mgr.files[0].npu_bundle_path().is_none());
+        assert_eq!(mgr.total_bytes(), crate::manifest::TOTAL_BYTES);
+        assert_eq!(mgr.status().npu_bundle.unwrap().total_bytes, 1_085_278_625);
         assert!(!ModelManager::new(PathBuf::from("unused")).includes_npu_bundle());
     }
 
@@ -725,6 +835,7 @@ mod tests {
             bytes: 42,
             total_bytes: 100,
             error: None,
+            npu_bundle: None,
         };
         let json = serde_json::to_string(&s).unwrap();
         assert!(json.contains("\"state\":\"downloading\""));

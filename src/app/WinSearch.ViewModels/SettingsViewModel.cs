@@ -106,6 +106,15 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     private string _primaryModelActionLabel = "Download";
 
     [ObservableProperty]
+    private string _npuBundleSummary = "Optional AMD NPU bundle (1,085,278,625 bytes)";
+
+    [ObservableProperty]
+    private string _npuBundleActionLabel = "Install NPU bundle";
+
+    [ObservableProperty]
+    private bool _canInstallNpuBundle;
+
+    [ObservableProperty]
     private bool _enableSemanticSearch = true;
 
     [ObservableProperty]
@@ -330,10 +339,28 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
             ? (status.Error ?? "Model operation failed.")
             : "";
 
-        CanStartOrResumeDownload = status.State is ModelState.NotDownloaded or ModelState.Paused or ModelState.Error;
-        CanPauseDownload = status.State == ModelState.Downloading;
-        CanImportModel = status.State != ModelState.Downloading;
-        CanDeleteModel = status.State is ModelState.Ready or ModelState.Paused or ModelState.Error;
+        var npu = status.NpuBundle;
+        var busy = status.State == ModelState.Downloading || npu?.State == ModelState.Downloading;
+        CanStartOrResumeDownload = !busy && status.State is ModelState.NotDownloaded or ModelState.Paused or ModelState.Error;
+        CanPauseDownload = busy;
+        CanImportModel = !busy;
+        CanDeleteModel = !busy && (status.State is ModelState.Ready or ModelState.Paused or ModelState.Error
+            || npu?.State is ModelState.Ready or ModelState.Paused or ModelState.Error);
+        CanInstallNpuBundle = !busy && status.State == ModelState.Ready && npu is not null && npu.State != ModelState.Ready;
+        NpuBundleActionLabel = npu?.State switch
+        {
+            ModelState.Paused => "Resume NPU bundle",
+            ModelState.Error => "Retry NPU bundle",
+            _ => "Install NPU bundle",
+        };
+        NpuBundleSummary = npu?.State switch
+        {
+            ModelState.Ready => "Optional AMD NPU bundle ready",
+            ModelState.Downloading => $"Downloading optional NPU bundle: {npu.Bytes:N0} / {npu.TotalBytes:N0} bytes",
+            ModelState.Paused => $"Optional NPU bundle paused: {npu.Bytes:N0} / {npu.TotalBytes:N0} bytes",
+            ModelState.Error => $"Optional NPU bundle error: {npu.Error}",
+            _ => "Optional AMD NPU bundle (1,085,278,625 bytes)",
+        };
 
         PrimaryModelActionLabel = status.State switch
         {
@@ -393,6 +420,21 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
             return string.Create(CultureInfo.InvariantCulture, $"{bytesPerSecond / kb:0} KB/s");
         }
         return string.Create(CultureInfo.InvariantCulture, $"{bytesPerSecond:0} B/s");
+    }
+
+    [RelayCommand]
+    public async Task InstallNpuBundleAsync(CancellationToken cancellationToken = default)
+    {
+        if (_client is null || !CanInstallNpuBundle) return;
+        try
+        {
+            var status = await _client.StartModelDownloadAsync(true, cancellationToken);
+            Dispatch(() => ApplyModelStatus(status));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Dispatch(() => NpuBundleSummary = ex.Message);
+        }
     }
 
     [RelayCommand]
