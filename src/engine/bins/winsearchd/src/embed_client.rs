@@ -224,7 +224,7 @@ struct BoundedCalls {
 enum RetirementReason {
     Cancelled,
     TimedOut,
-    AudioTimedOut,
+    NonNpuTimedOut,
 }
 
 pub struct EmbedSupervisor {
@@ -816,8 +816,15 @@ impl EmbedSupervisor {
         if path.is_empty() {
             return Err(EmbedError::InvalidRequest("empty media path".into()));
         }
-        let timeout_reason = if matches!(request, EmbedRequest::EmbedAudio { .. }) {
-            RetirementReason::AudioTimedOut
+        let timeout_reason = if matches!(
+            request,
+            EmbedRequest::EmbedAudio { .. }
+                | EmbedRequest::EmbedImage {
+                    token_budget: Some(70),
+                    ..
+                }
+        ) {
+            RetirementReason::NonNpuTimedOut
         } else {
             RetirementReason::TimedOut
         };
@@ -1675,7 +1682,7 @@ mod tests {
         for reason in [
             RetirementReason::Cancelled,
             RetirementReason::TimedOut,
-            RetirementReason::AudioTimedOut,
+            RetirementReason::NonNpuTimedOut,
         ] {
             for backend in ["auto", "npu", "cpu", "vulkan"] {
                 for state in [

@@ -449,7 +449,11 @@ impl ModelService {
             if kind == OpKind::Import
                 && !self.manager.has_import_files(path.expect("import path checked at start"), true)
             {
-                info!("no NPU bundle files in source");
+                if !self.manager.has_import_files(path.expect("import path checked at start"), false) {
+                    result = Err(OpError::Failed("source contains no model files".into()));
+                } else {
+                    info!("no NPU bundle files in source");
+                }
             } else {
                 let snapshot = self.manager.status();
                 if snapshot.state == ModelState::Ready {
