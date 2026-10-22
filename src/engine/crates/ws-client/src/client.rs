@@ -401,6 +401,35 @@ impl Client {
         result
     }
 
+    pub async fn ingest_enrichment(
+        &self,
+        request: ws_protocol::EnrichmentRequest,
+    ) -> Result<ws_protocol::EnrichmentIngested, Error> {
+        if !request.is_valid() {
+            return Err(Error::InvalidInput("invalid enrichment request"));
+        }
+        let expected = request.clone();
+        self.unary(
+            true,
+            Some("entry.enrichment"),
+            |id| ClientMessage::IngestEnrichment { id, request },
+            |message| match message {
+                ServerMessage::EnrichmentIngested { result, .. }
+                    if result.index_id == expected.index_id
+                        && result.model_generation == expected.model_generation
+                        && result.grant_generation == expected.grant_generation
+                        && result.content_revision > 0
+                        && result.reference.is_bound()
+                        && result.reference.result_id == expected.reference.result_id =>
+                {
+                    Ok(result)
+                }
+                _ => Err(Error::Protocol("invalid enrichment acknowledgment")),
+            },
+        )
+        .await
+    }
+
     pub async fn status(&self) -> Result<EngineStatus, Error> {
         self.unary(
             false,
@@ -809,7 +838,10 @@ fn preview_matches(
         if code {
             kind == "code"
         } else {
-            matches!(kind, "doc" | "pdf" | "ocr" | "image" | "audio" | "video")
+            matches!(
+                kind,
+                "doc" | "pdf" | "ocr" | "image" | "audio" | "video" | "transcript"
+            )
         }
     };
     if !entry_matches(&preview.entry, &expected.reference)
@@ -952,6 +984,7 @@ fn validate_id(message: &ServerMessage, expected: u64) -> Result<(), Error> {
         | ServerMessage::IndexingConfig { id, .. }
         | ServerMessage::Error { id, .. } => *id,
         ServerMessage::Pong { id }
+        | ServerMessage::EnrichmentIngested { id, .. }
         | ServerMessage::IndexReset { id, .. }
         | ServerMessage::ResolvedEntry { id, .. }
         | ServerMessage::EntryPreview { id, .. }
@@ -1063,6 +1096,95 @@ mod tests {
                 match variant {
                     0 => assert!(matches!(result, Err(Error::Unsupported("index.reset")))),
                     1 => assert_eq!(result.unwrap().index_id, "c".repeat(32)),
+                    _ => assert!(matches!(result, Err(Error::Protocol(_)))),
+                }
+                task.await.unwrap();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn enrichment_requires_capability_and_rejects_changed_admission_acknowledgments() {
+        for variant in 0..4 {
+            let (client, mut peer) = fixture();
+            let task = tokio::spawn(async move {
+                peer.connect().await.unwrap();
+                let _ = read_client(&mut peer).await;
+                let mut reply = ack();
+                if variant != 0 {
+                    if let ServerMessage::HelloAck { features, .. } = &mut reply {
+                        features.push("entry.enrichment".into());
+                    }
+                }
+                send_server(&mut peer, &reply).await;
+                if variant == 0 {
+                    return;
+                }
+                let ClientMessage::IngestEnrichment { id, request } = read_client(&mut peer).await
+                else {
+                    panic!("expected enrichment");
+                };
+                if variant == 3 {
+                    std::future::pending::<()>().await;
+                }
+                send_server(
+                    &mut peer,
+                    &ServerMessage::EnrichmentIngested {
+                        id,
+                        result: ws_protocol::EnrichmentIngested {
+                            index_id: request.index_id,
+                            reference: ws_protocol::EntryReference {
+                                result_id: request.reference.result_id,
+                                source_revision: Some("fresh-proof".into()),
+                            },
+                            content_revision: 1,
+                            model_generation: request.model_generation,
+                            grant_generation: if variant == 2 {
+                                request.grant_generation + 1
+                            } else {
+                                request.grant_generation
+                            },
+                            duplicate: false,
+                        },
+                    },
+                )
+                .await;
+            });
+            let request = ws_protocol::EnrichmentRequest {
+                index_id: "a".repeat(32),
+                reference: ws_protocol::EntryReference {
+                    result_id: "e1".into(),
+                    source_revision: Some("current-proof".into()),
+                },
+                expected_sha256: "b".repeat(64),
+                model_generation: 0,
+                grant_generation: 1,
+                kind: ws_protocol::EnrichmentKind::Ocr,
+                parts: vec![ws_protocol::EnrichmentPart {
+                    text: "consented fixture text".into(),
+                    location: None,
+                }],
+            };
+            if variant == 3 {
+                assert!(tokio::time::timeout(
+                    Duration::from_millis(100),
+                    client.ingest_enrichment(request)
+                )
+                .await
+                .is_err());
+                assert!(matches!(
+                    client.set_config(EngineConfig::default()).await,
+                    Err(Error::MutationOutcomeUnknown)
+                ));
+                task.abort();
+            } else {
+                let result = client.ingest_enrichment(request).await;
+                match variant {
+                    0 => assert!(matches!(
+                        result,
+                        Err(Error::Unsupported("entry.enrichment"))
+                    )),
+                    1 => assert_eq!(result.unwrap().content_revision, 1),
                     _ => assert!(matches!(result, Err(Error::Protocol(_)))),
                 }
                 task.await.unwrap();

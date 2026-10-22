@@ -8,6 +8,8 @@
 //! live in the `winsearchd` binary.
 
 pub mod calc;
+mod enrichment;
+pub use enrichment::{EnrichmentBatch, EnrichmentCommit};
 pub mod model;
 pub mod retrieval;
 pub mod search;

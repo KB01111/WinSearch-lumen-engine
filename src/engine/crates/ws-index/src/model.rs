@@ -414,6 +414,8 @@ pub const CONTENT_SEGMENT_KINDS: &[&str] = &[
     SEGMENT_KIND_PDF,
     SEGMENT_KIND_AUDIO,
     SEGMENT_KIND_VIDEO,
+    "enriched_ocr",
+    "enriched_transcript",
 ];
 
 /// All valid segment kinds (`name` + [`CONTENT_SEGMENT_KINDS`]).
@@ -425,6 +427,8 @@ pub const ALL_SEGMENT_KINDS: &[&str] = &[
     SEGMENT_KIND_PDF,
     SEGMENT_KIND_AUDIO,
     SEGMENT_KIND_VIDEO,
+    "enriched_ocr",
+    "enriched_transcript",
 ];
 
 /// Priority for `extract_jobs.priority`: new files first, LIFO within priority.

@@ -27,6 +27,10 @@ pub enum ClientMessage {
         id: RequestId,
         request: crate::ResetRequest,
     },
+    IngestEnrichment {
+        id: RequestId,
+        request: crate::EnrichmentRequest,
+    },
     ResolveEntry {
         id: RequestId,
         reference: crate::EntryReference,
@@ -109,6 +113,10 @@ pub enum ClientMessage {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
+    EnrichmentIngested {
+        id: RequestId,
+        result: crate::EnrichmentIngested,
+    },
     IndexReset {
         id: RequestId,
         reset: crate::IndexReset,
@@ -511,6 +519,9 @@ pub struct EngineStatus {
     /// Separate code-index incarnation; absent when unavailable or legacy.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code_index_id: Option<String>,
+    /// Content/vector generation used to fence provider ingestion. Legacy unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_generation: Option<i64>,
     pub state: EngineRunState,
     /// Short human-readable activity line ("Indexing Pictures", "Paused").
     pub current_activity: String,
@@ -557,15 +568,17 @@ mod tests {
 
     #[test]
     fn database_identity_status_round_trips_and_keeps_legacy_unknown() {
-        let value = serde_json::json!({"index_id":"a".repeat(32),"code_index_id":"b".repeat(32)});
+        let value = serde_json::json!({"index_id":"a".repeat(32),"code_index_id":"b".repeat(32),"model_generation":7});
         let status: EngineStatus = serde_json::from_value(value.clone()).unwrap();
         let encoded = serde_json::to_value(status).unwrap();
         assert_eq!(encoded["index_id"], value["index_id"]);
         assert_eq!(encoded["code_index_id"], value["code_index_id"]);
+        assert_eq!(encoded["model_generation"], 7);
         let legacy: EngineStatus = serde_json::from_str("{}").unwrap();
         let legacy = serde_json::to_value(legacy).unwrap();
         assert!(legacy.get("index_id").is_none());
         assert!(legacy.get("code_index_id").is_none());
+        assert!(legacy.get("model_generation").is_none());
     }
 
     #[test]

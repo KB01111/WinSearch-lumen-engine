@@ -316,7 +316,7 @@ public sealed class EngineClient : IEngineClient
     private static bool PreviewMatches(EntryPreview? preview, PreviewRequest expected)
     {
         var code = expected.Reference.ResultId[0] == 'c';
-        bool Known(string? kind) => code ? kind == "code" : kind is "doc" or "pdf" or "ocr" or "image" or "audio" or "video";
+        bool Known(string? kind) => code ? kind == "code" : kind is "doc" or "pdf" or "ocr" or "image" or "audio" or "video" or "transcript";
         if (preview?.Parts is null || preview.Extraction is null || !Enum.IsDefined(preview.State)
             || !ResolvedEntryMatches(preview.Entry, expected.Reference.ResultId, expected.Reference.SourceRevision)
             || preview.Parts.Count > 64 || preview.Extraction.Count > 8) return false;

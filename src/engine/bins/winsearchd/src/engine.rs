@@ -89,7 +89,7 @@ pub struct EngineService {
     related_jobs: std::sync::atomic::AtomicUsize,
     search_jobs: std::sync::atomic::AtomicUsize,
     next_client_id: std::sync::atomic::AtomicU64,
-    indexer: Arc<Indexer>,
+    pub(crate) indexer: Arc<Indexer>,
     extractors: Arc<crate::extract::ExtractorRegistry>,
     models: Arc<ModelService>,
     /// Embed worker supervisor (lazy: spawns on first embed request).
@@ -186,6 +186,121 @@ impl Drop for SearchWork {
 }
 
 impl EngineService {
+    pub fn ingest_enrichment(
+        self: &Arc<Self>,
+        client: &ClientHandle,
+        id: RequestId,
+        request: ws_protocol::EnrichmentRequest,
+    ) {
+        if !request.is_valid() {
+            let _ = client.send(&ServerMessage::Error {
+                id: Some(id),
+                code: ErrorCode::InvalidRequest,
+                message: "invalid enrichment request".into(),
+            });
+            return;
+        }
+        if self
+            .preview_jobs
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                (count < 2).then_some(count + 1)
+            })
+            .is_err()
+        {
+            let _ = client.send(&ServerMessage::Error {
+                id: Some(id),
+                code: ErrorCode::NotReady,
+                message: "source resources are busy".into(),
+            });
+            return;
+        }
+        let cancel = self.begin_request_for_client(client.id(), id);
+        let work = PreviewWork {
+            engine: self.clone(),
+            client_id: client.id(),
+            id,
+            cancel,
+        };
+        let peer = client.clone();
+        if std::thread::Builder::new()
+            .name("winsearch-enrichment".into())
+            .spawn(move || {
+                let Some(_ticket) = work.engine.indexer.work_gate.enter() else {
+                    let _ = peer.send(&ServerMessage::Error {
+                        id: Some(id),
+                        code: ErrorCode::NotReady,
+                        message: "index reset in progress".into(),
+                    });
+                    return;
+                };
+                let epoch = work.engine.indexer.policy_epoch();
+                let result = crate::enrichment::ingest(&work.engine, &request, &work.cancel);
+                let mut stream = peer.stream.lock().unwrap_or_else(|p| p.into_inner());
+                if let Some(reply) = work.engine.enrichment_response_for_delivery(
+                    peer.id(),
+                    id,
+                    &work.cancel,
+                    epoch,
+                    result,
+                ) {
+                    let _ = write_message(&mut *stream, &reply);
+                }
+            })
+            .is_err()
+        {
+            let _ = client.send(&ServerMessage::Error {
+                id: Some(id),
+                code: ErrorCode::NotReady,
+                message: "enrichment worker could not start".into(),
+            });
+        }
+    }
+    pub(crate) fn enrichment_response_for_delivery(
+        &self,
+        client_id: u64,
+        id: RequestId,
+        cancel: &Arc<AtomicBool>,
+        epoch: u64,
+        result: Result<ws_protocol::EnrichmentIngested, ErrorCode>,
+    ) -> Option<ServerMessage> {
+        let current = || {
+            self.cancels
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .get(&(client_id, id))
+                .is_some_and(|token| Arc::ptr_eq(token, cancel))
+        };
+        if !current() {
+            return None;
+        }
+        let result = result.and_then(|result| {
+            self.resolve_entry_snapshot(&result.reference)?;
+            if self.indexer.store_lock().model_generation().ok() != Some(result.model_generation) {
+                return Err(ErrorCode::NotReady);
+            }
+            Ok(result)
+        });
+        if !current() {
+            return None;
+        }
+        // Resolve can wait on filesystem/store work. Fence again immediately
+        // before delivery, including cancellation arriving during that wait.
+        let result = if cancel.load(Ordering::Acquire) {
+            Err(ErrorCode::Cancelled)
+        } else if self.indexer.policy_epoch() != epoch {
+            Err(ErrorCode::NotReady)
+        } else {
+            result
+        };
+        Some(match result {
+            Ok(result) => ServerMessage::EnrichmentIngested { id, result },
+            Err(code) => ServerMessage::Error {
+                id: Some(id),
+                code,
+                message: "enrichment source is unavailable or changed".into(),
+            },
+        })
+    }
     fn resume_after_reset_gate(&self) {
         self.indexer.work_gate.reopen();
         // Watcher notifications were deliberately excluded while draining.
@@ -424,6 +539,7 @@ impl EngineService {
         // weights resident, or stub vectors flowing in test setups). Reading
         // the cache never spawns a worker.
         status.model_loaded = self.embed.model_loaded();
+        status.model_generation = self.indexer.store_lock().model_generation().ok();
         status.embedding = Some(self.embed.diagnostics());
         status.code_index_id = self.code_service().map(|code| {
             code.store

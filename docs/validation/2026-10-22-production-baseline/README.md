@@ -27,6 +27,25 @@ Raw checks are retained locally in `artifacts/production-tests-reset` and
 dirty diff/untracked hashes, commands, timestamps and exit codes. The full source
 run excludes any later enrichment or Lumen migration change.
 
+## Enrichment contract checkpoint
+
+The subsequent engine implementation adds bounded image OCR/audio transcript
+ingestion through a current ordinary source reference, independently hashes the
+source, and atomically records text, pending vectors and idempotency receipts.
+Unknown legacy caches cannot acquire provenance from the new provider hash.
+The acknowledgment is fenced again after waiting for the peer writer. Source
+hash reads now check cancellation/admission between 64 KiB reads.
+
+The enrichment workspace snapshot passed **764 Rust tests, 11 ignored** across
+28 suites in the isolated `engine-validation` Cargo profile. Later delivery and
+cancellable-hash changes passed 257 protocol/client/store/extractor tests and four
+daemon enrichment tests. The latter include actual named-pipe ingestion and
+cached OCR preview, plus source/root/model/cancel/request-reuse rejection. The
+provider outputs and sources are generated fixtures, not live provider accuracy.
+These changes still require Lumen consented fixture delivery and final rebuilt
+payload/native/installed acceptance. Current builds use the XRT stub; the real
+SDK and models must be selected and requalified separately.
+
 ## Remaining acceptance
 
 Tasks 5 and 7-11 remain open. The Task 6 opt-in Lumen adapter has source regressions,

@@ -656,7 +656,7 @@ mod tests {
             idx.add_or_update((i + 1) as i64, 42, kind, &[1.0, 0.0])
                 .unwrap();
         }
-        assert_eq!(idx.len(), 7);
+        assert_eq!(idx.len(), 9);
         assert_eq!(idx.get_kind(1), Some(SEGMENT_KIND_NAME));
         assert_eq!(idx.get_kind(2), Some(SEGMENT_KIND_DOC));
         assert_eq!(idx.get_kind(3), Some(SEGMENT_KIND_IMAGE));
@@ -664,6 +664,8 @@ mod tests {
         assert_eq!(idx.get_kind(5), Some(SEGMENT_KIND_PDF));
         assert_eq!(idx.get_kind(6), Some(SEGMENT_KIND_AUDIO));
         assert_eq!(idx.get_kind(7), Some(SEGMENT_KIND_VIDEO));
+        assert_eq!(idx.get_kind(8), Some("enriched_ocr"));
+        assert_eq!(idx.get_kind(9), Some("enriched_transcript"));
 
         // Filter to content kinds excludes `name`.
         let content_filter = VectorFilter::content_kinds();
@@ -675,7 +677,7 @@ mod tests {
         assert_eq!(idx.count_by_kind(SEGMENT_KIND_PDF), 1);
         assert_eq!(idx.remove_by_kind(SEGMENT_KIND_PDF), 1);
         assert_eq!(idx.count_by_kind(SEGMENT_KIND_PDF), 0);
-        assert_eq!(idx.len(), 6);
+        assert_eq!(idx.len(), 8);
     }
 
     #[test]

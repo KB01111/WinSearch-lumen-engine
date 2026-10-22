@@ -68,7 +68,7 @@ pub struct EntryRow {
 }
 
 pub struct IndexStore {
-    conn: Connection,
+    pub(crate) conn: Connection,
     database_id: String,
 }
 
@@ -238,9 +238,18 @@ impl IndexStore {
                 return Ok(progress);
             }
         }
-        self.conn.execute("INSERT INTO content_revisions(entry_id,revision) VALUES(?1,1) ON CONFLICT(entry_id) DO UPDATE SET revision=revision+1",[entry])?;
-        let revision = self.content_revision(entry)?;
-        self.conn.execute("INSERT INTO content_progress(entry_id,kind,revision,source,model_generation) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(entry_id,kind) DO UPDATE SET cursor=0,complete=0,revision=excluded.revision,source=excluded.source,model_generation=excluded.model_generation,media_plan=NULL,video_selection=NULL,source_sha256=NULL,source_sha256_revision=NULL",params![entry,kind,revision,source,generation])?;
+        let previous_revision = revision;
+        let tx = self.conn.transaction()?;
+        tx.execute("INSERT INTO content_revisions(entry_id,revision) VALUES(?1,1) ON CONFLICT(entry_id) DO UPDATE SET revision=revision+1",[entry])?;
+        let revision: i64 = tx.query_row(
+            "SELECT revision FROM content_revisions WHERE entry_id=?1",
+            [entry],
+            |row| row.get(0),
+        )?;
+        tx.execute("UPDATE content_progress SET revision=?3,source_sha256_revision=CASE WHEN source_sha256 IS NULL THEN NULL ELSE ?3 END WHERE entry_id=?1 AND revision=?2 AND source=?4 AND model_generation=?5 AND kind IN ('enriched_ocr','enriched_transcript')",params![entry,previous_revision,revision,source,generation])?;
+        tx.execute("UPDATE enrichment_receipts SET revision=?3 WHERE entry_id=?1 AND revision=?2 AND source=?4 AND model_generation=?5",params![entry,previous_revision,revision,source,generation])?;
+        tx.execute("INSERT INTO content_progress(entry_id,kind,revision,source,model_generation) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(entry_id,kind) DO UPDATE SET cursor=0,complete=0,revision=excluded.revision,source=excluded.source,model_generation=excluded.model_generation,media_plan=NULL,video_selection=NULL,source_sha256=NULL,source_sha256_revision=NULL",params![entry,kind,revision,source,generation])?;
+        tx.commit()?;
         Ok(self
             .content_progress(entry, kind)?
             .expect("inserted progress"))
@@ -539,7 +548,7 @@ impl IndexStore {
             if !text.is_empty() {
                 used += text.len();
                 parts.push(PreviewTextPart {
-                    kind: row.get(0)?,
+                    kind: crate::enrichment::preview_kind(&row.get::<_, String>(0)?).to_owned(),
                     text: text.to_owned(),
                     location,
                 });
@@ -569,7 +578,7 @@ impl IndexStore {
                 })
             },
         )?;
-        let metadata = rows.collect::<Result<Vec<_>, _>>()?;
+        let mut metadata = rows.collect::<Result<Vec<_>, _>>()?;
         if metadata.len() > ws_protocol::MAX_PREVIEW_EXTRACTIONS
             || metadata
                 .iter()
@@ -578,6 +587,9 @@ impl IndexStore {
             return Err(StoreError::InvalidConfig(
                 "invalid preview extraction metadata".into(),
             ));
+        }
+        for item in &mut metadata {
+            item.kind = crate::enrichment::preview_kind(&item.kind).to_owned();
         }
         Ok(metadata)
     }
@@ -1194,6 +1206,7 @@ COMMIT;
         conn.execute("INSERT INTO meta(key,value) VALUES('entry_id_high_water',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE CAST(meta.value AS INTEGER)<CAST(excluded.value AS INTEGER)", [watermark.max(maximum).to_string()])?;
         conn.execute_batch("CREATE TRIGGER IF NOT EXISTS entries_id_high_water AFTER INSERT ON entries BEGIN UPDATE meta SET value=CAST(NEW.id AS TEXT) WHERE key='entry_id_high_water' AND CAST(value AS INTEGER)<NEW.id; END;")?;
         let store = Self { conn, database_id };
+        crate::enrichment::initialize(&store.conn)?;
         store.set_query_source_guard(|_, _, _| true)?;
         store.conn.execute_batch("CREATE TEMP VIEW IF NOT EXISTS query_entries AS SELECT * FROM visible_entries WHERE query_source_allowed(path,NULL,is_app); CREATE TEMP VIEW IF NOT EXISTS query_content_rows AS SELECT f.rowid AS id FROM content_fts f JOIN query_entries e ON e.id=CAST(f.entry_id AS INTEGER) LEFT JOIN content_chunks c ON c.id=f.rowid AND c.entry_id=e.id LEFT JOIN content_revisions r ON r.entry_id=e.id LEFT JOIN content_progress p ON p.entry_id=c.entry_id AND p.kind=c.job_kind AND p.revision=r.revision WHERE query_source_allowed(e.path,COALESCE(p.source,''),e.is_app);")?;
         store.set_search_request_filter(&crate::model::SearchRequest::default())?;

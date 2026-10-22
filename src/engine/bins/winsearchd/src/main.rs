@@ -8,6 +8,7 @@ mod code;
 mod crawl;
 mod embed_client;
 mod engine;
+mod enrichment;
 mod extract;
 mod extract_client;
 mod indexer;

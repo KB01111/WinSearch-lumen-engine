@@ -18,6 +18,7 @@ fn features() -> Vec<String> {
         "index.root_policies".to_string(),
         "index.identity".to_string(),
         "index.reset".to_string(),
+        "entry.enrichment".to_string(),
         "search.exact".to_string(),
         "search.semantic".to_string(),
         "search.filters".to_string(),
@@ -116,6 +117,9 @@ pub fn handle_connection(stream: PipeStream, engine: SharedEngine) {
         reader.finish_read_frame();
 
         match msg {
+            ClientMessage::IngestEnrichment { id, request } => {
+                engine.ingest_enrichment(&client, id, request)
+            }
             ClientMessage::ResetIndex { id, request } => engine.reset_index(&client, id, request),
             ClientMessage::ResolveEntry { id, reference } => {
                 engine.resolve_entry(&client, id, reference)

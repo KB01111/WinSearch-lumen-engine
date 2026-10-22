@@ -686,3 +686,34 @@ Rust client mutations remain ordered. A missing/invalid acknowledgment or an
 internal reset error requires stopping/restarting the host-owned child, reconciling
 current policy/status, and constructing a fresh client. Do not blindly retry reset.
 The C# client likewise refuses further operations after an uncertain reset.
+
+## Source-bound provider enrichment
+
+`entry.enrichment` gates `ingest_enrichment { id, request }` and
+`enrichment_ingested { id, result }`. The request contains the ordinary database
+`index_id`, current bound `reference`, complete lowercase `expected_sha256`,
+`model_generation`, nonzero host `grant_generation`, `kind` (`ocr` or
+`transcript`) and `parts`. Each part has `text` and optional typed `location`.
+There are at most 128 parts and 64 KiB aggregate UTF-8, with no empty/NUL text.
+Current status includes optional `model_generation`; an unknown generation cannot
+authorize ingestion. It is independent of the model-loaded diagnostic.
+The first contract admits image OCR without locations and audio transcripts
+without locations or with ordered timestamps inside the cached media duration.
+PDF/video provider ingestion is explicitly unsupported by this first contract.
+
+The engine independently hashes complete current local bytes under the existing
+64 MiB/10-second synchronous budget, checks identity, source proof, root admission,
+model generation and cancellation, and atomically commits chunks, FTS, pending
+embedding work and a receipt. Larger or unattested sources are unavailable until
+background attestation exists. The caller supplies no arbitrary path or vectors.
+Credentials, provider execution, consent and dispatch budgets remain host-owned;
+`grant_generation` is an echoed host fence, not engine-issued consent.
+
+The result contains `index_id`, a fresh bound `reference`, `content_revision`,
+`model_generation`, echoed `grant_generation` and `duplicate`. A matching retry
+after fresh source resolution returns the committed revision without duplicate
+chunks. Changed source/model/reset invalidates the receipt. Only previously
+byte-attested native content for the same bytes/model can survive the new revision.
+Source and request identity are checked again after waiting for the peer writer.
+Cancel/revocation can withhold an acknowledgment after commit; a caller must
+reconcile the unknown mutation outcome, never infer that an error undid a commit.
