@@ -301,9 +301,9 @@ mod tests {
 
         let (resolved, args) = resolve_shortcut(&lnk).expect("shortcut should resolve");
         assert_eq!(
-            PathBuf::from(resolved),
-            target,
-            "resolved target should round-trip"
+            fs::canonicalize(resolved).unwrap(),
+            fs::canonicalize(&target).unwrap(),
+            "resolved target should identify the same file, including 8.3 aliases"
         );
         assert!(args.contains("--flag"));
 
@@ -313,7 +313,10 @@ mod tests {
             .iter()
             .find(|a| a.name == "Acme App")
             .expect("shortcut in catalog");
-        assert_eq!(app.target, target.to_string_lossy());
+        assert_eq!(
+            fs::canonicalize(&app.target).unwrap(),
+            fs::canonicalize(&target).unwrap()
+        );
     }
 
     #[test]
