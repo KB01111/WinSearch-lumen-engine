@@ -633,13 +633,22 @@ impl CodeService {
                     *self.scan.lock().unwrap_or_else(|p| p.into_inner()) = Some(scan);
                 }
                 Err(e) => {
+                    let changed = e.to_string().contains("changed");
+                    // Policy/model admission can obsolete the initial scan.
+                    // Retry its unchanged claim promptly. Watcher successors
+                    // have a newer revision, so retry_job cannot shorten their quiet period.
                     self.store
                         .lock()
                         .unwrap_or_else(|p| p.into_inner())
                         .retry_job(
                             &scan.job,
-                            now() + 60_000,
-                            !e.to_string().contains("changed"),
+                            now()
+                                + if changed {
+                                    PARSER_ADMISSION_WAIT.as_millis() as i64
+                                } else {
+                                    60_000
+                                },
+                            !changed,
                         )?;
                     tracing::warn!(error=%e,"code scan deferred");
                 }
@@ -1439,6 +1448,67 @@ pub(crate) mod tests {
     }
     fn fixture() -> (Arc<CodeService>, PathBuf) {
         fixture_with_admission(false)
+    }
+
+    #[test]
+    fn canonical_host_root_policy_indexes_exact_code_without_a_model() {
+        let (code, root) = fixture();
+        std::fs::write(
+            root.join("report.rs"),
+            "pub fn adapter_probe() -> u32 { 7 }\n",
+        )
+        .unwrap();
+        let canonical = std::fs::canonicalize(&root)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let mut policy = code.indexer.get_indexing_config().unwrap();
+        policy.roots = vec![canonical.clone()];
+        policy.code_roots = vec![canonical.clone()];
+        policy.root_policies = vec![ws_protocol::RootPolicy {
+            root: canonical,
+            exclusions: vec!["private".into()],
+            include_hidden: false,
+            max_file_size_bytes: 7 * 1024 * 1024,
+        }];
+        code.indexer.set_indexing_config(&policy).unwrap();
+        code.configure().unwrap();
+        for _ in 0..16 {
+            if !code.turn().unwrap() {
+                break;
+            }
+        }
+        assert_eq!(code.exact("adapter_probe", 20).len(), 1);
+        stop_fixture_watchers(&code);
+        drop(code);
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn policy_fence_during_initial_code_scan_recovers_without_a_minute_of_unavailability() {
+        let (code, root) = fixture();
+        std::fs::write(
+            root.join("report.rs"),
+            "pub fn adapter_probe() -> u32 { 7 }\n",
+        )
+        .unwrap();
+        code.configure().unwrap();
+        assert!(code.turn().unwrap()); // Claim and snapshot the initial scan.
+        code.policy_changed(); // Configuration/model admission changes its fence.
+        assert!(code.turn().unwrap()); // Retire the obsolete scan state.
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while code.exact("adapter_probe", 20).is_empty() && std::time::Instant::now() < deadline {
+            code.turn().unwrap();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let found = code.exact("adapter_probe", 20).len();
+        stop_fixture_watchers(&code);
+        drop(code);
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+        assert_eq!(
+            found, 1,
+            "a current policy must promptly resume a canceled scan"
+        );
     }
 
     fn fixture_with_admission(deferred: bool) -> (Arc<CodeService>, PathBuf) {
