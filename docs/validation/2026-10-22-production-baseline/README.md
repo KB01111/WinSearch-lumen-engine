@@ -147,6 +147,30 @@ Stop took 23.76 ms and both owned jobs emptied. This qualifies the recovery fixt
 for those recorded bytes; it does not qualify new release latency or installed
 Lumen behavior.
 
+The clean `9b7b01d` release rebuild also passed. Its
+[100-sample top-20 release run](exact-scale-query-cache-release-failure.json)
+measured p50/p95/p99 of 1,984/2,324/3,023 ms on the same generated 1,000-file corpus,
+still failing the unchanged latency targets. It completed without an operator
+interruption; independent Stop took 22.76 ms and the owned job emptied. Peak job
+private/working-set bytes were 20,353,024/82,800,640, and data peaked at 10,059,326
+bytes, below the declared 2 GiB private/4 GiB data ceilings. These are separate
+host runs, so they do not isolate a causal speedup. Bulk-result and larger-corpus
+acceptance remain unmeasured. This candidate's separate copied recovery fixture
+passed with independent Stop in 24.95 ms.
+
+The [updated native-input proof](release-native-inputs.json) records independent
+CPU/NPU references, all ten frozen retrieval suites and copied recovery for the
+`9b7b01d` candidate. The assembler now pins that source and those bytes. Its
+unsigned model-free manifest is
+`059bea49c03e889de604dbd2c29af2deb410c2694c6d19099309295387fbce9b`.
+The [copied package fixture](payload-native-9b7b01d.json) passed in 33.39 seconds
+under the unchanged 90-second watchdog, outside the checkout with System32-only
+PATH. It checked native text/PDF extraction, per-folder admission and bounded
+1,000/1,100-result delivery. These functional checks do not override the failed
+latency gate. Lumen's local development pins/staging match this manifest; its
+expanded native adapter test still fails on queued code work and is under
+investigation. Default cutover remains disabled.
+
 ## Remaining acceptance
 
 Tasks 5-11 remain open. The Task 6 opt-in Lumen adapter has source regressions,
