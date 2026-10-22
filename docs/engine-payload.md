@@ -106,7 +106,8 @@ ownership and final runtime validation, and run clean
 installed Lumen/standalone, signing, licensing, update and uninstall gates.
 All [README TODOs](../README.md#v10-todo) remain open until their complete scope
 and acceptance checks are satisfied.
-# Building a current candidate
+
+## Building a current candidate
 
 `tools/build-engine-candidate.py` builds a model-free CPU/NPU release snapshot
 from a clean checkout. It requires explicit repository, target directory, XRT SDK,
@@ -120,4 +121,3 @@ This creates an unsigned, unqualified candidate. Existing package assembly still
 requires fresh reference/retrieval proof bound to the selected source and binary
 hashes. Candidate compilation or runtime-info output does not replace those gates,
 the dependency/license closure, signing or installed acceptance.
-
