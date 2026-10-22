@@ -92,9 +92,7 @@ fn main() -> anyhow::Result<()> {
     // Content extraction worker pool (P4.1): two background threads drain
     // non-name modality jobs (`doc`, `pdf`, `image`, `audio`, `video`) in
     // priority order (small + recent files first) under per-file budgets.
-    indexer.start_extract_workers(
-        engine.embed_supervisor(),
-        engine.extraction_registry());
+    indexer.start_extract_workers(engine.embed_supervisor(), engine.extraction_registry());
     engine.start_code_scheduler()?;
     spawn_status_pusher(Arc::clone(&engine));
     // Model progress/completion pushes fan out to every connected client.
@@ -158,12 +156,27 @@ fn run_crawl_bench(file_count: usize) -> anyhow::Result<()> {
     let stats = store.stats()?;
 
     println!("winsearch crawl-pipeline benchmark");
-    println!("files: {file_count}, dirs: {}, cpus: {}", file_count / 200, std::thread::available_parallelism().map(|p| p.get()).unwrap_or(0));
+    println!(
+        "files: {file_count}, dirs: {}, cpus: {}",
+        file_count / 200,
+        std::thread::available_parallelism()
+            .map(|p| p.get())
+            .unwrap_or(0)
+    );
     println!();
     println!("tree creation:               {build:>10.2?}");
-    println!("full crawl (scan+identity+upsert, {entries} entries): {full:>8.2?}  ({:.0} files/s)", file_count as f64 / full.as_secs_f64());
-    println!("incremental crawl (unchanged): {incremental:>10.2?}  ({:.0} files/s)", file_count as f64 / incremental.as_secs_f64());
-    println!("index size: {:.1} MiB", stats.index_size_bytes as f64 / 1_048_576.0);
+    println!(
+        "full crawl (scan+identity+upsert, {entries} entries): {full:>8.2?}  ({:.0} files/s)",
+        file_count as f64 / full.as_secs_f64()
+    );
+    println!(
+        "incremental crawl (unchanged): {incremental:>10.2?}  ({:.0} files/s)",
+        file_count as f64 / incremental.as_secs_f64()
+    );
+    println!(
+        "index size: {:.1} MiB",
+        stats.index_size_bytes as f64 / 1_048_576.0
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&db_dir);
@@ -200,8 +213,7 @@ fn init_logging() {
     // Keep the guard alive for the process lifetime.
     Box::leak(Box::new(guard));
 
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         EnvFilter::new("winsearchd=info,ws_platform=info,ws_protocol=warn,ws_index=warn")
     });
 

@@ -91,13 +91,19 @@ pub fn download_file(
 
     // Already downloaded and valid: skip the network entirely.
     if dest.is_file() && verify_file(&dest, expected).is_ok() {
-        info!(file = expected.name, "already present and valid; skipping download");
+        info!(
+            file = expected.name,
+            "already present and valid; skipping download"
+        );
         progress(expected.size, expected.size);
         return Ok(dest);
     }
     // A complete-but-invalid leftover can never be resumed.
     if dest.is_file() {
-        warn!(file = expected.name, "existing file failed verification; re-downloading");
+        warn!(
+            file = expected.name,
+            "existing file failed verification; re-downloading"
+        );
         fs::remove_file(&dest)?;
     }
 
@@ -134,7 +140,11 @@ pub fn download_file(
         resume_from = 0;
     }
     if resume_from > 0 {
-        info!(file = expected.name, bytes = resume_from, "resuming partial download");
+        info!(
+            file = expected.name,
+            bytes = resume_from,
+            "resuming partial download"
+        );
     }
 
     let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -235,7 +245,11 @@ pub fn download_file(
         }
     }
     progress(expected.size, expected.size);
-    info!(file = expected.name, bytes = downloaded, "download complete");
+    info!(
+        file = expected.name,
+        bytes = downloaded,
+        "download complete"
+    );
     Ok(dest)
 }
 
@@ -342,7 +356,7 @@ mod tests {
             let base_url = format!("http://{}", listener.local_addr().unwrap());
             let seen_ranges: Arc<Mutex<Vec<Option<String>>>> = Arc::new(Mutex::new(Vec::new()));
             let seen = Arc::clone(&seen_ranges);
-                let thread = std::thread::Builder::new()
+            let thread = std::thread::Builder::new()
                 .name("ws-modelmgr-fixture".into())
                 .spawn(move || {
                     for stream in listener.incoming().take(64) {
@@ -451,14 +465,15 @@ mod tests {
     }
 
     fn fixture_bytes(seed: u8, len: usize) -> Vec<u8> {
-        (0..len).map(|i| seed.wrapping_add((i % 251) as u8)).collect()
+        (0..len)
+            .map(|i| seed.wrapping_add((i % 251) as u8))
+            .collect()
     }
 
     fn expected_for(name: &'static str, bytes: &[u8]) -> ExpectedFile {
         // Leak a per-test hex string: tests are short-lived; the manifest
         // struct borrows `&'static str` for its pinned constants.
-        let hex: &'static str =
-            Box::leak(format!("{:x}", Sha256::digest(bytes)).into_boxed_str());
+        let hex: &'static str = Box::leak(format!("{:x}", Sha256::digest(bytes)).into_boxed_str());
         ExpectedFile {
             name,
             size: bytes.len() as u64,
@@ -494,7 +509,10 @@ mod tests {
         {
             let calls = calls.lock().unwrap();
             assert!(!calls.is_empty());
-            assert_eq!(*calls.last().unwrap(), (bytes.len() as u64, bytes.len() as u64));
+            assert_eq!(
+                *calls.last().unwrap(),
+                (bytes.len() as u64, bytes.len() as u64)
+            );
         }
 
         // Second call is a no-op (already valid) and performs no HTTP.
@@ -543,9 +561,11 @@ mod tests {
         let dest = download_file(&expected, &dir, &fx.options(), progress, &resume).unwrap();
         assert_eq!(fs::read(&dest).unwrap(), bytes);
         assert!(
-            fx.seen_ranges.lock().unwrap().iter().any(|r| r
-                .as_deref()
-                .is_some_and(|v| v.starts_with("bytes="))),
+            fx.seen_ranges
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|r| r.as_deref().is_some_and(|v| v.starts_with("bytes="))),
             "server never saw a Range resume"
         );
         assert!(!dir.join("big.gguf.part").exists());

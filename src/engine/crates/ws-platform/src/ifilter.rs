@@ -18,7 +18,7 @@ use std::path::Path;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Instant;
 
-use windows::core::{HRESULT, Interface, IUnknown, PCWSTR, PWSTR};
+use windows::core::{IUnknown, Interface, HRESULT, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{S_FALSE, S_OK};
 use windows::Win32::Storage::IndexServer::{
     IFilter, LoadIFilter, CHUNK_TEXT, FILTER_E_EMBEDDING_UNAVAILABLE, FILTER_E_END_OF_CHUNKS,
@@ -143,13 +143,8 @@ fn extract_text_via_ifilter_blocking(
         .collect();
 
     let mut raw_unk: *mut c_void = std::ptr::null_mut();
-    let load_res = unsafe {
-        LoadIFilter(
-            PCWSTR(wide_path.as_ptr()),
-            None::<&IUnknown>,
-            &mut raw_unk,
-        )
-    };
+    let load_res =
+        unsafe { LoadIFilter(PCWSTR(wide_path.as_ptr()), None::<&IUnknown>, &mut raw_unk) };
     if load_res.is_err() || raw_unk.is_null() {
         return IFilterOutcome::Unsupported;
     }

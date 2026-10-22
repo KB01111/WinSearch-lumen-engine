@@ -185,23 +185,36 @@ impl DaemonClient {
     /// Executes a streaming search over IPC and collects all batches until
     /// `done: true`.
     pub fn search(&mut self, query: SearchQuery) -> Result<Vec<SearchResult>, IpcError> {
-        self.last_search_outcome=None;
+        self.last_search_outcome = None;
         if !ws_protocol::valid_search_extensions(&query.extensions) {
             return Err(IpcError::InvalidSearchExtensions);
         }
         if !ws_protocol::valid_search_file_kinds(&query.file_kinds) {
             return Err(IpcError::InvalidSearchFileKinds);
         }
-        if !query.file_kinds.is_empty() && !self.features.iter().any(|feature| feature == "search.file_kinds") {
+        if !query.file_kinds.is_empty()
+            && !self
+                .features
+                .iter()
+                .any(|feature| feature == "search.file_kinds")
+        {
             return Err(IpcError::UnsupportedFeature("search.file_kinds"));
         }
-        if !query.extensions.is_empty() && !self.features.iter().any(|feature| feature == "search.filters") {
+        if !query.extensions.is_empty()
+            && !self
+                .features
+                .iter()
+                .any(|feature| feature == "search.filters")
+        {
             return Err(IpcError::UnsupportedFeature("search.filters"));
         }
         let extensions = query.extensions.clone();
         let file_kinds = query.file_kinds.clone();
-        let requested_semantic=query.include_semantic;
-        let require_outcome=self.features.iter().any(|feature|feature=="search.outcomes");
+        let requested_semantic = query.include_semantic;
+        let require_outcome = self
+            .features
+            .iter()
+            .any(|feature| feature == "search.outcomes");
         let id = self.alloc_id();
         write_message(&mut self.stream, &ClientMessage::Search { id, query })?;
         let mut results = Vec::new();
@@ -213,26 +226,41 @@ impl DaemonClient {
                     done,
                     outcome,
                 }) if resp_id == id => {
-                    if batch.iter().any(|hit| !ws_protocol::search_file_kind_result_allowed(&file_kinds,hit)) {
+                    if batch
+                        .iter()
+                        .any(|hit| !ws_protocol::search_file_kind_result_allowed(&file_kinds, hit))
+                    {
                         return Err(IpcError::UnselectedSearchFileKind);
                     }
-                    if !extensions.is_empty() && batch.iter().any(|hit| {
-                        hit.kind == ws_protocol::ResultKind::Folder || !hit.path.as_deref().is_some_and(|path| {
-                            ws_protocol::search_extension_allowed(&extensions,
-                                std::path::Path::new(path).extension().and_then(|extension| extension.to_str()).unwrap_or(""),)
+                    if !extensions.is_empty()
+                        && batch.iter().any(|hit| {
+                            hit.kind == ws_protocol::ResultKind::Folder
+                                || !hit.path.as_deref().is_some_and(|path| {
+                                    ws_protocol::search_extension_allowed(
+                                        &extensions,
+                                        std::path::Path::new(path)
+                                            .extension()
+                                            .and_then(|extension| extension.to_str())
+                                            .unwrap_or(""),
+                                    )
                                 })
-                        }) {
+                        })
+                    {
                         return Err(IpcError::UnselectedSearchExtension);
                     }
-                    if (done && require_outcome && outcome.is_none()) || outcome.as_ref()
-                        .is_some_and(|state| {!state.valid_for(done,batch.is_empty(),requested_semantic)
-                        }) {
+                    if (done && require_outcome && outcome.is_none())
+                        || outcome.as_ref().is_some_and(|state| {
+                            !state.valid_for(done, batch.is_empty(), requested_semantic)
+                        })
+                    {
                         return Err(IpcError::InvalidSearchOutcome);
                     }
                     results.extend(batch);
                     if done {
-                        self.last_search_outcome=outcome;
-                        if let Some(outcome)=outcome.filter(|state|state.disposition!=SearchDisposition::Complete) {
+                        self.last_search_outcome = outcome;
+                        if let Some(outcome) =
+                            outcome.filter(|state| state.disposition != SearchDisposition::Complete)
+                        {
                             return Err(IpcError::SearchInterrupted(outcome.disposition));
                         }
                         return Ok(results);
@@ -263,7 +291,10 @@ impl DaemonClient {
     ) -> Result<ModelStatus, IpcError> {
         self.require_npu_bundle(include_npu)?;
         let id = self.alloc_id();
-        write_message(&mut self.stream, &ClientMessage::ModelDownloadStart { id, include_npu },)?;
+        write_message(
+            &mut self.stream,
+            &ClientMessage::ModelDownloadStart { id, include_npu },
+        )?;
         self.await_model_terminal(id, progress)
     }
 
@@ -272,20 +303,25 @@ impl DaemonClient {
         path: String,
         progress: impl FnMut(&ModelStatus),
     ) -> Result<ModelStatus, IpcError> {
-        self.import_model_with_npu( path, false, progress)
+        self.import_model_with_npu(path, false, progress)
     }
 
-    pub
-
-    fn import_model_with_npu(
+    pub fn import_model_with_npu(
         &mut self,
         path: String,
-        include_npu: bool, progress: impl FnMut(&ModelStatus),
+        include_npu: bool,
+        progress: impl FnMut(&ModelStatus),
     ) -> Result<ModelStatus, IpcError> {
         self.require_npu_bundle(include_npu)?;
         let id = self.alloc_id();
-        write_message(&mut self.stream, &ClientMessage::ModelImport { id, path,
-                include_npu, },)?;
+        write_message(
+            &mut self.stream,
+            &ClientMessage::ModelImport {
+                id,
+                path,
+                include_npu,
+            },
+        )?;
         self.await_model_terminal(id, progress)
     }
 
@@ -305,7 +341,8 @@ impl DaemonClient {
                         && !status
                             .npu_bundle
                             .as_ref()
-                            .is_some_and(|s| s.state == ws_modelmgr::ModelState::Downloading) {
+                            .is_some_and(|s| s.state == ws_modelmgr::ModelState::Downloading)
+                    {
                         return Ok(status);
                     }
                 }
@@ -330,7 +367,7 @@ impl DaemonClient {
                 .any(|feature| feature == "model.npu_bundle")
         {
             return Err(IpcError::UnsupportedFeature("model.npu_bundle"));
-}
+        }
         Ok(())
     }
 }

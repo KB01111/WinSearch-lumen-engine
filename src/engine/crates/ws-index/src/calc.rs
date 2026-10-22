@@ -69,7 +69,9 @@ pub fn evaluate(input: &str) -> Result<Option<CalcResult>, CalcError> {
     if !parser.operated {
         return Ok(None); // a bare number is not a calculation
     }
-    let value = if value.is_finite() { value } else {
+    let value = if value.is_finite() {
+        value
+    } else {
         return Err(CalcError::NotFinite);
     };
     Ok(Some(CalcResult {
@@ -358,19 +360,13 @@ fn call_function(name: &str, args: &[f64]) -> Result<f64, CalcError> {
         "pow" => two(f64::powf),
         "atan2" => two(f64::atan2),
         "min" => {
-            let v = args
-                .iter()
-                .copied()
-                .fold(f64::INFINITY, f64::min);
+            let v = args.iter().copied().fold(f64::INFINITY, f64::min);
             args.is_empty()
                 .then(|| Err(CalcError::Arity(name.to_string())))
                 .unwrap_or(Ok(v))
         }
         "max" => {
-            let v = args
-                .iter()
-                .copied()
-                .fold(f64::NEG_INFINITY, f64::max);
+            let v = args.iter().copied().fold(f64::NEG_INFINITY, f64::max);
             args.is_empty()
                 .then(|| Err(CalcError::Arity(name.to_string())))
                 .unwrap_or(Ok(v))

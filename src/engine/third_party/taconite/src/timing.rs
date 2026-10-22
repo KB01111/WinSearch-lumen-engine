@@ -22,7 +22,10 @@ impl Timing {
     }
 
     pub fn get(&self, key: &str) -> Duration {
-        self.entries.iter().find(|(k, _)| k == key).map_or(Duration::ZERO, |e| e.1)
+        self.entries
+            .iter()
+            .find(|(k, _)| k == key)
+            .map_or(Duration::ZERO, |e| e.1)
     }
 
     pub fn clear(&mut self) {
@@ -30,14 +33,21 @@ impl Timing {
     }
 
     pub fn npu_total(&self) -> Duration {
-        self.entries.iter().filter(|(k, _)| k.starts_with("npu:")).map(|e| e.1).sum()
+        self.entries
+            .iter()
+            .filter(|(k, _)| k.starts_with("npu:"))
+            .map(|e| e.1)
+            .sum()
     }
 }
 
 impl fmt::Display for Timing {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ms = |d: &Duration| d.as_secs_f64() * 1e3;
-        let (npu, host): (Vec<_>, Vec<_>) = self.entries.iter().partition(|(k, _)| k.starts_with("npu:"));
+        let (npu, host): (Vec<_>, Vec<_>) = self
+            .entries
+            .iter()
+            .partition(|(k, _)| k.starts_with("npu:"));
         write!(f, "stages:")?;
         for (k, d) in &host {
             write!(f, " {k} {:.0}", ms(d))?;

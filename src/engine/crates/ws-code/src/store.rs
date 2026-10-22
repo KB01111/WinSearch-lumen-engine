@@ -192,11 +192,11 @@ impl CodeStore {
             if !allowed(&file, before.as_deref()) {
                 continue;
             }
-            let text = self
-                .conn
-                .query_row("SELECT text FROM code_chunks WHERE id=?1", [id], |r| {
-                    r.get(0)
-                })?;
+            let text =
+                self.conn
+                    .query_row("SELECT text FROM code_chunks WHERE id=?1", [id], |r| {
+                        r.get(0)
+                    })?;
             work.push((file, id, text, before));
             if work.len() == limit {
                 return Ok(PendingVectorPage {
@@ -213,178 +213,384 @@ impl CodeStore {
         })
     }
 
-    pub fn clear_scan(&mut self,repo:i64)->Result<(),CodeStoreError> {self.conn.execute("DELETE FROM code_scan_files WHERE repo_id=?1",[repo])?;Ok(())}
-    pub fn stage_scan(&mut self,repo:i64,records:&[CodeFileRecord])->Result<(),CodeStoreError> {
-        let tx=self.conn.savepoint()?;
+    pub fn clear_scan(&mut self, repo: i64) -> Result<(), CodeStoreError> {
+        self.conn
+            .execute("DELETE FROM code_scan_files WHERE repo_id=?1", [repo])?;
+        Ok(())
+    }
+    pub fn stage_scan(
+        &mut self,
+        repo: i64,
+        records: &[CodeFileRecord],
+    ) -> Result<(), CodeStoreError> {
+        let tx = self.conn.savepoint()?;
         for record in records {
-            let encoded=serde_json::to_string(record).map_err(|e|CodeStoreError::InvalidChunk(e.to_string()))?;
+            let encoded = serde_json::to_string(record)
+                .map_err(|e| CodeStoreError::InvalidChunk(e.to_string()))?;
             tx.execute("INSERT OR REPLACE INTO code_scan_files(repo_id,path,record,existing) VALUES(?1,?2,?3,EXISTS(SELECT 1 FROM code_files WHERE path=?2))",params![repo,record.path,encoded])?;
         }
-        tx.commit()?;Ok(())
-    }
-    pub fn scan_batch(&self,repo:i64,limit:usize)->Result<Vec<CodeFileRecord>,CodeStoreError> {
-        let mut stmt=self.conn.prepare("SELECT record FROM code_scan_files WHERE repo_id=?1 ORDER BY existing,path LIMIT ?2")?;
-        let records=stmt.query_map(params![repo,limit as i64],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
-        records.into_iter().map(|r|serde_json::from_str(&r).map_err(|e|CodeStoreError::InvalidChunk(e.to_string()))).collect()
-    }
-    pub fn complete_scan_batch(&mut self,repo:i64,records:&[CodeFileRecord])->Result<(),CodeStoreError> {
-        let tx=self.conn.savepoint()?;
-        for record in records {tx.execute("DELETE FROM code_scan_files WHERE repo_id=?1 AND path=?2",params![repo,record.path])?;}
-        tx.commit()?;Ok(())
-    }
-    pub fn invalidate_sources_under(&mut self,path:&str)->Result<(),CodeStoreError> {
-        let ids=self.all_files()?.into_iter().filter(|f| {
-            let p=f.path.replace('/',"\\").to_lowercase();
-            let root=path.replace('/',"\\").trim_end_matches('\\').to_lowercase();
-            p==root || p.strip_prefix(&root).is_some_and(|s|s.starts_with('\\'))
-        }).map(|f|f.id).collect::<Vec<_>>();
-        for id in ids { self.conn.execute("DELETE FROM code_source_state WHERE file_id=?1",[id])?; }
+        tx.commit()?;
         Ok(())
     }
-    pub fn all_files(&self)->Result<Vec<CodeFileRow>,CodeStoreError> {
+    pub fn scan_batch(
+        &self,
+        repo: i64,
+        limit: usize,
+    ) -> Result<Vec<CodeFileRecord>, CodeStoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT record FROM code_scan_files WHERE repo_id=?1 ORDER BY existing,path LIMIT ?2",
+        )?;
+        let records = stmt
+            .query_map(params![repo, limit as i64], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        records
+            .into_iter()
+            .map(|r| {
+                serde_json::from_str(&r).map_err(|e| CodeStoreError::InvalidChunk(e.to_string()))
+            })
+            .collect()
+    }
+    pub fn complete_scan_batch(
+        &mut self,
+        repo: i64,
+        records: &[CodeFileRecord],
+    ) -> Result<(), CodeStoreError> {
+        let tx = self.conn.savepoint()?;
+        for record in records {
+            tx.execute(
+                "DELETE FROM code_scan_files WHERE repo_id=?1 AND path=?2",
+                params![repo, record.path],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+    pub fn invalidate_sources_under(&mut self, path: &str) -> Result<(), CodeStoreError> {
+        let ids = self
+            .all_files()?
+            .into_iter()
+            .filter(|f| {
+                let p = f.path.replace('/', "\\").to_lowercase();
+                let root = path
+                    .replace('/', "\\")
+                    .trim_end_matches('\\')
+                    .to_lowercase();
+                p == root || p.strip_prefix(&root).is_some_and(|s| s.starts_with('\\'))
+            })
+            .map(|f| f.id)
+            .collect::<Vec<_>>();
+        for id in ids {
+            self.conn
+                .execute("DELETE FROM code_source_state WHERE file_id=?1", [id])?;
+        }
+        Ok(())
+    }
+    pub fn all_files(&self) -> Result<Vec<CodeFileRow>, CodeStoreError> {
         let mut stmt=self.conn.prepare("SELECT id,repo_id,path,rel_path,name,name_lower,ext,language,size,mtime,volume_serial,file_id,scan_generation FROM code_files ORDER BY mtime DESC,id")?;
-        let rows=stmt.query_map([],map_code_file_row)?.collect::<Result<Vec<_>,_>>()?;
+        let rows = stmt
+            .query_map([], map_code_file_row)?
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
-    pub fn enqueue_job(&mut self,path:&str,root:&str,scan:bool,due:i64)->Result<(),CodeStoreError> {
-        self.conn.execute("INSERT INTO code_jobs(path,root,scan,due) VALUES(?1,?2,?3,?4)
+    pub fn enqueue_job(
+        &mut self,
+        path: &str,
+        root: &str,
+        scan: bool,
+        due: i64,
+    ) -> Result<(), CodeStoreError> {
+        self.conn.execute(
+            "INSERT INTO code_jobs(path,root,scan,due) VALUES(?1,?2,?3,?4)
             ON CONFLICT(path) DO UPDATE SET root=excluded.root,scan=excluded.scan,due=excluded.due,
-            revision=code_jobs.revision+1,claimed=0,attempts=0",params![path,root,scan,due])?;
+            revision=code_jobs.revision+1,claimed=0,attempts=0",
+            params![path, root, scan, due],
+        )?;
         Ok(())
     }
-    pub fn ensure_scan_job(&mut self,root:&str,due:i64)->Result<(),CodeStoreError> {
-        self.conn.execute("INSERT INTO code_jobs(path,root,scan,due) VALUES(?1,?1,1,?2) ON CONFLICT(path) DO NOTHING",params![root,due])?;Ok(())
+    pub fn ensure_scan_job(&mut self, root: &str, due: i64) -> Result<(), CodeStoreError> {
+        self.conn.execute("INSERT INTO code_jobs(path,root,scan,due) VALUES(?1,?1,1,?2) ON CONFLICT(path) DO NOTHING",params![root,due])?;
+        Ok(())
     }
-    pub fn recover_jobs(&mut self)->Result<(),CodeStoreError> {
-        self.conn.execute("UPDATE code_jobs SET claimed=0",[])?; Ok(())
+    pub fn recover_jobs(&mut self) -> Result<(), CodeStoreError> {
+        self.conn.execute("UPDATE code_jobs SET claimed=0", [])?;
+        Ok(())
     }
-    pub fn defer_jobs_under(&mut self,root:&str,due:i64)->Result<(),CodeStoreError> {
-        let root=root.replace('/',"\\").trim_end_matches('\\').to_lowercase();
-        let mut stmt=self.conn.prepare("SELECT path FROM code_jobs")?;
-        let paths=stmt.query_map([],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+    pub fn defer_jobs_under(&mut self, root: &str, due: i64) -> Result<(), CodeStoreError> {
+        let root = root
+            .replace('/', "\\")
+            .trim_end_matches('\\')
+            .to_lowercase();
+        let mut stmt = self.conn.prepare("SELECT path FROM code_jobs")?;
+        let paths = stmt
+            .query_map([], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
         drop(stmt);
         for path in paths {
-            let normalized=path.replace('/',"\\").to_lowercase();
-            if normalized==root || normalized.strip_prefix(&root).is_some_and(|p|p.starts_with('\\')) {
+            let normalized = path.replace('/', "\\").to_lowercase();
+            if normalized == root
+                || normalized
+                    .strip_prefix(&root)
+                    .is_some_and(|p| p.starts_with('\\'))
+            {
                 self.conn.execute("UPDATE code_jobs SET due=?2,claimed=0,revision=revision+1,attempts=0 WHERE path=?1",params![path,due])?;
             }
         }
         Ok(())
     }
-    pub fn enqueue_file_job(&mut self,path:&str,root:&str,priority:i64,due:i64)->Result<(),CodeStoreError> {
-        self.enqueue_job(path,root,false,due)?;
-        self.conn.execute("UPDATE code_jobs SET priority=?2 WHERE path=?1",params![path,priority])?;Ok(())
+    pub fn enqueue_file_job(
+        &mut self,
+        path: &str,
+        root: &str,
+        priority: i64,
+        due: i64,
+    ) -> Result<(), CodeStoreError> {
+        self.enqueue_job(path, root, false, due)?;
+        self.conn.execute(
+            "UPDATE code_jobs SET priority=?2 WHERE path=?1",
+            params![path, priority],
+        )?;
+        Ok(())
     }
-    pub fn claim_job(&mut self,now:i64)->Result<Option<crate::model::CodeJob>,CodeStoreError> {
+    pub fn claim_job(&mut self, now: i64) -> Result<Option<crate::model::CodeJob>, CodeStoreError> {
         Ok(self.conn.query_row("UPDATE code_jobs SET claimed=1 WHERE path=(SELECT path FROM code_jobs
             WHERE claimed=0 AND due<=?1 AND attempts<3 ORDER BY scan DESC,priority DESC,due DESC,path LIMIT 1)
             RETURNING path,root,scan,revision,attempts",[now],|r|Ok(crate::model::CodeJob {
                 path:r.get(0)?,root:r.get(1)?,scan:r.get(2)?,revision:r.get(3)?,attempts:r.get(4)?
             })).optional()?)
     }
-    pub fn job_current(&self,job:&crate::model::CodeJob)->Result<bool,CodeStoreError> {
-        Ok(self.conn.query_row("SELECT EXISTS(SELECT 1 FROM code_jobs WHERE path=?1 AND revision=?2 AND claimed=1)",params![job.path,job.revision],|r|r.get(0))?)
+    pub fn job_current(&self, job: &crate::model::CodeJob) -> Result<bool, CodeStoreError> {
+        Ok(self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM code_jobs WHERE path=?1 AND revision=?2 AND claimed=1)",
+            params![job.path, job.revision],
+            |r| r.get(0),
+        )?)
     }
-    pub fn finish_job(&mut self,job:&crate::model::CodeJob)->Result<bool,CodeStoreError> {
-        Ok(self.conn.execute("DELETE FROM code_jobs WHERE path=?1 AND revision=?2",params![job.path,job.revision])?>0)
+    pub fn finish_job(&mut self, job: &crate::model::CodeJob) -> Result<bool, CodeStoreError> {
+        Ok(self.conn.execute(
+            "DELETE FROM code_jobs WHERE path=?1 AND revision=?2",
+            params![job.path, job.revision],
+        )? > 0)
     }
-    pub fn retry_job(&mut self,job:&crate::model::CodeJob,due:i64,poison:bool)->Result<(),CodeStoreError> {
-        self.conn.execute("UPDATE code_jobs SET claimed=0,due=?3,attempts=attempts+?4 WHERE path=?1 AND revision=?2",params![job.path,job.revision,due,poison as i64])?; Ok(())
+    pub fn retry_job(
+        &mut self,
+        job: &crate::model::CodeJob,
+        due: i64,
+        poison: bool,
+    ) -> Result<(), CodeStoreError> {
+        self.conn.execute("UPDATE code_jobs SET claimed=0,due=?3,attempts=attempts+?4 WHERE path=?1 AND revision=?2",params![job.path,job.revision,due,poison as i64])?;
+        Ok(())
     }
-    pub fn next_job_due(&self)->Result<Option<i64>,CodeStoreError> {
-        Ok(self.conn.query_row("SELECT MIN(due) FROM code_jobs WHERE claimed=0 AND attempts<3",[],|r|r.get(0))?)
+    pub fn next_job_due(&self) -> Result<Option<i64>, CodeStoreError> {
+        Ok(self.conn.query_row(
+            "SELECT MIN(due) FROM code_jobs WHERE claimed=0 AND attempts<3",
+            [],
+            |r| r.get(0),
+        )?)
     }
-    pub fn source_snapshot(&self,file:i64)->Result<Option<String>,CodeStoreError> {
-        Ok(self.conn.query_row("SELECT snapshot FROM code_source_state WHERE file_id=?1",[file],|r|r.get(0)).optional()?)
+    pub fn source_snapshot(&self, file: i64) -> Result<Option<String>, CodeStoreError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT snapshot FROM code_source_state WHERE file_id=?1",
+                [file],
+                |r| r.get(0),
+            )
+            .optional()?)
     }
-    pub fn source_provenance(&self,file:i64)->Result<Option<crate::model::CodeSourceState>,CodeStoreError> {
+    pub fn source_provenance(
+        &self,
+        file: i64,
+    ) -> Result<Option<crate::model::CodeSourceState>, CodeStoreError> {
         let state=self.conn.query_row("SELECT substr(s.snapshot,1,65537),f.content_revision,substr(s.sha256,1,65) FROM code_source_state s JOIN code_files f ON f.id=s.file_id WHERE s.file_id=?1 AND f.parse_version=?2 AND f.content_revision>0",
             params![file,crate::model::CODE_PARSE_VERSION],|r|Ok(crate::model::CodeSourceState {snapshot:r.get(0)?,revision:r.get(1)?,sha256:r.get(2)?})).optional()?;
-        if state.as_ref().is_some_and(|s|s.snapshot.is_empty() || s.snapshot.len()>65536
-            || s.sha256.as_ref().is_some_and(|hash|!valid_source_sha256(hash))) {
-            return Err(CodeStoreError::InvalidChunk("invalid code source provenance".into()));
+        if state.as_ref().is_some_and(|s| {
+            s.snapshot.is_empty()
+                || s.snapshot.len() > 65536
+                || s.sha256
+                    .as_ref()
+                    .is_some_and(|hash| !valid_source_sha256(hash))
+        }) {
+            return Err(CodeStoreError::InvalidChunk(
+                "invalid code source provenance".into(),
+            ));
         }
         Ok(state)
     }
     /// Reads bounded cached source text after current native admission, never vectors.
-    pub fn preview_text(&self,file:i64,revision:i64,location:Option<ws_protocol::MatchLocation>,
-        allowed:impl FnOnce(&CodeFileRow,&crate::model::CodeSourceState)->bool)
-        ->Result<(Vec<ws_protocol::PreviewTextPart>,bool),CodeStoreError> {
-        use ws_protocol::{MatchLocation,PreviewTextPart,MAX_PREVIEW_TEXT_BYTES,MAX_PREVIEW_TEXT_PARTS};
+    pub fn preview_text(
+        &self,
+        file: i64,
+        revision: i64,
+        location: Option<ws_protocol::MatchLocation>,
+        allowed: impl FnOnce(&CodeFileRow, &crate::model::CodeSourceState) -> bool,
+    ) -> Result<(Vec<ws_protocol::PreviewTextPart>, bool), CodeStoreError> {
+        use ws_protocol::{
+            MatchLocation, PreviewTextPart, MAX_PREVIEW_TEXT_BYTES, MAX_PREVIEW_TEXT_PARTS,
+        };
         if !ws_protocol::valid_code_preview_location(location) {
-            return Err(CodeStoreError::InvalidChunk("unsupported code preview location".into()));
+            return Err(CodeStoreError::InvalidChunk(
+                "unsupported code preview location".into(),
+            ));
         }
-        let Some(row)=self.get_file(file)? else {return Ok((Vec::new(),false));};
-        let Some(state)=self.source_provenance(file)? else {return Ok((Vec::new(),false));};
-        if state.revision!=revision || !self.get_repo(row.repo_id)?.is_some_and(|repo|repo.enabled)
-            || !allowed(&row,&state) {return Ok((Vec::new(),false));}
-        let (line,cell,first,last)=match location {
-            Some(MatchLocation::Line {line})=>(Some(line),None,None,None),
-            Some(MatchLocation::Notebook {cell_ordinal,line,end_line})=>(None,Some(cell_ordinal),Some(line),Some(end_line)),
-            _=>(None,None,None,None),
+        let Some(row) = self.get_file(file)? else {
+            return Ok((Vec::new(), false));
+        };
+        let Some(state) = self.source_provenance(file)? else {
+            return Ok((Vec::new(), false));
+        };
+        if state.revision != revision
+            || !self.get_repo(row.repo_id)?.is_some_and(|repo| repo.enabled)
+            || !allowed(&row, &state)
+        {
+            return Ok((Vec::new(), false));
+        }
+        let (line, cell, first, last) = match location {
+            Some(MatchLocation::Line { line }) => (Some(line), None, None, None),
+            Some(MatchLocation::Notebook {
+                cell_ordinal,
+                line,
+                end_line,
+            }) => (None, Some(cell_ordinal), Some(line), Some(end_line)),
+            _ => (None, None, None, None),
         };
         let mut statement=self.conn.prepare("SELECT substr(CAST(c.text AS BLOB),1,?3),length(CAST(c.text AS BLOB)),c.start_line,c.end_line,c.notebook_cell,c.cell_start_line,c.cell_end_line FROM code_chunks c JOIN code_files f ON f.id=c.file_id JOIN repos r ON r.id=f.repo_id JOIN code_source_state s ON s.file_id=f.id WHERE c.file_id=?1 AND f.content_revision=?2 AND f.parse_version=?9 AND s.snapshot=?10 AND s.sha256 IS ?11 AND r.enabled=1 AND c.text!='' AND (?4 IS NULL OR (c.notebook_cell IS NULL AND c.start_line<=?4 AND c.end_line>=?4)) AND (?5 IS NULL OR (c.notebook_cell=?5 AND c.cell_start_line<=?6 AND c.cell_end_line>=?7)) ORDER BY c.chunk_index,c.id LIMIT ?8")?;
-        let mut rows=statement.query(params![file,revision,(MAX_PREVIEW_TEXT_BYTES+1) as i64,line,cell,first,last,
-            (MAX_PREVIEW_TEXT_PARTS+1) as i64,crate::model::CODE_PARSE_VERSION,state.snapshot,state.sha256])?;
-        let (mut parts,mut used,mut seen,mut truncated)=(Vec::new(),0,0,false);
-        while let Some(row)=rows.next()? {
-            seen+=1;
-            if seen>MAX_PREVIEW_TEXT_PARTS {truncated=true;break;}
-            let bytes:Vec<u8>=row.get(0)?;
-            let original=usize::try_from(row.get::<_,i64>(1)?)
-                .map_err(|_|CodeStoreError::InvalidChunk("invalid cached source size".into()))?;
-            let prefix=&bytes[..bytes.len().min(MAX_PREVIEW_TEXT_BYTES-used)];
-            let text=match std::str::from_utf8(prefix) {
-                Ok(text)=>text,
-                Err(error) if error.error_len().is_none()=>std::str::from_utf8(&prefix[..error.valid_up_to()]).expect("validated UTF8 prefix"),
-                Err(_)=>return Err(CodeStoreError::InvalidChunk("cached source is not UTF8".into())),
+        let mut rows = statement.query(params![
+            file,
+            revision,
+            (MAX_PREVIEW_TEXT_BYTES + 1) as i64,
+            line,
+            cell,
+            first,
+            last,
+            (MAX_PREVIEW_TEXT_PARTS + 1) as i64,
+            crate::model::CODE_PARSE_VERSION,
+            state.snapshot,
+            state.sha256
+        ])?;
+        let (mut parts, mut used, mut seen, mut truncated) = (Vec::new(), 0, 0, false);
+        while let Some(row) = rows.next()? {
+            seen += 1;
+            if seen > MAX_PREVIEW_TEXT_PARTS {
+                truncated = true;
+                break;
+            }
+            let bytes: Vec<u8> = row.get(0)?;
+            let original = usize::try_from(row.get::<_, i64>(1)?)
+                .map_err(|_| CodeStoreError::InvalidChunk("invalid cached source size".into()))?;
+            let prefix = &bytes[..bytes.len().min(MAX_PREVIEW_TEXT_BYTES - used)];
+            let text = match std::str::from_utf8(prefix) {
+                Ok(text) => text,
+                Err(error) if error.error_len().is_none() => {
+                    std::str::from_utf8(&prefix[..error.valid_up_to()])
+                        .expect("validated UTF8 prefix")
+                }
+                Err(_) => {
+                    return Err(CodeStoreError::InvalidChunk(
+                        "cached source is not UTF8".into(),
+                    ))
+                }
             };
-            if text.is_empty() {truncated|=original>0;break;}
-            let cell:Option<u32>=row.get(4)?;
-            let (first,last)=if cell.is_some() {(row.get::<_,Option<u32>>(5)?.ok_or_else(||CodeStoreError::InvalidChunk("missing cell range".into()))?,
-                row.get::<_,Option<u32>>(6)?.ok_or_else(||CodeStoreError::InvalidChunk("missing cell range".into()))?)} else {(row.get::<_,u32>(2)?,row.get::<_,u32>(3)?)};
-            if first==0 || last<first {return Err(CodeStoreError::InvalidChunk("invalid cached source range".into()));}
-            let last=last.min(first.saturating_add((text.lines().count().max(1)-1) as u32));
-            let actual=cell.map(|cell_ordinal|MatchLocation::Notebook {cell_ordinal,line:first,end_line:last})
-                .unwrap_or(MatchLocation::Line {line:first});
-            let covers=match location {
-                None=>true,
-                Some(MatchLocation::Line {line})=>cell.is_none() && line>=first && line<=last,
-                Some(MatchLocation::Notebook {cell_ordinal,line,end_line})=>cell==Some(cell_ordinal) && line>=first && end_line<=last,
-                _=>false,
+            if text.is_empty() {
+                truncated |= original > 0;
+                break;
+            }
+            let cell: Option<u32> = row.get(4)?;
+            let (first, last) = if cell.is_some() {
+                (
+                    row.get::<_, Option<u32>>(5)?
+                        .ok_or_else(|| CodeStoreError::InvalidChunk("missing cell range".into()))?,
+                    row.get::<_, Option<u32>>(6)?
+                        .ok_or_else(|| CodeStoreError::InvalidChunk("missing cell range".into()))?,
+                )
+            } else {
+                (row.get::<_, u32>(2)?, row.get::<_, u32>(3)?)
             };
-            if !covers {truncated|=original>text.len();continue;}
-            used+=text.len();
-            parts.push(PreviewTextPart {kind:"code".into(),text:text.to_owned(),location:Some(actual)});
-            if original>text.len() {truncated=true;break;}
+            if first == 0 || last < first {
+                return Err(CodeStoreError::InvalidChunk(
+                    "invalid cached source range".into(),
+                ));
+            }
+            let last = last.min(first.saturating_add((text.lines().count().max(1) - 1) as u32));
+            let actual = cell
+                .map(|cell_ordinal| MatchLocation::Notebook {
+                    cell_ordinal,
+                    line: first,
+                    end_line: last,
+                })
+                .unwrap_or(MatchLocation::Line { line: first });
+            let covers = match location {
+                None => true,
+                Some(MatchLocation::Line { line }) => {
+                    cell.is_none() && line >= first && line <= last
+                }
+                Some(MatchLocation::Notebook {
+                    cell_ordinal,
+                    line,
+                    end_line,
+                }) => cell == Some(cell_ordinal) && line >= first && end_line <= last,
+                _ => false,
+            };
+            if !covers {
+                truncated |= original > text.len();
+                continue;
+            }
+            used += text.len();
+            parts.push(PreviewTextPart {
+                kind: "code".into(),
+                text: text.to_owned(),
+                location: Some(actual),
+            });
+            if original > text.len() {
+                truncated = true;
+                break;
+            }
         }
-        Ok((parts,truncated))
+        Ok((parts, truncated))
     }
 
     /// Publish parsed content and its byte provenance in the same transaction.
-    pub fn commit_parsed_source(&mut self,file:i64,parsed:&crate::ParsedCodeFile,snapshot:&str,sha256:&str)->Result<Vec<i64>,CodeStoreError> {
-        if snapshot.is_empty() || snapshot.len()>65536 || !valid_source_sha256(sha256) {
-            return Err(CodeStoreError::InvalidChunk("invalid code source provenance".into()));
+    pub fn commit_parsed_source(
+        &mut self,
+        file: i64,
+        parsed: &crate::ParsedCodeFile,
+        snapshot: &str,
+        sha256: &str,
+    ) -> Result<Vec<i64>, CodeStoreError> {
+        if snapshot.is_empty() || snapshot.len() > 65536 || !valid_source_sha256(sha256) {
+            return Err(CodeStoreError::InvalidChunk(
+                "invalid code source provenance".into(),
+            ));
         }
         self.conn.execute_batch("SAVEPOINT parsed_source")?;
-        let result=(|| {
-            let ids=self.commit_parsed_file(file,parsed)?;
-            self.set_source_snapshot(file,snapshot)?;
-            self.conn.execute("UPDATE code_source_state SET sha256=?2 WHERE file_id=?1",params![file,sha256])?;
+        let result = (|| {
+            let ids = self.commit_parsed_file(file, parsed)?;
+            self.set_source_snapshot(file, snapshot)?;
+            self.conn.execute(
+                "UPDATE code_source_state SET sha256=?2 WHERE file_id=?1",
+                params![file, sha256],
+            )?;
             Ok(ids)
         })();
         match result {
-            Ok(ids)=>{self.conn.execute_batch("RELEASE parsed_source")?;Ok(ids)}
-            Err(error)=>{self.conn.execute_batch("ROLLBACK TO parsed_source; RELEASE parsed_source")?;Err(error)}
+            Ok(ids) => {
+                self.conn.execute_batch("RELEASE parsed_source")?;
+                Ok(ids)
+            }
+            Err(error) => {
+                self.conn
+                    .execute_batch("ROLLBACK TO parsed_source; RELEASE parsed_source")?;
+                Err(error)
+            }
         }
     }
-    pub fn set_source_snapshot(&mut self,file:i64,snapshot:&str)->Result<(),CodeStoreError> {
-        self.conn.execute("INSERT INTO code_source_state(file_id,snapshot) VALUES(?1,?2) ON CONFLICT(file_id) DO UPDATE SET snapshot=excluded.snapshot,sha256=NULL",params![file,snapshot])?; Ok(())
+    pub fn set_source_snapshot(&mut self, file: i64, snapshot: &str) -> Result<(), CodeStoreError> {
+        self.conn.execute("INSERT INTO code_source_state(file_id,snapshot) VALUES(?1,?2) ON CONFLICT(file_id) DO UPDATE SET snapshot=excluded.snapshot,sha256=NULL",params![file,snapshot])?;
+        Ok(())
     }
-    pub fn invalidate_vectors(&mut self,fingerprint:&str)->Result<(),CodeStoreError> {
-        if self.meta_get("vector_fingerprint")?.as_deref()!=Some(fingerprint) {
-            let tx=self.conn.savepoint()?;
-            tx.execute("UPDATE code_chunks SET vector=x'',norm=0",[])?;
+    pub fn invalidate_vectors(&mut self, fingerprint: &str) -> Result<(), CodeStoreError> {
+        if self.meta_get("vector_fingerprint")?.as_deref() != Some(fingerprint) {
+            let tx = self.conn.savepoint()?;
+            tx.execute("UPDATE code_chunks SET vector=x'',norm=0", [])?;
             tx.execute("INSERT INTO meta(key,value) VALUES('vector_fingerprint',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[fingerprint])?;
             tx.commit()?;
         }
@@ -392,65 +598,164 @@ impl CodeStore {
     }
 
     /// Filtering precedes every candidate limit. No ordinary-index rows are consulted.
-    pub fn search_exact(&self,query:&str,limit:usize,allowed:impl Fn(&CodeFileRow)->bool)->Result<Vec<crate::model::CodeSearchHit>,CodeStoreError> {
+    pub fn search_exact(
+        &self,
+        query: &str,
+        limit: usize,
+        allowed: impl Fn(&CodeFileRow) -> bool,
+    ) -> Result<Vec<crate::model::CodeSearchHit>, CodeStoreError> {
         use crate::model::CodeSearchHit;
-        let q=query.trim().to_lowercase();
-        if q.is_empty() || limit==0 { return Ok(Vec::new()); }
-        let mut hits=Vec::new();
-        let mut symbols=self.conn.prepare("SELECT id,file_id,name,name_lower,kind,is_definition,line,end_line,signature,notebook_cell,cell_start_line,cell_end_line FROM code_symbols WHERE instr(name_lower,?1)>0 ORDER BY (name_lower=?1) DESC,is_definition DESC,length(name),line,id")?;
-        for symbol in symbols.query_map([&q],map_code_symbol_row)? {
-            let s=symbol?;
-            let Some(file)=self.get_file(s.file_id)?.filter(&allowed) else { continue };
-            hits.push(CodeSearchHit { file,excerpt:s.signature,symbol_name:s.name,symbol_kind:s.kind,is_definition:s.is_definition,start_line:s.line,end_line:s.end_line,notebook:s.notebook,score:if s.is_definition {1.0} else {0.95} });
-            if hits.len()==limit { return Ok(hits); }
+        let q = query.trim().to_lowercase();
+        if q.is_empty() || limit == 0 {
+            return Ok(Vec::new());
         }
-        let expr=q.split(|c:char|!c.is_alphanumeric() && c!='_').filter(|t|!t.is_empty()).take(32).map(|t|format!("\"{t}\"*")).collect::<Vec<_>>().join(" ");
-        if expr.is_empty() { return Ok(hits); }
+        let mut hits = Vec::new();
+        let mut symbols=self.conn.prepare("SELECT id,file_id,name,name_lower,kind,is_definition,line,end_line,signature,notebook_cell,cell_start_line,cell_end_line FROM code_symbols WHERE instr(name_lower,?1)>0 ORDER BY (name_lower=?1) DESC,is_definition DESC,length(name),line,id")?;
+        for symbol in symbols.query_map([&q], map_code_symbol_row)? {
+            let s = symbol?;
+            let Some(file) = self.get_file(s.file_id)?.filter(&allowed) else {
+                continue;
+            };
+            hits.push(CodeSearchHit {
+                file,
+                excerpt: s.signature,
+                symbol_name: s.name,
+                symbol_kind: s.kind,
+                is_definition: s.is_definition,
+                start_line: s.line,
+                end_line: s.end_line,
+                notebook: s.notebook,
+                score: if s.is_definition { 1.0 } else { 0.95 },
+            });
+            if hits.len() == limit {
+                return Ok(hits);
+            }
+        }
+        let expr = q
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .filter(|t| !t.is_empty())
+            .take(32)
+            .map(|t| format!("\"{t}\"*"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        if expr.is_empty() {
+            return Ok(hits);
+        }
         let mut stmt=self.conn.prepare("SELECT c.id,c.file_id,c.chunk_index,c.start_line,c.end_line,c.symbol_name,c.symbol_kind,c.text,c.vector,c.norm,c.notebook_cell,c.cell_start_line,c.cell_end_line FROM code_chunks_fts JOIN code_chunks c ON c.id=code_chunks_fts.rowid WHERE code_chunks_fts MATCH ?1 ORDER BY rank,c.id")?;
-        for chunk in stmt.query_map([expr],map_code_chunk_row)? {
-            let c=chunk?;
-            let Some(file)=self.get_file(c.file_id)?.filter(&allowed) else { continue };
-            if hits.iter().any(|h|h.file.id==c.file_id && h.start_line>=c.start_line && h.start_line<=c.end_line) {continue;}
-            hits.push(CodeSearchHit { file,excerpt:c.text,symbol_name:c.symbol_name,symbol_kind:c.symbol_kind,is_definition:false,start_line:c.start_line,end_line:c.end_line,notebook:c.notebook,score:0.9 });
-            if hits.len()==limit {break;}
+        for chunk in stmt.query_map([expr], map_code_chunk_row)? {
+            let c = chunk?;
+            let Some(file) = self.get_file(c.file_id)?.filter(&allowed) else {
+                continue;
+            };
+            if hits.iter().any(|h| {
+                h.file.id == c.file_id && h.start_line >= c.start_line && h.start_line <= c.end_line
+            }) {
+                continue;
+            }
+            hits.push(CodeSearchHit {
+                file,
+                excerpt: c.text,
+                symbol_name: c.symbol_name,
+                symbol_kind: c.symbol_kind,
+                is_definition: false,
+                start_line: c.start_line,
+                end_line: c.end_line,
+                notebook: c.notebook,
+                score: 0.9,
+            });
+            if hits.len() == limit {
+                break;
+            }
         }
         Ok(hits)
     }
 
     /// Corroborate code-task affinity with general retrieval before truncation;
     /// callers supply the same application admission rule for both raw cosines.
-    pub fn search_semantic(&self,query:&[f32],corroboration:&[f32],limit:usize,allowed:impl Fn(&CodeFileRow)->bool,admitted:impl Fn(f32)->bool)->Result<Vec<crate::model::CodeSearchHit>,CodeStoreError> {
-        Ok(self.search_semantic_report(query,corroboration,limit,allowed,admitted)?.0)
+    pub fn search_semantic(
+        &self,
+        query: &[f32],
+        corroboration: &[f32],
+        limit: usize,
+        allowed: impl Fn(&CodeFileRow) -> bool,
+        admitted: impl Fn(f32) -> bool,
+    ) -> Result<Vec<crate::model::CodeSearchHit>, CodeStoreError> {
+        Ok(self
+            .search_semantic_report(query, corroboration, limit, allowed, admitted)?
+            .0)
     }
     /// Availability is established by an eligible vector before cosine admission.
-    pub fn search_semantic_report(&self,query:&[f32],corroboration:&[f32],limit:usize,allowed:impl Fn(&CodeFileRow)->bool,admitted:impl Fn(f32)->bool)
-        ->Result<(Vec<crate::model::CodeSearchHit>,bool),CodeStoreError> {
+    pub fn search_semantic_report(
+        &self,
+        query: &[f32],
+        corroboration: &[f32],
+        limit: usize,
+        allowed: impl Fn(&CodeFileRow) -> bool,
+        admitted: impl Fn(f32) -> bool,
+    ) -> Result<(Vec<crate::model::CodeSearchHit>, bool), CodeStoreError> {
         use crate::model::CodeSearchHit;
-        let (q,norm)=normalize_vector(query);
-        let (confirmation,confirmation_norm)=normalize_vector(corroboration);
-        if norm==0.0 || confirmation_norm==0.0 || confirmation.len()!=q.len() || limit==0 {return Ok((Vec::new(),false));}
-        let mut hits=Vec::new();
-        let mut eligible=false;
-        let mut stmt=self.conn.prepare("SELECT id,file_id,chunk_index,start_line,end_line,symbol_name,symbol_kind,text,vector,norm,notebook_cell,cell_start_line,cell_end_line FROM code_chunks WHERE norm>0")?;
-        for chunk in stmt.query_map([],map_code_chunk_row)? {
-            let c=chunk?;
-            let Some(file)=self.get_file(c.file_id)?.filter(&allowed) else {continue};
-            if c.vector.len()!=q.len() || !c.vector.iter().all(|value|value.is_finite()) {continue;}
-            eligible=true;
-            let score=c.vector.iter().zip(&q).map(|(a,b)|a*b).sum();
-            if !admitted(score) || !admitted(c.vector.iter().zip(&confirmation).map(|(a,b)|a*b).sum()) {continue;}
-            hits.push(CodeSearchHit { file,excerpt:c.text,symbol_name:c.symbol_name,symbol_kind:c.symbol_kind,is_definition:false,start_line:c.start_line,end_line:c.end_line,notebook:c.notebook,score });
+        let (q, norm) = normalize_vector(query);
+        let (confirmation, confirmation_norm) = normalize_vector(corroboration);
+        if norm == 0.0 || confirmation_norm == 0.0 || confirmation.len() != q.len() || limit == 0 {
+            return Ok((Vec::new(), false));
         }
-        hits.sort_by(|a,b|b.score.total_cmp(&a.score).then_with(||a.file.id.cmp(&b.file.id)).then_with(||a.start_line.cmp(&b.start_line)));
-        hits.truncate(limit); Ok((hits,eligible))
+        let mut hits = Vec::new();
+        let mut eligible = false;
+        let mut stmt=self.conn.prepare("SELECT id,file_id,chunk_index,start_line,end_line,symbol_name,symbol_kind,text,vector,norm,notebook_cell,cell_start_line,cell_end_line FROM code_chunks WHERE norm>0")?;
+        for chunk in stmt.query_map([], map_code_chunk_row)? {
+            let c = chunk?;
+            let Some(file) = self.get_file(c.file_id)?.filter(&allowed) else {
+                continue;
+            };
+            if c.vector.len() != q.len() || !c.vector.iter().all(|value| value.is_finite()) {
+                continue;
+            }
+            eligible = true;
+            let score = c.vector.iter().zip(&q).map(|(a, b)| a * b).sum();
+            if !admitted(score)
+                || !admitted(c.vector.iter().zip(&confirmation).map(|(a, b)| a * b).sum())
+            {
+                continue;
+            }
+            hits.push(CodeSearchHit {
+                file,
+                excerpt: c.text,
+                symbol_name: c.symbol_name,
+                symbol_kind: c.symbol_kind,
+                is_definition: false,
+                start_line: c.start_line,
+                end_line: c.end_line,
+                notebook: c.notebook,
+                score,
+            });
+        }
+        hits.sort_by(|a, b| {
+            b.score
+                .total_cmp(&a.score)
+                .then_with(|| a.file.id.cmp(&b.file.id))
+                .then_with(|| a.start_line.cmp(&b.start_line))
+        });
+        hits.truncate(limit);
+        Ok((hits, eligible))
     }
     /// Whole-file replacement, including all FTS rows and parse state.
-    pub fn commit_parsed_file(&mut self, file: i64, parsed: &crate::ParsedCodeFile) -> Result<Vec<i64>, CodeStoreError> {
+    pub fn commit_parsed_file(
+        &mut self,
+        file: i64,
+        parsed: &crate::ParsedCodeFile,
+    ) -> Result<Vec<i64>, CodeStoreError> {
         self.conn.execute_batch("SAVEPOINT parsed_file")?;
         let result = crate::parse::persist_parsed_rows(self, file, parsed);
         match result {
-            Ok(ids) => { self.conn.execute_batch("RELEASE parsed_file")?; Ok(ids) }
-            Err(error) => { self.conn.execute_batch("ROLLBACK TO parsed_file; RELEASE parsed_file")?; Err(error) }
+            Ok(ids) => {
+                self.conn.execute_batch("RELEASE parsed_file")?;
+                Ok(ids)
+            }
+            Err(error) => {
+                self.conn
+                    .execute_batch("ROLLBACK TO parsed_file; RELEASE parsed_file")?;
+                Err(error)
+            }
         }
     }
     /// Opens (or creates) `code.db` at `path`.
@@ -488,8 +793,10 @@ impl CodeStore {
                 )?;
             }
             Some(CODE_SCHEMA_VERSION) => {}
-            Some("3")=>{}
-            Some("2")=>{conn.execute("UPDATE meta SET value='3' WHERE key='schema_version'",[])?;}
+            Some("3") => {}
+            Some("2") => {
+                conn.execute("UPDATE meta SET value='3' WHERE key='schema_version'", [])?;
+            }
             Some("1") => {
                 conn.execute_batch("BEGIN IMMEDIATE;
                     ALTER TABLE code_files ADD COLUMN parse_version INTEGER NOT NULL DEFAULT 0;
@@ -514,25 +821,62 @@ impl CodeStore {
         let has_revision:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('code_files') WHERE name='content_revision')",[],|r|r.get(0))?;
         let has_hash:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('code_source_state') WHERE name='sha256')",[],|r|r.get(0))?;
         if !has_revision || !has_hash {
-            let tx=conn.transaction()?;
+            let tx = conn.transaction()?;
             if !has_revision {
-                tx.execute("ALTER TABLE code_files ADD COLUMN content_revision INTEGER NOT NULL DEFAULT 0",[])?;
-                tx.execute("UPDATE code_files SET content_revision=1 WHERE parse_version=?1",[crate::model::CODE_PARSE_VERSION])?;
+                tx.execute(
+                    "ALTER TABLE code_files ADD COLUMN content_revision INTEGER NOT NULL DEFAULT 0",
+                    [],
+                )?;
+                tx.execute(
+                    "UPDATE code_files SET content_revision=1 WHERE parse_version=?1",
+                    [crate::model::CODE_PARSE_VERSION],
+                )?;
             }
-            if !has_hash {tx.execute("ALTER TABLE code_source_state ADD COLUMN sha256 TEXT",[])?;}
-            tx.execute("UPDATE meta SET value=?1 WHERE key='schema_version'",[CODE_SCHEMA_VERSION])?;
+            if !has_hash {
+                tx.execute("ALTER TABLE code_source_state ADD COLUMN sha256 TEXT", [])?;
+            }
+            tx.execute(
+                "UPDATE meta SET value=?1 WHERE key='schema_version'",
+                [CODE_SCHEMA_VERSION],
+            )?;
             tx.commit()?;
-        } else if matches!(version.as_deref(),Some("1"|"2"|"3")) {
-            conn.execute("UPDATE meta SET value=?1 WHERE key='schema_version'",[CODE_SCHEMA_VERSION])?;
+        } else if matches!(version.as_deref(), Some("1" | "2" | "3")) {
+            conn.execute(
+                "UPDATE meta SET value=?1 WHERE key='schema_version'",
+                [CODE_SCHEMA_VERSION],
+            )?;
         }
         conn.execute("INSERT OR IGNORE INTO meta(key,value) VALUES('database_id',lower(hex(randomblob(16))))", [])?;
-        let database_id: String = conn.query_row("SELECT value FROM meta WHERE key='database_id'", [], |row| row.get(0))?;
-        if database_id.len() != 32 || !database_id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        let database_id: String = conn.query_row(
+            "SELECT value FROM meta WHERE key='database_id'",
+            [],
+            |row| row.get(0),
+        )?;
+        if database_id.len() != 32
+            || !database_id
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
             return Err(CodeStoreError::InvalidIdentity);
         }
-        let maximum: i64 = conn.query_row("SELECT COALESCE(MAX(id),0) FROM code_files", [], |row| row.get(0))?;
-        let watermark: Option<String> = conn.query_row("SELECT value FROM meta WHERE key='file_id_high_water'", [], |row| row.get(0)).optional()?;
-        let watermark = watermark.as_deref().unwrap_or("0").parse::<i64>().ok().filter(|value| *value >= 0).ok_or(CodeStoreError::InvalidIdentity)?;
+        let maximum: i64 =
+            conn.query_row("SELECT COALESCE(MAX(id),0) FROM code_files", [], |row| {
+                row.get(0)
+            })?;
+        let watermark: Option<String> = conn
+            .query_row(
+                "SELECT value FROM meta WHERE key='file_id_high_water'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let watermark = watermark
+            .as_deref()
+            .unwrap_or("0")
+            .parse::<i64>()
+            .ok()
+            .filter(|value| *value >= 0)
+            .ok_or(CodeStoreError::InvalidIdentity)?;
         conn.execute("INSERT INTO meta(key,value) VALUES('file_id_high_water',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE CAST(meta.value AS INTEGER)<CAST(excluded.value AS INTEGER)", [watermark.max(maximum).to_string()])?;
         Ok(Self { conn, database_id })
     }
@@ -554,7 +898,10 @@ impl CodeStore {
     pub fn mark_parse_pending(&mut self, file: i64) -> Result<(), CodeStoreError> {
         self.conn
             .execute("UPDATE code_files SET parse_version=0 WHERE id=?1", [file])?;
-        self.conn.execute("UPDATE code_source_state SET sha256=NULL WHERE file_id=?1",[file])?;
+        self.conn.execute(
+            "UPDATE code_source_state SET sha256=NULL WHERE file_id=?1",
+            [file],
+        )?;
         Ok(())
     }
 
@@ -631,7 +978,7 @@ impl CodeStore {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    pub fn get_repo(&self,id:i64)->Result<Option<RepoRow>,CodeStoreError> {
+    pub fn get_repo(&self, id: i64) -> Result<Option<RepoRow>, CodeStoreError> {
         Ok(self.conn.query_row("SELECT id,root_path,name,has_git,enabled,current_generation FROM repos WHERE id=?1",[id],
             |r|Ok(RepoRow {id:r.get(0)?,root_path:r.get(1)?,name:r.get(2)?,has_git:r.get(3)?,enabled:r.get(4)?,current_generation:r.get(5)?})).optional()?)
     }
@@ -743,21 +1090,51 @@ impl CodeStore {
             ordered.sort_by_key(|(exists, _, _)| *exists);
             for (_, index, rec) in ordered {
                 let name_lower = rec.name.to_lowercase();
-                let existing_path: Option<(i64, i64, i64, String, String,i64,i64)> = by_path
+                let existing_path: Option<(i64, i64, i64, String, String, i64, i64)> = by_path
                     .query_row(params![rec.path], |r| {
-                        Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?,r.get(5)?,r.get(6)?))
+                        Ok((
+                            r.get(0)?,
+                            r.get(1)?,
+                            r.get(2)?,
+                            r.get(3)?,
+                            r.get(4)?,
+                            r.get(5)?,
+                            r.get(6)?,
+                        ))
                     })
                     .optional()?;
 
-                if let Some((id, size, mtime, old_name_lower, old_rel_path,volume,file)) = existing_path {
-                    if rec.volume_serial!=0 && rec.file_id!=0 && (volume!=rec.volume_serial as i64 || file!=rec.file_id as i64) {
-                        tx.execute("UPDATE code_files SET path='replaced:'||id||':'||path WHERE id=?1",[id])?;
+                if let Some((id, size, mtime, old_name_lower, old_rel_path, volume, file)) =
+                    existing_path
+                {
+                    if rec.volume_serial != 0
+                        && rec.file_id != 0
+                        && (volume != rec.volume_serial as i64 || file != rec.file_id as i64)
+                    {
+                        tx.execute(
+                            "UPDATE code_files SET path='replaced:'||id||':'||path WHERE id=?1",
+                            [id],
+                        )?;
                         let next_id = allocate_file_id(&tx)?;
-                        insert.execute(params![repo_id,rec.path,rec.rel_path,rec.name,name_lower,rec.ext,rec.language,rec.size as i64,rec.mtime,rec.volume_serial as i64,rec.file_id as i64,scan_generation,next_id])?;
-                        let replacement=tx.last_insert_rowid();
-                        delete_fts_for_file(&tx,id)?;
-                        tx.execute("DELETE FROM code_files WHERE id=?1",[id])?;
-                        outcomes[index]=Some(FileUpsertOutcome::Inserted {id:replacement});
+                        insert.execute(params![
+                            repo_id,
+                            rec.path,
+                            rec.rel_path,
+                            rec.name,
+                            name_lower,
+                            rec.ext,
+                            rec.language,
+                            rec.size as i64,
+                            rec.mtime,
+                            rec.volume_serial as i64,
+                            rec.file_id as i64,
+                            scan_generation,
+                            next_id
+                        ])?;
+                        let replacement = tx.last_insert_rowid();
+                        delete_fts_for_file(&tx, id)?;
+                        tx.execute("DELETE FROM code_files WHERE id=?1", [id])?;
+                        outcomes[index] = Some(FileUpsertOutcome::Inserted { id: replacement });
                         continue;
                     }
                     if size == rec.size as i64
@@ -1333,21 +1710,32 @@ impl CodeStore {
 
 fn allocate_file_id(conn: &Connection) -> Result<i64, CodeStoreError> {
     // Keep the high-water mark in the same savepoint as inserts and deletions.
-    let previous: String = conn.query_row("SELECT value FROM meta WHERE key='file_id_high_water'", [], |row| row.get(0))?;
-    let next = previous.parse::<i64>().ok().filter(|value| *value >= 0)
-        .and_then(|value| value.checked_add(1)).ok_or(CodeStoreError::InvalidIdentity)?;
-    conn.execute("UPDATE meta SET value=?1 WHERE key='file_id_high_water'", [next.to_string()])?;
+    let previous: String = conn.query_row(
+        "SELECT value FROM meta WHERE key='file_id_high_water'",
+        [],
+        |row| row.get(0),
+    )?;
+    let next = previous
+        .parse::<i64>()
+        .ok()
+        .filter(|value| *value >= 0)
+        .and_then(|value| value.checked_add(1))
+        .ok_or(CodeStoreError::InvalidIdentity)?;
+    conn.execute(
+        "UPDATE meta SET value=?1 WHERE key='file_id_high_water'",
+        [next.to_string()],
+    )?;
     Ok(next)
 }
 
-fn valid_source_sha256(value:&str)->bool {
-    value.len()==64 && value.bytes().all(|b|b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+fn valid_source_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-fn delete_fts_for_file(
-    tx: &rusqlite::Connection,
-    file_id: i64,
-) -> Result<(), rusqlite::Error> {
+fn delete_fts_for_file(tx: &rusqlite::Connection, file_id: i64) -> Result<(), rusqlite::Error> {
     tx.execute(
         "DELETE FROM code_chunks_fts WHERE rowid IN (
              SELECT id FROM code_chunks WHERE file_id = ?1
@@ -1480,23 +1868,47 @@ mod tests {
         let dir = TempDir::new("database-identity");
         let path = dir.0.join("code.db");
         let first = CodeStore::open(&path).unwrap();
-        let identity = first.meta_get("database_id").unwrap().expect("durable code identity");
+        let identity = first
+            .meta_get("database_id")
+            .unwrap()
+            .expect("durable code identity");
         assert_eq!(identity.len(), 32);
-        assert!(identity.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
+        assert!(identity
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
         drop(first);
         let reopened = CodeStore::open(&path).unwrap();
-        assert_eq!(reopened.meta_get("database_id").unwrap().as_ref(), Some(&identity));
-        assert_ne!(CodeStore::open_in_memory().unwrap().meta_get("database_id").unwrap().as_ref(), Some(&identity));
+        assert_eq!(
+            reopened.meta_get("database_id").unwrap().as_ref(),
+            Some(&identity)
+        );
+        assert_ne!(
+            CodeStore::open_in_memory()
+                .unwrap()
+                .meta_get("database_id")
+                .unwrap()
+                .as_ref(),
+            Some(&identity)
+        );
         drop(reopened);
         std::fs::remove_file(&path).unwrap();
         let recreated = CodeStore::open(&path).unwrap();
-        assert_ne!(recreated.meta_get("database_id").unwrap().as_ref(), Some(&identity));
+        assert_ne!(
+            recreated.meta_get("database_id").unwrap().as_ref(),
+            Some(&identity)
+        );
     }
 
     #[test]
     fn database_identity_corruption_is_rejected_without_rotating_code_bindings() {
         let store = CodeStore::open_in_memory().unwrap();
-        store.conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('database_id','invalid')", []).unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT OR REPLACE INTO meta(key,value) VALUES('database_id','invalid')",
+                [],
+            )
+            .unwrap();
         assert!(CodeStore::init(store.conn).is_err());
     }
 
@@ -1505,199 +1917,519 @@ mod tests {
         let dir = TempDir::new("non-reusing-file-ids");
         let path = dir.0.join("code.db");
         let mut store = CodeStore::open(&path).unwrap();
-        let repo = store.ensure_repo(&DetectedRepo {root_path:"C:/code".into(), name:"code".into(), has_git:false}).unwrap();
-        let record = |name:&str, file_id:u64| CodeFileRecord {path:format!("C:/code/{name}.rs"),rel_path:format!("{name}.rs"),
-            name:format!("{name}.rs"), ext:"rs".into(),language:"rust".into(),size:10,mtime:1,volume_serial:7,file_id};
-        let first = store.apply_file_batch(repo,1,&[record("first",101)]).unwrap()[0].file_id();
-        store.sweep_generation(repo,2).unwrap();
+        let repo = store
+            .ensure_repo(&DetectedRepo {
+                root_path: "C:/code".into(),
+                name: "code".into(),
+                has_git: false,
+            })
+            .unwrap();
+        let record = |name: &str, file_id: u64| CodeFileRecord {
+            path: format!("C:/code/{name}.rs"),
+            rel_path: format!("{name}.rs"),
+            name: format!("{name}.rs"),
+            ext: "rs".into(),
+            language: "rust".into(),
+            size: 10,
+            mtime: 1,
+            volume_serial: 7,
+            file_id,
+        };
+        let first = store
+            .apply_file_batch(repo, 1, &[record("first", 101)])
+            .unwrap()[0]
+            .file_id();
+        store.sweep_generation(repo, 2).unwrap();
         assert!(store.get_file(first).unwrap().is_none());
         drop(store);
         let mut store = CodeStore::open(&path).unwrap();
-        let second = store.apply_file_batch(repo,3,&[record("second",102)]).unwrap()[0].file_id();
-        assert!(second > first, "deleted code IDs must never authorize a different source");
+        let second = store
+            .apply_file_batch(repo, 3, &[record("second", 102)])
+            .unwrap()[0]
+            .file_id();
+        assert!(
+            second > first,
+            "deleted code IDs must never authorize a different source"
+        );
     }
 
     #[test]
     fn database_identity_migration_preserves_legacy_code_and_seeds_the_id_watermark() {
-        let (store, file, repo) = code_preview_fixture(crate::parse_source("fn retained() {}", "rust"));
+        let (store, file, repo) =
+            code_preview_fixture(crate::parse_source("fn retained() {}", "rust"));
         let chunks = store.list_chunks_for_file(file).unwrap();
-        store.conn.execute("DELETE FROM meta WHERE key IN ('database_id','file_id_high_water')", []).unwrap();
+        store
+            .conn
+            .execute(
+                "DELETE FROM meta WHERE key IN ('database_id','file_id_high_water')",
+                [],
+            )
+            .unwrap();
         let mut migrated = CodeStore::init(store.conn).unwrap();
         assert!(migrated.get_file(file).unwrap().is_some());
         assert_eq!(migrated.list_chunks_for_file(file).unwrap(), chunks);
         assert_eq!(migrated.database_id().len(), 32);
-        migrated.sweep_generation(repo,2).unwrap();
-        let record = CodeFileRecord {path:"C:/code/new.rs".into(),rel_path:"new.rs".into(),name:"new.rs".into(),
-            ext:"rs".into(),language:"rust".into(),size:10,mtime:1,volume_serial:7,file_id:100};
-        assert!(migrated.apply_file_batch(repo,3,&[record]).unwrap()[0].file_id() > file);
+        migrated.sweep_generation(repo, 2).unwrap();
+        let record = CodeFileRecord {
+            path: "C:/code/new.rs".into(),
+            rel_path: "new.rs".into(),
+            name: "new.rs".into(),
+            ext: "rs".into(),
+            language: "rust".into(),
+            size: 10,
+            mtime: 1,
+            volume_serial: 7,
+            file_id: 100,
+        };
+        assert!(migrated.apply_file_batch(repo, 3, &[record]).unwrap()[0].file_id() > file);
     }
 
     #[test]
     fn file_id_allocation_rolls_back_with_a_failed_batch_and_refuses_overflow() {
-        let (mut store, file, repo) = code_preview_fixture(crate::parse_source("fn retained() {}", "rust"));
-        let record = |name:&str, identity:u64| CodeFileRecord {path:format!("C:/code/{name}.rs"),rel_path:format!("{name}.rs"),
-            name:format!("{name}.rs"),ext:"rs".into(),language:"rust".into(),size:10,mtime:1,volume_serial:7,file_id:identity};
+        let (mut store, file, repo) =
+            code_preview_fixture(crate::parse_source("fn retained() {}", "rust"));
+        let record = |name: &str, identity: u64| CodeFileRecord {
+            path: format!("C:/code/{name}.rs"),
+            rel_path: format!("{name}.rs"),
+            name: format!("{name}.rs"),
+            ext: "rs".into(),
+            language: "rust".into(),
+            size: 10,
+            mtime: 1,
+            volume_serial: 7,
+            file_id: identity,
+        };
         let before = store.meta_get("file_id_high_water").unwrap();
         store.conn.execute_batch("CREATE TRIGGER reject_identity_fixture BEFORE INSERT ON code_files WHEN NEW.name='poison.rs' BEGIN SELECT RAISE(ABORT,'fixture insert failure'); END;").unwrap();
-        assert!(store.apply_file_batch(repo,2,&[record("valid",101),record("poison",102)]).is_err());
+        assert!(store
+            .apply_file_batch(repo, 2, &[record("valid", 101), record("poison", 102)])
+            .is_err());
         assert_eq!(store.meta_get("file_id_high_water").unwrap(), before);
         assert_eq!(store.list_files_for_repo(repo).unwrap().len(), 1);
         assert!(store.get_file(file).unwrap().is_some());
-        store.meta_set("file_id_high_water", &i64::MAX.to_string()).unwrap();
-        assert!(store.apply_file_batch(repo,3,&[record("overflow",103)]).is_err());
+        store
+            .meta_set("file_id_high_water", &i64::MAX.to_string())
+            .unwrap();
+        assert!(store
+            .apply_file_batch(repo, 3, &[record("overflow", 103)])
+            .is_err());
         assert_eq!(store.list_files_for_repo(repo).unwrap().len(), 1);
-        assert_eq!(store.meta_get("file_id_high_water").unwrap().unwrap(), i64::MAX.to_string());
+        assert_eq!(
+            store.meta_get("file_id_high_water").unwrap().unwrap(),
+            i64::MAX.to_string()
+        );
     }
 
-    fn code_preview_fixture(parsed:crate::ParsedCodeFile)->(CodeStore,i64,i64) {
-        let mut store=CodeStore::open_in_memory().unwrap();
-        let repo=store.ensure_repo(&DetectedRepo {root_path:"C:/code".into(),name:"code".into(),has_git:false}).unwrap();
-        let record=CodeFileRecord {path:"C:/code/source.rs".into(),rel_path:"source.rs".into(),name:"source.rs".into(),
-            ext:"rs".into(),language:parsed.language.clone(),size:16,mtime:1,volume_serial:7,file_id:9};
-        let file=store.apply_file_batch(repo,1,&[record]).unwrap()[0].file_id();
-        store.commit_parsed_source(file,&parsed,"fixture-current-source",&"a".repeat(64)).unwrap();
-        (store,file,repo)
+    fn code_preview_fixture(parsed: crate::ParsedCodeFile) -> (CodeStore, i64, i64) {
+        let mut store = CodeStore::open_in_memory().unwrap();
+        let repo = store
+            .ensure_repo(&DetectedRepo {
+                root_path: "C:/code".into(),
+                name: "code".into(),
+                has_git: false,
+            })
+            .unwrap();
+        let record = CodeFileRecord {
+            path: "C:/code/source.rs".into(),
+            rel_path: "source.rs".into(),
+            name: "source.rs".into(),
+            ext: "rs".into(),
+            language: parsed.language.clone(),
+            size: 16,
+            mtime: 1,
+            volume_serial: 7,
+            file_id: 9,
+        };
+        let file = store.apply_file_batch(repo, 1, &[record]).unwrap()[0].file_id();
+        store
+            .commit_parsed_source(file, &parsed, "fixture-current-source", &"a".repeat(64))
+            .unwrap();
+        (store, file, repo)
     }
 
     #[test]
     fn code_preview_preserves_real_source_lines_without_reading_vectors() {
         use ws_protocol::MatchLocation;
-        let (store,file,_)=code_preview_fixture(crate::parse_source("// header\nfn target() {\n    let value=7;\n}\n","rust"));
-        store.conn.execute("UPDATE code_chunks SET vector=x'01',norm=1 WHERE file_id=?1",[file]).unwrap();
-        let (parts,truncated)=store.preview_text(file,1,Some(MatchLocation::Line {line:3}),|_,_|true).unwrap();
-        assert!(!truncated);assert!(!parts.is_empty());
-        assert!(parts.iter().all(|part|part.kind=="code" && part.location==Some(MatchLocation::Line {line:2})
+        let (store, file, _) = code_preview_fixture(crate::parse_source(
+            "// header\nfn target() {\n    let value=7;\n}\n",
+            "rust",
+        ));
+        store
+            .conn
+            .execute(
+                "UPDATE code_chunks SET vector=x'01',norm=1 WHERE file_id=?1",
+                [file],
+            )
+            .unwrap();
+        let (parts, truncated) = store
+            .preview_text(file, 1, Some(MatchLocation::Line { line: 3 }), |_, _| true)
+            .unwrap();
+        assert!(!truncated);
+        assert!(!parts.is_empty());
+        assert!(parts.iter().all(|part| part.kind == "code"
+            && part.location == Some(MatchLocation::Line { line: 2 })
             && part.text.contains("let value=7;")));
-        assert!(store.preview_text(file,1,Some(MatchLocation::Line {line:500}),|_,_|true).unwrap().0.is_empty());
+        assert!(store
+            .preview_text(file, 1, Some(MatchLocation::Line { line: 500 }), |_, _| {
+                true
+            })
+            .unwrap()
+            .0
+            .is_empty());
     }
 
     #[test]
     fn code_preview_notebooks_preserve_cell_local_lines_and_exclude_outputs() {
         use ws_protocol::MatchLocation;
         let notebook=crate::parse_notebook(r#"{"metadata":{"language_info":{"name":"python"}},"cells":[{"cell_type":"code","source":["first=1\n"]},{"cell_type":"raw","source":["not indexed"]},{"cell_type":"code","source":["def target():\n","    return 7\n"],"outputs":[{"text":["PRIVATE_OUTPUT"]}]}]}"#).unwrap();
-        let (store,file,_)=code_preview_fixture(notebook.parsed);
-        let focus=MatchLocation::Notebook {cell_ordinal:2,line:2,end_line:2};
-        let (parts,truncated)=store.preview_text(file,1,Some(focus),|_,_|true).unwrap();
-        assert!(!truncated);assert!(!parts.is_empty());
-        assert!(parts.iter().all(|part|part.text.contains("return 7") && !part.text.contains("PRIVATE_OUTPUT")
-            && part.location==Some(MatchLocation::Notebook {cell_ordinal:2,line:1,end_line:2})));
-        for focus in [MatchLocation::Line {line:3},MatchLocation::Notebook {cell_ordinal:1,line:1,end_line:1},
-            MatchLocation::Notebook {cell_ordinal:2,line:3,end_line:3}] {
-            assert!(store.preview_text(file,1,Some(focus),|_,_|true).unwrap().0.is_empty());
+        let (store, file, _) = code_preview_fixture(notebook.parsed);
+        let focus = MatchLocation::Notebook {
+            cell_ordinal: 2,
+            line: 2,
+            end_line: 2,
+        };
+        let (parts, truncated) = store
+            .preview_text(file, 1, Some(focus), |_, _| true)
+            .unwrap();
+        assert!(!truncated);
+        assert!(!parts.is_empty());
+        assert!(parts.iter().all(|part| part.text.contains("return 7")
+            && !part.text.contains("PRIVATE_OUTPUT")
+            && part.location
+                == Some(MatchLocation::Notebook {
+                    cell_ordinal: 2,
+                    line: 1,
+                    end_line: 2
+                })));
+        for focus in [
+            MatchLocation::Line { line: 3 },
+            MatchLocation::Notebook {
+                cell_ordinal: 1,
+                line: 1,
+                end_line: 1,
+            },
+            MatchLocation::Notebook {
+                cell_ordinal: 2,
+                line: 3,
+                end_line: 3,
+            },
+        ] {
+            assert!(store
+                .preview_text(file, 1, Some(focus), |_, _| true)
+                .unwrap()
+                .0
+                .is_empty());
         }
     }
 
     #[test]
     fn code_preview_bounds_utf8_and_part_count_before_loading_unbounded_content() {
-        let (store,file,_)=code_preview_fixture(crate::parse_source(&"🌿".repeat(20000),"text"));
-        let (parts,truncated)=store.preview_text(file,1,None,|_,_|true).unwrap();
-        let bytes=parts.iter().map(|part|part.text.len()).sum::<usize>();
-        assert!(truncated && bytes>0 && bytes<=ws_protocol::MAX_PREVIEW_TEXT_BYTES);
-        assert!(parts.len()<=ws_protocol::MAX_PREVIEW_TEXT_PARTS && parts.iter().all(|part|part.text.chars().all(|c|c=='🌿')));
-        let parsed=crate::ParsedCodeFile {diagnostics:Vec::new(),language:"text".into(),symbols:Vec::new(),chunks:(1..=70).map(|line|crate::ParsedCodeUnit {
-            notebook:None,start_line:line,end_line:line,symbol_name:String::new(),symbol_kind:"text".into(),text:"x".into()}).collect()};
-        let (store,file,_)=code_preview_fixture(parsed);
-        let (parts,truncated)=store.preview_text(file,1,None,|_,_|true).unwrap();
-        assert!(truncated);assert_eq!(parts.len(),64);
+        let (store, file, _) =
+            code_preview_fixture(crate::parse_source(&"🌿".repeat(20000), "text"));
+        let (parts, truncated) = store.preview_text(file, 1, None, |_, _| true).unwrap();
+        let bytes = parts.iter().map(|part| part.text.len()).sum::<usize>();
+        assert!(truncated && bytes > 0 && bytes <= ws_protocol::MAX_PREVIEW_TEXT_BYTES);
+        assert!(
+            parts.len() <= ws_protocol::MAX_PREVIEW_TEXT_PARTS
+                && parts
+                    .iter()
+                    .all(|part| part.text.chars().all(|c| c == '🌿'))
+        );
+        let parsed = crate::ParsedCodeFile {
+            diagnostics: Vec::new(),
+            language: "text".into(),
+            symbols: Vec::new(),
+            chunks: (1..=70)
+                .map(|line| crate::ParsedCodeUnit {
+                    notebook: None,
+                    start_line: line,
+                    end_line: line,
+                    symbol_name: String::new(),
+                    symbol_kind: "text".into(),
+                    text: "x".into(),
+                })
+                .collect(),
+        };
+        let (store, file, _) = code_preview_fixture(parsed);
+        let (parts, truncated) = store.preview_text(file, 1, None, |_, _| true).unwrap();
+        assert!(truncated);
+        assert_eq!(parts.len(), 64);
     }
 
     #[test]
     fn code_preview_notebook_truncation_at_newline_does_not_claim_the_next_line() {
-        let mut chunks=vec![16384,16384,16384,16368].into_iter().enumerate().map(|(index,size)|crate::ParsedCodeUnit {
-            notebook:Some(crate::model::NotebookLocation {cell_ordinal:index as u32,start_line:1,end_line:1}),
-            start_line:index as u32+1,end_line:index as u32+1,symbol_name:String::new(),symbol_kind:"text".into(),text:"x".repeat(size),
-        }).collect::<Vec<_>>();
-        chunks.push(crate::ParsedCodeUnit {notebook:Some(crate::model::NotebookLocation {cell_ordinal:4,start_line:1,end_line:2}),
-            start_line:5,end_line:6,symbol_name:String::new(),symbol_kind:"text".into(),text:format!("{}\nsecond","a".repeat(15))});
-        assert!(chunks.iter().all(|chunk|chunk.text.len()<=16384));
-        let parsed=crate::ParsedCodeFile {diagnostics:Vec::new(),language:"notebook".into(),symbols:Vec::new(),chunks};
-        let (store,file,_)=code_preview_fixture(parsed);
-        let (parts,truncated)=store.preview_text(file,1,None,|_,_|true).unwrap();
-        assert!(truncated);assert_eq!(parts.iter().map(|part|part.text.len()).sum::<usize>(),65536);
-        let last=parts.last().unwrap();assert!(last.text.ends_with('\n'));
-        assert_eq!(last.location,Some(ws_protocol::MatchLocation::Notebook {cell_ordinal:4,line:1,end_line:1}),
-            "the newline terminates the returned line; it does not return the next one");
+        let mut chunks = vec![16384, 16384, 16384, 16368]
+            .into_iter()
+            .enumerate()
+            .map(|(index, size)| crate::ParsedCodeUnit {
+                notebook: Some(crate::model::NotebookLocation {
+                    cell_ordinal: index as u32,
+                    start_line: 1,
+                    end_line: 1,
+                }),
+                start_line: index as u32 + 1,
+                end_line: index as u32 + 1,
+                symbol_name: String::new(),
+                symbol_kind: "text".into(),
+                text: "x".repeat(size),
+            })
+            .collect::<Vec<_>>();
+        chunks.push(crate::ParsedCodeUnit {
+            notebook: Some(crate::model::NotebookLocation {
+                cell_ordinal: 4,
+                start_line: 1,
+                end_line: 2,
+            }),
+            start_line: 5,
+            end_line: 6,
+            symbol_name: String::new(),
+            symbol_kind: "text".into(),
+            text: format!("{}\nsecond", "a".repeat(15)),
+        });
+        assert!(chunks.iter().all(|chunk| chunk.text.len() <= 16384));
+        let parsed = crate::ParsedCodeFile {
+            diagnostics: Vec::new(),
+            language: "notebook".into(),
+            symbols: Vec::new(),
+            chunks,
+        };
+        let (store, file, _) = code_preview_fixture(parsed);
+        let (parts, truncated) = store.preview_text(file, 1, None, |_, _| true).unwrap();
+        assert!(truncated);
+        assert_eq!(
+            parts.iter().map(|part| part.text.len()).sum::<usize>(),
+            65536
+        );
+        let last = parts.last().unwrap();
+        assert!(last.text.ends_with('\n'));
+        assert_eq!(
+            last.location,
+            Some(ws_protocol::MatchLocation::Notebook {
+                cell_ordinal: 4,
+                line: 1,
+                end_line: 1
+            }),
+            "the newline terminates the returned line; it does not return the next one"
+        );
     }
 
     #[test]
     fn code_preview_requires_current_revision_repo_and_source_guard() {
-        let (store,file,repo)=code_preview_fixture(crate::parse_source("fn target() {}","rust"));
-        let calls=std::cell::Cell::new(0);
-        assert!(store.preview_text(file,1,None,|row,state|{calls.set(calls.get()+1);assert_eq!(row.id,file);
-            assert_eq!(state.snapshot,"fixture-current-source");false}).unwrap().0.is_empty());
-        assert_eq!(calls.get(),1,"native source admission must precede content selection");
-        assert!(store.preview_text(file,2,None,|_,_|true).unwrap().0.is_empty());
-        store.conn.execute("UPDATE repos SET enabled=0 WHERE id=?1",[repo]).unwrap();
-        assert!(store.preview_text(file,1,None,|_,_|true).unwrap().0.is_empty());
-        store.conn.execute("UPDATE repos SET enabled=1 WHERE id=?1",[repo]).unwrap();
-        assert!(!store.preview_text(file,1,None,|_,_|true).unwrap().0.is_empty());
-        for location in [ws_protocol::MatchLocation::Page {page:1},ws_protocol::MatchLocation::Line {line:0},
-            ws_protocol::MatchLocation::Notebook {cell_ordinal:0,line:2,end_line:1}] {
-            assert!(store.preview_text(file,1,Some(location),|_,_|true).is_err());
+        let (store, file, repo) =
+            code_preview_fixture(crate::parse_source("fn target() {}", "rust"));
+        let calls = std::cell::Cell::new(0);
+        assert!(store
+            .preview_text(file, 1, None, |row, state| {
+                calls.set(calls.get() + 1);
+                assert_eq!(row.id, file);
+                assert_eq!(state.snapshot, "fixture-current-source");
+                false
+            })
+            .unwrap()
+            .0
+            .is_empty());
+        assert_eq!(
+            calls.get(),
+            1,
+            "native source admission must precede content selection"
+        );
+        assert!(store
+            .preview_text(file, 2, None, |_, _| true)
+            .unwrap()
+            .0
+            .is_empty());
+        store
+            .conn
+            .execute("UPDATE repos SET enabled=0 WHERE id=?1", [repo])
+            .unwrap();
+        assert!(store
+            .preview_text(file, 1, None, |_, _| true)
+            .unwrap()
+            .0
+            .is_empty());
+        store
+            .conn
+            .execute("UPDATE repos SET enabled=1 WHERE id=?1", [repo])
+            .unwrap();
+        assert!(!store
+            .preview_text(file, 1, None, |_, _| true)
+            .unwrap()
+            .0
+            .is_empty());
+        for location in [
+            ws_protocol::MatchLocation::Page { page: 1 },
+            ws_protocol::MatchLocation::Line { line: 0 },
+            ws_protocol::MatchLocation::Notebook {
+                cell_ordinal: 0,
+                line: 2,
+                end_line: 1,
+            },
+        ] {
+            assert!(store
+                .preview_text(file, 1, Some(location), |_, _| true)
+                .is_err());
         }
     }
 
     #[test]
     fn code_provenance_commits_hash_revision_and_chunks_atomically_and_survives_reopen() {
-        let dir=TempDir::new("source-provenance");
-        let db=dir.0.join("code.db");
-        let mut store=CodeStore::open(&db).unwrap();
-        let repo=store.ensure_repo(&DetectedRepo {root_path:"C:/code".into(),name:"code".into(),has_git:false}).unwrap();
-        let record=CodeFileRecord {path:"C:/code/a.rs".into(),rel_path:"a.rs".into(),name:"a.rs".into(),
-            ext:"rs".into(),language:"rust".into(),size:16,mtime:1,volume_serial:7,file_id:9};
-        let file=store.apply_file_batch(repo,1,&[record]).unwrap()[0].file_id();
+        let dir = TempDir::new("source-provenance");
+        let db = dir.0.join("code.db");
+        let mut store = CodeStore::open(&db).unwrap();
+        let repo = store
+            .ensure_repo(&DetectedRepo {
+                root_path: "C:/code".into(),
+                name: "code".into(),
+                has_git: false,
+            })
+            .unwrap();
+        let record = CodeFileRecord {
+            path: "C:/code/a.rs".into(),
+            rel_path: "a.rs".into(),
+            name: "a.rs".into(),
+            ext: "rs".into(),
+            language: "rust".into(),
+            size: 16,
+            mtime: 1,
+            volume_serial: 7,
+            file_id: 9,
+        };
+        let file = store.apply_file_batch(repo, 1, &[record]).unwrap()[0].file_id();
         assert!(store.source_provenance(file).unwrap().is_none());
-        let first=crate::parse_source("fn alpha() {}","rust");
-        let ids=store.commit_parsed_source(file,&first,"actual-source-a",&"a".repeat(64)).unwrap();
-        store.set_chunk_vector(ids[0],&[1.0,0.0]).unwrap();
-        let saved=store.list_chunks_for_file(file).unwrap();
-        let state=store.source_provenance(file).unwrap().expect("committed native content needs provenance");
-        assert_eq!(state,crate::model::CodeSourceState {snapshot:"actual-source-a".into(),revision:1,sha256:Some("a".repeat(64))});
-        let second=crate::parse_source("fn beta() {}","rust");
+        let first = crate::parse_source("fn alpha() {}", "rust");
+        let ids = store
+            .commit_parsed_source(file, &first, "actual-source-a", &"a".repeat(64))
+            .unwrap();
+        store.set_chunk_vector(ids[0], &[1.0, 0.0]).unwrap();
+        let saved = store.list_chunks_for_file(file).unwrap();
+        let state = store
+            .source_provenance(file)
+            .unwrap()
+            .expect("committed native content needs provenance");
+        assert_eq!(
+            state,
+            crate::model::CodeSourceState {
+                snapshot: "actual-source-a".into(),
+                revision: 1,
+                sha256: Some("a".repeat(64))
+            }
+        );
+        let second = crate::parse_source("fn beta() {}", "rust");
         store.conn.execute_batch("CREATE TRIGGER reject_provenance BEFORE UPDATE OF sha256 ON code_source_state WHEN NEW.sha256 LIKE 'b%' BEGIN SELECT RAISE(ABORT,'fixture durable metadata failure'); END;").unwrap();
-        assert!(store.commit_parsed_source(file,&second,"actual-source-b",&"b".repeat(64)).is_err());
-        assert_eq!(store.list_chunks_for_file(file).unwrap(),saved,"metadata failure must retain old chunks, vectors and IDs");
-        assert_eq!(store.source_provenance(file).unwrap(),Some(state));
-        store.conn.execute_batch("DROP TRIGGER reject_provenance").unwrap();
-        store.commit_parsed_source(file,&second,"actual-source-b",&"b".repeat(64)).unwrap();
-        let state=store.source_provenance(file).unwrap().unwrap();
-        assert_eq!(state.revision,2);assert_eq!(state.sha256,Some("b".repeat(64)));
+        assert!(store
+            .commit_parsed_source(file, &second, "actual-source-b", &"b".repeat(64))
+            .is_err());
+        assert_eq!(
+            store.list_chunks_for_file(file).unwrap(),
+            saved,
+            "metadata failure must retain old chunks, vectors and IDs"
+        );
+        assert_eq!(store.source_provenance(file).unwrap(), Some(state));
+        store
+            .conn
+            .execute_batch("DROP TRIGGER reject_provenance")
+            .unwrap();
+        store
+            .commit_parsed_source(file, &second, "actual-source-b", &"b".repeat(64))
+            .unwrap();
+        let state = store.source_provenance(file).unwrap().unwrap();
+        assert_eq!(state.revision, 2);
+        assert_eq!(state.sha256, Some("b".repeat(64)));
         drop(store);
-        let mut store=CodeStore::open(&db).unwrap();
-        assert_eq!(store.source_provenance(file).unwrap(),Some(state));
-        store.commit_parsed_file(file,&first).unwrap();
-        let state=store.source_provenance(file).unwrap().unwrap();
-        assert_eq!(state.revision,3);assert_eq!(state.sha256,None,"a parse without byte provenance cannot keep an earlier hash");
+        let mut store = CodeStore::open(&db).unwrap();
+        assert_eq!(store.source_provenance(file).unwrap(), Some(state));
+        store.commit_parsed_file(file, &first).unwrap();
+        let state = store.source_provenance(file).unwrap().unwrap();
+        assert_eq!(state.revision, 3);
+        assert_eq!(
+            state.sha256, None,
+            "a parse without byte provenance cannot keep an earlier hash"
+        );
     }
 
     #[test]
     fn code_provenance_schema3_migration_preserves_data_and_keeps_legacy_hash_unknown() {
-        let dir=TempDir::new("source-provenance-migration");
-        let db=dir.0.join("code.db");
-        let mut store=CodeStore::open(&db).unwrap();
-        let repo=store.ensure_repo(&DetectedRepo {root_path:"C:/code".into(),name:"code".into(),has_git:false}).unwrap();
-        let record=CodeFileRecord {path:"C:/code/a.rs".into(),rel_path:"a.rs".into(),name:"a.rs".into(),
-            ext:"rs".into(),language:"rust".into(),size:16,mtime:1,volume_serial:7,file_id:9};
-        let file=store.apply_file_batch(repo,1,&[record]).unwrap()[0].file_id();
-        let ids=store.commit_parsed_file(file,&crate::parse_source("fn migration_token() {}","rust")).unwrap();
-        store.set_source_snapshot(file,"legacy-source").unwrap();
-        store.set_chunk_vector(ids[0],&[1.0,0.0]).unwrap();
-        store.enqueue_file_job("C:/code/a.rs","C:/code",1,10).unwrap();
-        let saved=store.list_chunks_for_file(file).unwrap();
-        for (table,column) in [("code_files","content_revision"),("code_source_state","sha256")] {
-            let exists:bool=store.conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name=?2)",params![table,column],|r|r.get(0)).unwrap();
-            if exists {store.conn.execute_batch(&format!("ALTER TABLE {table} DROP COLUMN {column}")).unwrap();}
+        let dir = TempDir::new("source-provenance-migration");
+        let db = dir.0.join("code.db");
+        let mut store = CodeStore::open(&db).unwrap();
+        let repo = store
+            .ensure_repo(&DetectedRepo {
+                root_path: "C:/code".into(),
+                name: "code".into(),
+                has_git: false,
+            })
+            .unwrap();
+        let record = CodeFileRecord {
+            path: "C:/code/a.rs".into(),
+            rel_path: "a.rs".into(),
+            name: "a.rs".into(),
+            ext: "rs".into(),
+            language: "rust".into(),
+            size: 16,
+            mtime: 1,
+            volume_serial: 7,
+            file_id: 9,
+        };
+        let file = store.apply_file_batch(repo, 1, &[record]).unwrap()[0].file_id();
+        let ids = store
+            .commit_parsed_file(
+                file,
+                &crate::parse_source("fn migration_token() {}", "rust"),
+            )
+            .unwrap();
+        store.set_source_snapshot(file, "legacy-source").unwrap();
+        store.set_chunk_vector(ids[0], &[1.0, 0.0]).unwrap();
+        store
+            .enqueue_file_job("C:/code/a.rs", "C:/code", 1, 10)
+            .unwrap();
+        let saved = store.list_chunks_for_file(file).unwrap();
+        for (table, column) in [
+            ("code_files", "content_revision"),
+            ("code_source_state", "sha256"),
+        ] {
+            let exists: bool = store
+                .conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name=?2)",
+                    params![table, column],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            if exists {
+                store
+                    .conn
+                    .execute_batch(&format!("ALTER TABLE {table} DROP COLUMN {column}"))
+                    .unwrap();
+            }
         }
-        store.conn.execute("UPDATE meta SET value='3' WHERE key='schema_version'",[]).unwrap();
+        store
+            .conn
+            .execute("UPDATE meta SET value='3' WHERE key='schema_version'", [])
+            .unwrap();
         drop(store);
-        let mut store=CodeStore::open(&db).unwrap();
-        assert_eq!(store.schema_version().unwrap(),"4");
-        assert_eq!(store.list_chunks_for_file(file).unwrap(),saved);
-        assert_eq!(store.get_file(file).unwrap().unwrap().file_id,9);
-        assert_eq!(store.search_exact("migration_token",5,|_|true).unwrap().len(),1);
-        assert!(store.claim_job(10).unwrap().is_some(),"migration must preserve durable jobs");
-        assert_eq!(store.source_provenance(file).unwrap(),Some(crate::model::CodeSourceState {
-            snapshot:"legacy-source".into(),revision:1,sha256:None}));
+        let mut store = CodeStore::open(&db).unwrap();
+        assert_eq!(store.schema_version().unwrap(), "4");
+        assert_eq!(store.list_chunks_for_file(file).unwrap(), saved);
+        assert_eq!(store.get_file(file).unwrap().unwrap().file_id, 9);
+        assert_eq!(
+            store
+                .search_exact("migration_token", 5, |_| true)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            store.claim_job(10).unwrap().is_some(),
+            "migration must preserve durable jobs"
+        );
+        assert_eq!(
+            store.source_provenance(file).unwrap(),
+            Some(crate::model::CodeSourceState {
+                snapshot: "legacy-source".into(),
+                revision: 1,
+                sha256: None
+            })
+        );
     }
 
     #[test]
@@ -1778,91 +2510,243 @@ mod tests {
 
     #[test]
     fn same_metadata_replacement_cannot_reuse_old_identity_or_content() {
-        let mut s=CodeStore::open_in_memory().unwrap();
-        let repo=s.ensure_repo(&DetectedRepo {root_path:"C:/r".into(),name:"r".into(),has_git:false}).unwrap();
-        let mut rec=CodeFileRecord {path:"C:/r/a.rs".into(),rel_path:"a.rs".into(),name:"a.rs".into(),ext:"rs".into(),language:"rust".into(),size:10,mtime:100,volume_serial:1,file_id:100};
-        let id=s.apply_file_batch(repo,1,&[rec.clone()]).unwrap()[0].file_id();
-        crate::persist_parsed_file(&mut s,id,&crate::parse_source("fn old() {}","rust")).unwrap();
-        rec.file_id=101;
-        let outcome=s.apply_file_batch(repo,2,&[rec]).unwrap()[0];
-        assert!(matches!(outcome,FileUpsertOutcome::Inserted {..}));
-        assert_ne!(outcome.file_id(),id);
-        assert!(s.search_symbols("old",10).unwrap().is_empty());
+        let mut s = CodeStore::open_in_memory().unwrap();
+        let repo = s
+            .ensure_repo(&DetectedRepo {
+                root_path: "C:/r".into(),
+                name: "r".into(),
+                has_git: false,
+            })
+            .unwrap();
+        let mut rec = CodeFileRecord {
+            path: "C:/r/a.rs".into(),
+            rel_path: "a.rs".into(),
+            name: "a.rs".into(),
+            ext: "rs".into(),
+            language: "rust".into(),
+            size: 10,
+            mtime: 100,
+            volume_serial: 1,
+            file_id: 100,
+        };
+        let id = s.apply_file_batch(repo, 1, &[rec.clone()]).unwrap()[0].file_id();
+        crate::persist_parsed_file(&mut s, id, &crate::parse_source("fn old() {}", "rust"))
+            .unwrap();
+        rec.file_id = 101;
+        let outcome = s.apply_file_batch(repo, 2, &[rec]).unwrap()[0];
+        assert!(matches!(outcome, FileUpsertOutcome::Inserted { .. }));
+        assert_ne!(outcome.file_id(), id);
+        assert!(s.search_symbols("old", 10).unwrap().is_empty());
     }
 
     #[test]
     fn durable_jobs_coalesce_recover_and_fence_claims() {
-        let mut s=CodeStore::open_in_memory().unwrap();
-        s.enqueue_job("C:/r","C:/r",true,100).unwrap();
+        let mut s = CodeStore::open_in_memory().unwrap();
+        s.enqueue_job("C:/r", "C:/r", true, 100).unwrap();
         assert!(s.claim_job(99).unwrap().is_none());
-        let first=s.claim_job(100).unwrap().unwrap();
-        s.enqueue_job("C:/r","C:/r",true,160).unwrap();
+        let first = s.claim_job(100).unwrap().unwrap();
+        s.enqueue_job("C:/r", "C:/r", true, 160).unwrap();
         assert!(!s.finish_job(&first).unwrap());
         assert!(s.claim_job(159).unwrap().is_none());
         s.recover_jobs().unwrap();
-        let second=s.claim_job(160).unwrap().unwrap();
-        assert!(second.revision>first.revision);
+        let second = s.claim_job(160).unwrap().unwrap();
+        assert!(second.revision > first.revision);
         assert!(s.finish_job(&second).unwrap());
     }
 
     #[test]
     fn code_exact_and_semantic_filter_before_limit() {
-        let mut s=CodeStore::open_in_memory().unwrap();
-        let r=s.ensure_repo(&DetectedRepo { root_path:"C:/r".into(),name:"r".into(),has_git:false }).unwrap();
-        for (n,text) in [("hidden.rs","fn needle() {}"),("visible.rs","fn needle() { needle(); }")] {
-            let record=CodeFileRecord { path:format!("C:/r/{n}"),rel_path:n.into(),name:n.into(),ext:"rs".into(),language:"rust".into(),size:text.len() as u64,mtime:1,volume_serial:0,file_id:0 };
-            let f=s.apply_file_batch(r,1,&[record]).unwrap()[0].file_id();
-            crate::persist_parsed_file(&mut s,f,&crate::parse_source(text,"rust")).unwrap();
-            for c in s.list_chunks_for_file(f).unwrap() { s.set_chunk_vector(c.id,&[1.0,0.0]).unwrap(); }
+        let mut s = CodeStore::open_in_memory().unwrap();
+        let r = s
+            .ensure_repo(&DetectedRepo {
+                root_path: "C:/r".into(),
+                name: "r".into(),
+                has_git: false,
+            })
+            .unwrap();
+        for (n, text) in [
+            ("hidden.rs", "fn needle() {}"),
+            ("visible.rs", "fn needle() { needle(); }"),
+        ] {
+            let record = CodeFileRecord {
+                path: format!("C:/r/{n}"),
+                rel_path: n.into(),
+                name: n.into(),
+                ext: "rs".into(),
+                language: "rust".into(),
+                size: text.len() as u64,
+                mtime: 1,
+                volume_serial: 0,
+                file_id: 0,
+            };
+            let f = s.apply_file_batch(r, 1, &[record]).unwrap()[0].file_id();
+            crate::persist_parsed_file(&mut s, f, &crate::parse_source(text, "rust")).unwrap();
+            for c in s.list_chunks_for_file(f).unwrap() {
+                s.set_chunk_vector(c.id, &[1.0, 0.0]).unwrap();
+            }
         }
-        let exact=s.search_exact("needle",2,|f|f.name=="visible.rs").unwrap();
-        assert_eq!(exact.len(),2);
+        let exact = s
+            .search_exact("needle", 2, |f| f.name == "visible.rs")
+            .unwrap();
+        assert_eq!(exact.len(), 2);
         assert!(exact[0].is_definition);
         assert!(!exact[1].is_definition);
-        let semantic=s.search_semantic(&[1.0,0.0],&[1.0,0.0],1,|f|f.name=="visible.rs",|score|score>=0.65).unwrap();
-        assert_eq!(semantic.len(),1);
-        assert_eq!(semantic[0].file.name,"visible.rs");
+        let semantic = s
+            .search_semantic(
+                &[1.0, 0.0],
+                &[1.0, 0.0],
+                1,
+                |f| f.name == "visible.rs",
+                |score| score >= 0.65,
+            )
+            .unwrap();
+        assert_eq!(semantic.len(), 1);
+        assert_eq!(semantic[0].file.name, "visible.rs");
     }
 
     #[test]
     fn code_corroboration_filters_before_limit_and_rejects_invalid_query_views() {
-        let mut store=CodeStore::open_in_memory().unwrap();
-        let repo=store.ensure_repo(&DetectedRepo {root_path:"C:/r".into(),name:"r".into(),has_git:false}).unwrap();
-        for (name,vector) in [("affinity.rs",[1.0,0.0]),("relevant.rs",[0.7,0.71414286])] {
-            let file=CodeFileRecord {path:format!("C:/r/{name}"),rel_path:name.into(),name:name.into(),ext:"rs".into(),language:"rust".into(),size:14,mtime:1,volume_serial:0,file_id:0};
-            let id=store.apply_file_batch(repo,1,&[file]).unwrap()[0].file_id();
-            crate::persist_parsed_file(&mut store,id,&crate::parse_source("fn source() {}","rust")).unwrap();
-            for chunk in store.list_chunks_for_file(id).unwrap() {store.set_chunk_vector(chunk.id,&vector).unwrap();}
+        let mut store = CodeStore::open_in_memory().unwrap();
+        let repo = store
+            .ensure_repo(&DetectedRepo {
+                root_path: "C:/r".into(),
+                name: "r".into(),
+                has_git: false,
+            })
+            .unwrap();
+        for (name, vector) in [
+            ("affinity.rs", [1.0, 0.0]),
+            ("relevant.rs", [0.7, 0.71414286]),
+        ] {
+            let file = CodeFileRecord {
+                path: format!("C:/r/{name}"),
+                rel_path: name.into(),
+                name: name.into(),
+                ext: "rs".into(),
+                language: "rust".into(),
+                size: 14,
+                mtime: 1,
+                volume_serial: 0,
+                file_id: 0,
+            };
+            let id = store.apply_file_batch(repo, 1, &[file]).unwrap()[0].file_id();
+            crate::persist_parsed_file(
+                &mut store,
+                id,
+                &crate::parse_source("fn source() {}", "rust"),
+            )
+            .unwrap();
+            for chunk in store.list_chunks_for_file(id).unwrap() {
+                store.set_chunk_vector(chunk.id, &vector).unwrap();
+            }
         }
-        let admitted=|score:f32|score.is_finite() && (0.65..=1.001).contains(&score);
-        let hits=store.search_semantic(&[1.0,0.0],&[0.0,1.0],1,|_|true,admitted).unwrap();
-        assert_eq!(hits.len(),1);
-        assert_eq!(hits[0].file.name,"relevant.rs","a stronger uncorroborated hit cannot crowd out a relevant candidate");
-        assert!((hits[0].score-0.7).abs()<0.001,"ranking retains the original code-task score");
-        for invalid in [vec![],vec![1.0],vec![0.0,0.0],vec![f32::NAN,0.0],vec![f32::INFINITY,0.0]] {
-            assert!(store.search_semantic(&[1.0,0.0],&invalid,1,|_|true,admitted).unwrap().is_empty());
-            assert!(store.search_semantic(&invalid,&[0.0,1.0],1,|_|true,admitted).unwrap().is_empty());
+        let admitted = |score: f32| score.is_finite() && (0.65..=1.001).contains(&score);
+        let hits = store
+            .search_semantic(&[1.0, 0.0], &[0.0, 1.0], 1, |_| true, admitted)
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(
+            hits[0].file.name, "relevant.rs",
+            "a stronger uncorroborated hit cannot crowd out a relevant candidate"
+        );
+        assert!(
+            (hits[0].score - 0.7).abs() < 0.001,
+            "ranking retains the original code-task score"
+        );
+        for invalid in [
+            vec![],
+            vec![1.0],
+            vec![0.0, 0.0],
+            vec![f32::NAN, 0.0],
+            vec![f32::INFINITY, 0.0],
+        ] {
+            assert!(store
+                .search_semantic(&[1.0, 0.0], &invalid, 1, |_| true, admitted)
+                .unwrap()
+                .is_empty());
+            assert!(store
+                .search_semantic(&invalid, &[0.0, 1.0], 1, |_| true, admitted)
+                .unwrap()
+                .is_empty());
         }
-        assert!(store.search_semantic(&[1.0,0.0],&[0.0,1.0],1,|file|file.name=="affinity.rs",admitted).unwrap().is_empty());
-        let (hits,eligible)=store.search_semantic_report(&[1.0,0.0],&[0.0,1.0],1,|file|file.name=="affinity.rs",admitted).unwrap();
-        assert!(hits.is_empty() && eligible,"below-threshold current vectors are a completed lookup");
-        assert!(!store.search_semantic_report(&[1.0,0.0],&[0.0,1.0],1,|_|false,admitted).unwrap().1,"excluded vectors cannot imply readiness");
-        assert!(!store.search_semantic_report(&[1.0,0.0,0.0],&[0.0,1.0,0.0],1,|_|true,admitted).unwrap().1,"wrong-dimension vectors cannot imply readiness");
+        assert!(store
+            .search_semantic(
+                &[1.0, 0.0],
+                &[0.0, 1.0],
+                1,
+                |file| file.name == "affinity.rs",
+                admitted
+            )
+            .unwrap()
+            .is_empty());
+        let (hits, eligible) = store
+            .search_semantic_report(
+                &[1.0, 0.0],
+                &[0.0, 1.0],
+                1,
+                |file| file.name == "affinity.rs",
+                admitted,
+            )
+            .unwrap();
+        assert!(
+            hits.is_empty() && eligible,
+            "below-threshold current vectors are a completed lookup"
+        );
+        assert!(
+            !store
+                .search_semantic_report(&[1.0, 0.0], &[0.0, 1.0], 1, |_| false, admitted)
+                .unwrap()
+                .1,
+            "excluded vectors cannot imply readiness"
+        );
+        assert!(
+            !store
+                .search_semantic_report(&[1.0, 0.0, 0.0], &[0.0, 1.0, 0.0], 1, |_| true, admitted)
+                .unwrap()
+                .1,
+            "wrong-dimension vectors cannot imply readiness"
+        );
     }
 
     #[test]
     fn parsed_file_commit_is_atomic_on_invalid_tail() {
         let mut store = CodeStore::open_in_memory().unwrap();
-        let repo = store.ensure_repo(&DetectedRepo { root_path: "C:/repo".into(), name:"repo".into(), has_git:false }).unwrap();
-        let record = CodeFileRecord { path:"C:/repo/lib.rs".into(), rel_path:"lib.rs".into(), name:"lib.rs".into(), ext:"rs".into(), language:"rust".into(), size:24, mtime:1, volume_serial:1, file_id:2 };
-        let id = store.apply_file_batch(repo,1,&[record]).unwrap()[0].file_id();
+        let repo = store
+            .ensure_repo(&DetectedRepo {
+                root_path: "C:/repo".into(),
+                name: "repo".into(),
+                has_git: false,
+            })
+            .unwrap();
+        let record = CodeFileRecord {
+            path: "C:/repo/lib.rs".into(),
+            rel_path: "lib.rs".into(),
+            name: "lib.rs".into(),
+            ext: "rs".into(),
+            language: "rust".into(),
+            size: 24,
+            mtime: 1,
+            volume_serial: 1,
+            file_id: 2,
+        };
+        let id = store.apply_file_batch(repo, 1, &[record]).unwrap()[0].file_id();
         let original = crate::parse_source("fn original() {}", "rust");
-        crate::persist_parsed_file(&mut store,id,&original).unwrap();
+        crate::persist_parsed_file(&mut store, id, &original).unwrap();
         let mut invalid = crate::parse_source("fn replacement() {}", "rust");
-        invalid.chunks.push(crate::ParsedCodeUnit { notebook:None,start_line:0,end_line:0,symbol_name:String::new(),symbol_kind:String::new(),text:"invalid".into() });
-        assert!(crate::persist_parsed_file(&mut store,id,&invalid).is_err());
-        assert_eq!(store.list_symbols_for_file(id).unwrap()[0].name,"original");
-        assert_eq!(store.list_chunks_for_file(id).unwrap()[0].text,"fn original() {}");
+        invalid.chunks.push(crate::ParsedCodeUnit {
+            notebook: None,
+            start_line: 0,
+            end_line: 0,
+            symbol_name: String::new(),
+            symbol_kind: String::new(),
+            text: "invalid".into(),
+        });
+        assert!(crate::persist_parsed_file(&mut store, id, &invalid).is_err());
+        assert_eq!(store.list_symbols_for_file(id).unwrap()[0].name, "original");
+        assert_eq!(
+            store.list_chunks_for_file(id).unwrap()[0].text,
+            "fn original() {}"
+        );
     }
     use crate::crawl::{crawl_repo, detect_repos};
     use crate::model::SymbolRole;

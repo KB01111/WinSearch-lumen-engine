@@ -95,7 +95,9 @@ pub fn scan_directory_with_hidden(
     if depth >= MAX_DEPTH {
         return Ok(scan);
     }
-    if !ws_platform::content::metadata_path_allowed(Path::new(dir_path), false) { return Ok(scan); }
+    if !ws_platform::content::metadata_path_allowed(Path::new(dir_path), false) {
+        return Ok(scan);
+    }
     if depth > 0 {
         match std::fs::symlink_metadata(dir_path) {
             Ok(meta) => {
@@ -172,7 +174,11 @@ pub fn scan_directory_with_hidden(
             root_id,
             parent_id,
             name: name.clone(),
-            ext: if is_dir { String::new() } else { extension_of(&name) },
+            ext: if is_dir {
+                String::new()
+            } else {
+                extension_of(&name)
+            },
             path,
             is_dir,
             size: if is_dir { 0 } else { metadata.file_size() },
@@ -239,13 +245,13 @@ pub fn file_identity(path: &Path, is_dir: bool) -> (u32, u64) {
     use std::ffi::c_void;
     use std::mem::size_of;
 
+    use windows::core::PCWSTR;
     use windows::Win32::Foundation::{CloseHandle, HANDLE};
     use windows::Win32::Storage::FileSystem::{
-        CreateFileW, GetFileInformationByHandleEx, FileIdInfo, FILE_FLAG_BACKUP_SEMANTICS,
-        FILE_FLAGS_AND_ATTRIBUTES, FILE_ID_INFO, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
+        CreateFileW, FileIdInfo, GetFileInformationByHandleEx, FILE_FLAGS_AND_ATTRIBUTES,
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_ID_INFO, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
         FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
     };
-    use windows::core::PCWSTR;
 
     let wide: Vec<u16> = path
         .to_string_lossy()
@@ -321,7 +327,11 @@ pub fn record_for_path_with_hidden(
         root_id,
         parent_id,
         name: name.clone(),
-        ext: if is_dir { String::new() } else { extension_of(&name) },
+        ext: if is_dir {
+            String::new()
+        } else {
+            extension_of(&name)
+        },
         path: path.to_string_lossy().into_owned(),
         is_dir,
         size: if is_dir { 0 } else { metadata.file_size() },
@@ -391,7 +401,14 @@ mod tests {
             fs::create_dir(tree.0.join(d)).unwrap();
             fs::write(tree.0.join(d).join("junk.bin"), b"x").unwrap();
         }
-        for f in ["id_rsa", "id_ed25519.pub", ".env", ".env.local", "server.pem", "store.pfx"] {
+        for f in [
+            "id_rsa",
+            "id_ed25519.pub",
+            ".env",
+            ".env.local",
+            "server.pem",
+            "store.pfx",
+        ] {
             fs::write(tree.0.join(f), b"secret").unwrap();
         }
         fs::write(tree.0.join("notes.txt"), b"fine").unwrap();
@@ -404,16 +421,20 @@ mod tests {
 
     #[test]
     fn hidden_items_are_skipped() {
+        use windows::core::PCWSTR;
         use windows::Win32::Storage::FileSystem::SetFileAttributesW;
         use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_HIDDEN;
-        use windows::core::PCWSTR;
 
         let tree = TempTree::new();
         let hidden = tree.0.join("secret-folder");
         fs::create_dir(&hidden).unwrap();
         fs::write(tree.0.join("visible.txt"), b"x").unwrap();
 
-        let wide: Vec<u16> = hidden.to_string_lossy().encode_utf16().chain(std::iter::once(0)).collect();
+        let wide: Vec<u16> = hidden
+            .to_string_lossy()
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
         unsafe {
             SetFileAttributesW(PCWSTR(wide.as_ptr()), FILE_ATTRIBUTE_HIDDEN).unwrap();
         }
@@ -460,7 +481,9 @@ mod tests {
         assert!(record_for_path(1, None, &secret).unwrap().is_none());
 
         // Vanished paths return None.
-        assert!(record_for_path(1, None, &tree.0.join("nope.txt")).unwrap().is_none());
+        assert!(record_for_path(1, None, &tree.0.join("nope.txt"))
+            .unwrap()
+            .is_none());
     }
 
     #[test]

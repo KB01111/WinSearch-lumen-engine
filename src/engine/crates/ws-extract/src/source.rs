@@ -360,12 +360,10 @@ mod tests {
         let fixture = Fixture::new(b"abc");
         let request = request(&fixture);
         let legacy = response();
-        assert!(
-            serde_json::to_value(&legacy)
-                .unwrap()
-                .get("source_sha256")
-                .is_none()
-        );
+        assert!(serde_json::to_value(&legacy)
+            .unwrap()
+            .get("source_sha256")
+            .is_none());
         crate::worker::validate_response(&request, &legacy).unwrap();
         let mut valid = response();
         valid.source_sha256 = Some("a".repeat(64));

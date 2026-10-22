@@ -8,17 +8,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
+use windows::core::PCWSTR;
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_LIST_DIRECTORY, FILE_SHARE_DELETE,
-    FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_ACTION_ADDED, FILE_ACTION_MODIFIED,
+    CreateFileW, ReadDirectoryChangesW, FILE_ACTION_ADDED, FILE_ACTION_MODIFIED,
     FILE_ACTION_REMOVED, FILE_ACTION_RENAMED_NEW_NAME, FILE_ACTION_RENAMED_OLD_NAME,
-    FILE_NOTIFY_CHANGE_CREATION, FILE_NOTIFY_CHANGE_DIR_NAME, FILE_NOTIFY_CHANGE_FILE_NAME,
-    FILE_NOTIFY_CHANGE_LAST_WRITE, FILE_NOTIFY_CHANGE_SIZE, OPEN_EXISTING,
-    ReadDirectoryChangesW,
+    FILE_FLAG_BACKUP_SEMANTICS, FILE_LIST_DIRECTORY, FILE_NOTIFY_CHANGE_CREATION,
+    FILE_NOTIFY_CHANGE_DIR_NAME, FILE_NOTIFY_CHANGE_FILE_NAME, FILE_NOTIFY_CHANGE_LAST_WRITE,
+    FILE_NOTIFY_CHANGE_SIZE, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows::Win32::System::IO::CancelIoEx;
-use windows::core::PCWSTR;
 
 /// One coalesced filesystem change under a watched root.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,7 +26,10 @@ pub enum WatchEvent {
     Deleted(PathBuf),
     Modified(PathBuf),
     /// A rename/move pair as reported by the OS (identity-preserving).
-    Renamed { from: PathBuf, to: PathBuf },
+    Renamed {
+        from: PathBuf,
+        to: PathBuf,
+    },
     /// The notification buffer overflowed: the subtree needs a rescan.
     Overflow,
 }
@@ -181,7 +183,9 @@ fn watch_loop(root: &Path, handle: Arc<OwnedHandle>, on_event: &(dyn Fn(WatchEve
             on_event(WatchEvent::Overflow);
             continue;
         }
-        for event in parse_notifications_with_state(&buffer[..returned as usize], &mut pending_rename) {
+        for event in
+            parse_notifications_with_state(&buffer[..returned as usize], &mut pending_rename)
+        {
             let full_event = match event {
                 WatchEvent::Created(p) => WatchEvent::Created(root.join(p)),
                 WatchEvent::Deleted(p) => WatchEvent::Deleted(root.join(p)),
@@ -351,16 +355,13 @@ mod tests {
         let mut saw_rename = false;
         let mut saw_delete = false;
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        while std::time::Instant::now() < deadline
-            && !(saw_create && saw_rename && saw_delete)
-        {
+        while std::time::Instant::now() < deadline && !(saw_create && saw_rename && saw_delete) {
             match rx.recv_timeout(Duration::from_millis(500)) {
                 Ok(WatchEvent::Created(ref p)) if p == &tree.0.join("hello.txt") => {
                     saw_create = true
                 }
                 Ok(WatchEvent::Renamed { ref from, ref to })
-                    if from == &tree.0.join("hello.txt")
-                        && to == &tree.0.join("renamed.txt") =>
+                    if from == &tree.0.join("hello.txt") && to == &tree.0.join("renamed.txt") =>
                 {
                     saw_rename = true
                 }

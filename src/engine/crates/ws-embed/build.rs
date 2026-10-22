@@ -67,7 +67,11 @@ fn delay_load_npu_shim() {
 }
 
 fn on_off(b: bool) -> &'static str {
-    if b { "enabled" } else { "skipped (SDK not found)" }
+    if b {
+        "enabled"
+    } else {
+        "skipped (SDK not found)"
+    }
 }
 
 fn manifest_dir() -> PathBuf {
@@ -97,7 +101,11 @@ fn cache_root() -> PathBuf {
 fn llama_source_dir() -> PathBuf {
     if let Some(dir) = env::var_os("LLAMA_CPP_DIR") {
         let p = PathBuf::from(dir);
-        assert!(p.join("CMakeLists.txt").is_file(), "LLAMA_CPP_DIR has no CMakeLists.txt: {}", p.display());
+        assert!(
+            p.join("CMakeLists.txt").is_file(),
+            "LLAMA_CPP_DIR has no CMakeLists.txt: {}",
+            p.display()
+        );
         return p;
     }
     let dest = cache_root().join(format!("llama.cpp-{LLAMA_CPP_LABEL}"));
@@ -120,7 +128,10 @@ fn llama_source_dir() -> PathBuf {
             .args(args)
             .status()
             .expect("run git (git must be on PATH)");
-        assert!(status.success(), "git {args:?} failed for llama.cpp {LLAMA_CPP_REV}");
+        assert!(
+            status.success(),
+            "git {args:?} failed for llama.cpp {LLAMA_CPP_REV}"
+        );
     };
     git(&["init", "--quiet"]);
     git(&["remote", "add", "origin", LLAMA_CPP_REPO]);
@@ -188,7 +199,10 @@ fn build_llama(src: &Path, cuda: bool, vulkan: bool) -> PathBuf {
 
     let mut cfg = Command::new(cmake_exe());
     cfg.arg("-S").arg(src).arg("-B").arg(&build);
-    cfg.arg("-G").arg("Visual Studio 17 2022").arg("-A").arg("x64");
+    cfg.arg("-G")
+        .arg("Visual Studio 17 2022")
+        .arg("-A")
+        .arg("x64");
     cfg.arg(format!("-DCMAKE_INSTALL_PREFIX={}", install.display()));
     cfg.arg(format!("-DCMAKE_BUILD_TYPE={}", profile()));
     cfg.args([
@@ -214,15 +228,19 @@ fn build_llama(src: &Path, cuda: bool, vulkan: bool) -> PathBuf {
     run(&mut cfg, "cmake configure");
     run(
         Command::new(cmake_exe())
-            .arg("--build").arg(&build)
-            .arg("--config").arg(profile())
+            .arg("--build")
+            .arg(&build)
+            .arg("--config")
+            .arg(profile())
             .arg("--parallel"),
         "cmake build",
     );
     run(
         Command::new(cmake_exe())
-            .arg("--install").arg(&build)
-            .arg("--config").arg(profile()),
+            .arg("--install")
+            .arg(&build)
+            .arg("--config")
+            .arg(profile()),
         "cmake install",
     );
     install
@@ -234,11 +252,17 @@ fn profile() -> &'static str {
 }
 
 fn on(b: bool) -> &'static str {
-    if b { "ON" } else { "OFF" }
+    if b {
+        "ON"
+    } else {
+        "OFF"
+    }
 }
 
 fn run(cmd: &mut Command, what: &str) {
-    let status = cmd.status().unwrap_or_else(|e| panic!("{what}: failed to start: {e}"));
+    let status = cmd
+        .status()
+        .unwrap_or_else(|e| panic!("{what}: failed to start: {e}"));
     assert!(status.success(), "{what} failed with {status}");
 }
 
@@ -284,7 +308,10 @@ fn stage_runtime_dlls(install: &Path) {
     };
     let targets = [profile_dir.clone(), profile_dir.join("deps")];
     let Ok(entries) = fs::read_dir(&bin) else {
-        println!("cargo:warning=ws-embed: install bin dir missing: {}", bin.display());
+        println!(
+            "cargo:warning=ws-embed: install bin dir missing: {}",
+            bin.display()
+        );
         return;
     };
     let current: Vec<std::ffi::OsString> = entries

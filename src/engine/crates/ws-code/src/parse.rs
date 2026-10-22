@@ -333,23 +333,55 @@ mod tests {
 
     #[test]
     fn code_provenance_hashes_exact_admitted_bytes_including_bom_crlf_and_notebook_outputs() {
-        let notebook = concat!(r#"{"cells":[{"cell_type":"code","metadata":{},"source":["print(7)\n"],"outputs":[{"text":["SECRET_OUTPUT"]}]}],"metadata":{"language_info":{"name":"python"}},"nbformat":4,"nbformat_minor":5}"#, "\r\n");
+        let notebook = concat!(
+            r#"{"cells":[{"cell_type":"code","metadata":{},"source":["print(7)\n"],"outputs":[{"text":["SECRET_OUTPUT"]}]}],"metadata":{"language_info":{"name":"python"}},"nbformat":4,"nbformat_minor":5}"#,
+            "\r\n"
+        );
         for (extension, bytes, expected) in [
-            ("txt", b"hello world".as_slice(), "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"),
-            ("txt", b"\xef\xbb\xbfhello world\r\n".as_slice(), "6600cce3a93121e79f93ad2175251d6d4c9b2a1241fbc1a8a45058e94e16ecd2"),
-            ("rs", b"".as_slice(), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
-            ("ipynb", notebook.as_bytes(), "777135e70bd3b7b683b827b5d7ac5576941c543e19e037f9f707887138a3dca1"),
+            (
+                "txt",
+                b"hello world".as_slice(),
+                "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+            ),
+            (
+                "txt",
+                b"\xef\xbb\xbfhello world\r\n".as_slice(),
+                "6600cce3a93121e79f93ad2175251d6d4c9b2a1241fbc1a8a45058e94e16ecd2",
+            ),
+            (
+                "rs",
+                b"".as_slice(),
+                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            ),
+            (
+                "ipynb",
+                notebook.as_bytes(),
+                "777135e70bd3b7b683b827b5d7ac5576941c543e19e037f9f707887138a3dca1",
+            ),
         ] {
-            let path=std::env::temp_dir().join(format!("winsearch-code-provenance-{}.{}",std::process::id(),extension));
-            fs::write(&path,bytes).unwrap();
-            let result=parse_file_with_sha256(&path);
+            let path = std::env::temp_dir().join(format!(
+                "winsearch-code-provenance-{}.{}",
+                std::process::id(),
+                extension
+            ));
+            fs::write(&path, bytes).unwrap();
+            let result = parse_file_with_sha256(&path);
             fs::remove_file(&path).unwrap();
-            let (parsed,sha256)=result.unwrap();
-            assert_eq!(sha256,expected,"hash must describe exact file bytes, not extracted cells or normalized text");
-            assert!(!parsed.chunks.iter().any(|chunk|chunk.text.contains("SECRET_OUTPUT")));
-            if extension=="ipynb" {
-                assert!(parsed.chunks.iter().any(|chunk|chunk.text.contains("print(7)")));
-                assert!(parsed.chunks.iter().all(|chunk|chunk.notebook.is_some()));
+            let (parsed, sha256) = result.unwrap();
+            assert_eq!(
+                sha256, expected,
+                "hash must describe exact file bytes, not extracted cells or normalized text"
+            );
+            assert!(!parsed
+                .chunks
+                .iter()
+                .any(|chunk| chunk.text.contains("SECRET_OUTPUT")));
+            if extension == "ipynb" {
+                assert!(parsed
+                    .chunks
+                    .iter()
+                    .any(|chunk| chunk.text.contains("print(7)")));
+                assert!(parsed.chunks.iter().all(|chunk| chunk.notebook.is_some()));
             }
         }
     }

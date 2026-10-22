@@ -26,26 +26,42 @@ struct Candidate {
 }
 
 impl IndexStore {
-    pub(crate) fn set_search_request_filter(&self,req:&SearchRequest)->Result<(),StoreError> {
-        if !ws_protocol::valid_search_extensions(&req.extensions) || !ws_protocol::valid_search_file_kinds(&req.file_kinds) {
-            return Err(StoreError::InvalidConfig("invalid search extension filter".into()));
+    pub(crate) fn set_search_request_filter(&self, req: &SearchRequest) -> Result<(), StoreError> {
+        if !ws_protocol::valid_search_extensions(&req.extensions)
+            || !ws_protocol::valid_search_file_kinds(&req.file_kinds)
+        {
+            return Err(StoreError::InvalidConfig(
+                "invalid search extension filter".into(),
+            ));
         }
-        let (apps_only,files_only,kinds)=(req.apps_only,req.files_only,req.kinds.clone());
-        let extensions=req.extensions.clone();
-        let file_kinds=req.file_kinds.clone();
+        let (apps_only, files_only, kinds) = (req.apps_only, req.files_only, req.kinds.clone());
+        let extensions = req.extensions.clone();
+        let file_kinds = req.file_kinds.clone();
         // Connection-local request scope must not change admission/metadata in query_entries.
-        self.conn().create_scalar_function("search_request_allowed",4,
-            rusqlite::functions::FunctionFlags::SQLITE_UTF8,move|ctx| {
-                let path=ctx.get::<String>(0)?;let ext=ctx.get::<String>(1)?;
-                let is_dir=ctx.get::<bool>(2)?;let is_app=ctx.get::<bool>(3)?;
-                let kind=if is_app {HitKind::Application} else if is_dir {HitKind::Folder}
-                    else {crate::model::kind_for_path_and_ext(&path,&ext).hit_kind()};
-                Ok((!apps_only || is_app) && (!files_only || !is_app)
+        self.conn().create_scalar_function(
+            "search_request_allowed",
+            4,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8,
+            move |ctx| {
+                let path = ctx.get::<String>(0)?;
+                let ext = ctx.get::<String>(1)?;
+                let is_dir = ctx.get::<bool>(2)?;
+                let is_app = ctx.get::<bool>(3)?;
+                let kind = if is_app {
+                    HitKind::Application
+                } else if is_dir {
+                    HitKind::Folder
+                } else {
+                    crate::model::kind_for_path_and_ext(&path, &ext).hit_kind()
+                };
+                Ok((!apps_only || is_app)
+                    && (!files_only || !is_app)
                     && (kinds.is_empty() || kinds.contains(&kind))
                     && (extensions.is_empty() || !is_dir)
-                    && ws_protocol::search_file_kind_allowed(&file_kinds,&ext,is_dir)
-                    && ws_protocol::search_extension_allowed(&extensions,&ext))
-            })?;
+                    && ws_protocol::search_file_kind_allowed(&file_kinds, &ext, is_dir)
+                    && ws_protocol::search_extension_allowed(&extensions, &ext))
+            },
+        )?;
         Ok(())
     }
 
@@ -60,7 +76,9 @@ impl IndexStore {
         }
         self.set_search_request_filter(req)?;
 
-        let candidate_limit = req.limit.clamp(CANDIDATE_CAP, ws_protocol::MAX_SEARCH_RESULTS as usize);
+        let candidate_limit = req
+            .limit
+            .clamp(CANDIDATE_CAP, ws_protocol::MAX_SEARCH_RESULTS as usize);
         let mut candidates = Vec::new();
         let mut seen = std::collections::HashSet::new();
         let mut push_unique = |rows: Vec<EntryRow>, via_fts: bool, via_content_fts: bool| {
@@ -75,11 +93,27 @@ impl IndexStore {
             }
         };
         push_unique(self.exact_candidates(&query_lower)?, false, false);
-        push_unique(self.prefix_candidates(&query_lower, candidate_limit)?, false, false);
-        push_unique(self.substring_candidates(&query_lower, candidate_limit)?, false, false);
+        push_unique(
+            self.prefix_candidates(&query_lower, candidate_limit)?,
+            false,
+            false,
+        );
+        push_unique(
+            self.substring_candidates(&query_lower, candidate_limit)?,
+            false,
+            false,
+        );
         push_unique(self.fts_candidates(&tokens, candidate_limit)?, true, false);
-        push_unique(self.content_fts_candidates(&tokens, candidate_limit)?, false, true);
-        push_unique(self.path_candidates(&query_lower, candidate_limit)?, false, false);
+        push_unique(
+            self.content_fts_candidates(&tokens, candidate_limit)?,
+            false,
+            true,
+        );
+        push_unique(
+            self.path_candidates(&query_lower, candidate_limit)?,
+            false,
+            false,
+        );
 
         let depth = |path: &str| path.matches('\\').count().max(path.matches('/').count());
         let mut hits: Vec<SearchHit> = candidates
@@ -126,7 +160,11 @@ impl IndexStore {
             })
             .collect();
 
-        hits.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.name.cmp(&b.name)));
+        hits.sort_by(|a, b| {
+            b.score
+                .total_cmp(&a.score)
+                .then_with(|| a.name.cmp(&b.name))
+        });
         hits.truncate(req.limit.max(1));
         for hit in &mut hits {
             hit.matches = self.content_matches(hit.entry_id, &tokens)?;
@@ -225,7 +263,11 @@ impl IndexStore {
     /// Name prefix: a range seek on the name index. A `>= / <` pair (rather
     /// than `LIKE 'x%'`) keeps the query index-eligible regardless of LIKE
     /// optimization rules and wildcard characters in the query.
-    fn prefix_candidates(&self, query_lower: &str, limit: usize) -> Result<Vec<EntryRow>, StoreError> {
+    fn prefix_candidates(
+        &self,
+        query_lower: &str,
+        limit: usize,
+    ) -> Result<Vec<EntryRow>, StoreError> {
         let Some(end) = prefix_upper_bound(query_lower) else {
             return Ok(Vec::new());
         };
@@ -243,7 +285,11 @@ impl IndexStore {
     /// trigram FTS index. Trigrams need three characters; shorter queries rely
     /// on prefix/token sources (mid-word two-character noise is excluded on
     /// purpose).
-    fn substring_candidates(&self, query_lower: &str, limit: usize) -> Result<Vec<EntryRow>, StoreError> {
+    fn substring_candidates(
+        &self,
+        query_lower: &str,
+        limit: usize,
+    ) -> Result<Vec<EntryRow>, StoreError> {
         if query_lower.chars().count() < 3 {
             return Ok(Vec::new());
         }
@@ -282,7 +328,11 @@ impl IndexStore {
     }
 
     /// All query tokens present as word prefixes in extracted content (`content_fts`).
-    fn content_fts_candidates(&self, tokens: &[String], limit: usize) -> Result<Vec<EntryRow>, StoreError> {
+    fn content_fts_candidates(
+        &self,
+        tokens: &[String],
+        limit: usize,
+    ) -> Result<Vec<EntryRow>, StoreError> {
         let match_expr = tokens
             .iter()
             .map(|t| format!("\"{t}\"*"))
@@ -305,7 +355,11 @@ impl IndexStore {
     /// Substring match against `entries.path` (for queries matching a parent
     /// directory substring or multi-segment path fragment of length >= 3).
     /// Backed by the `entries_path_tri` trigram FTS index over lowercased paths.
-    fn path_candidates(&self, query_lower: &str, limit: usize) -> Result<Vec<EntryRow>, StoreError> {
+    fn path_candidates(
+        &self,
+        query_lower: &str,
+        limit: usize,
+    ) -> Result<Vec<EntryRow>, StoreError> {
         if query_lower.chars().count() < 3 {
             return Ok(Vec::new());
         }
@@ -567,70 +621,173 @@ mod tests {
         assert!(hits.iter().all(|h| h.kind == HitKind::Application));
     }
 
-    fn assert_filter_precedes_every_candidate_cap(mut request:SearchRequest,wanted_app:bool) {
-        let mut store=IndexStore::open_in_memory().unwrap();
-        let root=store.ensure_root("C:\\data").unwrap();let generation=store.begin_generation(root).unwrap();
-        let mut records=(0..CANDIDATE_CAP+9).map(|index|rec(
-            &format!("C:\\data\\noise\\{index}\\needle.pdf"),"needle.pdf",!wanted_app)).collect::<Vec<_>>();
-        let wanted="C:\\data\\selected\\needle.pdf";
-        records.push(rec(wanted,"needle.pdf",wanted_app));
-        store.apply_batch(root,generation,&records).unwrap();
+    fn assert_filter_precedes_every_candidate_cap(mut request: SearchRequest, wanted_app: bool) {
+        let mut store = IndexStore::open_in_memory().unwrap();
+        let root = store.ensure_root("C:\\data").unwrap();
+        let generation = store.begin_generation(root).unwrap();
+        let mut records = (0..CANDIDATE_CAP + 9)
+            .map(|index| {
+                rec(
+                    &format!("C:\\data\\noise\\{index}\\needle.pdf"),
+                    "needle.pdf",
+                    !wanted_app,
+                )
+            })
+            .collect::<Vec<_>>();
+        let wanted = "C:\\data\\selected\\needle.pdf";
+        records.push(rec(wanted, "needle.pdf", wanted_app));
+        store.apply_batch(root, generation, &records).unwrap();
         // Offline query fixtures admit virtual content; production source admission stays separate.
         for record in &records {
-            let entry=store.find_by_path(&record.path).unwrap().unwrap();
-            store.conn().execute("INSERT INTO content_fts(entry_id,kind,text) VALUES(?1,'doc','contentneedle')",[entry.id]).unwrap();
+            let entry = store.find_by_path(&record.path).unwrap().unwrap();
+            store
+                .conn()
+                .execute(
+                    "INSERT INTO content_fts(entry_id,kind,text) VALUES(?1,'doc','contentneedle')",
+                    [entry.id],
+                )
+                .unwrap();
         }
-        request.text="needle".into();request.limit=1;
-        let hits=store.search(&request).unwrap();
-        assert_eq!(hits.len(),1,"excluded candidates cannot consume the scoped candidate budget");
-        assert_eq!(hits[0].path,wanted);
-        for (source,rows) in [
-            ("exact",store.exact_candidates("needle.pdf").unwrap()),
-            ("prefix",store.prefix_candidates("needle",CANDIDATE_CAP).unwrap()),
-            ("substring",store.substring_candidates("needle",CANDIDATE_CAP).unwrap()),
-            ("tokens",store.fts_candidates(&["needle".into()],CANDIDATE_CAP).unwrap()),
-            ("content",store.content_fts_candidates(&["contentneedle".into()],CANDIDATE_CAP).unwrap()),
-            ("path",store.path_candidates("needle",CANDIDATE_CAP).unwrap()),
+        request.text = "needle".into();
+        request.limit = 1;
+        let hits = store.search(&request).unwrap();
+        assert_eq!(
+            hits.len(),
+            1,
+            "excluded candidates cannot consume the scoped candidate budget"
+        );
+        assert_eq!(hits[0].path, wanted);
+        for (source, rows) in [
+            ("exact", store.exact_candidates("needle.pdf").unwrap()),
+            (
+                "prefix",
+                store.prefix_candidates("needle", CANDIDATE_CAP).unwrap(),
+            ),
+            (
+                "substring",
+                store.substring_candidates("needle", CANDIDATE_CAP).unwrap(),
+            ),
+            (
+                "tokens",
+                store
+                    .fts_candidates(&["needle".into()], CANDIDATE_CAP)
+                    .unwrap(),
+            ),
+            (
+                "content",
+                store
+                    .content_fts_candidates(&["contentneedle".into()], CANDIDATE_CAP)
+                    .unwrap(),
+            ),
+            (
+                "path",
+                store.path_candidates("needle", CANDIDATE_CAP).unwrap(),
+            ),
         ] {
-            assert_eq!(rows.len(),1,"{source} must filter before its own cap");
-            assert_eq!(rows[0].path,wanted,"{source}");
+            assert_eq!(rows.len(), 1, "{source} must filter before its own cap");
+            assert_eq!(rows[0].path, wanted, "{source}");
         }
-        let rejected=store.find_by_path(&records[0].path).unwrap().unwrap();
-        assert!(store.entry_visible(rejected.id).unwrap(),"request scope cannot revoke general metadata admission");
-        let all=store.search(&SearchRequest {text:"needle".into(),limit:1,..Default::default()}).unwrap();
-        assert_eq!(all.len(),1);assert_ne!(all[0].path,wanted,"a new request must replace the previous scope");
-        store.set_query_source_guard(|path,_,_|!path.contains("selected")).unwrap();
-        assert!(store.search(&request).unwrap().is_empty(),"request filters cannot bypass source admission");
+        let rejected = store.find_by_path(&records[0].path).unwrap().unwrap();
+        assert!(
+            store.entry_visible(rejected.id).unwrap(),
+            "request scope cannot revoke general metadata admission"
+        );
+        let all = store
+            .search(&SearchRequest {
+                text: "needle".into(),
+                limit: 1,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(all.len(), 1);
+        assert_ne!(
+            all[0].path, wanted,
+            "a new request must replace the previous scope"
+        );
+        store
+            .set_query_source_guard(|path, _, _| !path.contains("selected"))
+            .unwrap();
+        assert!(
+            store.search(&request).unwrap().is_empty(),
+            "request filters cannot bypass source admission"
+        );
     }
 
     #[test]
     fn files_mode_precedes_every_candidate_cap() {
-        assert_filter_precedes_every_candidate_cap(SearchRequest {files_only:true,..Default::default()},false);
+        assert_filter_precedes_every_candidate_cap(
+            SearchRequest {
+                files_only: true,
+                ..Default::default()
+            },
+            false,
+        );
     }
 
     #[test]
     fn apps_mode_precedes_every_candidate_cap() {
-        assert_filter_precedes_every_candidate_cap(SearchRequest {apps_only:true,..Default::default()},true);
+        assert_filter_precedes_every_candidate_cap(
+            SearchRequest {
+                apps_only: true,
+                ..Default::default()
+            },
+            true,
+        );
     }
 
     #[test]
     fn category_filter_precedes_every_candidate_cap() {
-        assert_filter_precedes_every_candidate_cap(SearchRequest {kinds:vec![HitKind::Document],..Default::default()},false);
+        assert_filter_precedes_every_candidate_cap(
+            SearchRequest {
+                kinds: vec![HitKind::Document],
+                ..Default::default()
+            },
+            false,
+        );
     }
 
     #[test]
     fn extension_filter_precedes_candidate_caps_and_preserves_case_and_dot_compatibility() {
-        let mut store=IndexStore::open_in_memory().unwrap();let root=store.ensure_root("C:\\data").unwrap();
-        let generation=store.begin_generation(root).unwrap();
-        let mut records=(0..CANDIDATE_CAP+9).map(|index|rec(
-            &format!("C:\\data\\needle-{index:04}.png"),&format!("needle-{index:04}.png"),false)).collect::<Vec<_>>();
-        let wanted="C:\\data\\needlez.pdf";records.push(rec(wanted,"needlez.pdf",false));
-        store.apply_batch(root,generation,&records).unwrap();
-        for extensions in [vec!["pdf".into()],vec![".PDF".into()],vec!["txt".into(),"PDF".into()]] {
-            let hits=store.search(&SearchRequest {text:"needle".into(),extensions,limit:1,..Default::default()}).unwrap();
-            assert_eq!(hits.len(),1);assert_eq!(hits[0].path,wanted);
+        let mut store = IndexStore::open_in_memory().unwrap();
+        let root = store.ensure_root("C:\\data").unwrap();
+        let generation = store.begin_generation(root).unwrap();
+        let mut records = (0..CANDIDATE_CAP + 9)
+            .map(|index| {
+                rec(
+                    &format!("C:\\data\\needle-{index:04}.png"),
+                    &format!("needle-{index:04}.png"),
+                    false,
+                )
+            })
+            .collect::<Vec<_>>();
+        let wanted = "C:\\data\\needlez.pdf";
+        records.push(rec(wanted, "needlez.pdf", false));
+        store.apply_batch(root, generation, &records).unwrap();
+        for extensions in [
+            vec!["pdf".into()],
+            vec![".PDF".into()],
+            vec!["txt".into(), "PDF".into()],
+        ] {
+            let hits = store
+                .search(&SearchRequest {
+                    text: "needle".into(),
+                    extensions,
+                    limit: 1,
+                    ..Default::default()
+                })
+                .unwrap();
+            assert_eq!(hits.len(), 1);
+            assert_eq!(hits[0].path, wanted);
         }
-        assert!(store.search(&SearchRequest {text:"needle".into(),extensions:vec!["txt".into()],limit:1,..Default::default()}).unwrap().is_empty());
+        assert!(store
+            .search(&SearchRequest {
+                text: "needle".into(),
+                extensions: vec!["txt".into()],
+                limit: 1,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -667,7 +824,11 @@ mod tests {
         let root = store.ensure_root("C:\\data").unwrap();
         let gen = store.begin_generation(root).unwrap();
         store
-            .apply_batch(root, gen, &[rec("C:\\data\\100%_real.txt", "100%_real.txt", false)])
+            .apply_batch(
+                root,
+                gen,
+                &[rec("C:\\data\\100%_real.txt", "100%_real.txt", false)],
+            )
             .unwrap();
         let hits = store
             .search(&SearchRequest {

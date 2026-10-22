@@ -447,7 +447,8 @@ mod tests {
     fn select_excerpt_centers_on_matching_query_terms() {
         let prefix = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. ".repeat(10);
         let target = "The termination clause requires thirty days written notice before renewal.";
-        let suffix = " Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.".repeat(10);
+        let suffix =
+            " Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.".repeat(10);
         let full = format!("{prefix}{target}{suffix}");
 
         let excerpt = select_excerpt(&full, &["termination", "clause"], 140);
@@ -460,8 +461,14 @@ mod tests {
             "excerpt exceeded max_chars: {} ({excerpt:?})",
             excerpt.chars().count()
         );
-        assert!(excerpt.starts_with('…'), "expected leading ellipsis: {excerpt:?}");
-        assert!(excerpt.ends_with('…'), "expected trailing ellipsis: {excerpt:?}");
+        assert!(
+            excerpt.starts_with('…'),
+            "expected leading ellipsis: {excerpt:?}"
+        );
+        assert!(
+            excerpt.ends_with('…'),
+            "expected trailing ellipsis: {excerpt:?}"
+        );
     }
 
     #[test]
@@ -476,7 +483,10 @@ mod tests {
     #[test]
     fn anchored_excerpt_preserves_original_byte_position_through_whitespace_collapse() {
         let prefix = "界\t  \n".repeat(200);
-        let text = format!("{prefix}café invoice detail {}", "trailing context ".repeat(30));
+        let text = format!(
+            "{prefix}café invoice detail {}",
+            "trailing context ".repeat(30)
+        );
         let excerpt = select_excerpt_at(&text, prefix.len(), 80);
         assert!(excerpt.contains("café invoice detail"), "{excerpt:?}");
         assert!(excerpt.chars().count() <= 80);

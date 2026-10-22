@@ -65,7 +65,9 @@ pub fn normalize_vector(v: &[f32]) -> (Vec<f32>, f32) {
     }
     let norm = (norm_f64 as f32).min(f32::MAX);
     (
-        v.iter().map(|&x| (f64::from(x) / norm_f64) as f32).collect(),
+        v.iter()
+            .map(|&x| (f64::from(x) / norm_f64) as f32)
+            .collect(),
         norm,
     )
 }
@@ -406,9 +408,8 @@ impl VectorIndex {
         if query_norm == 0.0 {
             return Ok(Vec::new());
         }
-        let entry_set: Option<HashSet<i64>> = filter.and_then(|f| {
-            (!f.entry_ids.is_empty()).then(|| f.entry_ids.iter().copied().collect())
-        });
+        let entry_set: Option<HashSet<i64>> = filter
+            .and_then(|f| (!f.entry_ids.is_empty()).then(|| f.entry_ids.iter().copied().collect()));
 
         let stride = self.dim * 2;
         let mut hits = Vec::with_capacity(self.ids.len().min(top_k.saturating_mul(2)));
@@ -436,12 +437,12 @@ impl VectorIndex {
                 cosine: dot,
             });
         }
-        hits.sort_by(|a, b| {
-            b.cosine
-                .total_cmp(&a.cosine)
-                .then_with(|| a.id.cmp(&b.id))
-        });
-        Ok(hits.into_iter().filter(|hit| allowed(hit)).take(top_k).collect())
+        hits.sort_by(|a, b| b.cosine.total_cmp(&a.cosine).then_with(|| a.id.cmp(&b.id)));
+        Ok(hits
+            .into_iter()
+            .filter(|hit| allowed(hit))
+            .take(top_k)
+            .collect())
     }
 }
 
@@ -483,7 +484,11 @@ mod tests {
 
     #[test]
     fn zero_and_nonfinite_vectors_encode_to_zero_norm() {
-        for v in [vec![0.0, 0.0, 0.0], vec![f32::NAN, 1.0], vec![f32::INFINITY, 1.0]] {
+        for v in [
+            vec![0.0, 0.0, 0.0],
+            vec![f32::NAN, 1.0],
+            vec![f32::INFINITY, 1.0],
+        ] {
             let (normed, norm) = normalize_vector(&v);
             assert_eq!(norm, 0.0);
             assert!(normed.iter().all(|&x| x == 0.0));
@@ -530,8 +535,16 @@ mod tests {
             }
         }
         // Known angles.
-        assert!(approx_eq(cosine_similarity(&[1.0, 0.0], &[1.0, 0.0]), 1.0, 1e-6));
-        assert!(approx_eq(cosine_similarity(&[1.0, 0.0], &[0.0, 1.0]), 0.0, 1e-6));
+        assert!(approx_eq(
+            cosine_similarity(&[1.0, 0.0], &[1.0, 0.0]),
+            1.0,
+            1e-6
+        ));
+        assert!(approx_eq(
+            cosine_similarity(&[1.0, 0.0], &[0.0, 1.0]),
+            0.0,
+            1e-6
+        ));
         assert!(approx_eq(
             cosine_similarity(&[1.0, 0.0], &[-1.0, 0.0]),
             -1.0,
@@ -607,13 +620,12 @@ mod tests {
 
         assert!(idx.search(&[], 10, None).unwrap().is_empty());
         assert!(idx.search(&[0.0, 0.0], 10, None).unwrap().is_empty());
-        assert!(
-            idx.search(&[f32::NAN, 1.0], 10, None)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(idx.search(&[f32::NAN, 1.0], 10, None).unwrap().is_empty());
         assert!(idx.search(&[1.0, 0.0], 0, None).unwrap().is_empty());
-        assert!(VectorIndex::new(2).search(&[1.0, 0.0], 10, None).unwrap().is_empty());
+        assert!(VectorIndex::new(2)
+            .search(&[1.0, 0.0], 10, None)
+            .unwrap()
+            .is_empty());
         assert_eq!(
             idx.search(&[1.0, 0.0, 0.0], 10, None).unwrap_err(),
             VectorError::DimensionMismatch {

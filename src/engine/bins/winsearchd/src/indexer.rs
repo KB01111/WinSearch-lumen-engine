@@ -21,7 +21,9 @@ use ws_index::model::{
     compute_extract_priority, EngineConfig, EntryRecord, NewSegment, SearchRequest, UpsertOutcome,
     EMBED_BATCH_SIZE, EXTRACT_PRIORITY_NEW, EXTRACT_PRIORITY_UPDATED, SEGMENT_KIND_NAME,
 };
-use ws_index::{EntryRow, HitKind, IndexStats, IndexStore, ScoredSegment, SearchHit, StoreError, VectorFilter};
+use ws_index::{
+    EntryRow, HitKind, IndexStats, IndexStore, ScoredSegment, SearchHit, StoreError, VectorFilter,
+};
 
 use crate::catalog;
 use crate::crawl;
@@ -113,18 +115,36 @@ struct CachedVectors {
 }
 
 impl CachedVectors {
-    fn search(&self, query:&[f32], top_k:usize, filter:Option<&VectorFilter>, policy:&ws_protocol::IndexingConfig) -> Result<Vec<ws_index::VectorHit>,StoreError> {
-        let mut checked=std::collections::HashMap::new();
-        self.index.search_where(query,top_k,filter,|hit| {
-            let Some(proof)=self.sources.get(&hit.id) else {return false;};
-            *checked.entry((hit.entry_id,proof.source.as_deref())).or_insert_with(||
-                query_source_allowed(policy,&proof.path,proof.source.as_deref(),proof.is_app))
-        }).map_err(|error|StoreError::InvalidVector(error.to_string()))
+    fn search(
+        &self,
+        query: &[f32],
+        top_k: usize,
+        filter: Option<&VectorFilter>,
+        policy: &ws_protocol::IndexingConfig,
+    ) -> Result<Vec<ws_index::VectorHit>, StoreError> {
+        let mut checked = std::collections::HashMap::new();
+        self.index
+            .search_where(query, top_k, filter, |hit| {
+                let Some(proof) = self.sources.get(&hit.id) else {
+                    return false;
+                };
+                *checked
+                    .entry((hit.entry_id, proof.source.as_deref()))
+                    .or_insert_with(|| {
+                        query_source_allowed(
+                            policy,
+                            &proof.path,
+                            proof.source.as_deref(),
+                            proof.is_app,
+                        )
+                    })
+            })
+            .map_err(|error| StoreError::InvalidVector(error.to_string()))
     }
 }
 
 pub struct Indexer {
-    code_service:Mutex<Option<std::sync::Weak<crate::code::CodeService>>>,
+    code_service: Mutex<Option<std::sync::Weak<crate::code::CodeService>>>,
     store: Mutex<IndexStore>,
     vector_index: std::sync::RwLock<Option<CachedVectors>>,
     cache_epoch: std::sync::atomic::AtomicU64,
@@ -141,7 +161,9 @@ pub struct Indexer {
 
 impl Indexer {
     fn root_snapshot(&self) -> Vec<Arc<RootInfo>> {
-        if !self.policy_admitted.load(Ordering::Acquire) { return Vec::new(); }
+        if !self.policy_admitted.load(Ordering::Acquire) {
+            return Vec::new();
+        }
         self.roots.read().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
@@ -174,8 +196,18 @@ impl Indexer {
             || *self.policy.read().unwrap_or_else(|p| p.into_inner()) != config;
         let mut store = self.store_lock();
         store.set_indexing_config(&config)?;
-        if policy_changed { self.policy_epoch.fetch_add(1, Ordering::AcqRel); }
-        if let Some(code)=self.code_service.lock().unwrap_or_else(|p|p.into_inner()).as_ref().and_then(|w|w.upgrade()) {code.policy_changed();}
+        if policy_changed {
+            self.policy_epoch.fetch_add(1, Ordering::AcqRel);
+        }
+        if let Some(code) = self
+            .code_service
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+            .and_then(|w| w.upgrade())
+        {
+            code.policy_changed();
+        }
         *self.policy.write().unwrap_or_else(|p| p.into_inner()) = config.clone();
         let mut roots = Vec::new();
         for row in store
@@ -185,7 +217,9 @@ impl Indexer {
         {
             let path = PathBuf::from(row.path);
             let present = path.is_dir();
-            if !present { store.set_missing_for_root(row.id, true)?; }
+            if !present {
+                store.set_missing_for_root(row.id, true)?;
+            }
             roots.push(Arc::new(RootInfo {
                 id: row.id,
                 path,
@@ -214,10 +248,9 @@ impl Indexer {
     }
     pub(crate) fn name_path_allowed(&self, path: &Path) -> bool {
         let policy = self.policy.read().unwrap_or_else(|p| p.into_inner());
-        self.policy_admitted.load(Ordering::Acquire) && crate::policy::path_allowed(
-            &policy,
-            &path.to_string_lossy(),
-        ) && crate::policy::metadata_safe(path, false)
+        self.policy_admitted.load(Ordering::Acquire)
+            && crate::policy::path_allowed(&policy, &path.to_string_lossy())
+            && crate::policy::metadata_safe(path, false)
             && crate::policy::metadata_allowed(&policy, path, false)
     }
     pub fn content_path_allowed(&self, path: &Path) -> bool {
@@ -248,7 +281,11 @@ impl Indexer {
         Self::open_with_admission(store, roots, true)
     }
 
-    fn open_with_admission(store: IndexStore, roots: &[PathBuf], admitted: bool) -> Result<Arc<Self>, StoreError> {
+    fn open_with_admission(
+        store: IndexStore,
+        roots: &[PathBuf],
+        admitted: bool,
+    ) -> Result<Arc<Self>, StoreError> {
         let mut store = store;
         // Claims left by a crashed run become work again (crawl queue and
         // embed queue alike: a crash mid-batch re-runs the idempotent work).
@@ -259,20 +296,32 @@ impl Indexer {
         }
         let mut config = store.get_or_migrate_indexing_config()?;
         if !roots.is_empty() {
-            config.roots = roots.iter().map(|r| r.to_string_lossy().into_owned()).collect();
+            config.roots = roots
+                .iter()
+                .map(|r| r.to_string_lossy().into_owned())
+                .collect();
             config = crate::policy::validate(&config)?;
             store.set_indexing_config(&config)?;
         }
         let config = crate::policy::validate(&config)?;
-        let policy=Arc::new(std::sync::RwLock::new(config.clone()));
+        let policy = Arc::new(std::sync::RwLock::new(config.clone()));
         let policy_admitted = Arc::new(AtomicBool::new(admitted));
         let query_admitted = policy_admitted.clone();
-        let query_policy=policy.clone();
-        store.set_query_source_guard(move |path,source,is_app| {
+        let query_policy = policy.clone();
+        store.set_query_source_guard(move |path, source, is_app| {
             query_admitted.load(Ordering::Acquire)
-                && query_source_allowed(&query_policy.read().unwrap_or_else(|p|p.into_inner()),path,source,is_app)
+                && query_source_allowed(
+                    &query_policy.read().unwrap_or_else(|p| p.into_inner()),
+                    path,
+                    source,
+                    is_app,
+                )
         })?;
-        let selected: Vec<PathBuf> = if admitted { config.roots.iter().map(PathBuf::from).collect() } else { Vec::new() };
+        let selected: Vec<PathBuf> = if admitted {
+            config.roots.iter().map(PathBuf::from).collect()
+        } else {
+            Vec::new()
+        };
         let mut infos = Vec::new();
         for root in &selected {
             let path = root.to_string_lossy().into_owned();
@@ -289,7 +338,7 @@ impl Indexer {
             }));
         }
         Ok(Arc::new(Self {
-            code_service:Mutex::new(None),
+            code_service: Mutex::new(None),
             store: Mutex::new(store),
             vector_index: std::sync::RwLock::new(None),
             cache_epoch: std::sync::atomic::AtomicU64::new(1),
@@ -322,7 +371,9 @@ impl Indexer {
             for root in &self.root_snapshot() {
                 match self.spawn_watcher(root) {
                     Some(w) => watchers.push(w),
-                    None => warn!(root = %root.path.display(), "root not present yet; watching after reconnect"),
+                    None => {
+                        warn!(root = %root.path.display(), "root not present yet; watching after reconnect")
+                    }
                 }
             }
         }
@@ -344,7 +395,9 @@ impl Indexer {
 
     /// Enqueues a full scan of every root (first run, reconnect, or rescan).
     pub fn enqueue_initial_scan(&self) -> Result<(), StoreError> {
-        if !self.policy_admitted.load(Ordering::Acquire) { return Ok(()); }
+        if !self.policy_admitted.load(Ordering::Acquire) {
+            return Ok(());
+        }
         self.enqueue_scans_for_roots(&self.root_snapshot())
     }
 
@@ -380,7 +433,7 @@ impl Indexer {
         top_k: usize,
         filter: Option<&VectorFilter>,
     ) -> Result<Vec<ScoredSegment>, StoreError> {
-        let epoch=self.search_epoch();
+        let epoch = self.search_epoch();
         if !self.policy_admitted.load(Ordering::Acquire) || top_k == 0 || query.is_empty() {
             return Ok(Vec::new());
         }
@@ -389,18 +442,23 @@ impl Indexer {
             return Ok(Vec::new());
         }
         let dim = query.len();
-        let policy=self.get_indexing_config()?;
+        let policy = self.get_indexing_config()?;
         let need_build = {
             let guard = self.vector_index.read().unwrap_or_else(|p| p.into_inner());
-            !guard.as_ref().is_some_and(|cached| cached.index.dim() == dim)
+            !guard
+                .as_ref()
+                .is_some_and(|cached| cached.index.dim() == dim)
         };
         let hits = if need_build {
             let epoch = self.cache_epoch.load(Ordering::Acquire);
             let built = {
-                let store=self.store_lock();
-                CachedVectors {index:ws_index::VectorIndex::from_segments(dim,&store.all_segments()?),sources:store.segment_sources()?}
+                let store = self.store_lock();
+                CachedVectors {
+                    index: ws_index::VectorIndex::from_segments(dim, &store.all_segments()?),
+                    sources: store.segment_sources()?,
+                }
             };
-            let hits = built.search(query, top_k, filter,&policy)?;
+            let hits = built.search(query, top_k, filter, &policy)?;
             let mut guard = self.vector_index.write().unwrap_or_else(|p| p.into_inner());
             if self.cache_epoch.load(Ordering::Acquire) == epoch {
                 *guard = Some(built);
@@ -410,7 +468,7 @@ impl Indexer {
             let guard = self.vector_index.read().unwrap_or_else(|p| p.into_inner());
             match guard.as_ref() {
                 Some(cached) if cached.index.dim() == dim => {
-                    cached.search(query, top_k, filter,&policy)?
+                    cached.search(query, top_k, filter, &policy)?
                 }
                 _ => Vec::new(),
             }
@@ -419,24 +477,34 @@ impl Indexer {
             return Ok(Vec::new());
         }
         let store = self.store.lock().unwrap_or_else(|p| p.into_inner());
-        if self.search_epoch()!=epoch {return Ok(Vec::new());}
+        if self.search_epoch() != epoch {
+            return Ok(Vec::new());
+        }
         let mut out = Vec::with_capacity(hits.len());
         for hit in hits {
             if let Some(segment) = store.get_segment(hit.id)? {
-                if !store.segment_source_allowed(&segment)? { continue; }
+                if !store.segment_source_allowed(&segment)? {
+                    continue;
+                }
                 out.push(ScoredSegment {
                     segment,
                     cosine: hit.cosine,
                 });
             }
         }
-        if self.search_epoch()!=epoch {return Ok(Vec::new());}
+        if self.search_epoch() != epoch {
+            return Ok(Vec::new());
+        }
         Ok(out)
     }
 
-    pub(crate) fn search_epoch(&self)->u64 {self.cache_epoch.load(Ordering::Acquire)}
+    pub(crate) fn search_epoch(&self) -> u64 {
+        self.cache_epoch.load(Ordering::Acquire)
+    }
 
-    pub(crate) fn policy_epoch(&self)->u64 {self.policy_epoch.load(Ordering::Acquire)}
+    pub(crate) fn policy_epoch(&self) -> u64 {
+        self.policy_epoch.load(Ordering::Acquire)
+    }
 
     pub(crate) fn invalidate_vector_cache(&self) {
         self.cache_epoch.fetch_add(1, Ordering::AcqRel);
@@ -448,8 +516,19 @@ impl Indexer {
         let mut guard = self.vector_index.write().unwrap_or_else(|p| p.into_inner());
         if let Some(ref mut cached) = *guard {
             if cached.index.dim() == vec.len() {
-                if cached.index.add_or_update(seg_id, entry.id, SEGMENT_KIND_NAME, vec).is_ok() {
-                    cached.sources.insert(seg_id,ws_index::store::SegmentSource {path:entry.path.clone(),is_app:entry.is_app,source:None});
+                if cached
+                    .index
+                    .add_or_update(seg_id, entry.id, SEGMENT_KIND_NAME, vec)
+                    .is_ok()
+                {
+                    cached.sources.insert(
+                        seg_id,
+                        ws_index::store::SegmentSource {
+                            path: entry.path.clone(),
+                            is_app: entry.is_app,
+                            source: None,
+                        },
+                    );
                 }
             } else {
                 *guard = None;
@@ -461,18 +540,35 @@ impl Indexer {
     /// scored segments through this).
     pub fn get_entry_by_id(&self, id: i64) -> Result<Option<EntryRow>, StoreError> {
         let store = self.store_lock();
-        if !store.entry_visible(id)? { return Ok(None); }
+        if !store.entry_visible(id)? {
+            return Ok(None);
+        }
         store.get_entry(id)
     }
 
-    pub(crate) fn segment_thumbnail(&self,segment:&ws_index::model::Segment) -> Result<Option<String>,StoreError> {
+    pub(crate) fn segment_thumbnail(
+        &self,
+        segment: &ws_index::model::Segment,
+    ) -> Result<Option<String>, StoreError> {
         self.store_lock().segment_thumbnail(segment)
     }
 
     /// Filter before vector top-k, while preserving source checks in vector retrieval.
-    pub fn matching_entry_ids_filtered(&self,apps_only:bool,exclude_apps:bool,
-        kinds:&[ws_index::HitKind],extensions:&[String],file_kinds:&[ws_protocol::FileKind])->Result<Vec<i64>,StoreError> {
-        self.store_lock().matching_entry_ids_filtered(apps_only,exclude_apps,kinds,extensions,file_kinds)
+    pub fn matching_entry_ids_filtered(
+        &self,
+        apps_only: bool,
+        exclude_apps: bool,
+        kinds: &[ws_index::HitKind],
+        extensions: &[String],
+        file_kinds: &[ws_protocol::FileKind],
+    ) -> Result<Vec<i64>, StoreError> {
+        self.store_lock().matching_entry_ids_filtered(
+            apps_only,
+            exclude_apps,
+            kinds,
+            extensions,
+            file_kinds,
+        )
     }
 
     /// Engine search policy for the semantic stage (`semantic_enabled`
@@ -491,7 +587,13 @@ impl Indexer {
             .unwrap_or_else(|p| p.into_inner())
             .set_engine_config(config)?;
         self.invalidate_vector_cache();
-        if let Some(code)=self.code_service.lock().unwrap_or_else(|p|p.into_inner()).as_ref().and_then(|w|w.upgrade()) {
+        if let Some(code) = self
+            .code_service
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+            .and_then(|w| w.upgrade())
+        {
             code.policy_changed();
         }
         Ok(())
@@ -603,17 +705,30 @@ impl Indexer {
         drop(store);
         self.invalidate_vector_cache();
         if purged > 0 || enqueued > 0 {
-            info!(purged, enqueued, "purged stale name vectors; requeued for re-embed");
+            info!(
+                purged,
+                enqueued, "purged stale name vectors; requeued for re-embed"
+            );
         }
         Ok((purged, enqueued))
     }
 
     // ---- crawl workers ----
 
-    pub(crate) fn set_code_service(&self,code:std::sync::Weak<crate::code::CodeService>) { *self.code_service.lock().unwrap_or_else(|p|p.into_inner())=Some(code); }
+    pub(crate) fn set_code_service(&self, code: std::sync::Weak<crate::code::CodeService>) {
+        *self.code_service.lock().unwrap_or_else(|p| p.into_inner()) = Some(code);
+    }
 
     pub(crate) fn notify_work(&self) {
-        if let Some(code)=self.code_service.lock().unwrap_or_else(|p|p.into_inner()).as_ref().and_then(|w|w.upgrade()) {code.signal();}
+        if let Some(code) = self
+            .code_service
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+            .and_then(|w| w.upgrade())
+        {
+            code.signal();
+        }
         let mut guard = self.wake.0.lock().unwrap_or_else(|p| p.into_inner());
         *guard = true;
         self.wake.1.notify_all();
@@ -625,9 +740,16 @@ impl Indexer {
     pub fn scan_available(&self, max_dirs: usize) -> usize {
         let mut processed = 0;
         for _ in 0..max_dirs {
-            if self.indexing_pause_reason().is_some() { break; }
-            let work = { let mut store = self.store_lock();
-                if self.indexing_pause_reason().is_some() { Ok(None) } else { store.claim_dir_with_generation() }
+            if self.indexing_pause_reason().is_some() {
+                break;
+            }
+            let work = {
+                let mut store = self.store_lock();
+                if self.indexing_pause_reason().is_some() {
+                    Ok(None)
+                } else {
+                    store.claim_dir_with_generation()
+                }
             };
             match work {
                 Ok(Some((queue_id, root_id, dir_path, claimed_gen))) => {
@@ -647,9 +769,17 @@ impl Indexer {
             if self.shutdown.load(Ordering::SeqCst) {
                 return;
             }
-            if self.indexing_pause_reason().is_some() { self.wait_for_work(); continue; }
-            let work = { let mut store = self.store_lock();
-                if self.indexing_pause_reason().is_some() { Ok(None) } else { store.claim_dir_with_generation() }
+            if self.indexing_pause_reason().is_some() {
+                self.wait_for_work();
+                continue;
+            }
+            let work = {
+                let mut store = self.store_lock();
+                if self.indexing_pause_reason().is_some() {
+                    Ok(None)
+                } else {
+                    store.claim_dir_with_generation()
+                }
             };
             match work {
                 Ok(Some((queue_id, root_id, dir_path, claimed_gen))) => {
@@ -688,7 +818,9 @@ impl Indexer {
     }
 
     fn is_excluded_under_root(&self, root_id: i64, path: &Path, is_dir: bool) -> bool {
-        if !self.name_path_allowed(path) { return true; }
+        if !self.name_path_allowed(path) {
+            return true;
+        }
         let roots = self.root_snapshot();
         let rel = roots
             .iter()
@@ -710,8 +842,7 @@ impl Indexer {
         let Some((leaf, ancestors)) = comps.split_last() else {
             return false;
         };
-        ancestors.iter().any(|a| crawl::is_excluded(a, true))
-            || crawl::is_excluded(leaf, is_dir)
+        ancestors.iter().any(|a| crawl::is_excluded(a, true)) || crawl::is_excluded(leaf, is_dir)
     }
 
     fn process_dir(
@@ -721,7 +852,10 @@ impl Indexer {
         dir_path: &str,
         claimed_generation: i64,
     ) -> Result<(), StoreError> {
-        if !self.name_path_allowed(Path::new(dir_path)) { self.store_lock().complete_dir(queue_id)?; return Ok(()); }
+        if !self.name_path_allowed(Path::new(dir_path)) {
+            self.store_lock().complete_dir(queue_id)?;
+            return Ok(());
+        }
         let depth = self.relative_depth(root_id, dir_path);
         let parent_id = self
             .store
@@ -731,8 +865,18 @@ impl Indexer {
             .map(|e| e.id);
 
         let mut scan_failed = false;
-        let include_hidden = crate::policy::include_hidden(&self.policy.read().unwrap_or_else(|p| p.into_inner()), dir_path, false);
-        let mut scan = match crawl::scan_directory_with_hidden(root_id, dir_path, parent_id, depth, include_hidden) {
+        let include_hidden = crate::policy::include_hidden(
+            &self.policy.read().unwrap_or_else(|p| p.into_inner()),
+            dir_path,
+            false,
+        );
+        let mut scan = match crawl::scan_directory_with_hidden(
+            root_id,
+            dir_path,
+            parent_id,
+            depth,
+            include_hidden,
+        ) {
             Ok(s) => s,
             Err(e) => {
                 warn!(dir = %dir_path, error = %e, "scan error");
@@ -742,10 +886,13 @@ impl Indexer {
         };
 
         let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
-        scan.entries.retain(|e| self.name_path_allowed(Path::new(&e.path)));
-        scan.subdirs.retain(|p| self.name_path_allowed(Path::new(p)));
+        scan.entries
+            .retain(|e| self.name_path_allowed(Path::new(&e.path)));
+        scan.subdirs
+            .retain(|p| self.name_path_allowed(Path::new(p)));
         let generation = self.current_generation(&store, root_id)?;
-        let superseded = claimed_generation != generation || !self.name_path_allowed(Path::new(dir_path));
+        let superseded =
+            claimed_generation != generation || !self.name_path_allowed(Path::new(dir_path));
         if !superseded {
             if scan_failed {
                 store.touch_subtree_generation(root_id, dir_path, generation)?;
@@ -813,7 +960,9 @@ impl Indexer {
     }
 
     fn apply_event(&self, root_id: i64, event: &WatchEvent) -> Result<(), StoreError> {
-        if !self.root_snapshot().iter().any(|r| r.id == root_id) { return Ok(()); }
+        if !self.root_snapshot().iter().any(|r| r.id == root_id) {
+            return Ok(());
+        }
         match event {
             WatchEvent::Created(path) => {
                 let is_dir = path.is_dir();
@@ -821,7 +970,11 @@ impl Indexer {
                     let path_str = path.to_string_lossy().into_owned();
                     if is_dir {
                         let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
-                        if !store.root_enabled(root_id)? || self.is_excluded_under_root(root_id, path, true) { return Ok(()); }
+                        if !store.root_enabled(root_id)?
+                            || self.is_excluded_under_root(root_id, path, true)
+                        {
+                            return Ok(());
+                        }
                         store.enqueue_dir(root_id, &path_str)?;
                         drop(store);
                         self.notify_work();
@@ -832,7 +985,9 @@ impl Indexer {
             }
             WatchEvent::Deleted(path) => {
                 let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
-                if !store.root_enabled(root_id)? { return Ok(()); }
+                if !store.root_enabled(root_id)? {
+                    return Ok(());
+                }
                 let removed = store.remove_tree(&path.to_string_lossy())?;
                 drop(store);
                 if removed > 0 {
@@ -870,7 +1025,9 @@ impl Indexer {
             }
             WatchEvent::Renamed { from, to } => {
                 let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
-                if !store.root_enabled(root_id)? { return Ok(()); }
+                if !store.root_enabled(root_id)? {
+                    return Ok(());
+                }
                 let to_excluded = self.is_excluded_under_root(root_id, to, to.is_dir());
                 let from_str = from.to_string_lossy().into_owned();
                 if to_excluded {
@@ -889,9 +1046,7 @@ impl Indexer {
                                 .map(|n| n.to_string_lossy().into_owned())
                                 .unwrap_or_default();
                             let ext = ws_index::model::extension_of(&name);
-                            let parent_id = store
-                                .find_by_path(&parent_of(&to_str))?
-                                .map(|e| e.id);
+                            let parent_id = store.find_by_path(&parent_of(&to_str))?.map(|e| e.id);
                             store.move_entry(row.id, parent_id, &to_str, &name, &ext)?;
                             if !row.is_dir {
                                 store.invalidate_content_source(row.id)?;
@@ -946,7 +1101,9 @@ impl Indexer {
                                     self.invalidate_vector_cache();
                                 }
                                 let mut s = self.store.lock().unwrap_or_else(|p| p.into_inner());
-                                if s.root_enabled(root_id)? && !self.is_excluded_under_root(root_id, to, true) {
+                                if s.root_enabled(root_id)?
+                                    && !self.is_excluded_under_root(root_id, to, true)
+                                {
                                     s.enqueue_dir(root_id, &to_str)?;
                                 }
                                 drop(s);
@@ -966,7 +1123,9 @@ impl Indexer {
             }
             WatchEvent::Overflow => {
                 let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
-                if !store.root_enabled(root_id)? { return Ok(()); }
+                if !store.root_enabled(root_id)? {
+                    return Ok(());
+                }
                 let root = self
                     .root_snapshot()
                     .iter()
@@ -975,7 +1134,8 @@ impl Indexer {
                 if let Some(root_path) = root {
                     let gen = store.begin_generation(root_id)?;
                     store.requeue_dir(root_id, &root_path)?;
-                    store.set_checkpoint(&format!("root:{root_id}:generation"), &gen.to_string())?;
+                    store
+                        .set_checkpoint(&format!("root:{root_id}:generation"), &gen.to_string())?;
                 }
                 drop(store);
                 self.notify_work();
@@ -1004,15 +1164,20 @@ impl Indexer {
             })
             .map(|e| e.id);
 
-        let include_hidden = crate::policy::include_hidden(&self.policy.read().unwrap_or_else(|p| p.into_inner()), &path.to_string_lossy(), false);
-        let record = match crawl::record_for_path_with_hidden(root_id, parent_id, path, include_hidden) {
-            Ok(Some(r)) => r,
-            Ok(None) => return Ok(()), // excluded or vanished
-            Err(e) => {
-                warn!(path = %path.display(), error = %e, "stat failed");
-                return Ok(());
-            }
-        };
+        let include_hidden = crate::policy::include_hidden(
+            &self.policy.read().unwrap_or_else(|p| p.into_inner()),
+            &path.to_string_lossy(),
+            false,
+        );
+        let record =
+            match crawl::record_for_path_with_hidden(root_id, parent_id, path, include_hidden) {
+                Ok(Some(r)) => r,
+                Ok(None) => return Ok(()), // excluded or vanished
+                Err(e) => {
+                    warn!(path = %path.display(), error = %e, "stat failed");
+                    return Ok(());
+                }
+            };
 
         self.commit_point_record(root_id, &record)
     }
@@ -1069,7 +1234,9 @@ impl Indexer {
     }
 
     fn refresh_catalog(&self) -> Result<(), StoreError> {
-        if !self.policy_admitted.load(Ordering::Acquire) { return Ok(()); }
+        if !self.policy_admitted.load(Ordering::Acquire) {
+            return Ok(());
+        }
         let scan = catalog::scan_catalog_full(&catalog::app_roots());
         let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
         let root_id = store.ensure_root(CATALOG_ROOT)?;
@@ -1134,11 +1301,7 @@ impl Indexer {
             };
             // The upsert just wrote the row: resolve its id by path.
             if let Some(row) = store.find_by_path(&rec.path)? {
-                store.enqueue_extract_job_with_priority(
-                    row.id,
-                    SEGMENT_KIND_NAME,
-                    priority,
-                )?;
+                store.enqueue_extract_job_with_priority(row.id, SEGMENT_KIND_NAME, priority)?;
                 if !rec.is_dir && !rec.is_app {
                     if let Some(modality_kind) = modality_kind_for_ext(&rec.ext) {
                         let content_priority =
@@ -1185,10 +1348,14 @@ impl Indexer {
     where
         F: Fn(&[String]) -> Result<Vec<Vec<f32>>, String>,
     {
-        if self.indexing_pause_reason().is_some() { return Ok(EmbedBatchOutcome::default()); }
+        if self.indexing_pause_reason().is_some() {
+            return Ok(EmbedBatchOutcome::default());
+        }
         let (claimed, generation): (Vec<ClaimedNameJob>, i64) = {
             let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
-            if self.indexing_pause_reason().is_some() { return Ok(EmbedBatchOutcome::default()); }
+            if self.indexing_pause_reason().is_some() {
+                return Ok(EmbedBatchOutcome::default());
+            }
             let jobs = store.claim_extract_jobs_batch_for_kind(SEGMENT_KIND_NAME, EMBED_BATCH)?;
             let mut out = Vec::with_capacity(jobs.len());
             for job in jobs {
@@ -1214,7 +1381,10 @@ impl Indexer {
         if claimed.is_empty() {
             return Ok(EmbedBatchOutcome::default());
         }
-        let texts: Vec<String> = claimed.iter().map(|c| ws_modelmgr::recipe::filename(&c.name).to_owned()).collect();
+        let texts: Vec<String> = claimed
+            .iter()
+            .map(|c| ws_modelmgr::recipe::filename(&c.name).to_owned())
+            .collect();
         let vecs = match embed(&texts) {
             Ok(v) => v,
             Err(e) => {
@@ -1241,7 +1411,11 @@ impl Indexer {
             }
         };
         if vecs.len() != claimed.len() {
-            warn!(got = vecs.len(), want = claimed.len(), "embed arity mismatch; releasing batch for retry");
+            warn!(
+                got = vecs.len(),
+                want = claimed.len(),
+                "embed arity mismatch; releasing batch for retry"
+            );
             let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
             let mut failed = 0usize;
             let mut poisoned = 0usize;
@@ -1280,7 +1454,8 @@ impl Indexer {
                     continue;
                 };
                 if !fresh.is_app && !self.name_path_allowed(Path::new(&fresh.path)) {
-                    store.requeue_extract_job(c.job_id)?; continue;
+                    store.requeue_extract_job(c.job_id)?;
+                    continue;
                 }
                 // I2: the entry changed under our claimed batch (the
                 // concurrent write already bumped the job's priority via the
@@ -1382,23 +1557,21 @@ impl Indexer {
         let weak: Weak<Self> = Arc::downgrade(self);
         std::thread::Builder::new()
             .name("winsearch-embed-sched".into())
-            .spawn(move || {
-                loop {
-                    let Some(indexer) = weak.upgrade() else {
-                        return;
-                    };
-                    if indexer.shutdown.load(Ordering::SeqCst) {
-                        return;
+            .spawn(move || loop {
+                let Some(indexer) = weak.upgrade() else {
+                    return;
+                };
+                if indexer.shutdown.load(Ordering::SeqCst) {
+                    return;
+                }
+                match indexer.embed_once_with_supervisor(&embed) {
+                    Ok(out) if out.claimed == 0 => {
+                        indexer.wait_for_work();
                     }
-                    match indexer.embed_once_with_supervisor(&embed) {
-                        Ok(out) if out.claimed == 0 => {
-                            indexer.wait_for_work();
-                        }
-                        Ok(_) => {}
-                        Err(e) => {
-                            warn!(error = %e, "embed batch error");
-                            std::thread::sleep(std::time::Duration::from_secs(1));
-                        }
+                    Ok(_) => {}
+                    Err(e) => {
+                        warn!(error = %e, "embed batch error");
+                        std::thread::sleep(std::time::Duration::from_secs(1));
                     }
                 }
             })
@@ -1440,8 +1613,7 @@ impl Indexer {
                 info!(root = %root.path.display(), "volume disconnected; preserving index");
                 root.offline.store(true, Ordering::Release);
                 root.missing_mark_pending.store(true, Ordering::Release);
-                let mut store =
-                    self.store.lock().unwrap_or_else(|p| p.into_inner());
+                let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
                 match store.set_missing_for_root(root.id, true) {
                     Ok(_) => root.missing_mark_pending.store(false, Ordering::Release),
                     Err(e) => warn!(error = %e, "marking missing failed"),
@@ -1457,8 +1629,13 @@ impl Indexer {
     }
 
     fn reconnect_root(self: &Arc<Self>, root: &RootInfo) -> Result<(), StoreError> {
-        let _change = self.configuration_change.lock().unwrap_or_else(|p| p.into_inner());
-        if !self.store_lock().root_enabled(root.id)? { return Ok(()); }
+        let _change = self
+            .configuration_change
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if !self.store_lock().root_enabled(root.id)? {
+            return Ok(());
+        }
         {
             let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
             store.set_missing_for_root(root.id, false)?;
@@ -1501,15 +1678,24 @@ impl Indexer {
 /// Pseudo-root for the application catalog (its entries carry real paths).
 pub const CATALOG_ROOT: &str = "@apps";
 
-fn query_source_allowed(policy:&ws_protocol::IndexingConfig,path:&str,source:Option<&str>,is_app:bool)->bool {
-    if is_app {return source.is_none();}
-    let path=Path::new(path);
-    crate::policy::path_allowed(policy,&path.to_string_lossy())
-        && crate::policy::metadata_safe(path,source.is_some())
-        && crate::policy::metadata_allowed(policy,path,false)
-        && source.is_none_or(|saved| !saved.is_empty()
-            && crate::policy::ordinary_content_allowed(policy,path)
-            && crate::extract::source_snapshot(path)==saved)
+fn query_source_allowed(
+    policy: &ws_protocol::IndexingConfig,
+    path: &str,
+    source: Option<&str>,
+    is_app: bool,
+) -> bool {
+    if is_app {
+        return source.is_none();
+    }
+    let path = Path::new(path);
+    crate::policy::path_allowed(policy, &path.to_string_lossy())
+        && crate::policy::metadata_safe(path, source.is_some())
+        && crate::policy::metadata_allowed(policy, path, false)
+        && source.is_none_or(|saved| {
+            !saved.is_empty()
+                && crate::policy::ordinary_content_allowed(policy, path)
+                && crate::extract::source_snapshot(path) == saved
+        })
 }
 
 fn parent_of(path: &str) -> String {
@@ -1547,7 +1733,8 @@ mod tests {
         let database = tree.0.join("engine.sqlite3");
         let mut selected = ws_protocol::IndexingConfig {
             roots: vec![root.to_string_lossy().into_owned()],
-            code_enabled: true, code_roots: vec![root.to_string_lossy().into_owned()],
+            code_enabled: true,
+            code_roots: vec![root.to_string_lossy().into_owned()],
             ..Default::default()
         };
         let id = {
@@ -1555,33 +1742,77 @@ mod tests {
             store.set_indexing_config(&selected).unwrap();
             let root_id = store.ensure_root(&root.to_string_lossy()).unwrap();
             let generation = store.begin_generation(root_id).unwrap();
-            let record = crawl::record_for_path(root_id, None, &path).unwrap().unwrap();
+            let record = crawl::record_for_path(root_id, None, &path)
+                .unwrap()
+                .unwrap();
             store.apply_batch(root_id, generation, &[record]).unwrap();
-            let id = store.find_by_path(&path.to_string_lossy()).unwrap().unwrap().id;
+            let id = store
+                .find_by_path(&path.to_string_lossy())
+                .unwrap()
+                .unwrap()
+                .id;
             store.enqueue_dir(root_id, &root.to_string_lossy()).unwrap();
-            store.enqueue_extract_job_with_priority(id, "name", EXTRACT_PRIORITY_NEW).unwrap();
-            store.enqueue_extract_job_with_priority(id, "doc", EXTRACT_PRIORITY_NEW).unwrap();
-            store.upsert_segment(NewSegment { entry_id:id, kind:"name", chunk_index:0,
-                text:"saved-admission.txt", page:None, start_ms:None, end_ms:None, line:None,
-                vector:&[1.0, 0.0] }).unwrap();
+            store
+                .enqueue_extract_job_with_priority(id, "name", EXTRACT_PRIORITY_NEW)
+                .unwrap();
+            store
+                .enqueue_extract_job_with_priority(id, "doc", EXTRACT_PRIORITY_NEW)
+                .unwrap();
+            store
+                .upsert_segment(NewSegment {
+                    entry_id: id,
+                    kind: "name",
+                    chunk_index: 0,
+                    text: "saved-admission.txt",
+                    page: None,
+                    start_ms: None,
+                    end_ms: None,
+                    line: None,
+                    vector: &[1.0, 0.0],
+                })
+                .unwrap();
             id
         };
         let indexer = Indexer::open_deferred(IndexStore::open(&database).unwrap()).unwrap();
         let effective = indexer.get_indexing_config().unwrap();
-        assert!(effective.roots.is_empty(), "saved folders are not current host consent");
+        assert!(
+            effective.roots.is_empty(),
+            "saved folders are not current host consent"
+        );
         assert!(effective.paused && !effective.code_enabled && effective.code_roots.is_empty());
-        assert_eq!(indexer.indexing_pause_reason().as_deref(), Some("Awaiting host folder policy"));
+        assert_eq!(
+            indexer.indexing_pause_reason().as_deref(),
+            Some("Awaiting host folder policy")
+        );
         assert!(indexer.root_snapshot().is_empty());
         assert!(!indexer.name_path_allowed(&path) && !indexer.content_path_allowed(&path));
-        assert!(indexer.search(&SearchRequest { text:"saved-admission".into(), limit:10,
-            ..Default::default() }).unwrap().is_empty());
-        assert!(indexer.search_vectors(&[1.0,0.0], 10, None).unwrap().is_empty());
+        assert!(indexer
+            .search(&SearchRequest {
+                text: "saved-admission".into(),
+                limit: 10,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty());
+        assert!(indexer
+            .search_vectors(&[1.0, 0.0], 10, None)
+            .unwrap()
+            .is_empty());
         indexer.enqueue_initial_scan().unwrap();
         indexer.reconcile_drives();
         assert_eq!(indexer.scan_available(64), 0);
-        assert_eq!(indexer.embed_once_with(|_| panic!("embedding before admission")).unwrap().claimed, 0);
-        let extracted = indexer.extract_once_with(&crate::extract::ExtractorRegistry::default(),
-            |_| panic!("content extraction before admission")).unwrap();
+        assert_eq!(
+            indexer
+                .embed_once_with(|_| panic!("embedding before admission"))
+                .unwrap()
+                .claimed,
+            0
+        );
+        let extracted = indexer
+            .extract_once_with(&crate::extract::ExtractorRegistry::default(), |_| {
+                panic!("content extraction before admission")
+            })
+            .unwrap();
         assert!(!extracted.claimed);
         {
             let mut store = indexer.store_lock();
@@ -1597,28 +1828,57 @@ mod tests {
         selected.paused = true;
         indexer.set_indexing_config(&selected).unwrap();
         assert_eq!(indexer.get_indexing_config().unwrap(), selected);
-        assert_eq!(indexer.search(&SearchRequest { text:"saved-admission".into(), limit:10,
-            ..Default::default() }).unwrap().len(), 1);
-        selected.roots.clear(); selected.code_enabled = false; selected.code_roots.clear();
+        assert_eq!(
+            indexer
+                .search(&SearchRequest {
+                    text: "saved-admission".into(),
+                    limit: 10,
+                    ..Default::default()
+                })
+                .unwrap()
+                .len(),
+            1
+        );
+        selected.roots.clear();
+        selected.code_enabled = false;
+        selected.code_roots.clear();
         indexer.set_indexing_config(&selected).unwrap();
-        assert!(indexer.search(&SearchRequest { text:"saved-admission".into(), limit:10,
-            ..Default::default() }).unwrap().is_empty());
+        assert!(indexer
+            .search(&SearchRequest {
+                text: "saved-admission".into(),
+                limit: 10,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty());
         assert_eq!(indexer.store_lock().get_entry(id).unwrap().unwrap().id, id);
     }
 
     #[test]
     fn deferred_admission_invalid_policy_does_not_unlock_catalog_or_acceptance() {
         let indexer = Indexer::open_deferred(IndexStore::open_in_memory().unwrap()).unwrap();
-        let invalid = ws_protocol::IndexingConfig { roots:vec!["relative-folder".into()], ..Default::default() };
+        let invalid = ws_protocol::IndexingConfig {
+            roots: vec!["relative-folder".into()],
+            ..Default::default()
+        };
         assert!(indexer.set_indexing_config(&invalid).is_err());
         indexer.refresh_catalog().unwrap();
-        assert!(indexer.store_lock().roots().unwrap().is_empty(), "catalog must wait for host admission");
-        assert_eq!(indexer.indexing_pause_reason().as_deref(), Some("Awaiting host folder policy"));
+        assert!(
+            indexer.store_lock().roots().unwrap().is_empty(),
+            "catalog must wait for host admission"
+        );
+        assert_eq!(
+            indexer.indexing_pause_reason().as_deref(),
+            Some("Awaiting host folder policy")
+        );
         let empty = ws_protocol::IndexingConfig::default();
         indexer.set_indexing_config(&empty).unwrap();
         assert_eq!(indexer.get_indexing_config().unwrap(), empty);
         assert!(indexer.root_snapshot().is_empty());
-        assert_ne!(indexer.indexing_pause_reason().as_deref(), Some("Awaiting host folder policy"));
+        assert_ne!(
+            indexer.indexing_pause_reason().as_deref(),
+            Some("Awaiting host folder policy")
+        );
     }
 
     #[test]
@@ -1636,24 +1896,41 @@ mod tests {
             let database = tree.0.join("engine.sqlite3");
             let indexer = Indexer::open_deferred(IndexStore::open(&database).unwrap()).unwrap();
             let fault = rusqlite::Connection::open(&database).unwrap();
-            fault.execute_batch(&format!("CREATE TRIGGER fail_scan_setup {trigger} BEGIN
-                SELECT RAISE(ABORT, 'forced scan setup write failure'); END;")).unwrap();
+            fault
+                .execute_batch(&format!(
+                    "CREATE TRIGGER fail_scan_setup {trigger} BEGIN
+                SELECT RAISE(ABORT, 'forced scan setup write failure'); END;"
+                ))
+                .unwrap();
             let selected = ws_protocol::IndexingConfig {
-                roots:vec![root.to_string_lossy().into_owned()], ..Default::default()
+                roots: vec![root.to_string_lossy().into_owned()],
+                ..Default::default()
             };
             assert!(indexer.set_indexing_config(&selected).is_err(), "{trigger}");
-            assert_eq!(indexer.indexing_pause_reason().as_deref(), Some("Awaiting host folder policy"), "{trigger}");
+            assert_eq!(
+                indexer.indexing_pause_reason().as_deref(),
+                Some("Awaiting host folder policy"),
+                "{trigger}"
+            );
             assert!(indexer.get_indexing_config().unwrap().roots.is_empty());
             assert!(indexer.root_snapshot().is_empty());
             assert!(indexer.watchers.lock().unwrap().is_empty());
             assert!(!indexer.name_path_allowed(&path));
             indexer.refresh_catalog().unwrap();
-            assert!(!indexer.store_lock().roots().unwrap().iter().any(|row| row.path == CATALOG_ROOT));
+            assert!(!indexer
+                .store_lock()
+                .roots()
+                .unwrap()
+                .iter()
+                .any(|row| row.path == CATALOG_ROOT));
             assert_eq!(indexer.scan_available(10), 0);
             fault.execute_batch("DROP TRIGGER fail_scan_setup").unwrap();
             indexer.set_indexing_config(&selected).unwrap();
             assert_eq!(indexer.get_indexing_config().unwrap(), selected);
-            assert_ne!(indexer.indexing_pause_reason().as_deref(), Some("Awaiting host folder policy"));
+            assert_ne!(
+                indexer.indexing_pause_reason().as_deref(),
+                Some("Awaiting host folder policy")
+            );
             assert!(indexer.scan_available(10) > 0);
         }
     }
@@ -1702,19 +1979,42 @@ mod tests {
 
     #[test]
     fn removed_root_readded_offline_preserves_identity_and_reconciles() {
-        let tree=TempTree::new(); let drive=tree.0.join("drive"); fs::create_dir_all(&drive).unwrap();
-        let file=drive.join("offline.txt"); fs::write(&file,"old").unwrap();
-        let indexer=Indexer::open(IndexStore::open_in_memory().unwrap(),&[drive.clone()]).unwrap();
-        indexer.enqueue_initial_scan().unwrap(); while indexer.scan_available(64)>0 {}
-        let id=indexer.store_lock().find_by_path(&file.to_string_lossy()).unwrap().unwrap().id;
-        let selected=indexer.get_indexing_config().unwrap(); let mut empty=selected.clone(); empty.roots.clear();
+        let tree = TempTree::new();
+        let drive = tree.0.join("drive");
+        fs::create_dir_all(&drive).unwrap();
+        let file = drive.join("offline.txt");
+        fs::write(&file, "old").unwrap();
+        let indexer =
+            Indexer::open(IndexStore::open_in_memory().unwrap(), &[drive.clone()]).unwrap();
+        indexer.enqueue_initial_scan().unwrap();
+        while indexer.scan_available(64) > 0 {}
+        let id = indexer
+            .store_lock()
+            .find_by_path(&file.to_string_lossy())
+            .unwrap()
+            .unwrap()
+            .id;
+        let selected = indexer.get_indexing_config().unwrap();
+        let mut empty = selected.clone();
+        empty.roots.clear();
         indexer.set_indexing_config(&empty).unwrap();
-        fs::remove_file(&file).unwrap(); fs::remove_dir(&drive).unwrap();
+        fs::remove_file(&file).unwrap();
+        fs::remove_dir(&drive).unwrap();
         indexer.set_indexing_config(&selected).unwrap();
-        let row=indexer.store_lock().get_entry(id).unwrap().unwrap(); assert!(row.missing); assert_eq!(row.id,id);
-        fs::create_dir_all(&drive).unwrap(); fs::write(&file,"reconnected").unwrap();
-        indexer.reconcile_drives(); while indexer.scan_available(64)>0 {}
-        let row=indexer.store_lock().find_by_path(&file.to_string_lossy()).unwrap().unwrap(); assert_eq!(row.id,id); assert!(!row.missing);
+        let row = indexer.store_lock().get_entry(id).unwrap().unwrap();
+        assert!(row.missing);
+        assert_eq!(row.id, id);
+        fs::create_dir_all(&drive).unwrap();
+        fs::write(&file, "reconnected").unwrap();
+        indexer.reconcile_drives();
+        while indexer.scan_available(64) > 0 {}
+        let row = indexer
+            .store_lock()
+            .find_by_path(&file.to_string_lossy())
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.id, id);
+        assert!(!row.missing);
     }
     #[test]
     fn dynamic_policy_revokes_claims_results_and_resumes_durable_work() {
@@ -1747,7 +2047,10 @@ mod tests {
                 .len(),
             1
         );
-        assert!(!indexer.search_vectors(&[1.,0.],10,None).unwrap().is_empty());
+        assert!(!indexer
+            .search_vectors(&[1., 0.], 10, None)
+            .unwrap()
+            .is_empty());
         let aid = indexer.root_snapshot()[0].id;
         indexer
             .store_lock()
@@ -1949,7 +2252,10 @@ mod tests {
             })
             .unwrap();
         assert_eq!(after.len(), 1, "renamed file should be searchable");
-        assert_eq!(after[0].entry_id, id_before, "identity preserved across rename");
+        assert_eq!(
+            after[0].entry_id, id_before,
+            "identity preserved across rename"
+        );
         assert!(
             indexer
                 .search(&SearchRequest {
@@ -2038,12 +2344,19 @@ mod tests {
                 })
                 .unwrap()
         };
-        assert_eq!(find("usb-file").len(), 1, "indexed through the mapped drive");
+        assert_eq!(
+            find("usb-file").len(),
+            1,
+            "indexed through the mapped drive"
+        );
 
         // Disconnect the volume.
         subst(&[drive, "/d"]);
         indexer.reconcile_drives();
-        assert!(find("usb-file").is_empty(), "missing entries stay out of results");
+        assert!(
+            find("usb-file").is_empty(),
+            "missing entries stay out of results"
+        );
         assert_eq!(
             indexer.store.lock().unwrap().stats().unwrap().entries_total,
             1,
@@ -2118,7 +2431,10 @@ mod tests {
         assert!(embedded >= 2, "fake embed should store segments");
         assert_eq!(indexer.embed_queue_depth().unwrap(), 0);
         let segs = indexer.segments_indexed().unwrap();
-        assert!(segs >= 2, "segments_indexed counts name-segments, got {segs}");
+        assert!(
+            segs >= 2,
+            "segments_indexed counts name-segments, got {segs}"
+        );
 
         // Stored vectors are the deterministic stub for the file name
         // (idempotent upsert: a second drain claims nothing, segments stay).
@@ -2157,20 +2473,14 @@ mod tests {
         // the new file must embed first even though it arrived later.
         fs::write(tree.0.join("old.txt"), b"changed-contents-longer").unwrap();
         let root_id = indexer.root_snapshot()[0].id;
-        indexer
-            .handle_event(
-                root_id,
-                WatchEvent::Modified(tree.0.join("old.txt")),
-            );
+        indexer.handle_event(root_id, WatchEvent::Modified(tree.0.join("old.txt")));
         fs::write(tree.0.join("brand-new.txt"), b"n").unwrap();
         indexer.handle_event(root_id, WatchEvent::Created(tree.0.join("brand-new.txt")));
         // Drain one batch at a time and record order via segment creation?
         // Simpler: assert priorities at the queue level (store order).
         {
             let mut store = indexer.store.lock().unwrap_or_else(|p| p.into_inner());
-            let batch = store
-                .claim_extract_jobs_batch_for_kind("name", 10)
-                .unwrap();
+            let batch = store.claim_extract_jobs_batch_for_kind("name", 10).unwrap();
             assert_eq!(batch.len(), 2);
             assert_eq!(batch[0].priority, ws_index::EXTRACT_PRIORITY_NEW);
             assert_eq!(batch[1].priority, ws_index::EXTRACT_PRIORITY_UPDATED);
@@ -2252,16 +2562,14 @@ mod tests {
                 "delete must cascade to segments"
             );
         }
-        assert!(
-            indexer
-                .search(&SearchRequest {
-                    text: "obsolete".into(),
-                    limit: 10,
-                    ..Default::default()
-                })
-                .unwrap()
-                .is_empty()
-        );
+        assert!(indexer
+            .search(&SearchRequest {
+                text: "obsolete".into(),
+                limit: 10,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -2275,9 +2583,7 @@ mod tests {
         // Simulate a crash mid-batch: claim jobs but never complete them.
         let claimed_ids: Vec<i64> = {
             let mut store = indexer.store.lock().unwrap_or_else(|p| p.into_inner());
-            let batch = store
-                .claim_extract_jobs_batch_for_kind("name", 10)
-                .unwrap();
+            let batch = store.claim_extract_jobs_batch_for_kind("name", 10).unwrap();
             assert!(!batch.is_empty());
             batch.into_iter().map(|j| j.id).collect()
         };
@@ -2461,18 +2767,23 @@ mod tests {
 
     #[test]
     fn application_name_batch_cannot_commit_across_model_generation() {
-        let tree=TempTree::new();
-        fs::write(tree.0.join("recipe-generation.txt"),b"x").unwrap();
-        let indexer=seeded(&tree);
-        let outcome=indexer.embed_once_with(|texts| {
-            indexer.store_lock().reset_content_vectors().unwrap();
-            fake_embed(texts)
-        }).unwrap();
-        assert!(outcome.claimed>0);
-        assert_eq!(outcome.embedded,0,"old-space name batch committed after model migration");
-        assert_eq!(outcome.requeued,outcome.claimed);
-        assert_eq!(indexer.segments_indexed().unwrap(),0);
-        assert!(indexer.embed_once_with(fake_embed).unwrap().embedded>0);
+        let tree = TempTree::new();
+        fs::write(tree.0.join("recipe-generation.txt"), b"x").unwrap();
+        let indexer = seeded(&tree);
+        let outcome = indexer
+            .embed_once_with(|texts| {
+                indexer.store_lock().reset_content_vectors().unwrap();
+                fake_embed(texts)
+            })
+            .unwrap();
+        assert!(outcome.claimed > 0);
+        assert_eq!(
+            outcome.embedded, 0,
+            "old-space name batch committed after model migration"
+        );
+        assert_eq!(outcome.requeued, outcome.claimed);
+        assert_eq!(indexer.segments_indexed().unwrap(), 0);
+        assert!(indexer.embed_once_with(fake_embed).unwrap().embedded > 0);
     }
 
     #[test]
@@ -2494,7 +2805,10 @@ mod tests {
 
         let (embedded, _) = drain_embed_queue(&indexer);
         assert_eq!(embedded as u64, segs_before);
-        assert_eq!(indexer.content_extract_queue_depth().unwrap(), enqueued - segs_before);
+        assert_eq!(
+            indexer.content_extract_queue_depth().unwrap(),
+            enqueued - segs_before
+        );
         assert_eq!(indexer.segments_indexed().unwrap(), segs_before);
     }
 
@@ -2646,19 +2960,34 @@ mod tests {
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
         let conn = rusqlite::Connection::open(&db).unwrap();
-        conn.execute_batch("CREATE TRIGGER fail_disconnect BEFORE UPDATE OF missing ON entries
-            BEGIN SELECT RAISE(FAIL, 'simulated write failure'); END;").unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER fail_disconnect BEFORE UPDATE OF missing ON entries
+            BEGIN SELECT RAISE(FAIL, 'simulated write failure'); END;",
+        )
+        .unwrap();
         fs::remove_dir_all(&root).unwrap();
         indexer.reconcile_drives();
         conn.execute_batch("DROP TRIGGER fail_disconnect;").unwrap();
         indexer.reconcile_drives();
-        assert!(indexer.store_lock().find_by_path(&file.to_string_lossy()).unwrap().unwrap().missing);
+        assert!(
+            indexer
+                .store_lock()
+                .find_by_path(&file.to_string_lossy())
+                .unwrap()
+                .unwrap()
+                .missing
+        );
         // Count actual writes, including the empty-root case, on later polls.
-        conn.execute_batch("CREATE TABLE writes(n INTEGER); INSERT INTO writes VALUES(0);
+        conn.execute_batch(
+            "CREATE TABLE writes(n INTEGER); INSERT INTO writes VALUES(0);
             CREATE TRIGGER count_disconnect AFTER UPDATE OF missing ON entries
-            BEGIN UPDATE writes SET n = n + 1; END;").unwrap();
+            BEGIN UPDATE writes SET n = n + 1; END;",
+        )
+        .unwrap();
         indexer.reconcile_drives();
-        let writes: i64 = conn.query_row("SELECT n FROM writes", [], |r| r.get(0)).unwrap();
+        let writes: i64 = conn
+            .query_row("SELECT n FROM writes", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(writes, 0);
     }
 
@@ -2680,7 +3009,11 @@ mod tests {
         assert_eq!(indexer.scan_available(1), 1); // Root sees the claimed child.
         indexer.process_dir(qid, root_id, &dir, generation).unwrap();
         while indexer.scan_available(64) > 0 {}
-        assert!(indexer.store_lock().find_by_path(&keep.to_string_lossy()).unwrap().is_some());
+        assert!(indexer
+            .store_lock()
+            .find_by_path(&keep.to_string_lossy())
+            .unwrap()
+            .is_some());
     }
 
     #[test]
@@ -2691,26 +3024,52 @@ mod tests {
         fs::write(&from, b"fixture").unwrap();
         let indexer = seeded(&tree);
         let root_id = indexer.root_snapshot()[0].id;
-        let id = indexer.store_lock().find_by_path(&from.to_string_lossy()).unwrap().unwrap().id;
+        let id = indexer
+            .store_lock()
+            .find_by_path(&from.to_string_lossy())
+            .unwrap()
+            .unwrap()
+            .id;
         {
             let mut store = indexer.store_lock();
-            store.upsert_segment(NewSegment {
-                entry_id: id, kind: "doc", chunk_index: 0,
-                page: None, start_ms: None, end_ms: None, line: None,
-                text: "obsolete", vector: &[1.0, 0.0],
-            }).unwrap();
-            while let Some(job) = store.claim_extract_jobs_batch_for_kind("doc", 1).unwrap().first() {
+            store
+                .upsert_segment(NewSegment {
+                    entry_id: id,
+                    kind: "doc",
+                    chunk_index: 0,
+                    page: None,
+                    start_ms: None,
+                    end_ms: None,
+                    line: None,
+                    text: "obsolete",
+                    vector: &[1.0, 0.0],
+                })
+                .unwrap();
+            while let Some(job) = store
+                .claim_extract_jobs_batch_for_kind("doc", 1)
+                .unwrap()
+                .first()
+            {
                 store.complete_extract_job(job.id).unwrap();
             }
         }
         indexer.search_vectors(&[1.0, 0.0], 10, None).unwrap();
         fs::rename(&from, &to).unwrap();
-        indexer.apply_event(root_id, &WatchEvent::Renamed { from, to }).unwrap();
+        indexer
+            .apply_event(root_id, &WatchEvent::Renamed { from, to })
+            .unwrap();
         let store = indexer.store_lock();
-        assert!(store.list_segments_for_entry(id).unwrap().iter().all(|s| s.kind != "doc"));
+        assert!(store
+            .list_segments_for_entry(id)
+            .unwrap()
+            .iter()
+            .all(|s| s.kind != "doc"));
         assert_eq!(store.extract_queue_depth_for_kind("doc").unwrap(), 1);
         drop(store);
-        assert!(indexer.search_vectors(&[1.0, 0.0], 10, None).unwrap().is_empty());
+        assert!(indexer
+            .search_vectors(&[1.0, 0.0], 10, None)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

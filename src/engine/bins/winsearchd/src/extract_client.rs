@@ -53,21 +53,32 @@ struct ExtractionSlots {
 
 fn extraction_slots() -> &'static ExtractionSlots {
     static SLOTS: OnceLock<ExtractionSlots> = OnceLock::new();
-    SLOTS.get_or_init(|| ExtractionSlots { active: Mutex::new(0), ready: Condvar::new() })
+    SLOTS.get_or_init(|| ExtractionSlots {
+        active: Mutex::new(0),
+        ready: Condvar::new(),
+    })
 }
 
 struct ExtractionPermit;
 impl ExtractionPermit {
     fn try_acquire() -> Option<Self> {
-        let mut active = extraction_slots().active.lock().unwrap_or_else(|p| p.into_inner());
-        if *active >= MAX_EXTRACTION_JOBS { return None; }
+        let mut active = extraction_slots()
+            .active
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if *active >= MAX_EXTRACTION_JOBS {
+            return None;
+        }
         *active += 1;
         Some(Self)
     }
 }
 impl Drop for ExtractionPermit {
     fn drop(&mut self) {
-        let mut active = extraction_slots().active.lock().unwrap_or_else(|p| p.into_inner());
+        let mut active = extraction_slots()
+            .active
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         *active -= 1;
         extraction_slots().ready.notify_all();
     }
@@ -86,15 +97,22 @@ pub struct ExtractClient {
 impl ExtractClient {
     pub fn admission_available(&self) -> bool {
         self.cleanup_pending.load(Ordering::Acquire) == 0
-            && *extraction_slots().active.lock().unwrap_or_else(|p| p.into_inner()) < MAX_EXTRACTION_JOBS
+            && *extraction_slots()
+                .active
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                < MAX_EXTRACTION_JOBS
     }
 
     pub(crate) fn wait_for_admission(&self, timeout: Duration) {
         let slots = extraction_slots();
         let active = slots.active.lock().unwrap_or_else(|p| p.into_inner());
-        let _guard = slots.ready.wait_timeout_while(active, timeout, |active| {
-            *active >= MAX_EXTRACTION_JOBS || self.cleanup_pending.load(Ordering::Acquire) != 0
-        }).unwrap_or_else(|p| p.into_inner());
+        let _guard = slots
+            .ready
+            .wait_timeout_while(active, timeout, |active| {
+                *active >= MAX_EXTRACTION_JOBS || self.cleanup_pending.load(Ordering::Acquire) != 0
+            })
+            .unwrap_or_else(|p| p.into_inner());
     }
 
     pub fn new(worker_bin: PathBuf, cache_dir: PathBuf) -> Self {
@@ -155,7 +173,9 @@ impl ExtractClient {
         if !self.admission_available() {
             return Err(ExtractClientError::AdmissionUnavailable);
         }
-        let permit = Arc::new(ExtractionPermit::try_acquire().ok_or(ExtractClientError::AdmissionUnavailable)?);
+        let permit = Arc::new(
+            ExtractionPermit::try_acquire().ok_or(ExtractClientError::AdmissionUnavailable)?,
+        );
         let deadline = Instant::now() + timeout;
         let frame = encode_request(request).map_err(ExtractClientError::Malformed)?;
         if !allowed() {
@@ -310,10 +330,16 @@ impl ExtractClient {
             Ok(response)
         })();
         if scratch.clean().is_err() {
-            self.retain_cleanup(Exchange {
-                job: None, writer: None, reader: None, closed: true,
-                _permit: Some(Arc::clone(&permit)),
-            }, Scratch(scratch.0.take()));
+            self.retain_cleanup(
+                Exchange {
+                    job: None,
+                    writer: None,
+                    reader: None,
+                    closed: true,
+                    _permit: Some(Arc::clone(&permit)),
+                },
+                Scratch(scratch.0.take()),
+            );
             return Err(ExtractClientError::AdmissionUnavailable);
         }
         let response = result?;
@@ -345,49 +371,52 @@ impl ExtractClient {
         }
         let mut moved: std::collections::HashMap<PathBuf, PathBuf> =
             std::collections::HashMap::new();
-        let mut promote_one = |source: &Path, extension: &str, cap: u64| -> Result<PathBuf, ExtractClientError> {
-            if !ws_platform::content::local_content_allowed(source) {
-                return Err(ExtractClientError::Malformed(
-                    "unsafe thumbnail source".into(),
-                ));
-            }
-            let canonical = source
-                .canonicalize()
-                .map_err(|e| ExtractClientError::Malformed(e.to_string()))?;
-            if !canonical.starts_with(&anchor.canonical) || !canonical.is_file() {
-                return Err(ExtractClientError::Malformed(
-                    "thumbnail outside scratch".into(),
-                ));
-            }
-            if let Some(path) = moved.get(&canonical) {
-                return Ok(path.clone());
-            }
-            let name = format!(
-                "extract-{}-{}.{extension}",
-                request
-                    .scratch_dir
-                    .file_name()
-                    .expect("private scratch name")
-                    .to_string_lossy(),
-                moved.len()
-            );
-            let path = destination.join(name);
-            let mut target = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-                .map_err(ExtractClientError::worker)?;
-            promoted.paths.push(path.clone());
-            let source_file =
-                std::fs::File::open(&canonical).map_err(ExtractClientError::worker)?;
-            let bytes = std::io::copy(&mut source_file.take(cap + 1), &mut target)
-                .map_err(ExtractClientError::worker)?;
-            if bytes > cap {
-                return Err(ExtractClientError::Malformed("derived artifact too large".into()));
-            }
-            moved.insert(canonical, path.clone());
-            Ok(path)
-        };
+        let mut promote_one =
+            |source: &Path, extension: &str, cap: u64| -> Result<PathBuf, ExtractClientError> {
+                if !ws_platform::content::local_content_allowed(source) {
+                    return Err(ExtractClientError::Malformed(
+                        "unsafe thumbnail source".into(),
+                    ));
+                }
+                let canonical = source
+                    .canonicalize()
+                    .map_err(|e| ExtractClientError::Malformed(e.to_string()))?;
+                if !canonical.starts_with(&anchor.canonical) || !canonical.is_file() {
+                    return Err(ExtractClientError::Malformed(
+                        "thumbnail outside scratch".into(),
+                    ));
+                }
+                if let Some(path) = moved.get(&canonical) {
+                    return Ok(path.clone());
+                }
+                let name = format!(
+                    "extract-{}-{}.{extension}",
+                    request
+                        .scratch_dir
+                        .file_name()
+                        .expect("private scratch name")
+                        .to_string_lossy(),
+                    moved.len()
+                );
+                let path = destination.join(name);
+                let mut target = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&path)
+                    .map_err(ExtractClientError::worker)?;
+                promoted.paths.push(path.clone());
+                let source_file =
+                    std::fs::File::open(&canonical).map_err(ExtractClientError::worker)?;
+                let bytes = std::io::copy(&mut source_file.take(cap + 1), &mut target)
+                    .map_err(ExtractClientError::worker)?;
+                if bytes > cap {
+                    return Err(ExtractClientError::Malformed(
+                        "derived artifact too large".into(),
+                    ));
+                }
+                moved.insert(canonical, path.clone());
+                Ok(path)
+            };
         for segment in &mut response.output.segments {
             if let Some(source) = segment.thumbnail_hint.as_ref() {
                 segment.thumbnail_hint = Some(promote_one(source, "png", 16 * 1024 * 1024)?);
@@ -398,12 +427,15 @@ impl ExtractClient {
                     *path = promote_one(path, "png", 16 * 1024 * 1024)?;
                 }
                 ws_extract::DraftEmbeddingInput::Audio { path } => {
-                    *path = promote_one(path, "wav", ws_extract::decoder::MAX_PCM_BYTES as u64 + 44)?;
+                    *path =
+                        promote_one(path, "wav", ws_extract::decoder::MAX_PCM_BYTES as u64 + 44)?;
                     let samples = ws_extract::audio::validate_window_wav(path)
                         .map_err(|e| ExtractClientError::Malformed(e.to_string()))?;
                     let span = segment.end_ms.unwrap() - segment.start_ms.unwrap();
                     if (samples * 1000).div_ceil(16000).abs_diff(span) > 1 {
-                        return Err(ExtractClientError::Malformed("audio timestamp/WAV duration mismatch".into()));
+                        return Err(ExtractClientError::Malformed(
+                            "audio timestamp/WAV duration mismatch".into(),
+                        ));
                     }
                 }
             }
@@ -438,9 +470,11 @@ impl ArtifactLease {
     pub fn keep(&mut self) {
         self.paths.clear();
     }
-    pub fn keep_input(&mut self,input:&ws_extract::DraftEmbeddingInput) {
-        if let ws_extract::DraftEmbeddingInput::Image { path,.. } | ws_extract::DraftEmbeddingInput::Audio { path }=input {
-            self.paths.retain(|p|p!=path);
+    pub fn keep_input(&mut self, input: &ws_extract::DraftEmbeddingInput) {
+        if let ws_extract::DraftEmbeddingInput::Image { path, .. }
+        | ws_extract::DraftEmbeddingInput::Audio { path } = input
+        {
+            self.paths.retain(|p| p != path);
         }
     }
 }
@@ -648,7 +682,10 @@ fn retain_cleanup(cleanup: RetainedCleanup) {
                     let counter = cleanup.pending.take();
                     drop(cleanup);
                     if let Some(counter) = counter {
-                        let _active = extraction_slots().active.lock().unwrap_or_else(|p| p.into_inner());
+                        let _active = extraction_slots()
+                            .active
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner());
                         counter.fetch_sub(1, Ordering::AcqRel);
                         extraction_slots().ready.notify_all();
                     }
@@ -767,127 +804,196 @@ pub(crate) mod tests {
         let mut client = ExtractClient::new(fixture(), tree.0.join("cache"));
         let request = client.request(tree.0.join("source.wav"), "audio", 30);
         let original = request.scratch_dir.join("window.wav");
-        client.worker_args = vec!["audio-cache".into(), tree.0.join("worker.pid").to_string_lossy().into(), original.to_string_lossy().into()];
+        client.worker_args = vec![
+            "audio-cache".into(),
+            tree.0.join("worker.pid").to_string_lossy().into(),
+            original.to_string_lossy().into(),
+        ];
         let response = client.extract(&request, Duration::from_secs(5)).unwrap();
-        let ws_extract::DraftEmbeddingInput::Audio { path } = &response.output.segments[0].embedding_input else { panic!("typed audio missing"); };
-        assert!(path.is_file(), "audio artifact was lost when private scratch was cleaned");
+        let ws_extract::DraftEmbeddingInput::Audio { path } =
+            &response.output.segments[0].embedding_input
+        else {
+            panic!("typed audio missing");
+        };
+        assert!(
+            path.is_file(),
+            "audio artifact was lost when private scratch was cleaned"
+        );
         assert!(!path.starts_with(&request.scratch_dir));
         assert!(path.starts_with(&client.cache_dir));
         assert_eq!(&std::fs::read(path).unwrap()[..4], b"RIFF");
         drop(ArtifactLease::for_output(&response.output));
-        assert!(!path.exists(), "uncommitted derived audio lease must clean up");
+        assert!(
+            !path.exists(),
+            "uncommitted derived audio lease must clean up"
+        );
     }
 
     #[test]
     fn code_native_child_parses_source_under_shared_owned_transport() {
-        let tree=Tree::new();
-        let source=tree.0.join("example.rs");
-        std::fs::write(&source,"pub fn first() { helper(); }\n").unwrap();
-        let worker=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/winsearch-extract.exe");
-        let client=ExtractClient::new(worker,tree.0.join("cache"));
-        let request=client.request(source,"code",64);
-        let response=client.extract(&request,Duration::from_secs(10)).unwrap();
-        assert!(matches!(response.output.status,ws_extract::ExtractionStatus::Extracted),
-            "real child did not parse code: {:?}",response.output.status);
-        let batch=response.code.expect("typed code batch");
-        assert!(batch.units.iter().any(|unit|matches!(unit,ws_extract::code::CodeUnit::Symbol { symbol,.. }
-            if symbol.name=="first" && symbol.role.is_definition() && symbol.line==1)));
-        assert!(batch.units.iter().any(|unit|matches!(unit,ws_extract::code::CodeUnit::Chunk { chunk,.. }
-            if chunk.text=="pub fn first() { helper(); }\n")));
+        let tree = Tree::new();
+        let source = tree.0.join("example.rs");
+        std::fs::write(&source, "pub fn first() { helper(); }\n").unwrap();
+        let worker = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/debug/winsearch-extract.exe");
+        let client = ExtractClient::new(worker, tree.0.join("cache"));
+        let request = client.request(source, "code", 64);
+        let response = client.extract(&request, Duration::from_secs(10)).unwrap();
+        assert!(
+            matches!(
+                response.output.status,
+                ws_extract::ExtractionStatus::Extracted
+            ),
+            "real child did not parse code: {:?}",
+            response.output.status
+        );
+        let batch = response.code.expect("typed code batch");
+        assert!(batch.units.iter().any(
+            |unit| matches!(unit,ws_extract::code::CodeUnit::Symbol { symbol,.. }
+            if symbol.name=="first" && symbol.role.is_definition() && symbol.line==1)
+        ));
+        assert!(batch.units.iter().any(
+            |unit| matches!(unit,ws_extract::code::CodeUnit::Chunk { chunk,.. }
+            if chunk.text=="pub fn first() { helper(); }\n")
+        ));
     }
 
     #[test]
     fn code_native_child_continuations_preserve_the_complete_source_and_symbol_tail() {
         use ws_extract::code::CodeUnit;
-        let tree=Tree::new();
-        let source=tree.0.join("many.rs");
-        let text=(0..300).map(|n|format!("pub fn f{n}() {{ helper(); }}\n")).collect::<String>();
-        std::fs::write(&source,&text).unwrap();
-        let worker=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/winsearch-extract.exe");
-        let client=ExtractClient::new(worker,tree.0.join("cache"));
-        let mut request=client.request(source,"code",64);
-        let mut reconstructed=String::new();
-        let (mut definitions,mut references,mut batches,mut consumed)=(0,0,0,0);
-        let mut expected_total=None;
+        let tree = Tree::new();
+        let source = tree.0.join("many.rs");
+        let text = (0..300)
+            .map(|n| format!("pub fn f{n}() {{ helper(); }}\n"))
+            .collect::<String>();
+        std::fs::write(&source, &text).unwrap();
+        let worker = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/debug/winsearch-extract.exe");
+        let client = ExtractClient::new(worker, tree.0.join("cache"));
+        let mut request = client.request(source, "code", 64);
+        let mut reconstructed = String::new();
+        let (mut definitions, mut references, mut batches, mut consumed) = (0, 0, 0, 0);
+        let mut expected_total = None;
         loop {
-            let response=client.extract(&request,Duration::from_secs(10)).unwrap();
+            let response = client.extract(&request, Duration::from_secs(10)).unwrap();
             assert!(response.diagnostics.is_empty());
-            if let Some(total)=expected_total { assert_eq!(response.total_units,Some(total)); }
-            else { expected_total=response.total_units; }
-            let batch=response.code.unwrap();
-            assert!(!batch.units.is_empty() && batch.units.len()<=64);
+            if let Some(total) = expected_total {
+                assert_eq!(response.total_units, Some(total));
+            } else {
+                expected_total = response.total_units;
+            }
+            let batch = response.code.unwrap();
+            assert!(!batch.units.is_empty() && batch.units.len() <= 64);
             for unit in batch.units {
-                assert_eq!(unit.ordinal(),consumed);
-                consumed+=1;
+                assert_eq!(unit.ordinal(), consumed);
+                consumed += 1;
                 match unit {
-                    CodeUnit::Chunk { chunk,.. }=>reconstructed.push_str(&chunk.text),
-                    CodeUnit::Symbol { symbol,.. } if symbol.role.is_definition()=>definitions+=1,
-                    CodeUnit::Symbol { symbol,.. } if symbol.name=="helper"=>references+=1,
-                    _=>(),
+                    CodeUnit::Chunk { chunk, .. } => reconstructed.push_str(&chunk.text),
+                    CodeUnit::Symbol { symbol, .. } if symbol.role.is_definition() => {
+                        definitions += 1
+                    }
+                    CodeUnit::Symbol { symbol, .. } if symbol.name == "helper" => references += 1,
+                    _ => (),
                 }
             }
-            batches+=1;
+            batches += 1;
             match response.next_cursor {
-                Some(next)=> { assert_eq!(next,consumed); request.cursor=next; }
-                None=>break,
+                Some(next) => {
+                    assert_eq!(next, consumed);
+                    request.cursor = next;
+                }
+                None => break,
             }
-            assert!(batches<30,"continuation failed to make bounded progress");
+            assert!(batches < 30, "continuation failed to make bounded progress");
         }
-        assert!(batches>1);
-        assert_eq!(Some(consumed),expected_total);
-        assert_eq!(reconstructed,text);
-        assert_eq!((definitions,references),(300,300));
+        assert!(batches > 1);
+        assert_eq!(Some(consumed), expected_total);
+        assert_eq!(reconstructed, text);
+        assert_eq!((definitions, references), (300, 300));
     }
 
     #[test]
     fn code_native_child_keeps_notebook_coordinates_and_excludes_outputs() {
         use ws_extract::code::CodeUnit;
-        let tree=Tree::new();
-        let source=tree.0.join("example.ipynb");
-        let notebook=serde_json::json!({"cells":[
+        let tree = Tree::new();
+        let source = tree.0.join("example.ipynb");
+        let notebook = serde_json::json!({"cells":[
             {"cell_type":"markdown","source":"Introduction\n"},
             {"cell_type":"code","source":"%%python\ndef greet():\n    helper()\n",
              "outputs":[{"text":"OUTPUT_MUST_NOT_BE_INDEXED"}],"attachments":{"fake":"ATTACHMENT_MUST_NOT_BE_INDEXED"}}
         ]});
-        std::fs::write(&source,serde_json::to_vec(&notebook).unwrap()).unwrap();
-        let worker=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/winsearch-extract.exe");
-        let client=ExtractClient::new(worker,tree.0.join("cache"));
-        let response=client.extract(&client.request(source,"code",64),Duration::from_secs(10)).unwrap();
+        std::fs::write(&source, serde_json::to_vec(&notebook).unwrap()).unwrap();
+        let worker = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/debug/winsearch-extract.exe");
+        let client = ExtractClient::new(worker, tree.0.join("cache"));
+        let response = client
+            .extract(&client.request(source, "code", 64), Duration::from_secs(10))
+            .unwrap();
         assert!(response.diagnostics.is_empty());
-        let batch=response.code.unwrap();
-        let serialized=serde_json::to_string(&batch).unwrap();
+        let batch = response.code.unwrap();
+        let serialized = serde_json::to_string(&batch).unwrap();
         assert!(!serialized.contains("MUST_NOT_BE_INDEXED"));
-        let symbol=batch.units.iter().find_map(|unit|match unit {
-            CodeUnit::Symbol { symbol,.. } if symbol.name=="greet" && symbol.role.is_definition()=>Some(symbol),
-            _=>None,
-        }).unwrap();
-        assert_eq!((symbol.line,symbol.end_line),(3,4));
-        let cell=symbol.notebook.unwrap();
-        assert_eq!((cell.cell_ordinal,cell.start_line,cell.end_line),(1,2,3));
+        let symbol = batch
+            .units
+            .iter()
+            .find_map(|unit| match unit {
+                CodeUnit::Symbol { symbol, .. }
+                    if symbol.name == "greet" && symbol.role.is_definition() =>
+                {
+                    Some(symbol)
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!((symbol.line, symbol.end_line), (3, 4));
+        let cell = symbol.notebook.unwrap();
+        assert_eq!(
+            (cell.cell_ordinal, cell.start_line, cell.end_line),
+            (1, 2, 3)
+        );
     }
 
     #[test]
     fn code_native_child_denies_sensitive_and_oversized_sources() {
-        let tree=Tree::new();
-        let sensitive=tree.0.join(".env");
-        std::fs::write(&sensitive,"SYNTHETIC_PRIVATE_FIXTURE=not-to-be-read").unwrap();
-        let oversized=tree.0.join("oversized.rs");
-        std::fs::File::create(&oversized).unwrap().set_len(ws_code::MAX_CODE_FILE_BYTES+1).unwrap();
-        let worker=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/winsearch-extract.exe");
-        let client=ExtractClient::new(worker,tree.0.join("cache"));
-        for (path,expected) in [(sensitive,"code source policy denied"),(oversized,"source exceeds 2 MiB")] {
-            match client.extract(&client.request(path,"code",64),Duration::from_secs(10)) {
-                Err(ExtractClientError::Worker(message))=>assert!(message.contains(expected),"{message}"),
-                other=>panic!("unsafe code source was not explicitly rejected: {other:?}"),
+        let tree = Tree::new();
+        let sensitive = tree.0.join(".env");
+        std::fs::write(&sensitive, "SYNTHETIC_PRIVATE_FIXTURE=not-to-be-read").unwrap();
+        let oversized = tree.0.join("oversized.rs");
+        std::fs::File::create(&oversized)
+            .unwrap()
+            .set_len(ws_code::MAX_CODE_FILE_BYTES + 1)
+            .unwrap();
+        let worker = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/debug/winsearch-extract.exe");
+        let client = ExtractClient::new(worker, tree.0.join("cache"));
+        for (path, expected) in [
+            (sensitive, "code source policy denied"),
+            (oversized, "source exceeds 2 MiB"),
+        ] {
+            match client.extract(&client.request(path, "code", 64), Duration::from_secs(10)) {
+                Err(ExtractClientError::Worker(message)) => {
+                    assert!(message.contains(expected), "{message}")
+                }
+                other => panic!("unsafe code source was not explicitly rejected: {other:?}"),
             }
         }
-        for relative in [".git/config", ".hg/hgrc", ".svn/auth/private.py", ".env/private.py", ".environment/private.py"] {
-            let path=tree.0.join("repo").join(relative);
+        for relative in [
+            ".git/config",
+            ".hg/hgrc",
+            ".svn/auth/private.py",
+            ".env/private.py",
+            ".environment/private.py",
+        ] {
+            let path = tree.0.join("repo").join(relative);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(&path,"SYNTHETIC_PRIVATE_FIXTURE=not-to-be-read").unwrap();
-            match client.extract(&client.request(path,"code",64),Duration::from_secs(10)) {
-                Err(ExtractClientError::Worker(message))=>assert!(message.contains("code source policy denied"),"{message}"),
-                other=>panic!("sensitive ancestor {relative} bypassed child source policy: {other:?}"),
+            std::fs::write(&path, "SYNTHETIC_PRIVATE_FIXTURE=not-to-be-read").unwrap();
+            match client.extract(&client.request(path, "code", 64), Duration::from_secs(10)) {
+                Err(ExtractClientError::Worker(message)) => {
+                    assert!(message.contains("code source policy denied"), "{message}")
+                }
+                other => {
+                    panic!("sensitive ancestor {relative} bypassed child source policy: {other:?}")
+                }
             }
         }
     }
@@ -896,10 +1002,20 @@ pub(crate) mod tests {
     fn media_artifact_outside_private_scratch_is_rejected() {
         let tree = Tree::new();
         let mut client = ExtractClient::new(fixture(), tree.0.join("cache"));
-        client.worker_args = vec!["audio-outside".into(), tree.0.join("worker.pid").to_string_lossy().into(), tree.0.join("outside.wav").to_string_lossy().into()];
+        client.worker_args = vec![
+            "audio-outside".into(),
+            tree.0.join("worker.pid").to_string_lossy().into(),
+            tree.0.join("outside.wav").to_string_lossy().into(),
+        ];
         let request = client.request(tree.0.join("source.wav"), "audio", 30);
-        assert!(matches!(client.extract(&request, Duration::from_secs(5)), Err(ExtractClientError::Malformed(_))));
-        assert!(tree.0.join("outside.wav").is_file(), "external data must be preserved");
+        assert!(matches!(
+            client.extract(&request, Duration::from_secs(5)),
+            Err(ExtractClientError::Malformed(_))
+        ));
+        assert!(
+            tree.0.join("outside.wav").is_file(),
+            "external data must be preserved"
+        );
     }
     impl Drop for CleanupFixture {
         fn drop(&mut self) {
@@ -918,7 +1034,8 @@ pub(crate) mod tests {
         let pending = Arc::clone(&client.cleanup_pending);
         let binary = fixture();
         move || {
-            let permit = Arc::new(ExtractionPermit::try_acquire().expect("fixture parser admission"));
+            let permit =
+                Arc::new(ExtractionPermit::try_acquire().expect("fixture parser admission"));
             let mut command = Command::new(&binary);
             command
                 .arg("never-read")
@@ -1145,18 +1262,26 @@ pub(crate) mod tests {
     impl RunningExtractions {
         fn stop(&mut self) -> Vec<Result<ExtractResponse, ExtractClientError>> {
             self.allowed.store(false, Ordering::Release);
-            self.tasks.drain(..).map(|task| task.join().unwrap()).collect()
+            self.tasks
+                .drain(..)
+                .map(|task| task.join().unwrap())
+                .collect()
         }
     }
     impl Drop for RunningExtractions {
-        fn drop(&mut self) { let _ = self.stop(); }
+        fn drop(&mut self) {
+            let _ = self.stop();
+        }
     }
 
     #[test]
     fn process_wide_parser_slots_block_fresh_clients_until_owned_children_finish() {
         let tree = Tree::new();
         let allowed = Arc::new(std::sync::atomic::AtomicBool::new(true));
-        let mut running = RunningExtractions { allowed: allowed.clone(), tasks: vec![] };
+        let mut running = RunningExtractions {
+            allowed: allowed.clone(),
+            tasks: vec![],
+        };
         let mut pids = Vec::new();
         for number in 0..2 {
             let pid = tree.0.join(format!("pid-{number}"));
@@ -1165,31 +1290,52 @@ pub(crate) mod tests {
             client.worker_args = vec!["never-read".into(), pid.to_string_lossy().into()];
             let request = client.request(tree.0.join("fixture.txt"), "doc", 1);
             let allowed = allowed.clone();
-            running.tasks.push(thread::spawn(move || client.extract_while(&request,
-                Duration::from_secs(10), || allowed.load(Ordering::Acquire))));
+            running.tasks.push(thread::spawn(move || {
+                client.extract_while(&request, Duration::from_secs(10), || {
+                    allowed.load(Ordering::Acquire)
+                })
+            }));
         }
         let deadline = Instant::now() + Duration::from_secs(3);
         while pids.iter().any(|pid| !pid.exists()) && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(2));
         }
-        assert!(pids.iter().all(|pid| pid.exists()), "both owned parsers must actually start");
+        assert!(
+            pids.iter().all(|pid| pid.exists()),
+            "both owned parsers must actually start"
+        );
         let mut third = ExtractClient::new(fixture(), tree.0.join("third-cache"));
         let third_pid = tree.0.join("third.pid");
         third.worker_args = vec!["oversized".into(), third_pid.to_string_lossy().into()];
         let denied = third.request(tree.0.join("fixture.txt"), "doc", 1);
         let result = third.extract(&denied, Duration::from_secs(1));
-        assert!(matches!(result, Err(ExtractClientError::AdmissionUnavailable)), "{result:?}");
-        assert!(!denied.scratch_dir.exists() && !third_pid.exists(),
-            "capacity denial must precede scratch creation and process startup");
+        assert!(
+            matches!(result, Err(ExtractClientError::AdmissionUnavailable)),
+            "{result:?}"
+        );
+        assert!(
+            !denied.scratch_dir.exists() && !third_pid.exists(),
+            "capacity denial must precede scratch creation and process startup"
+        );
         let started = Instant::now();
         for result in running.stop() {
-            assert!(matches!(result, Err(ExtractClientError::Cancelled)), "{result:?}");
+            assert!(
+                matches!(result, Err(ExtractClientError::Cancelled)),
+                "{result:?}"
+            );
         }
         assert!(started.elapsed() < Duration::from_millis(500));
-        for pid in pids { dead(&pid); }
+        for pid in pids {
+            dead(&pid);
+        }
         let admitted = third.request(tree.0.join("fixture.txt"), "doc", 1);
-        assert!(matches!(third.extract(&admitted, Duration::from_secs(2)),
-            Err(ExtractClientError::Malformed(_))), "a freed slot must admit another owned parser");
+        assert!(
+            matches!(
+                third.extract(&admitted, Duration::from_secs(2)),
+                Err(ExtractClientError::Malformed(_))
+            ),
+            "a freed slot must admit another owned parser"
+        );
         dead(&third_pid);
         assert!(!admitted.scratch_dir.exists());
     }
@@ -1203,13 +1349,23 @@ pub(crate) mod tests {
         let second = ExtractClient::new(fixture(), second_tree.0.join("cache"));
         let first_cleanup = cleanup_trigger(&first, first_tree.0.clone())();
         let second_cleanup = cleanup_trigger(&second, second_tree.0.clone())();
-        let fresh = ExtractClient::new(third_tree.0.join("missing.exe"), third_tree.0.join("cache"));
+        let fresh =
+            ExtractClient::new(third_tree.0.join("missing.exe"), third_tree.0.join("cache"));
         let request = fresh.request(third_tree.0.join("source.txt"), "doc", 1);
         let result = fresh.extract(&request, Duration::from_secs(1));
-        assert!(matches!(result, Err(ExtractClientError::AdmissionUnavailable)), "{result:?}");
-        assert!(!request.scratch_dir.exists(), "retained slots must block new setup");
+        assert!(
+            matches!(result, Err(ExtractClientError::AdmissionUnavailable)),
+            "{result:?}"
+        );
+        assert!(
+            !request.scratch_dir.exists(),
+            "retained slots must block new setup"
+        );
         drop((first_cleanup, second_cleanup));
-        assert!(fresh.admission_available(), "finished cleanup must release shared admission");
+        assert!(
+            fresh.admission_available(),
+            "finished cleanup must release shared admission"
+        );
     }
 
     #[test]
@@ -1221,30 +1377,61 @@ pub(crate) mod tests {
         let mut client = ExtractClient::new(fixture(), tree.0.join("cache"));
         let pid = tree.0.join("parser.pid");
         let release = tree.0.join("release");
-        client.worker_args = vec!["code-wait".into(), pid.to_string_lossy().into(), release.to_string_lossy().into()];
+        client.worker_args = vec![
+            "code-wait".into(),
+            pid.to_string_lossy().into(),
+            release.to_string_lossy().into(),
+        ];
         let client = Arc::new(client);
         let request = client.request(tree.0.join("source.rs"), "code", 1);
         let scratch = request.scratch_dir.clone();
         let allowed = Arc::new(std::sync::atomic::AtomicBool::new(true));
-        let mut running = RunningExtractions { allowed: allowed.clone(), tasks: vec![] };
+        let mut running = RunningExtractions {
+            allowed: allowed.clone(),
+            tasks: vec![],
+        };
         let active = client.clone();
-        running.tasks.push(thread::spawn(move || active.extract_while(&request,
-            Duration::from_secs(10), || allowed.load(Ordering::Acquire))));
+        running.tasks.push(thread::spawn(move || {
+            active.extract_while(&request, Duration::from_secs(10), || {
+                allowed.load(Ordering::Acquire)
+            })
+        }));
         let deadline = Instant::now() + Duration::from_secs(3);
-        while !pid.exists() && Instant::now() < deadline { thread::sleep(Duration::from_millis(2)); }
-        assert!(pid.exists(), "worker must actually start before locking its scratch");
-        let locked = std::fs::OpenOptions::new().write(true).create_new(true).share_mode(0)
-            .open(scratch.join("held.tmp")).unwrap();
+        while !pid.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(
+            pid.exists(),
+            "worker must actually start before locking its scratch"
+        );
+        let locked = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .share_mode(0)
+            .open(scratch.join("held.tmp"))
+            .unwrap();
         std::fs::write(&release, b"release").unwrap();
         let result = running.tasks.pop().unwrap().join().unwrap();
-        assert!(matches!(result, Err(ExtractClientError::AdmissionUnavailable)), "{result:?}");
+        assert!(
+            matches!(result, Err(ExtractClientError::AdmissionUnavailable)),
+            "{result:?}"
+        );
         dead(&pid);
-        assert!(scratch.exists(), "the fixture must actually prevent scratch deletion");
+        assert!(
+            scratch.exists(),
+            "the fixture must actually prevent scratch deletion"
+        );
         let fresh = ExtractClient::new(tree.0.join("missing.exe"), tree.0.join("fresh-cache"));
         let request = fresh.request(tree.0.join("source.rs"), "code", 1);
         let result = fresh.extract(&request, Duration::from_secs(1));
-        assert!(matches!(result, Err(ExtractClientError::AdmissionUnavailable)), "{result:?}");
-        assert!(!request.scratch_dir.exists(), "failed cleanup cannot be bypassed");
+        assert!(
+            matches!(result, Err(ExtractClientError::AdmissionUnavailable)),
+            "{result:?}"
+        );
+        assert!(
+            !request.scratch_dir.exists(),
+            "failed cleanup cannot be bypassed"
+        );
         drop(locked);
         drop(parked_cleanup);
         let deadline = Instant::now() + Duration::from_secs(3);
@@ -1252,7 +1439,10 @@ pub(crate) mod tests {
             client.wait_for_admission(Duration::from_millis(20));
         }
         assert!(client.admission_available() && fresh.admission_available());
-        assert!(!scratch.exists(), "retained scratch must actually be cleaned");
+        assert!(
+            !scratch.exists(),
+            "retained scratch must actually be cleaned"
+        );
     }
 
     fn real_client(tree: &Tree) -> ExtractClient {
@@ -1273,8 +1463,11 @@ pub(crate) mod tests {
         let client = real_client(&tree);
         let request = client.request(path.clone(), "doc", 256);
         let response = client.extract(&request, Duration::from_secs(10)).unwrap();
-        assert_eq!(response.source_sha256.as_deref(),Some("831a561524ffc04c9d0c0773e6c34f4dc9bd90fb63864d13970efe9a89d63fbc"),
-            "actual ordinary worker must attest complete source bytes");
+        assert_eq!(
+            response.source_sha256.as_deref(),
+            Some("831a561524ffc04c9d0c0773e6c34f4dc9bd90fb63864d13970efe9a89d63fbc"),
+            "actual ordinary worker must attest complete source bytes"
+        );
         assert_eq!(
             response.output.segments[0].text,
             "actual generated fixture text\nsecond line"
@@ -1294,7 +1487,7 @@ pub(crate) mod tests {
         assert!(completed.output.segments.is_empty());
         assert_eq!(completed.next_cursor, None);
         assert_eq!(completed.total_units, Some(1));
-        assert_eq!(completed.source_sha256,response.source_sha256);
+        assert_eq!(completed.source_sha256, response.source_sha256);
         std::fs::write(
             tree.0.join("actual.txt"),
             "generated chunk words ".repeat(200),

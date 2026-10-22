@@ -66,7 +66,10 @@ fn embeddinggemma2_matches_reference_vectors() {
         return;
     };
     let fixture = load_fixture();
-    let opts = LoadOptions { backend: BackendPreference::Cpu, ..LoadOptions::default() };
+    let opts = LoadOptions {
+        backend: BackendPreference::Cpu,
+        ..LoadOptions::default()
+    };
     let mut rt = EmbedRuntime::load(&model, &opts).expect("load EmbeddingGemma 2 on CPU");
     assert_eq!(rt.n_embd(), fixture.dim, "runtime dim must match reference");
 

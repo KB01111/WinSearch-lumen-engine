@@ -105,9 +105,11 @@ fn parse_search_args(args: &[String]) -> anyhow::Result<CliCommand> {
                 i += 2;
             }
             "--extension" | "-e" => {
-                let value = args.get(i + 1)
+                let value = args
+                    .get(i + 1)
                     .filter(|value| !value.starts_with('-'))
-                    .ok_or_else(|| { anyhow::anyhow!("--extension requires a single extension (e.g. pdf)")
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("--extension requires a single extension (e.g. pdf)")
                     })?;
                 extensions.push(value.clone());
                 i += 2;
@@ -172,7 +174,8 @@ fn parse_model_args(args: &[String]) -> anyhow::Result<CliCommand> {
             anyhow::ensure!(
                 args[1..].iter().all(|arg| arg == "--include-npu"),
                 "unknown model download option"
-            ); Ok(CliCommand::Model(ModelSubcommand::Download {
+            );
+            Ok(CliCommand::Model(ModelSubcommand::Download {
                 include_npu: args[1..].iter().any(|arg| arg == "--include-npu"),
             }))
         }
@@ -318,8 +321,8 @@ fn cmd_search(
     })?;
 
     if json {
-        if let Some(outcome)=client.last_search_outcome {
-            eprintln!("search outcome: {}",serde_json::to_string(&outcome)?);
+        if let Some(outcome) = client.last_search_outcome {
+            eprintln!("search outcome: {}", serde_json::to_string(&outcome)?);
         }
         println!("{}", serde_json::to_string(&results)?);
         return Ok(());
@@ -333,8 +336,8 @@ fn cmd_search(
         results.len()
     );
     match client.last_search_outcome {
-        Some(outcome)=>println!("outcome: {}",serde_json::to_string(&outcome)?),
-        None=>println!("outcome: unknown (legacy peer)"),
+        Some(outcome) => println!("outcome: {}", serde_json::to_string(&outcome)?),
+        None => println!("outcome: unknown (legacy peer)"),
     }
     for (idx, r) in results.iter().enumerate() {
         println!(
@@ -591,7 +594,7 @@ fn cmd_model_with_pipe(
                     client.pipe_name()
                 );
                 let mut last_pct = 0u64;
-                let mut progress =|s: &ws_modelmgr::ModelStatus| {
+                let mut progress = |s: &ws_modelmgr::ModelStatus| {
                     print_npu_progress(s, include_npu);
                     if s.total_bytes > 0 {
                         let pct = (s.bytes * 100) / s.total_bytes;
@@ -646,19 +649,20 @@ fn cmd_model_with_pipe(
             }
             Err(e) => Err(e.into()),
         },
-        ModelSubcommand::Import { path, include_npu } => { match DaemonClient::connect_pipe(pipe_name) {
-            Ok(mut client) => {
-                println!(
-                    "importing model from {} via daemon ({})...",
-                    path.display(),
-                    client.pipe_name()
-                );
-                let mut progress = |s: &ws_modelmgr::ModelStatus| {
+        ModelSubcommand::Import { path, include_npu } => {
+            match DaemonClient::connect_pipe(pipe_name) {
+                Ok(mut client) => {
+                    println!(
+                        "importing model from {} via daemon ({})...",
+                        path.display(),
+                        client.pipe_name()
+                    );
+                    let mut progress = |s: &ws_modelmgr::ModelStatus| {
                         print_npu_progress(s, include_npu);
-                    if s.total_bytes > 0 && s.state == ModelState::Downloading {
-                        println!("  progress: {}/{} bytes", s.bytes, s.total_bytes);
-                    }
-                };
+                        if s.total_bytes > 0 && s.state == ModelState::Downloading {
+                            println!("  progress: {}/{} bytes", s.bytes, s.total_bytes);
+                        }
+                    };
                     let path = path.to_string_lossy().into_owned();
                     let status = if include_npu {
                         client.import_model_with_npu(path, true, &mut progress)
@@ -666,47 +670,49 @@ fn cmd_model_with_pipe(
                         client.import_model(path, &mut progress)
                     }?;
                     require_npu_ready(&status, include_npu)?;
-                match status.state {
-                    ModelState::Ready => {
-                        println!(
-                            "import complete: state={:?} ({}/{} bytes)",
-                            status.state, status.bytes, status.total_bytes
-                        );
-                        Ok(())
-                    }
-                    other => {
-                        let detail = status.error.unwrap_or_else(|| format!("state={other:?}"));
-                        anyhow::bail!("daemon model import did not reach Ready: {detail}")
+                    match status.state {
+                        ModelState::Ready => {
+                            println!(
+                                "import complete: state={:?} ({}/{} bytes)",
+                                status.state, status.bytes, status.total_bytes
+                            );
+                            Ok(())
+                        }
+                        other => {
+                            let detail = status.error.unwrap_or_else(|| format!("state={other:?}"));
+                            anyhow::bail!("daemon model import did not reach Ready: {detail}")
+                        }
                     }
                 }
-            }
-            Err(IpcError::NotConnected { .. }) => {
-                println!(
-                    "importing model from {} into {}...",
-                    path.display(),
-                    model_dir.display()
-                );
-                let cancel = AtomicBool::new(false);
-                    if !include_npu || mgr.has_import_files(&path, false) { mgr.import(&path, &cancel)?;
+                Err(IpcError::NotConnected { .. }) => {
+                    println!(
+                        "importing model from {} into {}...",
+                        path.display(),
+                        model_dir.display()
+                    );
+                    let cancel = AtomicBool::new(false);
+                    if !include_npu || mgr.has_import_files(&path, false) {
+                        mgr.import(&path, &cancel)?;
                     }
-                let status = if include_npu { mgr.import_npu_bundle(&path, &cancel)?
+                    let status = if include_npu {
+                        mgr.import_npu_bundle(&path, &cancel)?
                     } else {
                         mgr.status()
                     };
-                println!(
-                    "import complete: state={:?} ({}/{} bytes)",
-                    status.state, status.bytes, status.total_bytes
-                );
-                if status.state != ModelState::Ready {
                     println!(
+                        "import complete: state={:?} ({}/{} bytes)",
+                        status.state, status.bytes, status.total_bytes
+                    );
+                    if status.state != ModelState::Ready {
+                        println!(
                         "note: partial import ({} of {} total bytes present); import remaining manifest file(s) to reach Ready",
                         status.bytes, status.total_bytes
                     );
+                    }
+                    Ok(())
                 }
-                Ok(())
+                Err(e) => Err(e.into()),
             }
-            Err(e) => Err(e.into()),
-        }
         }
     }
 }
@@ -784,30 +790,60 @@ mod tests {
     #[test]
     fn search_extension_options_do_not_become_query_text() {
         let command = parse_args(&vec_args(&[
-            "search", "needle", "--extension", ".RS", "--extension=pdf", "-e", "c++",
-        ])).unwrap();
-        assert!(matches!(command, CliCommand::Search { query, extensions, .. }
-            if query == "needle" && extensions == vec![".RS", "pdf", "c++"]));
+            "search",
+            "needle",
+            "--extension",
+            ".RS",
+            "--extension=pdf",
+            "-e",
+            "c++",
+        ]))
+        .unwrap();
+        assert!(
+            matches!(command, CliCommand::Search { query, extensions, .. }
+            if query == "needle" && extensions == vec![".RS", "pdf", "c++"])
+        );
     }
 
     #[test]
     fn search_rejects_invalid_or_excessive_extension_options() {
         for value in ["", ".", "*.pdf", "../pdf", "pdf,rs", "two words", "--json"] {
-            assert!(parse_args(&vec_args(&["search", "needle", "--extension", value])).is_err(), "{value:?}");
+            assert!(
+                parse_args(&vec_args(&["search", "needle", "--extension", value])).is_err(),
+                "{value:?}"
+            );
         }
         assert!(parse_args(&vec_args(&["search", "needle", "--extension"])).is_err());
         assert!(parse_args(&vec_args(&["search", "needle", "--extension="])).is_err());
-        assert!(parse_args(&vec_args(&["search", "needle", "--extension", &"a".repeat(33)])).is_err());
+        assert!(parse_args(&vec_args(&[
+            "search",
+            "needle",
+            "--extension",
+            &"a".repeat(33)
+        ]))
+        .is_err());
         let mut args = vec_args(&["search", "needle"]);
-        for _ in 0..65 { args.extend(vec_args(&["--extension", "pdf"])); }
+        for _ in 0..65 {
+            args.extend(vec_args(&["--extension", "pdf"]));
+        }
         assert!(parse_args(&args).is_err());
     }
 
     #[test]
     fn search_rejects_unknown_long_options_and_allows_literal_options_after_separator() {
         assert!(parse_args(&vec_args(&["search", "needle", "--extensoin", "pdf"])).is_err());
-        let command = parse_args(&vec_args(&["search", "--extension", "txt", "--", "--extension=pdf", "-42"])).unwrap();
-        assert!(matches!(command, CliCommand::Search { query, .. } if query == "--extension=pdf -42"));
+        let command = parse_args(&vec_args(&[
+            "search",
+            "--extension",
+            "txt",
+            "--",
+            "--extension=pdf",
+            "-42",
+        ]))
+        .unwrap();
+        assert!(
+            matches!(command, CliCommand::Search { query, .. } if query == "--extension=pdf -42")
+        );
     }
 
     #[test]
@@ -921,7 +957,8 @@ mod tests {
                         ClientMessage::Search { id, query } => {
                             write_message(
                                 &mut stream,
-                                &ServerMessage::Results { outcome:None,
+                                &ServerMessage::Results {
+                                    outcome: None,
                                     id,
                                     batch: vec![SearchResult {
                                         id: "e1".into(),
@@ -938,7 +975,8 @@ mod tests {
                             .unwrap();
                             write_message(
                                 &mut stream,
-                                &ServerMessage::Results { outcome:None,
+                                &ServerMessage::Results {
+                                    outcome: None,
                                     id,
                                     batch: vec![SearchResult {
                                         id: "s2".into(),
@@ -1016,8 +1054,11 @@ mod tests {
                     &ServerMessage::HelloAck {
                         protocol_version: PROTOCOL_VERSION,
                         engine_version: "0.1.0-test".into(),
-                        features: vec!["search.exact".into(), "search.semantic".into(),
-                            "model.npu_bundle".into(),],
+                        features: vec![
+                            "search.exact".into(),
+                            "search.semantic".into(),
+                            "model.npu_bundle".into(),
+                        ],
                     },
                 )
                 .unwrap();
@@ -1025,7 +1066,8 @@ mod tests {
                 if let Ok(Some(msg)) = read_message::<_, ClientMessage>(&mut stream) {
                     seen_server.lock().unwrap().push(msg.clone());
                     match msg {
-                        ClientMessage::ModelDownloadStart { id,
+                        ClientMessage::ModelDownloadStart {
+                            id,
                             include_npu: true,
                         }
                         | ClientMessage::ModelImport {
@@ -1034,30 +1076,31 @@ mod tests {
                             ..
                         } => {
                             for state in [ModelState::Downloading, ModelState::Ready] {
-                            write_message(
-                                &mut stream,
-                                &ServerMessage::ModelStatus {
-                                    id: Some(id),
-                                    status: ModelStatus {
-                                        state: ModelState::Ready,
-                                        bytes: 100,
-                                        total_bytes: 100,
-                                        error: None,
+                                write_message(
+                                    &mut stream,
+                                    &ServerMessage::ModelStatus {
+                                        id: Some(id),
+                                        status: ModelStatus {
+                                            state: ModelState::Ready,
+                                            bytes: 100,
+                                            total_bytes: 100,
+                                            error: None,
                                             npu_bundle: Some(ws_modelmgr::ModelComponentStatus {
                                                 state,
                                                 bytes: 10,
                                                 total_bytes: 10,
                                                 error: None,
                                             }),
+                                        },
                                     },
-                                },
-                            )
-                            .unwrap();
+                                )
+                                .unwrap();
                             }
                         }
                         ClientMessage::ModelDownloadStart {
                             id,
-                            include_npu: false, } => {
+                            include_npu: false,
+                        } => {
                             write_message(
                                 &mut stream,
                                 &ServerMessage::ModelStatus {
@@ -1144,8 +1187,12 @@ mod tests {
             "winsearch-cli-model-test-dir-{}",
             std::process::id()
         ));
-        cmd_model_with_pipe(ModelSubcommand::Download { include_npu: false }, &pipe, dummy_dir.clone())
-            .expect("daemon model download");
+        cmd_model_with_pipe(
+            ModelSubcommand::Download { include_npu: false },
+            &pipe,
+            dummy_dir.clone(),
+        )
+        .expect("daemon model download");
         cmd_model_with_pipe(
             ModelSubcommand::Import {
                 path: PathBuf::from(r"C:\fake\models"),

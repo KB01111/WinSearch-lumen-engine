@@ -113,7 +113,9 @@ pub fn kind_for_ext(ext: &str) -> EntryKind {
         | "gif" | "ico" | "raw" | "cr2" | "cr3" | "nef" | "arw" | "dng" | "orf" | "rw2" => {
             EntryKind::Image
         }
-        "mp3" | "wav" | "flac" | "m4a" | "aac" | "ogg" | "wma" | "opus" | "aiff" => EntryKind::Audio,
+        "mp3" | "wav" | "flac" | "m4a" | "aac" | "ogg" | "wma" | "opus" | "aiff" => {
+            EntryKind::Audio
+        }
         "mp4" | "mkv" | "mov" | "avi" | "webm" | "wmv" | "m4v" | "mpg" | "mpeg" => EntryKind::Video,
         "pdf" | "doc" | "docx" | "odt" | "rtf" | "txt" | "md" | "xls" | "xlsx" | "ppt" | "pptx"
         | "csv" | "epub" | "mobi" | "one" | "pages" | "numbers" | "key" => EntryKind::Document,
@@ -347,14 +349,17 @@ pub struct MediaPlan {
 
 impl MediaPlan {
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.duration_ms == 0 || self.duration_ms > MAX_MEDIA_DURATION_MS
+        if self.duration_ms == 0
+            || self.duration_ms > MAX_MEDIA_DURATION_MS
             || self.frames_ms.len() > MAX_MEDIA_FRAMES
-            || (!self.has_audio && self.frames_ms.is_empty()) {
+            || (!self.has_audio && self.frames_ms.is_empty())
+        {
             return Err("invalid media duration/stream/frame bound");
         }
         if !self.frames_ms.is_empty()
             && (self.frames_ms.iter().any(|t| *t >= self.duration_ms)
-                || self.frames_ms.windows(2).any(|p| p[1] <= p[0] + 500)) {
+                || self.frames_ms.windows(2).any(|p| p[1] <= p[0] + 500))
+        {
             return Err("media selection is outside source or not deduplicated");
         }
         Ok(())

@@ -2,7 +2,10 @@
 //! This fixture changes that instance's root policy and restores it before exit.
 use std::{error::Error, time::Duration};
 use ws_client::{
-    protocol::{ErrorCode, IndexingConfig, SearchMode, SearchQuery, SearchResult,SearchDisposition,SemanticPhase},
+    protocol::{
+        ErrorCode, IndexingConfig, SearchDisposition, SearchMode, SearchQuery, SearchResult,
+        SemanticPhase,
+    },
     Client, EngineEvent,
 };
 
@@ -14,27 +17,44 @@ async fn search(
     mode: SearchMode,
     include_semantic: bool,
 ) -> Result<Vec<SearchResult>> {
-    search_query(client,SearchQuery {
+    search_query(
+        client,
+        SearchQuery {
             text: text.into(),
             mode,
             limit: 5,
             include_semantic,
             ..Default::default()
-        }).await
+        },
+    )
+    .await
 }
 
-async fn search_query(client:&Client,query:SearchQuery)->Result<Vec<SearchResult>> {
-    let requested_semantic=query.include_semantic;
-    let mut stream=client.search(query).await?;
+async fn search_query(client: &Client, query: SearchQuery) -> Result<Vec<SearchResult>> {
+    let requested_semantic = query.include_semantic;
+    let mut stream = client.search(query).await?;
     let mut results = Vec::new();
     let mut terminal = false;
     while let Some(frame) = stream.next().await? {
         terminal |= frame.done;
         if frame.done {
-            let outcome=frame.outcome.expect("native engine must supply terminal outcomes");
-            eprintln!("typed search outcome: {}",serde_json::to_string(&outcome)?);
-            assert_eq!(outcome.disposition,SearchDisposition::Complete,"native acceptance requires a completed snapshot; no implicit retry");
-            assert_eq!(outcome.semantic.unwrap().phase,if requested_semantic {SemanticPhase::Ready} else {SemanticPhase::Disabled});
+            let outcome = frame
+                .outcome
+                .expect("native engine must supply terminal outcomes");
+            eprintln!("typed search outcome: {}", serde_json::to_string(&outcome)?);
+            assert_eq!(
+                outcome.disposition,
+                SearchDisposition::Complete,
+                "native acceptance requires a completed snapshot; no implicit retry"
+            );
+            assert_eq!(
+                outcome.semantic.unwrap().phase,
+                if requested_semantic {
+                    SemanticPhase::Ready
+                } else {
+                    SemanticPhase::Disabled
+                }
+            );
         }
         results.extend(frame.batch);
     }
@@ -44,7 +64,16 @@ async fn search_query(client:&Client,query:SearchQuery)->Result<Vec<SearchResult
 
 async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_json::Value> {
     let info = client.info().await?;
-    for feature in ["search.entry_references","entry.resolve.code","entry.preview.code","search.filters","search.outcomes","search.related"] {assert!(info.supports(feature));}
+    for feature in [
+        "search.entry_references",
+        "entry.resolve.code",
+        "entry.preview.code",
+        "search.filters",
+        "search.outcomes",
+        "search.related",
+    ] {
+        assert!(info.supports(feature));
+    }
     let status = client.status().await?;
     let model = client.model_status().await?;
     let engine_config = client.config().await?;
@@ -65,9 +94,12 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
 
     let document = search(client, "amberparitytoken", SearchMode::Files, false).await?;
     if document.is_empty() {
-        let status=client.status().await?;
-        let repeated=search(client,"amberparitytoken",SearchMode::Files,false).await?;
-        eprintln!("document admission diagnostic: {}",serde_json::json!({"status":status,"repeated":repeated}));
+        let status = client.status().await?;
+        let repeated = search(client, "amberparitytoken", SearchMode::Files, false).await?;
+        eprintln!(
+            "document admission diagnostic: {}",
+            serde_json::json!({"status":status,"repeated":repeated})
+        );
     }
     assert!(
         !document.is_empty(),
@@ -78,38 +110,105 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
         code.iter().any(|hit| hit.location.is_some()),
         "actual code locations must survive IPC"
     );
-    let mut extension_filters=Vec::new();
-    for (text,mode,extension,expected) in [
-        ("pdfparitytoken",SearchMode::Files,".PDF",Some("item-b.pdf")),
-        ("pdfparitytoken",SearchMode::Files,"txt",None),
-        ("parityneedle",SearchMode::Code,"rs",Some("源 code.rs")),
-        ("parityneedle",SearchMode::Code,"py",None),
+    let mut extension_filters = Vec::new();
+    for (text, mode, extension, expected) in [
+        (
+            "pdfparitytoken",
+            SearchMode::Files,
+            ".PDF",
+            Some("item-b.pdf"),
+        ),
+        ("pdfparitytoken", SearchMode::Files, "txt", None),
+        ("parityneedle", SearchMode::Code, "rs", Some("源 code.rs")),
+        ("parityneedle", SearchMode::Code, "py", None),
     ] {
-        let hits=search_query(client,SearchQuery {text:text.into(),mode,limit:5,
-            extensions:vec![extension.into()],..Default::default()}).await?;
-        if let Some(name)=expected {assert!(hits.iter().any(|hit|hit.path.as_deref()
-            .is_some_and(|path|std::path::Path::new(path).file_name().unwrap()==name)));}
-        else {assert!(hits.is_empty());}
-        extension_filters.push(serde_json::json!({"query":text,"extension":extension,"results":hits}));
+        let hits = search_query(
+            client,
+            SearchQuery {
+                text: text.into(),
+                mode,
+                limit: 5,
+                extensions: vec![extension.into()],
+                ..Default::default()
+            },
+        )
+        .await?;
+        if let Some(name) = expected {
+            assert!(hits.iter().any(|hit| hit
+                .path
+                .as_deref()
+                .is_some_and(|path| std::path::Path::new(path).file_name().unwrap() == name)));
+        } else {
+            assert!(hits.is_empty());
+        }
+        extension_filters
+            .push(serde_json::json!({"query":text,"extension":extension,"results":hits}));
     }
-    let mut file_kind_filters=Vec::new();
-    for (text,mode,kind,expected) in [
-        ("pdfparitytoken",SearchMode::Files,ws_client::protocol::FileKind::Pdf,Some("item-b.pdf")),
-        ("pdfparitytoken",SearchMode::Files,ws_client::protocol::FileKind::Document,None),
-        ("parityneedle",SearchMode::Code,ws_client::protocol::FileKind::Source,Some("源 code.rs")),
-        ("parityneedle",SearchMode::Code,ws_client::protocol::FileKind::Pdf,None),
-        ("notebookparity",SearchMode::Code,ws_client::protocol::FileKind::Unknown,Some("cells.ipynb")),
-        ("notebookparity",SearchMode::Code,ws_client::protocol::FileKind::Source,None),
+    let mut file_kind_filters = Vec::new();
+    for (text, mode, kind, expected) in [
+        (
+            "pdfparitytoken",
+            SearchMode::Files,
+            ws_client::protocol::FileKind::Pdf,
+            Some("item-b.pdf"),
+        ),
+        (
+            "pdfparitytoken",
+            SearchMode::Files,
+            ws_client::protocol::FileKind::Document,
+            None,
+        ),
+        (
+            "parityneedle",
+            SearchMode::Code,
+            ws_client::protocol::FileKind::Source,
+            Some("源 code.rs"),
+        ),
+        (
+            "parityneedle",
+            SearchMode::Code,
+            ws_client::protocol::FileKind::Pdf,
+            None,
+        ),
+        (
+            "notebookparity",
+            SearchMode::Code,
+            ws_client::protocol::FileKind::Unknown,
+            Some("cells.ipynb"),
+        ),
+        (
+            "notebookparity",
+            SearchMode::Code,
+            ws_client::protocol::FileKind::Source,
+            None,
+        ),
     ] {
-        let hits=search_query(client,SearchQuery {text:text.into(),mode,limit:5,file_kinds:vec![kind],..Default::default()}).await?;
-        if let Some(name)=expected {assert!(hits.iter().any(|hit|hit.path.as_deref()
-            .is_some_and(|path|std::path::Path::new(path).file_name().unwrap()==name)));}
-        else {assert!(hits.is_empty());}
+        let hits = search_query(
+            client,
+            SearchQuery {
+                text: text.into(),
+                mode,
+                limit: 5,
+                file_kinds: vec![kind],
+                ..Default::default()
+            },
+        )
+        .await?;
+        if let Some(name) = expected {
+            assert!(hits.iter().any(|hit| hit
+                .path
+                .as_deref()
+                .is_some_and(|path| std::path::Path::new(path).file_name().unwrap() == name)));
+        } else {
+            assert!(hits.is_empty());
+        }
         file_kind_filters.push(serde_json::json!({"query":text,"file_kind":kind,"results":hits}));
     }
     let semantic_code = if engine_config.semantic_enabled {
         let query = "a function named parityneedle and its caller";
-        assert!(search(client, query, SearchMode::Code, false).await?.is_empty());
+        assert!(search(client, query, SearchMode::Code, false)
+            .await?
+            .is_empty());
         let hits = search(client, query, SearchMode::Code, true).await?;
         assert!(
             !hits.is_empty(),
@@ -120,75 +219,159 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
             "asteroid orbital mechanics and interstellar propulsion",
             SearchMode::Code,
             true,
-        ).await?.is_empty());
+        )
+        .await?
+        .is_empty());
         Some(hits)
     } else {
         None
     };
-    let reference=document[0].entry_reference.clone().expect("use the engine's bound document reference");
+    let reference = document[0]
+        .entry_reference
+        .clone()
+        .expect("use the engine's bound document reference");
     assert!(reference.is_bound());
     let entry = client.resolve_entry(reference.clone()).await?;
     assert!(entry.index_revision.is_some_and(|revision| revision > 0));
     assert_eq!(client.resolve_entry(reference.clone()).await?, entry);
-    let notebook=search(client,"notebookparity",SearchMode::Code,false).await?;
+    let notebook = search(client, "notebookparity", SearchMode::Code, false).await?;
     assert!(!notebook.is_empty());
-    let mut code_entries=Vec::new();
-    for hit in code.iter().chain(notebook.iter()).chain(semantic_code.iter().flatten()) {
-        let reference=hit.entry_reference.clone().expect("query-specific code IDs must not be parsed by consumers");
+    let mut code_entries = Vec::new();
+    for hit in code
+        .iter()
+        .chain(notebook.iter())
+        .chain(semantic_code.iter().flatten())
+    {
+        let reference = hit
+            .entry_reference
+            .clone()
+            .expect("query-specific code IDs must not be parsed by consumers");
         assert!(reference.is_bound() && reference.result_id.starts_with('c'));
-        let resolved=client.resolve_entry(reference).await?;
-        assert_eq!(resolved.path,hit.path.clone().unwrap());
-        assert!(resolved.index_revision.is_some_and(|n|n>0));
-        assert!(resolved.content_sha256.as_deref().is_some_and(ws_client::protocol::valid_content_sha256));
+        let resolved = client.resolve_entry(reference).await?;
+        assert_eq!(resolved.path, hit.path.clone().unwrap());
+        assert!(resolved.index_revision.is_some_and(|n| n > 0));
+        assert!(resolved
+            .content_sha256
+            .as_deref()
+            .is_some_and(ws_client::protocol::valid_content_sha256));
         code_entries.push(resolved);
     }
-    let code_reference=code[0].entry_reference.clone().unwrap();
-    let document_preview = client.preview_text(ws_client::protocol::PreviewRequest {
-        reference: reference.clone(),
-        location: Some(ws_client::protocol::MatchLocation::Line { line: 2 }),
-    }).await?;
-    assert!(document_preview.parts.iter().any(|part| part.text.contains("amberparitytoken")));
-    assert!(document_preview.entry.content_sha256.as_deref().is_some_and(ws_client::protocol::valid_content_sha256));
-    assert!(document_preview.extraction.iter().all(|progress| progress.source_units.is_none() && progress.capped.is_none()));
+    let code_reference = code[0].entry_reference.clone().unwrap();
+    let document_preview = client
+        .preview_text(ws_client::protocol::PreviewRequest {
+            reference: reference.clone(),
+            location: Some(ws_client::protocol::MatchLocation::Line { line: 2 }),
+        })
+        .await?;
+    assert!(document_preview
+        .parts
+        .iter()
+        .any(|part| part.text.contains("amberparitytoken")));
+    assert!(document_preview
+        .entry
+        .content_sha256
+        .as_deref()
+        .is_some_and(ws_client::protocol::valid_content_sha256));
+    assert!(document_preview
+        .extraction
+        .iter()
+        .all(|progress| progress.source_units.is_none() && progress.capped.is_none()));
     let pdf = search(client, "pdfparitytoken", SearchMode::Files, false).await?;
-    let pdf_preview = client.preview_text(ws_client::protocol::PreviewRequest {
-        reference: pdf[0].entry_reference.clone().expect("use the engine's PDF reference"),
-        location: Some(ws_client::protocol::MatchLocation::Page { page: 2 }),
-    }).await?;
-    assert!(pdf_preview.parts.iter().any(|part| part.text.contains("pdfparitytoken")
-        && part.location == Some(ws_client::protocol::MatchLocation::Page { page: 2 })));
-    assert!(pdf_preview.entry.content_sha256.as_deref().is_some_and(ws_client::protocol::valid_content_sha256));
-    let code_preview=client.preview_text(ws_client::protocol::PreviewRequest {
-        reference:code_reference.clone(),location:code[0].location,
-    }).await?;
-    assert!(code_preview.parts.iter().any(|part|part.kind=="code" && part.text.contains("parityneedle")));
-    let notebook_preview=client.preview_text(ws_client::protocol::PreviewRequest {
-        reference:notebook[0].entry_reference.clone().unwrap(),location:notebook[0].location,
-    }).await?;
-    assert!(notebook_preview.parts.iter().any(|part|part.text.contains("notebookparity")
-        && matches!(part.location,Some(ws_client::protocol::MatchLocation::Notebook {cell_ordinal:1,line:1,end_line:2}))));
-    assert!(notebook_preview.parts.iter().all(|part|!part.text.contains("PRIVATE_OUTPUT_SENTINEL")));
+    let pdf_preview = client
+        .preview_text(ws_client::protocol::PreviewRequest {
+            reference: pdf[0]
+                .entry_reference
+                .clone()
+                .expect("use the engine's PDF reference"),
+            location: Some(ws_client::protocol::MatchLocation::Page { page: 2 }),
+        })
+        .await?;
+    assert!(pdf_preview
+        .parts
+        .iter()
+        .any(|part| part.text.contains("pdfparitytoken")
+            && part.location == Some(ws_client::protocol::MatchLocation::Page { page: 2 })));
+    assert!(pdf_preview
+        .entry
+        .content_sha256
+        .as_deref()
+        .is_some_and(ws_client::protocol::valid_content_sha256));
+    let code_preview = client
+        .preview_text(ws_client::protocol::PreviewRequest {
+            reference: code_reference.clone(),
+            location: code[0].location,
+        })
+        .await?;
+    assert!(code_preview
+        .parts
+        .iter()
+        .any(|part| part.kind == "code" && part.text.contains("parityneedle")));
+    let notebook_preview = client
+        .preview_text(ws_client::protocol::PreviewRequest {
+            reference: notebook[0].entry_reference.clone().unwrap(),
+            location: notebook[0].location,
+        })
+        .await?;
+    assert!(notebook_preview
+        .parts
+        .iter()
+        .any(|part| part.text.contains("notebookparity")
+            && matches!(
+                part.location,
+                Some(ws_client::protocol::MatchLocation::Notebook {
+                    cell_ordinal: 1,
+                    line: 1,
+                    end_line: 2
+                })
+            )));
+    assert!(notebook_preview
+        .parts
+        .iter()
+        .all(|part| !part.text.contains("PRIVATE_OUTPUT_SENTINEL")));
 
-    let mut related_checks=Vec::new();
-    for source in [&reference,&code_reference] {
-        let mut stream=client.related(ws_client::protocol::RelatedQuery {source:source.clone(),limit:5,
-            categories:Vec::new(),extensions:Vec::new(),file_kinds:Vec::new()}).await?;
+    let mut related_checks = Vec::new();
+    for source in [&reference, &code_reference] {
+        let mut stream = client
+            .related(ws_client::protocol::RelatedQuery {
+                source: source.clone(),
+                limit: 5,
+                categories: Vec::new(),
+                extensions: Vec::new(),
+                file_kinds: Vec::new(),
+            })
+            .await?;
         if engine_config.semantic_enabled {
-            let mut frames=Vec::new();
-            while let Some(frame)=stream.next().await? {
-                assert!(frame.batch.iter().all(|hit|hit.entry_reference.as_ref().is_some_and(|target|
-                    target.is_bound() && target.result_id!=source.result_id && target.result_id.as_bytes()[0]==source.result_id.as_bytes()[0])));
+            let mut frames = Vec::new();
+            while let Some(frame) = stream.next().await? {
+                assert!(frame
+                    .batch
+                    .iter()
+                    .all(|hit| hit
+                        .entry_reference
+                        .as_ref()
+                        .is_some_and(|target| target.is_bound()
+                            && target.result_id != source.result_id
+                            && target.result_id.as_bytes()[0] == source.result_id.as_bytes()[0])));
                 if frame.done {
-                    let outcome=frame.outcome.unwrap();assert_eq!(outcome.disposition,SearchDisposition::Complete);
-                    assert_eq!(outcome.semantic.unwrap().phase,SemanticPhase::Ready);
+                    let outcome = frame.outcome.unwrap();
+                    assert_eq!(outcome.disposition, SearchDisposition::Complete);
+                    assert_eq!(outcome.semantic.unwrap().phase, SemanticPhase::Ready);
                 }
                 frames.push(serde_json::json!({"results":frame.batch,"done":frame.done,"outcome":frame.outcome}));
             }
-            assert!(frames.last().is_some_and(|frame|frame["done"]==true));
+            assert!(frames.last().is_some_and(|frame| frame["done"] == true));
             related_checks.push(serde_json::json!({"source":source,"frames":frames}));
         } else {
-            assert!(matches!(stream.next().await,Err(ws_client::Error::Remote {code:ErrorCode::NotReady,..})),
-                "Related must not become ordinary exact search without semantic inference");
+            assert!(
+                matches!(
+                    stream.next().await,
+                    Err(ws_client::Error::Remote {
+                        code: ErrorCode::NotReady,
+                        ..
+                    })
+                ),
+                "Related must not become ordinary exact search without semantic inference"
+            );
             related_checks.push(serde_json::json!({"source":source,"error":"not_ready"}));
         }
     }
@@ -208,14 +391,32 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
 
     let mut revoked = original.clone();
     revoked.roots.clear();
-    revoked.code_enabled=false;
+    revoked.code_enabled = false;
     client.set_indexing_config(revoked).await?;
-    assert!(matches!(client.preview_text(ws_client::protocol::PreviewRequest {
-        reference:code_reference.clone(),location:code[0].location,
-    }).await,Err(ws_client::Error::Remote {code:ErrorCode::NotReady,..})));
-    assert!(matches!(client.preview_text(ws_client::protocol::PreviewRequest {
-        reference: reference.clone(), location: None,
-    }).await, Err(ws_client::Error::Remote { code: ErrorCode::NotReady, .. })));
+    assert!(matches!(
+        client
+            .preview_text(ws_client::protocol::PreviewRequest {
+                reference: code_reference.clone(),
+                location: code[0].location,
+            })
+            .await,
+        Err(ws_client::Error::Remote {
+            code: ErrorCode::NotReady,
+            ..
+        })
+    ));
+    assert!(matches!(
+        client
+            .preview_text(ws_client::protocol::PreviewRequest {
+                reference: reference.clone(),
+                location: None,
+            })
+            .await,
+        Err(ws_client::Error::Remote {
+            code: ErrorCode::NotReady,
+            ..
+        })
+    ));
     assert!(matches!(
         client.resolve_entry(reference.clone()).await,
         Err(ws_client::Error::Remote {
@@ -227,14 +428,37 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
         .await?
         .is_empty());
     client.set_indexing_config(original.clone()).await?;
-    assert!(matches!(client.preview_text(ws_client::protocol::PreviewRequest {
-        reference:code_reference.clone(),location:code[0].location,
-    }).await,Err(ws_client::Error::Remote {code:ErrorCode::NotReady,..})));
-    assert!(matches!(client.resolve_entry(code_reference).await,
-        Err(ws_client::Error::Remote {code:ErrorCode::NotReady,..})));
-    assert!(matches!(client.preview_text(ws_client::protocol::PreviewRequest {
-        reference: reference.clone(), location: None,
-    }).await, Err(ws_client::Error::Remote { code: ErrorCode::NotReady, .. })));
+    assert!(matches!(
+        client
+            .preview_text(ws_client::protocol::PreviewRequest {
+                reference: code_reference.clone(),
+                location: code[0].location,
+            })
+            .await,
+        Err(ws_client::Error::Remote {
+            code: ErrorCode::NotReady,
+            ..
+        })
+    ));
+    assert!(matches!(
+        client.resolve_entry(code_reference).await,
+        Err(ws_client::Error::Remote {
+            code: ErrorCode::NotReady,
+            ..
+        })
+    ));
+    assert!(matches!(
+        client
+            .preview_text(ws_client::protocol::PreviewRequest {
+                reference: reference.clone(),
+                location: None,
+            })
+            .await,
+        Err(ws_client::Error::Remote {
+            code: ErrorCode::NotReady,
+            ..
+        })
+    ));
     assert!(matches!(
         client.resolve_entry(reference).await,
         Err(ws_client::Error::Remote {
@@ -242,9 +466,14 @@ async fn exercise(client: &Client, original: &IndexingConfig) -> Result<serde_js
             ..
         })
     ));
-    let fresh_hits=search(client,"amberparitytoken",SearchMode::Files,false).await?;
-    assert!(!fresh_hits.is_empty(),"root restoration must preserve committed exact document text without a model or a retry");
-    let fresh=client.resolve_entry(fresh_hits[0].entry_reference.clone().unwrap()).await?;
+    let fresh_hits = search(client, "amberparitytoken", SearchMode::Files, false).await?;
+    assert!(
+        !fresh_hits.is_empty(),
+        "root restoration must preserve committed exact document text without a model or a retry"
+    );
+    let fresh = client
+        .resolve_entry(fresh_hits[0].entry_reference.clone().unwrap())
+        .await?;
     assert_ne!(
         fresh.source_revision, entry.source_revision,
         "revoked references must not revive"
@@ -299,7 +528,10 @@ async fn main() -> Result<()> {
     let restored = client.set_indexing_config(original.clone()).await;
     let mut report = result?;
     assert_eq!(restored?, original, "restore the original fixture policy");
-    report["process_identity_checks"] = serde_json::json!(["host_supplied_owned_pid", "same_connection_before_every_handshake"]);
+    report["process_identity_checks"] = serde_json::json!([
+        "host_supplied_owned_pid",
+        "same_connection_before_every_handshake"
+    ]);
     report["engine_process_id"] = serde_json::json!(process_id.get());
     println!("{}", serde_json::to_string(&report)?);
     Ok(())

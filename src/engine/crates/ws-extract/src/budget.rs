@@ -43,9 +43,14 @@ impl Default for ExtractBudget {
 
 impl ExtractBudget {
     pub fn for_modality(kind: &str) -> Self {
-        Self { max_bytes: if matches!(kind, "audio" | "video") {
-            DEFAULT_MAX_MEDIA_FILE_BYTES
-        } else { DEFAULT_MAX_FILE_BYTES }, ..Self::default() }
+        Self {
+            max_bytes: if matches!(kind, "audio" | "video") {
+                DEFAULT_MAX_MEDIA_FILE_BYTES
+            } else {
+                DEFAULT_MAX_FILE_BYTES
+            },
+            ..Self::default()
+        }
     }
     /// Creates a budget starting now with `timeout` duration.
     pub fn new(max_bytes: u64, timeout: Duration, max_segments: usize) -> Self {
@@ -68,7 +73,11 @@ impl ExtractBudget {
 
     /// Creates a budget with a specific `max_segments` cap and default byte/timeout limits.
     pub fn with_max_segments(max_segments: usize) -> Self {
-        Self::new(DEFAULT_MAX_FILE_BYTES, DEFAULT_EXTRACT_TIMEOUT, max_segments)
+        Self::new(
+            DEFAULT_MAX_FILE_BYTES,
+            DEFAULT_EXTRACT_TIMEOUT,
+            max_segments,
+        )
     }
 
     /// Returns `Err(ExtractError::DeadlineExceeded)` if `Instant::now() >= self.deadline`.

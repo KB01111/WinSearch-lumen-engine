@@ -143,8 +143,7 @@ impl ModelService {
                         let _ = this.record_compat();
                         info!(
                             purged,
-                            enqueued,
-                            "model swap: stale vectors purged, re-embed queued"
+                            enqueued, "model swap: stale vectors purged, re-embed queued"
                         );
                     }
                     Err(e) => warn!(error = %e, "model-swap purge/requeue failed"),
@@ -161,7 +160,11 @@ impl ModelService {
     }
 
     fn push(&self, status: &ModelStatus) {
-        let push = self.notifier.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        let push = self
+            .notifier
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
         if let Some(push) = push {
             push(ServerMessage::ModelStatus {
                 id: None,
@@ -201,10 +204,24 @@ impl ModelService {
     /// Current lifecycle snapshot: live progress while an op runs, the
     /// terminal error after a failure, otherwise the filesystem truth.
     pub fn status(&self) -> ModelStatus {
-        if self.active.lock().unwrap_or_else(|p| p.into_inner()).is_some() {
-            return self.progress.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        if self
+            .active
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_some()
+        {
+            return self
+                .progress
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .clone();
         }
-        if let Some(Outcome::Failed(_)) = self.outcome.lock().unwrap_or_else(|p| p.into_inner()).clone() {
+        if let Some(Outcome::Failed(_)) = self
+            .outcome
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+        {
             let failed = self
                 .progress
                 .lock()
@@ -252,7 +269,12 @@ impl ModelService {
     /// Signals the running op to stop; partial files stay for resume.
     /// No-op when idle.
     pub fn cancel_download(&self) -> ModelStatus {
-        if let Some(op) = self.active.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
+        if let Some(op) = self
+            .active
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+        {
             if op.kind == OpKind::Download {
                 info!("cancelling model download");
                 op.cancel.store(true, Ordering::Relaxed);
@@ -293,7 +315,10 @@ impl ModelService {
 
     /// Compares the stored compat record against this build's manifest.
     pub fn check_compat(&self) -> Result<CompatCheck, String> {
-        let raw = self.indexer.meta_get(EMBEDDING_MODEL_META_KEY).map_err(|e| e.to_string())?;
+        let raw = self
+            .indexer
+            .meta_get(EMBEDDING_MODEL_META_KEY)
+            .map_err(|e| e.to_string())?;
         let Some(raw) = raw else {
             return Ok(CompatCheck::NoRecord);
         };
@@ -309,7 +334,10 @@ impl ModelService {
         }
     }
 
-    fn start_op(self: &Arc<Self>, kind: OpKind, path: Option<PathBuf>,
+    fn start_op(
+        self: &Arc<Self>,
+        kind: OpKind,
+        path: Option<PathBuf>,
         include_npu: bool,
     ) -> ModelStatus {
         self.start_op_result(kind, path, include_npu)
@@ -323,9 +351,9 @@ impl ModelService {
                     return self.status();
                 }
                 ModelStatus {
-                state: ModelState::Error,
-                error: Some(e),
-                ..self.manager.status()
+                    state: ModelState::Error,
+                    error: Some(e),
+                    ..self.manager.status()
                 }
             })
     }
@@ -339,8 +367,12 @@ impl ModelService {
         let mut active = self.active.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(op) = active.as_ref() {
             return if kind == OpKind::Download && op.kind == kind && op.include_npu == include_npu {
-                    Ok(self.progress.lock().unwrap_or_else(|p| p.into_inner()).clone())
-                } else {
+                Ok(self
+                    .progress
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .clone())
+            } else {
                 Err("a different model download/import is already running".into())
             };
         }
@@ -356,9 +388,12 @@ impl ModelService {
         };
         *self.outcome.lock().unwrap_or_else(|p| p.into_inner()) = None;
         let mut started = self.manager.status();
-        let npu_first = include_npu && started.state == ModelState::Ready
+        let npu_first = include_npu
+            && started.state == ModelState::Ready
             && (kind == OpKind::Download
-                || self.manager.has_import_files(path.as_deref().expect("import path checked"), true));
+                || self
+                    .manager
+                    .has_import_files(path.as_deref().expect("import path checked"), true));
         set_component(&mut started, npu_first, ModelState::Downloading, None);
         *self.progress.lock().unwrap_or_else(|p| p.into_inner()) = started.clone();
         let this = Arc::clone(self);
@@ -384,7 +419,10 @@ impl ModelService {
             self.push_pending_notifications();
             return Err(msg);
         }
-        *active = Some(ActiveOp { id, kind, cancel,
+        *active = Some(ActiveOp {
+            id,
+            kind,
+            cancel,
             include_npu,
         });
         self.queue_notification(started.clone());
@@ -395,16 +433,25 @@ impl ModelService {
         Ok(started)
     }
 
-    fn run_op(&self, id: u64, kind: OpKind, path: Option<&Path>,
+    fn run_op(
+        &self,
+        id: u64,
+        kind: OpKind,
+        path: Option<&Path>,
         include_npu: bool,
-        cancel: &AtomicBool) {
+        cancel: &AtomicBool,
+    ) {
         let last_push = Mutex::new(Instant::now());
         let progress_cb = |npu: bool, downloaded: u64, total: u64| {
             let active = self.active.lock().unwrap_or_else(|p| p.into_inner());
             if !active.as_ref().is_some_and(|op| op.id == id) {
                 return;
             }
-            let mut snapshot = self.progress.lock().unwrap_or_else(|p| p.into_inner()).clone();
+            let mut snapshot = self
+                .progress
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .clone();
             set_component(&mut snapshot, npu, ModelState::Downloading, None);
             if npu {
                 if let Some(component) = snapshot.npu_bundle.as_mut() {
@@ -434,22 +481,26 @@ impl ModelService {
                 .map_err(OpError::from_download),
             OpKind::Import => {
                 let path = path.expect("import path checked at start");
-                if include_npu && !self.manager
-                    .has_import_files(path, false) {
+                if include_npu && !self.manager.has_import_files(path, false) {
                     Ok(())
                 } else {
                     self.manager
                         .import(path, cancel)
-                    .map(|_| ())
-                    .map_err(OpError::from_manager)
+                        .map(|_| ())
+                        .map_err(OpError::from_manager)
+                }
             }
-        }
         };
         if result.is_ok() && include_npu {
             if kind == OpKind::Import
-                && !self.manager.has_import_files(path.expect("import path checked at start"), true)
+                && !self
+                    .manager
+                    .has_import_files(path.expect("import path checked at start"), true)
             {
-                if !self.manager.has_import_files(path.expect("import path checked at start"), false) {
+                if !self
+                    .manager
+                    .has_import_files(path.expect("import path checked at start"), false)
+                {
                     result = Err(OpError::Failed("source contains no model files".into()));
                 } else {
                     info!("no NPU bundle files in source");
@@ -490,8 +541,8 @@ impl ModelService {
                 *self.outcome.lock().unwrap_or_else(|p| p.into_inner()) = Some(Outcome::Ok);
                 if self.manager.status().state == ModelState::Ready {
                     if let Err(e) = self.record_compat() {
-                    warn!(error = %e, "cannot write embedding compat record");
-                }
+                        warn!(error = %e, "cannot write embedding compat record");
+                    }
                 }
                 let status = self.manager.status();
                 info!("model operation complete: {:?}", status.state);
@@ -658,10 +709,7 @@ mod tests {
     }
 
     /// A service wired to tiny stand-in files served by `fx`.
-    fn tiny_service(
-        dir: PathBuf,
-        fx: &Fixture,
-        blobs: &[(String, Vec<u8>)]) -> Arc<ModelService> {
+    fn tiny_service(dir: PathBuf, fx: &Fixture, blobs: &[(String, Vec<u8>)]) -> Arc<ModelService> {
         use sha2::{Digest, Sha256};
         let files: Vec<ExpectedFile> = blobs
             .iter()
@@ -724,10 +772,17 @@ mod tests {
         let imported = wait_until(Duration::from_secs(2), || dir.join("tiny.gguf").exists());
         release_tx.send(()).unwrap();
         caller.join().unwrap().unwrap();
-        assert!(wait_until(Duration::from_secs(2), || statuses.lock().unwrap().len() >= 2));
+        assert!(wait_until(Duration::from_secs(2), || statuses
+            .lock()
+            .unwrap()
+            .len()
+            >= 2));
         assert!(active_unlocked, "broadcast held the operation lock");
         assert!(imported, "broadcast prevented the import from running");
-        assert_eq!(*statuses.lock().unwrap(), vec![ModelState::Downloading, ModelState::Ready]);
+        assert_eq!(
+            *statuses.lock().unwrap(),
+            vec![ModelState::Downloading, ModelState::Ready]
+        );
         let _ = std::fs::remove_dir_all(dir);
         let _ = std::fs::remove_dir_all(srcdir);
     }
@@ -751,7 +806,12 @@ mod tests {
                 assert!(stream.read(&mut request).unwrap() > 0);
                 download_started_tx.send(()).unwrap();
                 download_release_rx.recv().unwrap();
-                write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                )
+                .unwrap();
                 stream.write_all(&body).unwrap();
             }),
         };
@@ -786,7 +846,9 @@ mod tests {
         });
         std::fs::remove_file(dir.join("tiny.gguf")).unwrap();
         assert_eq!(service.start_download().state, ModelState::Downloading);
-        download_started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        download_started_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
         release_tx.send(()).unwrap();
         caller.join().unwrap().unwrap();
         let delivered = wait_until(Duration::from_secs(2), || {
@@ -794,10 +856,23 @@ mod tests {
         });
         let observed = statuses.lock().unwrap().clone();
         download_release_tx.send(()).unwrap();
-        assert!(wait_until(Duration::from_secs(2), || service.status().state == ModelState::Ready));
+        assert!(wait_until(Duration::from_secs(2), || service
+            .status()
+            .state
+            == ModelState::Ready));
         assert!(imported, "blocked delivery stopped the first import");
-        assert!(delivered, "ordered lifecycle notifications were not drained");
-        assert_eq!(observed, vec![ModelState::Downloading, ModelState::Ready, ModelState::Downloading]);
+        assert!(
+            delivered,
+            "ordered lifecycle notifications were not drained"
+        );
+        assert_eq!(
+            observed,
+            vec![
+                ModelState::Downloading,
+                ModelState::Ready,
+                ModelState::Downloading
+            ]
+        );
         let _ = std::fs::remove_dir_all(dir);
         let _ = std::fs::remove_dir_all(srcdir);
     }
@@ -824,11 +899,27 @@ mod tests {
             }
         }));
         service.start_import(srcdir.join("tiny.gguf")).unwrap();
-        assert_eq!(deleted_rx.recv_timeout(Duration::from_secs(2)).unwrap().unwrap().state,
-            ModelState::NotDownloaded);
-        assert!(wait_until(Duration::from_secs(2), || statuses.lock().unwrap().len() == 3));
-        assert_eq!(*statuses.lock().unwrap(),
-            vec![ModelState::Downloading, ModelState::Ready, ModelState::NotDownloaded]);
+        assert_eq!(
+            deleted_rx
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap()
+                .unwrap()
+                .state,
+            ModelState::NotDownloaded
+        );
+        assert!(wait_until(Duration::from_secs(2), || statuses
+            .lock()
+            .unwrap()
+            .len()
+            == 3));
+        assert_eq!(
+            *statuses.lock().unwrap(),
+            vec![
+                ModelState::Downloading,
+                ModelState::Ready,
+                ModelState::NotDownloaded
+            ]
+        );
         assert!(!dir.join("tiny.gguf").exists());
         let _ = std::fs::remove_dir_all(dir);
         let _ = std::fs::remove_dir_all(srcdir);
@@ -845,8 +936,13 @@ mod tests {
             include_npu: false,
         });
         *service.outcome.lock().unwrap() = Some(Outcome::Ok);
-        service.run_op(1, OpKind::Import, Some(&dir.join("absent")),
-            false, &AtomicBool::new(false));
+        service.run_op(
+            1,
+            OpKind::Import,
+            Some(&dir.join("absent")),
+            false,
+            &AtomicBool::new(false),
+        );
         assert_eq!(*service.outcome.lock().unwrap(), Some(Outcome::Ok));
         assert_eq!(service.active.lock().unwrap().as_ref().unwrap().id, 2);
         let _ = std::fs::remove_dir_all(dir);
@@ -896,8 +992,7 @@ mod tests {
 
         let dir = temp_dir("incompat-restart");
         let store = ws_index::IndexStore::open_in_memory().unwrap();
-        let indexer =
-            crate::indexer::Indexer::open(store, &[tree.clone()]).unwrap();
+        let indexer = crate::indexer::Indexer::open(store, &[tree.clone()]).unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
         // Seed one name vector through the pipeline's fake path.
@@ -911,14 +1006,27 @@ mod tests {
             .unwrap();
         assert!(out.embedded >= 1);
         assert!(indexer.segments_indexed().unwrap() >= 1);
-        let entry_id = indexer.store_lock().find_by_path(&tree.join("keep.txt").to_string_lossy()).unwrap().unwrap().id;
+        let entry_id = indexer
+            .store_lock()
+            .find_by_path(&tree.join("keep.txt").to_string_lossy())
+            .unwrap()
+            .unwrap()
+            .id;
         {
             let mut store = indexer.store_lock();
-            store.upsert_segment(ws_index::model::NewSegment {
-                entry_id, kind: "doc", chunk_index: 0, text: "old model content",
-                page: None, start_ms: None, end_ms: None, line: None,
-                vector: &[1.0, 0.0],
-            }).unwrap();
+            store
+                .upsert_segment(ws_index::model::NewSegment {
+                    entry_id,
+                    kind: "doc",
+                    chunk_index: 0,
+                    text: "old model content",
+                    page: None,
+                    start_ms: None,
+                    end_ms: None,
+                    line: None,
+                    vector: &[1.0, 0.0],
+                })
+                .unwrap();
             for job in store.claim_extract_jobs_batch_for_kind("doc", 10).unwrap() {
                 store.complete_extract_job(job.id).unwrap();
             }
@@ -977,106 +1085,119 @@ mod tests {
     #[test]
     fn legacy_media_pipeline_requeues_vectors_and_preserves_exact_chunks() {
         for pipeline in [None, Some(1)] {
-        let dir = temp_dir("legacy-media-pipeline");
-        let root = dir.join("source");
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(root.join("keep.txt"), b"durableexact").unwrap();
-        let mut store = ws_index::IndexStore::open_in_memory().unwrap();
-        let mut config = store.get_or_migrate_indexing_config().unwrap();
-        // This fixture tests migration; host Battery Saver must not skip its scan.
-        config.respect_battery_saver = false;
-        store.set_indexing_config(&config).unwrap();
-        let indexer = crate::indexer::Indexer::open(
-            store,
-            &[root.clone()])
-        .unwrap();
-        assert!(indexer.indexing_pause_reason().is_none(), "fixture scan paused: {:?}", indexer.indexing_pause_reason());
-        indexer.enqueue_initial_scan().unwrap();
-        while indexer.scan_available(64) > 0 {}
-        let (entry, before, generation) = {
-            let mut store = indexer.store_lock();
-            let entry = store
-                .find_by_path(&root.join("keep.txt").to_string_lossy())
-                .unwrap()
-                .unwrap()
-                .id;
-            let job = store
-                .claim_extract_jobs_batch_for_kind("doc", 1)
-                .unwrap()
-                .pop()
-                .unwrap();
-            let progress = store
-                .begin_content_batch(entry, "doc", &crate::extract::source_snapshot(&root.join("keep.txt")))
-                .unwrap();
-            let mut chunk = ws_index::model::ContentChunk {
-                id: 0,
-                entry_id: entry,
-                job_kind: "doc".into(),
-                kind: "doc".into(),
-                chunk_index: 0,
-                text: "durableexact".into(),
-                location: Default::default(),
-                embed: true,
-                visual: false,
-                embedding_input: Default::default(),
-                attempts: 0,
+            let dir = temp_dir("legacy-media-pipeline");
+            let root = dir.join("source");
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::write(root.join("keep.txt"), b"durableexact").unwrap();
+            let mut store = ws_index::IndexStore::open_in_memory().unwrap();
+            let mut config = store.get_or_migrate_indexing_config().unwrap();
+            // This fixture tests migration; host Battery Saver must not skip its scan.
+            config.respect_battery_saver = false;
+            store.set_indexing_config(&config).unwrap();
+            let indexer = crate::indexer::Indexer::open(store, &[root.clone()]).unwrap();
+            assert!(
+                indexer.indexing_pause_reason().is_none(),
+                "fixture scan paused: {:?}",
+                indexer.indexing_pause_reason()
+            );
+            indexer.enqueue_initial_scan().unwrap();
+            while indexer.scan_available(64) > 0 {}
+            let (entry, before, generation) = {
+                let mut store = indexer.store_lock();
+                let entry = store
+                    .find_by_path(&root.join("keep.txt").to_string_lossy())
+                    .unwrap()
+                    .unwrap()
+                    .id;
+                let job = store
+                    .claim_extract_jobs_batch_for_kind("doc", 1)
+                    .unwrap()
+                    .pop()
+                    .unwrap();
+                let progress = store
+                    .begin_content_batch(
+                        entry,
+                        "doc",
+                        &crate::extract::source_snapshot(&root.join("keep.txt")),
+                    )
+                    .unwrap();
+                let mut chunk = ws_index::model::ContentChunk {
+                    id: 0,
+                    entry_id: entry,
+                    job_kind: "doc".into(),
+                    kind: "doc".into(),
+                    chunk_index: 0,
+                    text: "durableexact".into(),
+                    location: Default::default(),
+                    embed: true,
+                    visual: false,
+                    embedding_input: Default::default(),
+                    attempts: 0,
+                };
+                chunk.location.line = Some(4);
+                assert!(store
+                    .commit_content_batch(&job, &progress, &[chunk], None)
+                    .unwrap());
+                let chunks = store.claim_content_vectors(Some(entry)).unwrap();
+                assert_eq!(chunks.len(), 1);
+                let generation = store.model_generation().unwrap();
+                assert!(store
+                    .commit_content_vectors(
+                        &chunks,
+                        &[vec![1.0, 0.0]],
+                        progress.revision,
+                        generation
+                    )
+                    .unwrap());
+                (
+                    entry,
+                    store.list_content_chunks(entry).unwrap(),
+                    store.model_generation().unwrap(),
+                )
             };
-            chunk.location.line = Some(4);
-            assert!(store
-                .commit_content_batch(&job, &progress, &[chunk], None)
-                .unwrap());
-            let chunks = store.claim_content_vectors(Some(entry)).unwrap();
-            assert_eq!(chunks.len(), 1);
-            let generation = store.model_generation().unwrap();
-            assert!(store
-                .commit_content_vectors(&chunks, &[vec![1.0, 0.0]], progress.revision, generation)
-                .unwrap());
-            (
-                entry,
-                store.list_content_chunks(entry).unwrap(),
-                store.model_generation().unwrap(),
-            )
-        };
-        let mut legacy = serde_json::to_value(ModelCompat::current()).unwrap();
-        if let Some(version) = pipeline {
-            legacy["vector_pipeline_version"] = serde_json::json!(version);
-        } else {
-            legacy.as_object_mut().unwrap().remove("vector_pipeline_version");
-        }
-        indexer
-            .meta_set(EMBEDDING_MODEL_META_KEY, &legacy.to_string())
-            .unwrap();
-        let _service = ModelService::with_manager(
-            ws_modelmgr::ModelManager::new(dir.join("models")),
-            Arc::clone(&indexer),
-        );
-        let mut store = indexer.store_lock();
-        let retained = store.list_content_chunks(entry).unwrap();
-        assert_eq!(retained.len(), 1);
-        assert_eq!(retained[0].id, before[0].id);
-        assert_eq!(retained[0].text, "durableexact");
-        assert_eq!(retained[0].location.line, Some(4));
-        assert_eq!(
-            store
-                .content_matches(entry, &["durableexact".into()])
-                .unwrap()
-                .len(),
-            1
-        );
-        assert!(store.list_segments_for_entry(entry).unwrap().is_empty());
-        assert!(store.model_generation().unwrap() > generation);
-        assert!(
-            store
-                .content_progress(entry, "doc")
-                .unwrap()
-                .unwrap()
-                .complete
-        );
-        let pending = store.claim_content_vectors(Some(entry)).unwrap();
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].id, before[0].id);
-        drop(store);
-        std::fs::remove_dir_all(dir).unwrap();
+            let mut legacy = serde_json::to_value(ModelCompat::current()).unwrap();
+            if let Some(version) = pipeline {
+                legacy["vector_pipeline_version"] = serde_json::json!(version);
+            } else {
+                legacy
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("vector_pipeline_version");
+            }
+            indexer
+                .meta_set(EMBEDDING_MODEL_META_KEY, &legacy.to_string())
+                .unwrap();
+            let _service = ModelService::with_manager(
+                ws_modelmgr::ModelManager::new(dir.join("models")),
+                Arc::clone(&indexer),
+            );
+            let mut store = indexer.store_lock();
+            let retained = store.list_content_chunks(entry).unwrap();
+            assert_eq!(retained.len(), 1);
+            assert_eq!(retained[0].id, before[0].id);
+            assert_eq!(retained[0].text, "durableexact");
+            assert_eq!(retained[0].location.line, Some(4));
+            assert_eq!(
+                store
+                    .content_matches(entry, &["durableexact".into()])
+                    .unwrap()
+                    .len(),
+                1
+            );
+            assert!(store.list_segments_for_entry(entry).unwrap().is_empty());
+            assert!(store.model_generation().unwrap() > generation);
+            assert!(
+                store
+                    .content_progress(entry, "doc")
+                    .unwrap()
+                    .unwrap()
+                    .complete
+            );
+            let pending = store.claim_content_vectors(Some(entry)).unwrap();
+            assert_eq!(pending.len(), 1);
+            assert_eq!(pending[0].id, before[0].id);
+            drop(store);
+            std::fs::remove_dir_all(dir).unwrap();
         }
     }
 
@@ -1085,7 +1206,9 @@ mod tests {
         let service = ModelService::new(temp_dir("import-cancel"), test_indexer());
         let cancel = Arc::new(AtomicBool::new(false));
         *service.active.lock().unwrap() = Some(ActiveOp {
-            id: 1, kind: OpKind::Import, cancel: Arc::clone(&cancel),
+            id: 1,
+            kind: OpKind::Import,
+            cancel: Arc::clone(&cancel),
             include_npu: false,
         });
         service.cancel_download();
@@ -1361,13 +1484,17 @@ mod tests {
         let service = tiny_service(dir.clone(), &fx, &blobs);
 
         service.start_download();
-        assert!(wait_until(Duration::from_secs(10), || service.status().bytes > 0));
+        assert!(wait_until(Duration::from_secs(10), || service
+            .status()
+            .bytes
+            > 0));
         // Refused (engine maps this to Error{invalid_request}), not merged.
         let err = service.start_import(dir.join("whatever.gguf")).unwrap_err();
         assert!(err.contains("already running"), "got {err}");
         service.cancel_download();
         assert!(
-            wait_until(Duration::from_secs(10), || service.status().state == ModelState::Paused),
+            wait_until(Duration::from_secs(10), || service.status().state
+                == ModelState::Paused),
             "cancel never settled, got {:?}",
             service.status()
         );
@@ -1397,7 +1524,8 @@ mod tests {
 
         // The first import still completes byte-identical with compat written.
         assert!(
-            wait_until(Duration::from_secs(90), || service.status().state == ModelState::Ready),
+            wait_until(Duration::from_secs(90), || service.status().state
+                == ModelState::Ready),
             "import never reached ready, got {:?}",
             service.status()
         );
@@ -1447,7 +1575,8 @@ mod tests {
         assert_eq!(service.start_download().state, ModelState::Downloading);
 
         assert!(
-            wait_until(Duration::from_secs(30), || service.status().state == ModelState::Ready),
+            wait_until(Duration::from_secs(30), || service.status().state
+                == ModelState::Ready),
             "download never reached ready"
         );
         assert_eq!(service.check_compat().unwrap(), CompatCheck::Compatible);
@@ -1475,7 +1604,8 @@ mod tests {
         }));
         service.cancel_download();
         assert!(
-            wait_until(Duration::from_secs(10), || service.status().state == ModelState::Paused),
+            wait_until(Duration::from_secs(10), || service.status().state
+                == ModelState::Paused),
             "cancel never settled to paused, got {:?}",
             service.status()
         );
@@ -1484,7 +1614,8 @@ mod tests {
         // Resume on a fresh op completes byte-identical.
         service.start_download();
         assert!(
-            wait_until(Duration::from_secs(30), || service.status().state == ModelState::Ready),
+            wait_until(Duration::from_secs(30), || service.status().state
+                == ModelState::Ready),
             "resume never reached ready"
         );
         assert_eq!(std::fs::read(dir.join("slow.gguf")).unwrap(), body);

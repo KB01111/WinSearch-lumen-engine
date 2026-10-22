@@ -59,7 +59,7 @@ mod winload;
 #[cfg(feature = "xrt")]
 mod xrt;
 #[cfg(feature = "xrt")]
-pub use xrt::{set_execution_budget, Buffer, Kernel, Run, Session};
+pub use xrt::{Buffer, Kernel, Run, Session, set_execution_budget};
 
 pub use timing::Timing;
 
@@ -146,7 +146,8 @@ pub fn fast_exp(x: f32) -> f32 {
     let p = 1.0
         + f * (6.931_472e-1
             + f * (2.402_264_8e-1
-                + f * (5.550_332_5e-2 + f * (9.618_438e-3 + f * (1.339_887_4e-3 + f * 1.535_336_2e-4)))));
+                + f * (5.550_332_5e-2
+                    + f * (9.618_438e-3 + f * (1.339_887_4e-3 + f * 1.535_336_2e-4)))));
     f32::from_bits(p.to_bits().wrapping_add((n as i32 as u32) << 23))
 }
 
@@ -229,10 +230,21 @@ mod tests {
 
     #[test]
     fn bf16_round_trips_and_rounds_to_nearest_even() {
-        for &x in &[0.0f32, 1.0, -2.5, std::f32::consts::PI, 1e-3, 65504.0, -1e30] {
+        for &x in &[
+            0.0f32,
+            1.0,
+            -2.5,
+            std::f32::consts::PI,
+            1e-3,
+            65504.0,
+            -1e30,
+        ] {
             let b = f32_to_bf16(x);
             let back = bf16_to_f32(b);
-            assert!((back - x).abs() <= x.abs() * (1.0 / 128.0) + 1e-30, "{x} -> {back}");
+            assert!(
+                (back - x).abs() <= x.abs() * (1.0 / 128.0) + 1e-30,
+                "{x} -> {back}"
+            );
         }
         // 1 + 2^-8 is exactly halfway between 1.0 and 1.0078125 in bf16: ties to even -> 1.0
         assert_eq!(bf16_to_f32(f32_to_bf16(1.0 + 1.0 / 256.0)), 1.0);

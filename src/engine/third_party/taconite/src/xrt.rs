@@ -5,7 +5,7 @@
 //! [`Buffer`] over the C shim `build.rs` compiles against XRT's C++ API.
 //! Re-exported from the crate root.
 
-use std::ffi::{c_char, c_int, c_void, CStr, CString};
+use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::marker::PhantomData;
 use std::path::Path;
 use std::ptr::NonNull;
@@ -35,7 +35,11 @@ mod ffi {
     }
 
     unsafe extern "C" {
-        pub fn iron_open(device_index: c_int, err: *mut c_char, err_len: usize) -> *mut iron_session;
+        pub fn iron_open(
+            device_index: c_int,
+            err: *mut c_char,
+            err_len: usize,
+        ) -> *mut iron_session;
         pub fn iron_close(s: *mut iron_session);
         pub fn iron_set_deadline_ms(timeout_ms: u64);
         pub fn iron_kernel_load(
@@ -48,10 +52,23 @@ mod ffi {
             err_len: usize,
         ) -> *mut iron_kernel;
         pub fn iron_kernel_free(k: *mut iron_kernel);
-        pub fn iron_buffer_alloc(s: *mut iron_session, bytes: usize, err: *mut c_char, err_len: usize) -> *mut iron_buffer;
+        pub fn iron_buffer_alloc(
+            s: *mut iron_session,
+            bytes: usize,
+            err: *mut c_char,
+            err_len: usize,
+        ) -> *mut iron_buffer;
         pub fn iron_buffer_map(b: *mut iron_buffer) -> *mut c_void;
-        pub fn iron_buffer_sync_to_device(b: *mut iron_buffer, err: *mut c_char, err_len: usize) -> c_int;
-        pub fn iron_buffer_sync_from_device(b: *mut iron_buffer, err: *mut c_char, err_len: usize) -> c_int;
+        pub fn iron_buffer_sync_to_device(
+            b: *mut iron_buffer,
+            err: *mut c_char,
+            err_len: usize,
+        ) -> c_int;
+        pub fn iron_buffer_sync_from_device(
+            b: *mut iron_buffer,
+            err: *mut c_char,
+            err_len: usize,
+        ) -> c_int;
         pub fn iron_buffer_free(b: *mut iron_buffer);
         pub fn iron_buffer_sub(
             parent: *mut iron_buffer,
@@ -83,7 +100,12 @@ mod ffi {
             err: *mut c_char,
             err_len: usize,
         ) -> *mut iron_run;
-        pub fn iron_run_wait(r: *mut iron_run, elapsed_ns: *mut u64, err: *mut c_char, err_len: usize) -> c_int;
+        pub fn iron_run_wait(
+            r: *mut iron_run,
+            elapsed_ns: *mut u64,
+            err: *mut c_char,
+            err_len: usize,
+        ) -> c_int;
     }
 }
 
@@ -122,11 +144,14 @@ fn err_buf() -> Vec<c_char> {
 
 fn err_string(buf: &[c_char]) -> String {
     // SAFETY: the shim always NUL-terminates within ERR_LEN.
-    unsafe { CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().into_owned()
+    unsafe { CStr::from_ptr(buf.as_ptr()) }
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn c_path(p: &Path) -> Result<CString, Error> {
-    CString::new(p.to_string_lossy().as_bytes()).map_err(|_| Error::Path(format!("{} contains a NUL byte", p.display())))
+    CString::new(p.to_string_lossy().as_bytes())
+        .map_err(|_| Error::Path(format!("{} contains a NUL byte", p.display())))
 }
 
 struct SessionInner {
@@ -172,7 +197,10 @@ impl Session {
         // SAFETY: err is ERR_LEN bytes; the shim writes within it.
         let raw = unsafe { ffi::iron_open(device_index as c_int, err.as_mut_ptr(), ERR_LEN) };
         let raw = NonNull::new(raw).ok_or_else(|| Error::Device(err_string(&err)))?;
-        Ok(Self { inner: Arc::new(SessionInner { raw }), _not_sync: PhantomData })
+        Ok(Self {
+            inner: Arc::new(SessionInner { raw }),
+            _not_sync: PhantomData,
+        })
     }
 
     fn raw(&self) -> *mut ffi::iron_session {
@@ -202,7 +230,9 @@ impl Session {
         let gops = u32::try_from((ops_per_run as f64 / 1e9).round() as u64).unwrap_or(u32::MAX);
         let xclbin_c = c_path(xclbin)?;
         let insts_c = c_path(insts)?;
-        let name_c = kernel_name.map(|n| CString::new(n).map_err(|_| Error::Path(n.into()))).transpose()?;
+        let name_c = kernel_name
+            .map(|n| CString::new(n).map_err(|_| Error::Path(n.into())))
+            .transpose()?;
         let mut err = err_buf();
         // SAFETY: all pointers are valid for the call; err is ERR_LEN bytes.
         let raw = unsafe {
@@ -217,7 +247,11 @@ impl Session {
             )
         };
         let raw = NonNull::new(raw).ok_or_else(|| Error::Kernel(err_string(&err)))?;
-        Ok(Kernel { raw, _session: self.clone(), _not_sync: PhantomData })
+        Ok(Kernel {
+            raw,
+            _session: self.clone(),
+            _not_sync: PhantomData,
+        })
     }
 
     /// A zeroed host-visible buffer object of `bytes` bytes, usable as an
@@ -227,7 +261,12 @@ impl Session {
         // SAFETY: err is ERR_LEN bytes.
         let raw = unsafe { ffi::iron_buffer_alloc(self.raw(), bytes, err.as_mut_ptr(), ERR_LEN) };
         let raw = NonNull::new(raw).ok_or_else(|| Error::Buffer(err_string(&err)))?;
-        Ok(Buffer { raw, bytes, _session: self.clone(), _not_sync: PhantomData })
+        Ok(Buffer {
+            raw,
+            bytes,
+            _session: self.clone(),
+            _not_sync: PhantomData,
+        })
     }
 
     /// [`alloc`](Self::alloc) sized for `n` elements of `T`.
@@ -262,7 +301,14 @@ impl Kernel {
         let mut err = err_buf();
         // SAFETY: raw holds valid buffer pointers for the call; err is ERR_LEN bytes.
         let rc = unsafe {
-            ffi::iron_kernel_run(self.raw.as_ptr(), raw.as_mut_ptr(), raw.len(), &mut elapsed_ns, err.as_mut_ptr(), ERR_LEN)
+            ffi::iron_kernel_run(
+                self.raw.as_ptr(),
+                raw.as_mut_ptr(),
+                raw.len(),
+                &mut elapsed_ns,
+                err.as_mut_ptr(),
+                ERR_LEN,
+            )
         };
         if rc != 0 {
             return Err(Error::Run(err_string(&err)));
@@ -302,9 +348,20 @@ impl Kernel {
         let mut raw: Vec<*mut ffi::iron_buffer> = args.iter().map(|b| b.raw.as_ptr()).collect();
         let mut err = err_buf();
         // SAFETY: raw holds valid buffer pointers for the call; err is ERR_LEN bytes.
-        let r = unsafe { ffi::iron_kernel_start(self.raw.as_ptr(), raw.as_mut_ptr(), raw.len(), err.as_mut_ptr(), ERR_LEN) };
+        let r = unsafe {
+            ffi::iron_kernel_start(
+                self.raw.as_ptr(),
+                raw.as_mut_ptr(),
+                raw.len(),
+                err.as_mut_ptr(),
+                ERR_LEN,
+            )
+        };
         let raw = NonNull::new(r).ok_or_else(|| Error::Run(err_string(&err)))?;
-        Ok(Run { raw: Some(raw), _borrow: PhantomData })
+        Ok(Run {
+            raw: Some(raw),
+            _borrow: PhantomData,
+        })
     }
 }
 
@@ -328,7 +385,8 @@ impl<'a> Run<'a> {
         let mut elapsed_ns: u64 = 0;
         let mut err = err_buf();
         // SAFETY: raw came from iron_kernel_start and is waited/freed exactly once.
-        let rc = unsafe { ffi::iron_run_wait(raw.as_ptr(), &mut elapsed_ns, err.as_mut_ptr(), ERR_LEN) };
+        let rc =
+            unsafe { ffi::iron_run_wait(raw.as_ptr(), &mut elapsed_ns, err.as_mut_ptr(), ERR_LEN) };
         if rc != 0 {
             return Err(Error::Run(err_string(&err)));
         }
@@ -374,9 +432,16 @@ impl Buffer {
     pub fn sub(&self, offset: usize, bytes: usize) -> Result<Buffer, Error> {
         let mut err = err_buf();
         // SAFETY: raw is a live buffer; err is ERR_LEN bytes.
-        let raw = unsafe { ffi::iron_buffer_sub(self.raw.as_ptr(), offset, bytes, err.as_mut_ptr(), ERR_LEN) };
+        let raw = unsafe {
+            ffi::iron_buffer_sub(self.raw.as_ptr(), offset, bytes, err.as_mut_ptr(), ERR_LEN)
+        };
         let raw = NonNull::new(raw).ok_or_else(|| Error::Buffer(err_string(&err)))?;
-        Ok(Buffer { raw, bytes, _session: self._session.clone(), _not_sync: PhantomData })
+        Ok(Buffer {
+            raw,
+            bytes,
+            _session: self._session.clone(),
+            _not_sync: PhantomData,
+        })
     }
 
     /// [`sub`](Self::sub) in elements of `T`.
@@ -411,7 +476,9 @@ impl Buffer {
     pub fn sync_to_device(&self) -> Result<(), Error> {
         let mut err = err_buf();
         // SAFETY: err is ERR_LEN bytes.
-        if unsafe { ffi::iron_buffer_sync_to_device(self.raw.as_ptr(), err.as_mut_ptr(), ERR_LEN) } != 0 {
+        if unsafe { ffi::iron_buffer_sync_to_device(self.raw.as_ptr(), err.as_mut_ptr(), ERR_LEN) }
+            != 0
+        {
             return Err(Error::Buffer(err_string(&err)));
         }
         Ok(())
@@ -420,7 +487,10 @@ impl Buffer {
     pub fn sync_from_device(&self) -> Result<(), Error> {
         let mut err = err_buf();
         // SAFETY: err is ERR_LEN bytes.
-        if unsafe { ffi::iron_buffer_sync_from_device(self.raw.as_ptr(), err.as_mut_ptr(), ERR_LEN) } != 0 {
+        if unsafe {
+            ffi::iron_buffer_sync_from_device(self.raw.as_ptr(), err.as_mut_ptr(), ERR_LEN)
+        } != 0
+        {
             return Err(Error::Buffer(err_string(&err)));
         }
         Ok(())

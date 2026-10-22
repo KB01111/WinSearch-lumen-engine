@@ -274,95 +274,138 @@ pub fn crawl_repo(repo_root: &Path) -> io::Result<Vec<CodeFileRecord>> {
 }
 
 /// Authorization is checked again immediately before every ignore/sniff open.
-pub fn crawl_repo_while(repo_root: &Path, allowed: &dyn Fn(&Path)->bool) -> io::Result<Vec<CodeFileRecord>> {
-    let mut crawler=CodeCrawler::open(repo_root,allowed)?;
-    let mut records=Vec::new();
-    loop {let (batch,done)=crawler.next_batch(512,allowed)?;records.extend(batch);if done {break;}}
-    records.sort_by(|a,b|a.rel_path.cmp(&b.rel_path));
+pub fn crawl_repo_while(
+    repo_root: &Path,
+    allowed: &dyn Fn(&Path) -> bool,
+) -> io::Result<Vec<CodeFileRecord>> {
+    let mut crawler = CodeCrawler::open(repo_root, allowed)?;
+    let mut records = Vec::new();
+    loop {
+        let (batch, done) = crawler.next_batch(512, allowed)?;
+        records.extend(batch);
+        if done {
+            break;
+        }
+    }
+    records.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
     Ok(records)
 }
 
 /// Resumable metadata traversal: each turn visits at most the supplied entries.
-pub struct CodeCrawler { root:std::path::PathBuf, stack:Vec<CrawlFrame> }
+pub struct CodeCrawler {
+    root: std::path::PathBuf,
+    stack: Vec<CrawlFrame>,
+}
 impl CodeCrawler {
-pub fn open(repo_root:&Path,allowed:&dyn Fn(&Path)->bool)->io::Result<Self> {
-    Self::open_with_control(repo_root, allowed, allowed)
-}
-pub fn open_with_control(repo_root:&Path,allowed:&dyn Fn(&Path)->bool,control_allowed:&dyn Fn(&Path)->bool)->io::Result<Self> {
-    if !repo_root.is_absolute() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "code root must be absolute",
-        ));
+    pub fn open(repo_root: &Path, allowed: &dyn Fn(&Path) -> bool) -> io::Result<Self> {
+        Self::open_with_control(repo_root, allowed, allowed)
     }
-    if !allowed(repo_root) || sensitive_code_ancestor(repo_root)
-        || !ws_platform::content::metadata_path_allowed(repo_root, false)
-        || !repo_root.exists()
-    {
-        return Ok(Self {root:repo_root.into(),stack:Vec::new()});
-    }
-    let mut inherited = Vec::new();
-    if let Some(rule) = guarded_ignore(repo_root, &repo_root.join(".git/info/exclude"), control_allowed)? {
-        inherited.push(rule);
-    }
-    Ok(Self {root:repo_root.into(),stack:vec![CrawlFrame::open(repo_root,0,inherited,Vec::new(),control_allowed)?]})
-}
-pub fn next_batch(&mut self,max_entries:usize,allowed:&dyn Fn(&Path)->bool)->io::Result<(Vec<CodeFileRecord>,bool)> {
-    self.next_batch_with_control(max_entries, allowed, allowed)
-}
-pub fn next_batch_with_control(&mut self,max_entries:usize,allowed:&dyn Fn(&Path)->bool,control_allowed:&dyn Fn(&Path)->bool)->io::Result<(Vec<CodeFileRecord>,bool)> {
-    let repo_root=&self.root;
-    let stack=&mut self.stack;
-    let mut records = Vec::new();
-    let mut visited=0;
-    while visited<max_entries.max(1) {
-        let Some(frame)=stack.last_mut() else {break};
-        let Some(entry) = frame.entries.next() else {
-            stack.pop();
-            continue;
-        };
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(_) => continue,
-        };
-        visited+=1;
-        let path = entry.path();
-        if !allowed(&path) || !ws_platform::content::metadata_path_allowed(&path, false) {
-            continue;
+    pub fn open_with_control(
+        repo_root: &Path,
+        allowed: &dyn Fn(&Path) -> bool,
+        control_allowed: &dyn Fn(&Path) -> bool,
+    ) -> io::Result<Self> {
+        if !repo_root.is_absolute() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "code root must be absolute",
+            ));
         }
-        let metadata = match fs::symlink_metadata(&path) {
-            Ok(metadata) => metadata,
-            Err(_) => continue,
-        };
-        let is_dir = metadata.is_dir();
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if (is_dir && is_excluded_code_dir(&name)) || (!is_dir && is_excluded_code_file(&name)) {
-            continue;
+        if !allowed(repo_root)
+            || sensitive_code_ancestor(repo_root)
+            || !ws_platform::content::metadata_path_allowed(repo_root, false)
+            || !repo_root.exists()
+        {
+            return Ok(Self {
+                root: repo_root.into(),
+                stack: Vec::new(),
+            });
         }
-        // .ignore has priority over .gitignore; nearest matching scope wins.
-        let excluded = rule_match(&frame.ignore_rules, &path, is_dir)
-            .or_else(|| rule_match(&frame.git_rules, &path, is_dir))
-            .unwrap_or(false);
-        if excluded {
-            continue;
+        let mut inherited = Vec::new();
+        if let Some(rule) = guarded_ignore(
+            repo_root,
+            &repo_root.join(".git/info/exclude"),
+            control_allowed,
+        )? {
+            inherited.push(rule);
         }
-        if is_dir && frame.depth < 63 {
-            let child = CrawlFrame::open(
-                &path,
-                frame.depth + 1,
-                frame.git_rules.clone(),
-                frame.ignore_rules.clone(),
+        Ok(Self {
+            root: repo_root.into(),
+            stack: vec![CrawlFrame::open(
+                repo_root,
+                0,
+                inherited,
+                Vec::new(),
                 control_allowed,
-            )?;
-            stack.push(child);
-        } else if metadata.is_file() {
-            if let Some(record) = record_for_code_path_while(repo_root, &path, allowed)? {
-                records.push(record);
+            )?],
+        })
+    }
+    pub fn next_batch(
+        &mut self,
+        max_entries: usize,
+        allowed: &dyn Fn(&Path) -> bool,
+    ) -> io::Result<(Vec<CodeFileRecord>, bool)> {
+        self.next_batch_with_control(max_entries, allowed, allowed)
+    }
+    pub fn next_batch_with_control(
+        &mut self,
+        max_entries: usize,
+        allowed: &dyn Fn(&Path) -> bool,
+        control_allowed: &dyn Fn(&Path) -> bool,
+    ) -> io::Result<(Vec<CodeFileRecord>, bool)> {
+        let repo_root = &self.root;
+        let stack = &mut self.stack;
+        let mut records = Vec::new();
+        let mut visited = 0;
+        while visited < max_entries.max(1) {
+            let Some(frame) = stack.last_mut() else { break };
+            let Some(entry) = frame.entries.next() else {
+                stack.pop();
+                continue;
+            };
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => continue,
+            };
+            visited += 1;
+            let path = entry.path();
+            if !allowed(&path) || !ws_platform::content::metadata_path_allowed(&path, false) {
+                continue;
+            }
+            let metadata = match fs::symlink_metadata(&path) {
+                Ok(metadata) => metadata,
+                Err(_) => continue,
+            };
+            let is_dir = metadata.is_dir();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if (is_dir && is_excluded_code_dir(&name)) || (!is_dir && is_excluded_code_file(&name))
+            {
+                continue;
+            }
+            // .ignore has priority over .gitignore; nearest matching scope wins.
+            let excluded = rule_match(&frame.ignore_rules, &path, is_dir)
+                .or_else(|| rule_match(&frame.git_rules, &path, is_dir))
+                .unwrap_or(false);
+            if excluded {
+                continue;
+            }
+            if is_dir && frame.depth < 63 {
+                let child = CrawlFrame::open(
+                    &path,
+                    frame.depth + 1,
+                    frame.git_rules.clone(),
+                    frame.ignore_rules.clone(),
+                    control_allowed,
+                )?;
+                stack.push(child);
+            } else if metadata.is_file() {
+                if let Some(record) = record_for_code_path_while(repo_root, &path, allowed)? {
+                    records.push(record);
+                }
             }
         }
+        Ok((records, stack.is_empty()))
     }
-    Ok((records,stack.is_empty()))
-}
 }
 
 struct CrawlFrame {
@@ -378,7 +421,7 @@ impl CrawlFrame {
         depth: usize,
         mut git_rules: Vec<Arc<Gitignore>>,
         mut ignore_rules: Vec<Arc<Gitignore>>,
-        allowed: &dyn Fn(&Path)->bool,
+        allowed: &dyn Fn(&Path) -> bool,
     ) -> io::Result<Self> {
         if let Some(rule) = guarded_ignore(path, &path.join(".gitignore"), allowed)? {
             git_rules.push(rule);
@@ -407,7 +450,11 @@ fn rule_match(rules: &[Arc<Gitignore>], path: &Path, is_dir: bool) -> Option<boo
 }
 
 /// Fixed control filenames only; no library-triggered parent/global/worktree reads.
-fn guarded_ignore(scope: &Path, path: &Path, allowed: &dyn Fn(&Path)->bool) -> io::Result<Option<Arc<Gitignore>>> {
+fn guarded_ignore(
+    scope: &Path,
+    path: &Path,
+    allowed: &dyn Fn(&Path) -> bool,
+) -> io::Result<Option<Arc<Gitignore>>> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error)
@@ -429,14 +476,20 @@ fn guarded_ignore(scope: &Path, path: &Path, allowed: &dyn Fn(&Path)->bool) -> i
             "ignore configuration is unavailable or exceeds 2 MiB",
         ));
     }
-    if !allowed(path) { return Err(io::Error::new(io::ErrorKind::PermissionDenied,"code policy changed")); }
+    if !allowed(path) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "code policy changed",
+        ));
+    }
     let mut file = File::open(path)?;
     let mut bytes = Vec::new();
     (&mut file)
         .take(MAX_CODE_FILE_BYTES + 1)
         .read_to_end(&mut bytes)?;
     let after = file.metadata()?;
-    if !allowed(path) || bytes.len() as u64 > MAX_CODE_FILE_BYTES
+    if !allowed(path)
+        || bytes.len() as u64 > MAX_CODE_FILE_BYTES
         || metadata.len() != after.len()
         || metadata.modified()? != after.modified()?
         || !ws_platform::content::local_content_allowed(path)
@@ -471,14 +524,19 @@ fn guarded_ignore(scope: &Path, path: &Path, allowed: &dyn Fn(&Path)->bool) -> i
 /// `Ok(None)` if the file vanished, is excluded by policy, exceeds
 /// [`MAX_CODE_FILE_BYTES`], or appears to be binary.
 pub fn record_for_code_path(repo_root: &Path, path: &Path) -> io::Result<Option<CodeFileRecord>> {
-    record_for_code_path_while(repo_root,path,&|_|true)
+    record_for_code_path_while(repo_root, path, &|_| true)
 }
 
-pub fn record_for_code_path_while(repo_root: &Path, path: &Path, allowed:&dyn Fn(&Path)->bool) -> io::Result<Option<CodeFileRecord>> {
+pub fn record_for_code_path_while(
+    repo_root: &Path,
+    path: &Path,
+    allowed: &dyn Fn(&Path) -> bool,
+) -> io::Result<Option<CodeFileRecord>> {
     let Ok(relative) = path.strip_prefix(repo_root) else {
         return Ok(None);
     };
-    if !allowed(path) || !path.is_absolute()
+    if !allowed(path)
+        || !path.is_absolute()
         || sensitive_code_ancestor(path)
         || relative
             .components()
@@ -521,7 +579,7 @@ pub fn record_for_code_path_while(repo_root: &Path, path: &Path, allowed:&dyn Fn
         }
     }
 
-    if is_probably_binary_while(path,allowed)? {
+    if is_probably_binary_while(path, allowed)? {
         return Ok(None);
     }
 
@@ -591,12 +649,17 @@ pub fn is_excluded_code_file(name: &str) -> bool {
 /// Inspects the first 8 KiB of `path` and returns `true` if it contains a NUL
 /// byte (standard Git/ripgrep binary heuristic).
 pub fn is_probably_binary(path: &Path) -> io::Result<bool> {
-    is_probably_binary_while(path,&|_|true)
+    is_probably_binary_while(path, &|_| true)
 }
 
-fn is_probably_binary_while(path: &Path, allowed:&dyn Fn(&Path)->bool) -> io::Result<bool> {
+fn is_probably_binary_while(path: &Path, allowed: &dyn Fn(&Path) -> bool) -> io::Result<bool> {
     crate::parse::guard_source_path(path)?;
-    if !allowed(path) { return Err(io::Error::new(io::ErrorKind::PermissionDenied,"code policy changed")); }
+    if !allowed(path) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "code policy changed",
+        ));
+    }
     let mut file = match File::open(path) {
         Ok(f) => f,
         Err(e)
