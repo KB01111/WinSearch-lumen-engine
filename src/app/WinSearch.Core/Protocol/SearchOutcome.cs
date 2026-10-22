@@ -6,11 +6,12 @@ namespace WinSearch.Core.Protocol;
 public sealed class ProtocolCodeEnumConverter : JsonConverterFactory
 {
     public override bool CanConvert(Type typeToConvert) => typeToConvert == typeof(SearchDisposition)
-        || typeToConvert == typeof(SemanticPhase) || typeToConvert == typeof(SemanticIssue) || typeToConvert == typeof(FileKind);
+        || typeToConvert == typeof(SemanticPhase) || typeToConvert == typeof(SemanticIssue) || typeToConvert == typeof(FileKind) || typeToConvert == typeof(MatchSource);
     public override JsonConverter CreateConverter(Type typeToConvert, JsonSerializerOptions options)
         => typeToConvert == typeof(SearchDisposition) ? new ClosedCodes<SearchDisposition>()
             : typeToConvert == typeof(SemanticPhase) ? new ClosedCodes<SemanticPhase>()
             : typeToConvert == typeof(SemanticIssue) ? new ClosedCodes<SemanticIssue>()
+            : typeToConvert == typeof(MatchSource) ? new ClosedCodes<MatchSource>()
             : new ClosedCodes<FileKind>();
 
     private sealed class ClosedCodes<T> : JsonConverter<T> where T : struct, Enum

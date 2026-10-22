@@ -14,7 +14,7 @@
 //! directory. The shim is resolved only beside the executable. Neither PATH
 //! nor the working directory can supply executable code.
 
-use std::ffi::{c_void, OsStr, OsString};
+use std::ffi::{OsStr, OsString, c_void};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -47,7 +47,10 @@ fn load() -> Result<(), String> {
         .into_iter()
         .find_map(|p| load_path(&p).inspect_err(|e| tried.push(e.clone())).ok())
         .ok_or_else(|| {
-            format!("XRT runtime ({XRT_DLL}) not found; install or update the AMD NPU driver ({})", tried.join("; "))
+            format!(
+                "XRT runtime ({XRT_DLL}) not found; install or update the AMD NPU driver ({})",
+                tried.join("; ")
+            )
         })?;
     let _ = xrt; // stays loaded for the process lifetime
 
@@ -57,7 +60,10 @@ fn load() -> Result<(), String> {
         .find_map(|p| load_path(&p).inspect_err(|e| tried.push(e.clone())).ok())
         .map(|_| ())
         .ok_or_else(|| {
-            format!("{SHIM_DLL} not found next to the executable ({})", tried.join("; "))
+            format!(
+                "{SHIM_DLL} not found next to the executable ({})",
+                tried.join("; ")
+            )
         })
 }
 
@@ -89,7 +95,8 @@ fn exe_dir() -> Option<PathBuf> {
         return None;
     }
     PathBuf::from(OsString::from_wide(&buf[..n]))
-        .parent().map(Path::to_path_buf)
+        .parent()
+        .map(Path::to_path_buf)
 }
 
 /// Dependencies use only the DLL's directory and the safe Windows defaults.
@@ -125,8 +132,7 @@ fn load_path(path: &Path) -> Result<*mut c_void, String> {
         };
         if !same_file {
             // SAFETY: release only this call's loader reference.
-            unsafe { FreeLibrary(module)
-    };
+            unsafe { FreeLibrary(module) };
             Err("loaded DLL does not match its requested absolute path".into())
         } else {
             Ok(module)

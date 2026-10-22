@@ -1,0 +1,173 @@
+{
+  "scope": "Run the actual pinned payload outside the checkout, with only Windows on PATH.\n\nThis is no-model package acceptance, not installed Lumen or model-quality evidence.\n",
+  "manifestSha256": "059bea49c03e889de604dbd2c29af2deb410c2694c6d19099309295387fbce9b",
+  "engineCommit": "9b7b01d86dce6c13abdfedc2c842d3095bbd796d",
+  "checks": [
+    "ffmpeg.exe starts outside checkout with System32-only PATH",
+    "ffprobe.exe starts outside checkout with System32-only PATH",
+    "winsearch-embed.exe starts outside checkout with System32-only PATH",
+    "identity, per-folder policy and search-limit capabilities are active",
+    "actual confined text/PDF extraction and public exact search: notes.txt",
+    "actual confined text/PDF extraction and public exact search: pages.pdf",
+    "per-folder hidden, size and exclusion restrictions apply; hidden opt-in reconciles",
+    "1000 exact results stream in bounded frames; a 10000 limit preserves 1100 eligible files",
+    "deferred startup admits only explicit generated root"
+  ],
+  "ownedJobEmpty": true,
+  "passed": true,
+  "timedOut": false,
+  "queryFrames": [
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 3.69
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 4.29
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 4.495
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 4.7
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 4.905
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 5.109
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 5.314
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 5.518
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 5.723
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 5.928
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 6.193
+    },
+    {
+      "query": "packagecontenttoken",
+      "count": 1,
+      "done": true,
+      "elapsedSeconds": 6.623
+    },
+    {
+      "query": "pdfparitytoken",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 6.639
+    },
+    {
+      "query": "pdfparitytoken",
+      "count": 1,
+      "done": true,
+      "elapsedSeconds": 6.954
+    },
+    {
+      "query": "policy",
+      "count": 1,
+      "done": true,
+      "elapsedSeconds": 7.105
+    },
+    {
+      "query": "policy-hidden",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 7.159
+    },
+    {
+      "query": "policy-hidden",
+      "count": 1,
+      "done": true,
+      "elapsedSeconds": 8.015
+    },
+    {
+      "query": "budget-source",
+      "count": 0,
+      "done": true,
+      "elapsedSeconds": 15.179
+    },
+    {
+      "query": "budget-source",
+      "count": 512,
+      "done": false,
+      "elapsedSeconds": 22.764
+    },
+    {
+      "query": "budget-source",
+      "count": 488,
+      "done": true,
+      "elapsedSeconds": 25.633
+    },
+    {
+      "query": "budget-source",
+      "count": 512,
+      "done": false,
+      "elapsedSeconds": 29.762
+    },
+    {
+      "query": "budget-source",
+      "count": 512,
+      "done": false,
+      "elapsedSeconds": 32.82
+    },
+    {
+      "query": "budget-source",
+      "count": 76,
+      "done": true,
+      "elapsedSeconds": 33.376
+    }
+  ],
+  "supersededRetries": 1,
+  "activeQuery": "budget-source",
+  "files": 69,
+  "elapsedSeconds": 33.385,
+  "databaseCounts": {
+    "code.db": {
+      "code_files": 0
+    },
+    "index.db": {
+      "entries": 1672,
+      "segments": 0,
+      "content_chunks": 5
+    }
+  }
+}

@@ -6,7 +6,9 @@ WinUI 3 app. WinSearch is being completed as the dedicated search engine behind
 The feature reference is [ARahim3/DigUp](https://github.com/ARahim3/DigUp).
 
 **Status: v1.0 is in progress.** The implementation PR is
-[PR #2](https://github.com/KB01111/WinSearch-lumen-engine/pull/2). Existing engine
+[PR #4](https://github.com/KB01111/WinSearch-lumen-engine/pull/4), followed by the
+[production and Lumen integration plan](docs/superpowers/plans/2026-10-22-production-readiness-lumen.md).
+Existing engine
 features and passing subsystem tests do not establish complete or installed v1.0
 acceptance. CPU inference works locally; GPU calibration remains pending. On PCs
 with an AMD Ryzen AI NPU2, the [IRON EmbeddingGemma 2 bundle](docs/hx370-npu.md)

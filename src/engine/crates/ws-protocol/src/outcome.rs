@@ -113,13 +113,11 @@ mod tests {
             assert!(outcome.valid_for(true, true, true));
             assert!(!outcome.valid_for(true, false, true));
             assert!(!outcome.valid_for(false, true, true));
-            assert!(
-                !SearchOutcome {
-                    semantic: Some(SemanticOutcome::DISABLED),
-                    ..outcome
-                }
-                .valid_for(true, true, true)
-            );
+            assert!(!SearchOutcome {
+                semantic: Some(SemanticOutcome::DISABLED),
+                ..outcome
+            }
+            .valid_for(true, true, true));
         }
         assert!(
             !SearchOutcome::interrupted(SearchDisposition::Complete).valid_for(true, true, true)

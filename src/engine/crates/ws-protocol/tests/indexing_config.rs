@@ -4,10 +4,18 @@ use ws_protocol::{ClientMessage, IndexingConfig, IndexingMode, ServerMessage};
 fn per_root_policies_round_trip_without_changing_legacy_defaults() {
     let rules = serde_json::json!([{"root":"C:/Data","include_hidden":true,
         "max_file_size_bytes":1048576,"exclusions":["cache","*.tmp"]}]);
-    let config: IndexingConfig = serde_json::from_value(serde_json::json!({"roots":["C:/Data"],"root_policies":rules})).unwrap();
-    assert_eq!(serde_json::to_value(config).unwrap()["root_policies"], rules);
+    let config: IndexingConfig =
+        serde_json::from_value(serde_json::json!({"roots":["C:/Data"],"root_policies":rules}))
+            .unwrap();
+    assert_eq!(
+        serde_json::to_value(config).unwrap()["root_policies"],
+        rules
+    );
     let legacy: IndexingConfig = serde_json::from_str("{}").unwrap();
-    assert!(serde_json::to_value(legacy).unwrap().get("root_policies").is_none());
+    assert!(serde_json::to_value(legacy)
+        .unwrap()
+        .get("root_policies")
+        .is_none());
 }
 #[test]
 fn indexing_wire_defaults_and_full_contract() {

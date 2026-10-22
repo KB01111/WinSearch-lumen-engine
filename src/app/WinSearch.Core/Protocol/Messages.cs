@@ -9,6 +9,7 @@ namespace WinSearch.Core.Protocol;
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
 [JsonDerivedType(typeof(HelloMessage), "hello")]
 [JsonDerivedType(typeof(PingMessage), "ping")]
+[JsonDerivedType(typeof(ResetIndexMessage), "reset_index")]
 [JsonDerivedType(typeof(ResolveEntryMessage), "resolve_entry")]
 [JsonDerivedType(typeof(PreviewEntryMessage), "preview_entry")]
 [JsonDerivedType(typeof(SearchMessage), "search")]
@@ -25,6 +26,28 @@ namespace WinSearch.Core.Protocol;
 [JsonDerivedType(typeof(GetIndexingConfigMessage), "get_indexing_config")]
 [JsonDerivedType(typeof(SetIndexingConfigMessage), "set_indexing_config")]
 public abstract class ClientMessage;
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed class ResetRequest
+{
+    public required string ExpectedIndexId { get; set; }
+    public required string ExpectedCodeIndexId { get; set; }
+    public bool IsValid() => IndexReset.ValidId(ExpectedIndexId) && IndexReset.ValidId(ExpectedCodeIndexId);
+}
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed class IndexReset
+{
+    public required string IndexId { get; set; }
+    public required string CodeIndexId { get; set; }
+    public static bool ValidId(string? value) => value is { Length: 32 } && value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
+    public bool IsValid() => ValidId(IndexId) && ValidId(CodeIndexId) && IndexId != CodeIndexId;
+}
+public sealed class ResetIndexMessage : ClientMessage
+{
+    public ulong Id { get; set; }
+    public required ResetRequest Request { get; set; }
+}
 
 public sealed class HelloMessage : ClientMessage
 {
@@ -188,8 +211,15 @@ public sealed class SetIndexingConfigMessage : ClientMessage
 [JsonDerivedType(typeof(ModelStatusMessage), "model_status")]
 [JsonDerivedType(typeof(ConfigMessage), "config")]
 [JsonDerivedType(typeof(IndexingConfigMessage), "indexing_config")]
+[JsonDerivedType(typeof(IndexResetMessage), "index_reset")]
 [JsonDerivedType(typeof(ErrorMessage), "error")]
 public abstract class ServerMessage;
+
+public sealed class IndexResetMessage : ServerMessage
+{
+    public ulong Id { get; set; }
+    public required IndexReset Reset { get; set; }
+}
 
 public sealed class HelloAckMessage : ServerMessage
 {
@@ -370,6 +400,8 @@ public sealed class NotebookLocation : MatchLocation
     public uint EndLine { get; set; }
 }
 
+public enum MatchSource { Filename, Content, Semantic, Related }
+
 public sealed class SearchResult
 {
     public EntryReference? EntryReference { get; set; }
@@ -378,6 +410,8 @@ public sealed class SearchResult
     public string Title { get; set; } = "";
     public string Subtitle { get; set; } = "";
     public string MatchExplanation { get; set; } = "";
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MatchSource? MatchSource { get; set; }
     public double Score { get; set; }
     public string? Path { get; set; }
     public MatchLocation? Location { get; set; }

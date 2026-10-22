@@ -292,7 +292,10 @@ mod tests {
         };
         let json = serde_json::to_string(&current).unwrap();
         assert!(json.contains(r#""npu":"ready""#));
-        assert_eq!(serde_json::from_str::<EmbedResponse>(&json).unwrap(), current);
+        assert_eq!(
+            serde_json::from_str::<EmbedResponse>(&json).unwrap(),
+            current
+        );
     }
 
     #[test]

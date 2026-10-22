@@ -5,22 +5,22 @@ use std::os::windows::{
 };
 use std::{cell::UnsafeCell, fs::File, path::Path};
 use windows::{
+    core::HRESULT,
     Win32::{
         Foundation::{ERROR_IO_PENDING, HANDLE, WAIT_TIMEOUT},
         Storage::FileSystem::{
             FILE_FLAG_OPEN_NO_RECALL, FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAG_OVERLAPPED,
         },
         System::{
-            IO::{CancelIoEx, DeviceIoControl, GetOverlappedResult, OVERLAPPED},
             Ioctl::{
                 FSCTL_REQUEST_OPLOCK, OPLOCK_LEVEL_CACHE_READ, REQUEST_OPLOCK_CURRENT_VERSION,
                 REQUEST_OPLOCK_INPUT_BUFFER, REQUEST_OPLOCK_INPUT_FLAG_REQUEST,
                 REQUEST_OPLOCK_OUTPUT_BUFFER,
             },
             Threading::{CreateEventW, WaitForSingleObject},
+            IO::{CancelIoEx, DeviceIoControl, GetOverlappedResult, OVERLAPPED},
         },
     },
-    core::HRESULT,
 };
 
 struct PendingRead {

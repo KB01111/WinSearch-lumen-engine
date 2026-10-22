@@ -13,6 +13,7 @@
 //! committed to the repository.
 
 pub mod download;
+mod download_transport;
 pub mod manager;
 pub mod manifest;
 pub mod recipe;

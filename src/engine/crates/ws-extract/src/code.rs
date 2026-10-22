@@ -42,14 +42,20 @@ pub fn extract_code_batch(
     budget: &ExtractBudget,
 ) -> Result<ExtractResponse, ExtractError> {
     budget.check_deadline()?;
-    let (parsed,source_sha256) = ws_code::parse_file_with_sha256(&request.path)?;
+    let (parsed, source_sha256) = ws_code::parse_file_with_sha256(&request.path)?;
     budget.check_deadline()?;
     let total = (parsed.chunks.len() + parsed.symbols.len()) as u64;
     if request.cursor > total || request.max_units == 0 {
         return Err(ExtractError::Decode("invalid code cursor/budget".into()));
     }
-    let mut batch=CodeBatch {language:parsed.language,source_sha256,units:Vec::new()};
-    let mut bytes = serde_json::to_vec(&batch).map_err(|e| ExtractError::Decode(e.to_string()))?.len();
+    let mut batch = CodeBatch {
+        language: parsed.language,
+        source_sha256,
+        units: Vec::new(),
+    };
+    let mut bytes = serde_json::to_vec(&batch)
+        .map_err(|e| ExtractError::Decode(e.to_string()))?
+        .len();
     for ordinal in request.cursor..total {
         budget.check_deadline()?;
         if batch.units.len() >= request.max_units as usize {
@@ -135,7 +141,12 @@ pub(crate) fn validate_batch(
         return Ok(());
     }
     let code = response.code.as_ref().ok_or("typed code batch missing")?;
-    if code.source_sha256.len()!=64 || !code.source_sha256.bytes().all(|b|b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+    if code.source_sha256.len() != 64
+        || !code
+            .source_sha256
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
         return Err("invalid code source SHA256".into());
     }
     if code.language.is_empty()
@@ -191,20 +202,37 @@ mod tests {
 
     #[test]
     fn code_provenance_batch_carries_exact_source_hash_in_every_continuation() {
-        let path=std::env::temp_dir().join(format!("winsearch-code-provenance-batch-{}.rs",std::process::id()));
-        std::fs::write(&path,b"\xef\xbb\xbfpub fn a() {}\r\npub fn b() {}\r\n").unwrap();
-        let mut request=ExtractRequest {path:path.clone(),kind:"code".into(),scratch_dir:std::env::temp_dir(),
-            cursor:0,max_units:1,media_plan:None,video_selection:None};
-        let mut batches=0;
+        let path = std::env::temp_dir().join(format!(
+            "winsearch-code-provenance-batch-{}.rs",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"\xef\xbb\xbfpub fn a() {}\r\npub fn b() {}\r\n").unwrap();
+        let mut request = ExtractRequest {
+            path: path.clone(),
+            kind: "code".into(),
+            scratch_dir: std::env::temp_dir(),
+            cursor: 0,
+            max_units: 1,
+            media_plan: None,
+            video_selection: None,
+        };
+        let mut batches = 0;
         loop {
-            let response=extract_code_batch(&request,&ExtractBudget::default()).unwrap();
-            crate::worker::validate_response(&request,&response).unwrap();
-            assert_eq!(response.code.unwrap().source_sha256,"59f56ce02354434d0d9ace1fe5f8ca17f222ea026adedda751014489ec367db9");
-            batches+=1;
-            if let Some(next)=response.next_cursor {request.cursor=next;} else {break;}
+            let response = extract_code_batch(&request, &ExtractBudget::default()).unwrap();
+            crate::worker::validate_response(&request, &response).unwrap();
+            assert_eq!(
+                response.code.unwrap().source_sha256,
+                "59f56ce02354434d0d9ace1fe5f8ca17f222ea026adedda751014489ec367db9"
+            );
+            batches += 1;
+            if let Some(next) = response.next_cursor {
+                request.cursor = next;
+            } else {
+                break;
+            }
         }
         std::fs::remove_file(path).unwrap();
-        assert!(batches>1,"fixture must exercise real continued batches");
+        assert!(batches > 1, "fixture must exercise real continued batches");
     }
 
     #[test]
@@ -294,10 +322,10 @@ mod tests {
                     });
                 }
                 8 => invalid.code.as_mut().unwrap().source_sha256.clear(),
-                9 => invalid.code.as_mut().unwrap().source_sha256="g".repeat(64),
-                10 => invalid.code.as_mut().unwrap().source_sha256="a".repeat(65),
-                11 => invalid.code.as_mut().unwrap().source_sha256="A".repeat(64),
-                12 => invalid.source_sha256=Some("a".repeat(64)),
+                9 => invalid.code.as_mut().unwrap().source_sha256 = "g".repeat(64),
+                10 => invalid.code.as_mut().unwrap().source_sha256 = "a".repeat(65),
+                11 => invalid.code.as_mut().unwrap().source_sha256 = "A".repeat(64),
+                12 => invalid.source_sha256 = Some("a".repeat(64)),
                 _ => unreachable!(),
             }
             assert!(

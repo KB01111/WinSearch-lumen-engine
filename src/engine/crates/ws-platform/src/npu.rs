@@ -157,14 +157,19 @@ mod tests {
     #[test]
     fn parses_windows_instance_ids() {
         assert_eq!(
-            parse_pci_instance_id(r"PCI\VEN_1022&DEV_17F0&SUBSYS_88DA103C&REV_10\4&2B4A6B1A&0&0141"),
+            parse_pci_instance_id(
+                r"PCI\VEN_1022&DEV_17F0&SUBSYS_88DA103C&REV_10\4&2B4A6B1A&0&0141"
+            ),
             Some((0x1022, 0x17F0, Some(0x10)))
         );
         assert_eq!(
             parse_pci_instance_id(r"pci\ven_1022&dev_1502&rev_00\x"),
             Some((0x1022, 0x1502, Some(0)))
         );
-        assert_eq!(parse_pci_instance_id(r"PCI\VEN_10DE&DEV_2684\x"), Some((0x10DE, 0x2684, None)));
+        assert_eq!(
+            parse_pci_instance_id(r"PCI\VEN_10DE&DEV_2684\x"),
+            Some((0x10DE, 0x2684, None))
+        );
         assert_eq!(parse_pci_instance_id(r"USB\VID_046D&PID_C52B\x"), None);
         assert_eq!(parse_pci_instance_id(r"PCI\VEN_ZZZZ&DEV_17F0\x"), None);
         assert_eq!(parse_pci_instance_id(r"PCI\DEV_17F0\x"), None);

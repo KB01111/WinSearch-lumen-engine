@@ -9,30 +9,85 @@ pub use root_rules::{include_hidden, metadata_allowed};
 /// Callback contexts are integer registry keys, never dereferenced pointers.
 /// Removal before unregister makes late callbacks harmless even if native
 /// unregistration fails; weak values do not extend the indexer's lifetime.
-pub struct PowerNotifications { handles:Vec<usize>, key:usize, _parameters:Box<windows::Win32::System::Power::DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS> }
+pub struct PowerNotifications {
+    handles: Vec<usize>,
+    key: usize,
+    _parameters: Box<windows::Win32::System::Power::DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS>,
+}
 unsafe impl Send for PowerNotifications {}
 unsafe impl Sync for PowerNotifications {}
-fn power_listeners()->&'static std::sync::Mutex<std::collections::HashMap<usize,std::sync::Weak<crate::indexer::Indexer>>> {
-    static LISTENERS:std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<usize,std::sync::Weak<crate::indexer::Indexer>>>>=std::sync::OnceLock::new();
+fn power_listeners() -> &'static std::sync::Mutex<
+    std::collections::HashMap<usize, std::sync::Weak<crate::indexer::Indexer>>,
+> {
+    static LISTENERS: std::sync::OnceLock<
+        std::sync::Mutex<
+            std::collections::HashMap<usize, std::sync::Weak<crate::indexer::Indexer>>,
+        >,
+    > = std::sync::OnceLock::new();
     LISTENERS.get_or_init(Default::default)
 }
-unsafe extern "system" fn power_changed(context:*const core::ffi::c_void,_kind:u32,_setting:*const core::ffi::c_void)->u32 {
-    let indexer=power_listeners().lock().unwrap_or_else(|p|p.into_inner()).get(&(context as usize)).and_then(|w|w.upgrade());
-    if let Some(indexer)=indexer {indexer.notify_work();}
+unsafe extern "system" fn power_changed(
+    context: *const core::ffi::c_void,
+    _kind: u32,
+    _setting: *const core::ffi::c_void,
+) -> u32 {
+    let indexer = power_listeners()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(&(context as usize))
+        .and_then(|w| w.upgrade());
+    if let Some(indexer) = indexer {
+        indexer.notify_work();
+    }
     0
 }
 impl PowerNotifications {
-    pub fn register(indexer:&std::sync::Arc<crate::indexer::Indexer>)->std::io::Result<Self> {
-        use windows::{core::GUID,Win32::{Foundation::HANDLE,System::Power::{DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS,PowerSettingRegisterNotification},UI::WindowsAndMessaging::DEVICE_NOTIFY_CALLBACK}};
-        static NEXT:std::sync::atomic::AtomicUsize=std::sync::atomic::AtomicUsize::new(1);
-        let key=NEXT.fetch_add(1,std::sync::atomic::Ordering::Relaxed);
-        power_listeners().lock().unwrap_or_else(|p|p.into_inner()).insert(key,std::sync::Arc::downgrade(indexer));
-        let parameters=Box::new(DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS {Callback:Some(power_changed),Context:key as *mut _});
-        let mut owned=Self {handles:Vec::new(),key,_parameters:parameters};
-        for guid in [GUID::from_u128(0x5d3e9a59_e9d5_4b00_a6bd_ff34ff516548),GUID::from_u128(0xe00958c0_c213_4ace_ac77_fecced2eeea5)] {
-            let mut registration=std::ptr::null_mut();
-            let error=unsafe {PowerSettingRegisterNotification(&guid,DEVICE_NOTIFY_CALLBACK,HANDLE((&*owned._parameters as *const DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS).cast_mut().cast()),&mut registration)};
-            if error.0!=0 {return Err(std::io::Error::from_raw_os_error(error.0 as i32));}
+    pub fn register(indexer: &std::sync::Arc<crate::indexer::Indexer>) -> std::io::Result<Self> {
+        use windows::{
+            core::GUID,
+            Win32::{
+                Foundation::HANDLE,
+                System::Power::{
+                    PowerSettingRegisterNotification, DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS,
+                },
+                UI::WindowsAndMessaging::DEVICE_NOTIFY_CALLBACK,
+            },
+        };
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
+        let key = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        power_listeners()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(key, std::sync::Arc::downgrade(indexer));
+        let parameters = Box::new(DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS {
+            Callback: Some(power_changed),
+            Context: key as *mut _,
+        });
+        let mut owned = Self {
+            handles: Vec::new(),
+            key,
+            _parameters: parameters,
+        };
+        for guid in [
+            GUID::from_u128(0x5d3e9a59_e9d5_4b00_a6bd_ff34ff516548),
+            GUID::from_u128(0xe00958c0_c213_4ace_ac77_fecced2eeea5),
+        ] {
+            let mut registration = std::ptr::null_mut();
+            let error = unsafe {
+                PowerSettingRegisterNotification(
+                    &guid,
+                    DEVICE_NOTIFY_CALLBACK,
+                    HANDLE(
+                        (&*owned._parameters as *const DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS)
+                            .cast_mut()
+                            .cast(),
+                    ),
+                    &mut registration,
+                )
+            };
+            if error.0 != 0 {
+                return Err(std::io::Error::from_raw_os_error(error.0 as i32));
+            }
             owned.handles.push(registration as usize);
         }
         Ok(owned)
@@ -40,19 +95,37 @@ impl PowerNotifications {
 }
 impl Drop for PowerNotifications {
     fn drop(&mut self) {
-        power_listeners().lock().unwrap_or_else(|p|p.into_inner()).remove(&self.key);
-        for handle in self.handles.drain(..) {let error=unsafe {windows::Win32::System::Power::PowerSettingUnregisterNotification(windows::Win32::System::Power::HPOWERNOTIFY(handle as isize))};if error.0!=0 {tracing::warn!(code=error.0,"power notification unregister failed");}}
+        power_listeners()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&self.key);
+        for handle in self.handles.drain(..) {
+            let error = unsafe {
+                windows::Win32::System::Power::PowerSettingUnregisterNotification(
+                    windows::Win32::System::Power::HPOWERNOTIFY(handle as isize),
+                )
+            };
+            if error.0 != 0 {
+                tracing::warn!(code = error.0, "power notification unregister failed");
+            }
+        }
     }
 }
 
 /// Deadline of the next daily scheduled opening, not a periodic poll.
-pub fn schedule_wait(c:&IndexingConfig)->Option<std::time::Duration> {
-    if c.paused || c.mode!=IndexingMode::Scheduled {return None;}
-    let t=unsafe {windows::Win32::System::SystemInformation::GetLocalTime()};
-    let minute=t.wHour*60+t.wMinute;
-    if hours_contains(c.hours_start,c.hours_end,minute) {return None;}
-    let delta=(i32::from(c.hours_start)-i32::from(minute)).rem_euclid(1440) as u64;
-    Some(std::time::Duration::from_millis(delta*60_000-u64::from(t.wSecond)*1000-u64::from(t.wMilliseconds)))
+pub fn schedule_wait(c: &IndexingConfig) -> Option<std::time::Duration> {
+    if c.paused || c.mode != IndexingMode::Scheduled {
+        return None;
+    }
+    let t = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
+    let minute = t.wHour * 60 + t.wMinute;
+    if hours_contains(c.hours_start, c.hours_end, minute) {
+        return None;
+    }
+    let delta = (i32::from(c.hours_start) - i32::from(minute)).rem_euclid(1440) as u64;
+    Some(std::time::Duration::from_millis(
+        delta * 60_000 - u64::from(t.wSecond) * 1000 - u64::from(t.wMilliseconds),
+    ))
 }
 
 pub fn hours_contains(start: u16, end: u16, minute: u16) -> bool {
@@ -122,7 +195,9 @@ fn path_allowed_with_visibility(c: &IndexingConfig, path: &str, filter_hidden: b
     let Some(root) = root else {
         return false;
     };
-    if !root_rules::relative_allowed(c, root, path, filter_hidden) { return false; }
+    if !root_rules::relative_allowed(c, root, path, filter_hidden) {
+        return false;
+    }
     if c.excluded_paths
         .iter()
         .any(|e| contains(e, path) && normalized(e).len() >= normalized(root).len())
@@ -138,16 +213,20 @@ fn path_allowed_with_visibility(c: &IndexingConfig, path: &str, filter_hidden: b
 }
 
 pub fn code_path_allowed(c: &IndexingConfig, path: &str) -> bool {
-    if !c.code_enabled {return false;}
-    let mut code=c.clone();
-    code.roots=c.code_roots.clone();
-    path_allowed(&code,path)
+    if !c.code_enabled {
+        return false;
+    }
+    let mut code = c.clone();
+    code.roots = c.code_roots.clone();
+    path_allowed(&code, path)
 }
 pub fn code_control_path_allowed(c: &IndexingConfig, path: &str) -> bool {
-    if !c.code_enabled {return false;}
-    let mut code=c.clone();
-    code.roots=c.code_roots.clone();
-    path_allowed_with_visibility(&code,path,false)
+    if !c.code_enabled {
+        return false;
+    }
+    let mut code = c.clone();
+    code.roots = c.code_roots.clone();
+    path_allowed_with_visibility(&code, path, false)
 }
 pub fn pause_reason(
     c: &IndexingConfig,
@@ -251,6 +330,19 @@ pub fn dataset_names(names: &[String]) -> bool {
         .any(|(all, machine)| *all >= 300 && machine * 10 >= all * 7)
 }
 pub fn ordinary_content_reason(c: &IndexingConfig, path: &Path) -> Option<&'static str> {
+    let started =
+        tracing::enabled!(target: "winsearchd::query_profile_detail", tracing::Level::DEBUG)
+            .then(std::time::Instant::now);
+    let result = ordinary_content_reason_inner(c, path);
+    if let Some(started) = started {
+        tracing::debug!(target: "winsearchd::query_profile_detail",
+            elapsed_ms = started.elapsed().as_secs_f64() * 1000., denied = result.is_some(),
+            "ordinary content classification timing");
+    }
+    result
+}
+
+fn ordinary_content_reason_inner(c: &IndexingConfig, path: &Path) -> Option<&'static str> {
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     if crate::crawl::is_excluded(&name, false)
         || ws_code::EXCLUDED_CODE_FILES.contains(&name.to_ascii_lowercase().as_str())
@@ -340,9 +432,11 @@ mod tests {
     }
     #[test]
     fn consent_boundaries_and_reinclusion() {
-        let mut c = IndexingConfig::default();
-        c.roots = vec![r"C:\Data".into(), r"C:\Data\Skip\Chosen".into()];
-        c.excluded_paths = vec![r"C:\Data\Skip".into()];
+        let mut c = IndexingConfig {
+            roots: vec![r"C:\Data".into(), r"C:\Data\Skip\Chosen".into()],
+            excluded_paths: vec![r"C:\Data\Skip".into()],
+            ..Default::default()
+        };
         assert!(path_allowed(&c, r"c:\DATA\notes.txt"));
         assert!(!path_allowed(&c, r"C:\Database\notes.txt"));
         assert!(!path_allowed(&c, r"C:\Data\Skip\notes.txt"));
@@ -352,9 +446,11 @@ mod tests {
     }
     #[test]
     fn validates_and_normalizes_without_dropping_offline_roots() {
-        let mut c = IndexingConfig::default();
-        c.roots = vec![r"Z:\offline".into()];
-        c.excluded_extensions = vec![".PDF".into()];
+        let mut c = IndexingConfig {
+            roots: vec![r"Z:\offline".into()],
+            excluded_extensions: vec![".PDF".into()],
+            ..Default::default()
+        };
         assert_eq!(validate(&c).unwrap().excluded_extensions, vec!["pdf"]);
         c.roots = vec!["relative".into()];
         assert!(validate(&c).is_err());
@@ -428,8 +524,10 @@ mod tests {
             std::fs::write(media.join(format!("clip_{i:06}.jpg")), []).unwrap();
         }
         let file = media.join("clip_000000.jpg");
-        let mut c = IndexingConfig::default();
-        c.roots = vec![base.to_string_lossy().into_owned()];
+        let mut c = IndexingConfig {
+            roots: vec![base.to_string_lossy().into_owned()],
+            ..Default::default()
+        };
         assert_eq!(
             ordinary_content_reason(&c, &file),
             Some("Machine-named media dataset")
@@ -461,8 +559,10 @@ mod tests {
         let screenshot = docs.join("Screenshot 2026.png");
         std::fs::write(&document, b"private repository design").unwrap();
         std::fs::write(&screenshot, []).unwrap();
-        let mut config = IndexingConfig::default();
-        config.roots = vec![docs.to_string_lossy().into_owned()];
+        let config = IndexingConfig {
+            roots: vec![docs.to_string_lossy().into_owned()],
+            ..Default::default()
+        };
         for marker in [".git", "package.json"] {
             let marker = base.join("repo").join(marker);
             std::fs::write(&marker, []).unwrap();

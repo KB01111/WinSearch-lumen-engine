@@ -125,8 +125,11 @@ impl ModelManager {
 
     /// Size of the base GGUFs only.
     pub fn total_bytes(&self) -> u64 {
-        self.files.iter()
-            .filter(|f| f.npu_bundle_path().is_none()).map(|f| f.size).sum()
+        self.files
+            .iter()
+            .filter(|f| f.npu_bundle_path().is_none())
+            .map(|f| f.size)
+            .sum()
     }
 
     /// Filesystem-derived status (no in-flight knowledge — the service merges
@@ -147,7 +150,8 @@ impl ModelManager {
     }
 
     fn component_status(&self, npu: bool) -> ModelComponentStatus {
-        let total = self.files
+        let total = self
+            .files
             .iter()
             .filter(|f| f.npu_bundle_path().is_some() == npu)
             .map(|f| f.size)
@@ -155,7 +159,8 @@ impl ModelManager {
         let mut bytes = 0u64;
         let mut complete = true;
         let mut partial = false;
-        for f in self.files
+        for f in self
+            .files
             .iter()
             .filter(|f| f.npu_bundle_path().is_some() == npu)
         {
@@ -230,7 +235,8 @@ impl ModelManager {
         fs::create_dir_all(&self.dir)?;
         let total = self.component_status(npu).total_bytes;
         let mut done_before = 0u64;
-        for f in self.files
+        for f in self
+            .files
             .iter()
             .filter(|f| f.npu_bundle_path().is_some() == npu)
         {
@@ -298,7 +304,8 @@ impl ModelManager {
         fs::create_dir_all(&self.dir)?;
         if path.is_dir() {
             let mut any = false;
-            for f in self.files
+            for f in self
+                .files
                 .iter()
                 .filter(|f| f.npu_bundle_path().is_some() == npu)
             {
@@ -376,9 +383,9 @@ impl ModelManager {
             }
         }
         // Only directories the bundle created, and only once empty.
-            for sub in ["kernels", ""] {
-                let _ = fs::remove_dir(self.dir.join(NPU_BUNDLE_DIR).join(sub));
-            }
+        for sub in ["kernels", ""] {
+            let _ = fs::remove_dir(self.dir.join(NPU_BUNDLE_DIR).join(sub));
+        }
         Ok(self.status())
     }
 
@@ -389,7 +396,10 @@ impl ModelManager {
         cancel: &AtomicBool,
     ) -> Result<(), ManagerError> {
         if cancel.load(Ordering::Relaxed) {
-            return Err(ManagerError::Download(DownloadError::Cancelled(0, expected.size)));
+            return Err(ManagerError::Download(DownloadError::Cancelled(
+                0,
+                expected.size,
+            )));
         }
         // Verify the source before touching the model dir.
         let len = src.metadata()?.len();
@@ -481,7 +491,10 @@ impl ModelManager {
             self.invalidate_verified(f.name);
             return false;
         }
-        let stamp = (meta.len(), meta.modified().unwrap_or(SystemTime::UNIX_EPOCH));
+        let stamp = (
+            meta.len(),
+            meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+        );
         if let Ok(cache) = self.verified.lock() {
             if cache.get(f.name).copied() == Some(stamp) {
                 return true;
@@ -500,7 +513,10 @@ impl ModelManager {
 
     fn record_verified(&self, name: &str, dest: &Path) {
         if let Ok(meta) = dest.metadata() {
-            let stamp = (meta.len(), meta.modified().unwrap_or(SystemTime::UNIX_EPOCH));
+            let stamp = (
+                meta.len(),
+                meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+            );
             if let Ok(mut cache) = self.verified.lock() {
                 cache.insert(name.to_string(), stamp);
             }
@@ -570,7 +586,11 @@ mod tests {
         assert_eq!(s.total_bytes, TOTAL_BYTES);
 
         // A stale .part marker reads back as paused.
-        fs::write(dir.join(format!("{}.part", EXPECTED_FILES[0].name)), b"half").unwrap();
+        fs::write(
+            dir.join(format!("{}.part", EXPECTED_FILES[0].name)),
+            b"half",
+        )
+        .unwrap();
         assert_eq!(mgr.status().state, ModelState::Paused);
 
         let _ = fs::remove_dir_all(&dir);
@@ -621,14 +641,21 @@ mod tests {
         // Cloned manager shares the verification cache.
         let mgr_clone = mgr.clone();
         assert_eq!(mgr_clone.status().state, ModelState::Ready);
-        assert_eq!(mgr_clone.verified.lock().unwrap().get(name).copied(), cached_stamp);
+        assert_eq!(
+            mgr_clone.verified.lock().unwrap().get(name).copied(),
+            cached_stamp
+        );
 
         // Corrupt the file with a new mtime (same length): cache must invalidate and reject.
         let mut corrupt = body.clone();
         corrupt[0] ^= 0xff;
         let bumped_mtime = cached_stamp.unwrap().1 + Duration::from_secs(2);
         {
-            let mut f = fs::OpenOptions::new().write(true).truncate(true).open(&path).unwrap();
+            let mut f = fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(&path)
+                .unwrap();
             f.write_all(&corrupt).unwrap();
             f.set_modified(bumped_mtime).unwrap();
         }
@@ -651,7 +678,9 @@ mod tests {
 
         // Right name, wrong size (manifest expects hundreds of MB).
         fs::write(src.join(EXPECTED_FILES[0].name), b"too small").unwrap();
-        let err = mgr.import(&src.join(EXPECTED_FILES[0].name), &live).unwrap_err();
+        let err = mgr
+            .import(&src.join(EXPECTED_FILES[0].name), &live)
+            .unwrap_err();
         assert!(err.to_string().contains("size"), "got {err}");
 
         // Directory containing only a wrong-sized candidate fails.
@@ -675,7 +704,10 @@ mod tests {
         use sha2::{Digest, Sha256};
         let dir = temp_dir("import-ok");
         let src = temp_dir("import-ok-src");
-        let bodies = vec![(leak("ok-a.gguf"), vec![11u8; 4096]), (leak("ok-b.gguf"), vec![12u8; 9000])];
+        let bodies = vec![
+            (leak("ok-a.gguf"), vec![11u8; 4096]),
+            (leak("ok-b.gguf"), vec![12u8; 9000]),
+        ];
         let files: Vec<ExpectedFile> = bodies
             .iter()
             .map(|(name, body)| ExpectedFile {
@@ -713,15 +745,23 @@ mod tests {
         let dir = temp_dir("npu-bundle");
         let src = temp_dir("npu-bundle-src");
         let bodies = [
-            (leak("iron-embeddinggemma2-npu2/manifest.txt"), vec![1u8; 100]),
-            (leak("iron-embeddinggemma2-npu2/kernels/k.insts.bin"), vec![2u8; 300]),
+            (
+                leak("iron-embeddinggemma2-npu2/manifest.txt"),
+                vec![1u8; 100],
+            ),
+            (
+                leak("iron-embeddinggemma2-npu2/kernels/k.insts.bin"),
+                vec![2u8; 300],
+            ),
         ];
         let files: Vec<ExpectedFile> = bodies
             .iter()
             .map(|(name, body)| ExpectedFile {
                 name,
                 size: body.len() as u64,
-                sha256: Some(Box::leak(format!("{:x}", Sha256::digest(body)).into_boxed_str())),
+                sha256: Some(Box::leak(
+                    format!("{:x}", Sha256::digest(body)).into_boxed_str(),
+                )),
             })
             .collect();
         fs::create_dir_all(src.join("kernels")).unwrap();
@@ -729,7 +769,9 @@ mod tests {
         fs::write(src.join("kernels").join("k.insts.bin"), &bodies[1].1).unwrap();
         let mgr = ModelManager::with_files(dir.clone(), DownloadOptions::default(), files);
         assert!(mgr.includes_npu_bundle());
-        let s = mgr.import_npu_bundle(&src, &AtomicBool::new(false)).unwrap();
+        let s = mgr
+            .import_npu_bundle(&src, &AtomicBool::new(false))
+            .unwrap();
         assert_eq!(s.npu_bundle.unwrap().state, ModelState::Ready);
         assert_eq!(
             fs::read(dir.join(NPU_BUNDLE_DIR).join("kernels").join("k.insts.bin")).unwrap(),
@@ -743,8 +785,13 @@ mod tests {
 
     #[test]
     fn npu_bundle_is_optional_and_registered_once() {
-        let mgr = ModelManager::new(PathBuf::from("unused")).with_npu_bundle().with_npu_bundle();
-        assert_eq!(mgr.files.len(), NPU_BUNDLE_FILES.len() + EXPECTED_FILES.len());
+        let mgr = ModelManager::new(PathBuf::from("unused"))
+            .with_npu_bundle()
+            .with_npu_bundle();
+        assert_eq!(
+            mgr.files.len(),
+            NPU_BUNDLE_FILES.len() + EXPECTED_FILES.len()
+        );
         assert!(mgr.files[0].npu_bundle_path().is_none());
         assert_eq!(mgr.total_bytes(), crate::manifest::TOTAL_BYTES);
         assert_eq!(mgr.status().npu_bundle.unwrap().total_bytes, 1_085_278_625);

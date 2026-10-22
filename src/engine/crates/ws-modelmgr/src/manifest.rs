@@ -161,9 +161,15 @@ mod tests {
 
     #[test]
     fn application_recipe_rejects_raw_text_pipeline_one() {
-        let current=ModelCompat::current();
-        let legacy=ModelCompat { vector_pipeline_version:1,..current.clone() };
-        assert!(!current.is_compatible_with(&legacy),"raw application vectors cannot mix with prompted query/document vectors");
+        let current = ModelCompat::current();
+        let legacy = ModelCompat {
+            vector_pipeline_version: 1,
+            ..current.clone()
+        };
+        assert!(
+            !current.is_compatible_with(&legacy),
+            "raw application vectors cannot mix with prompted query/document vectors"
+        );
     }
 
     #[test]
@@ -224,7 +230,9 @@ mod tests {
         let mut names = std::collections::HashSet::new();
         for f in &NPU_BUNDLE_FILES {
             assert!(names.insert(f.name), "duplicate {}", f.name);
-            let path = f.npu_bundle_path().expect("bundle files live under NPU_BUNDLE_DIR");
+            let path = f
+                .npu_bundle_path()
+                .expect("bundle files live under NPU_BUNDLE_DIR");
             assert!(!path.contains(".."));
             assert_eq!(
                 f.url(),
@@ -234,9 +242,16 @@ mod tests {
             assert_eq!(hash.len(), 64);
             assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
         }
-        for required in ["manifest.txt", "tensors.txt", "tensors.bin", "kernels/tgemm.xclbin"] {
+        for required in [
+            "manifest.txt",
+            "tensors.txt",
+            "tensors.bin",
+            "kernels/tgemm.xclbin",
+        ] {
             assert!(
-                NPU_BUNDLE_FILES.iter().any(|f| f.npu_bundle_path() == Some(required)),
+                NPU_BUNDLE_FILES
+                    .iter()
+                    .any(|f| f.npu_bundle_path() == Some(required)),
                 "{required} missing"
             );
         }

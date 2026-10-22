@@ -24,8 +24,9 @@ pub use budget::{
     ExtractBudget, DEFAULT_EXTRACT_TIMEOUT, DEFAULT_MAX_FILE_BYTES, DEFAULT_MAX_SEGMENTS,
 };
 pub use chunk::{
-    chunk_text, chunk_text_default, chunk_text_with_lines, select_excerpt, select_excerpt_at, TextChunk,
-    DEFAULT_CHUNK_CHARS, DEFAULT_EXCERPT_CHARS, DEFAULT_OVERLAP_CHARS, DEFAULT_OVERLAP_RATIO,
+    chunk_text, chunk_text_default, chunk_text_with_lines, select_excerpt, select_excerpt_at,
+    TextChunk, DEFAULT_CHUNK_CHARS, DEFAULT_EXCERPT_CHARS, DEFAULT_OVERLAP_CHARS,
+    DEFAULT_OVERLAP_RATIO,
 };
 pub use docs::{build_document_output, is_numeric_dominated, strip_rtf, DocumentExtractor};
 pub use image::{
@@ -169,7 +170,9 @@ pub trait Extractor: Send + Sync {
             output.status,
             ExtractionStatus::Extracted | ExtractionStatus::ExactOnly
         );
-        Ok(worker::ExtractResponse { source_sha256: None, code: None,
+        Ok(worker::ExtractResponse {
+            source_sha256: None,
+            code: None,
             output,
             next_cursor: (successful && (end as u64) < total).then_some(end as u64),
             total_units: successful.then_some(total),
@@ -222,8 +225,19 @@ impl Extractor for PlainTextExtractor {
             .unwrap_or_default();
         if !matches!(
             ext.as_str(),
-            "txt" | "md" | "markdown" | "rst" | "csv" | "tsv" | "log" | "json" | "yaml" | "yml"
-                | "toml" | "ini" | "cfg"
+            "txt"
+                | "md"
+                | "markdown"
+                | "rst"
+                | "csv"
+                | "tsv"
+                | "log"
+                | "json"
+                | "yaml"
+                | "yml"
+                | "toml"
+                | "ini"
+                | "cfg"
         ) {
             return Ok(ExtractOutput::unsupported());
         }
@@ -236,8 +250,7 @@ impl Extractor for PlainTextExtractor {
         let text = String::from_utf8_lossy(&bytes);
         budget.check_deadline()?;
 
-        let raw_chunks =
-            chunk_text_with_lines(&text, DEFAULT_CHUNK_CHARS, DEFAULT_OVERLAP_RATIO);
+        let raw_chunks = chunk_text_with_lines(&text, DEFAULT_CHUNK_CHARS, DEFAULT_OVERLAP_RATIO);
         if raw_chunks.is_empty() {
             return Ok(ExtractOutput::extracted(Vec::new()));
         }

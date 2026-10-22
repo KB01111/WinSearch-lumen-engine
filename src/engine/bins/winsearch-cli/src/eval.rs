@@ -6,6 +6,7 @@
 //!   configured), or
 //! - the live `winsearch-embed` worker when `WS_EMBED_TEST_MODEL` points to a
 //!   valid GGUF file,
+//!
 //! and runs the hybrid exact + semantic ranking pipeline across all suite
 //! queries, computing Recall@5, MRR, and negative-control false-positive rate.
 
@@ -474,7 +475,9 @@ impl WorkerModelEmbedder {
         let reply: Option<ws_embed_protocol::EmbedResponse> =
             ws_protocol::read_message(&mut stream)?;
         let (vectors, backend) = real_worker_vectors(reply, id, count)?;
-        let requested = self.forced_backend.clone()
+        let requested = self
+            .forced_backend
+            .clone()
             .or_else(|| std::env::var("WS_EMBED_BACKEND").ok())
             .unwrap_or_else(|| "auto".into());
         let fallback = matches!(
@@ -489,8 +492,7 @@ impl WorkerModelEmbedder {
             requested_route_matches(&requested, fallback, &backend),
             "requested {requested}, observed unexpected {backend} for {feature}"
         );
-        eprintln!("Verified execution: {feature} backend={backend} stub=false dim=768"
-        );
+        eprintln!("Verified execution: {feature} backend={backend} stub=false dim=768");
         self.verified_label.get_or_init(|| {
             format!(
                 "WorkerModelEmbedder (real {backend}; stub:false; dim:768; model:{})",
@@ -505,8 +507,9 @@ fn requested_route_matches(requested: &str, fallback_only: bool, actual: &str) -
     if requested == "npu" && fallback_only {
         matches!(actual, "cpu" | "cuda" | "vulkan")
     } else {
-        requested == "auto" || requested == actual ||
-            (requested == "npu" && matches!(actual, "npu+cpu" | "npu+cuda" | "npu+vulkan"))
+        requested == "auto"
+            || requested == actual
+            || (requested == "npu" && matches!(actual, "npu+cpu" | "npu+cuda" | "npu+vulkan"))
     }
 }
 
@@ -529,7 +532,10 @@ fn real_worker_vectors(
                 "real-model evaluation refuses stub vectors"
             );
             anyhow::ensure!(
-                matches!(backend.as_str(), "cpu" | "cuda" | "vulkan" | "npu" | "npu+cpu" | "npu+cuda" | "npu+vulkan"),
+                matches!(
+                    backend.as_str(),
+                    "cpu" | "cuda" | "vulkan" | "npu" | "npu+cpu" | "npu+cuda" | "npu+vulkan"
+                ),
                 "unknown real-model backend: {backend}"
             );
             anyhow::ensure!(id == expected_id, "real-model response ID mismatch");
@@ -572,7 +578,11 @@ struct MixedModelEmbedder {
 
 impl MixedModelEmbedder {
     fn next(&self) -> &WorkerModelEmbedder {
-        if self.sequence.fetch_add(1, Ordering::Relaxed).is_multiple_of(2) {
+        if self
+            .sequence
+            .fetch_add(1, Ordering::Relaxed)
+            .is_multiple_of(2)
+        {
             &self.npu
         } else {
             &self.cpu
@@ -609,7 +619,7 @@ fn select_embedder() -> anyhow::Result<Box<dyn EvalEmbedder>> {
             cpu.forced_backend = Some("cpu".into());
             let mut npu = WorkerModelEmbedder::new(path);
             npu.forced_backend = Some("npu".into());
-        return Ok(Box::new(MixedModelEmbedder {
+            return Ok(Box::new(MixedModelEmbedder {
                 cpu,
                 npu,
                 sequence: AtomicU64::new(0),
@@ -893,19 +903,22 @@ pub fn execute_code_query(
     let mut semantic = Vec::new();
     if include_semantic {
         let vectors = embedder.embed_texts(&[
-            ws_modelmgr::recipe::code_query(text), ws_modelmgr::recipe::search_query(text),
+            ws_modelmgr::recipe::code_query(text),
+            ws_modelmgr::recipe::search_query(text),
         ])?;
         anyhow::ensure!(vectors.len() == 2, "code query embedding count mismatch");
-        for hit in
-            store.search_semantic(&vectors[0], &vectors[1], SEMANTIC_TOP_K.max(limit).saturating_mul(8), |_|
-                true, |score|semantic_admitted("code",score))?
-        {
+        for hit in store.search_semantic(
+            &vectors[0],
+            &vectors[1],
+            SEMANTIC_TOP_K.max(limit).saturating_mul(8),
+            |_| true,
+            |score| semantic_admitted("code", score),
+        )? {
             if exact.iter().any(|e| {
-                    e.file.id == hit.file.id
-                        && e.start_line >= hit.start_line
-                        && e.start_line <= hit.end_line
-                })
-            {
+                e.file.id == hit.file.id
+                    && e.start_line >= hit.start_line
+                    && e.start_line <= hit.end_line
+            }) {
                 continue;
             }
             let score = hybrid_score(hit.score, text, &hit.file.name_lower, hit.file.mtime, now);
@@ -1753,16 +1766,23 @@ mod tests {
     fn code_semantic_rejects_task_affinity_without_losing_corroborated_results() {
         struct TaskVectors;
         impl EvalEmbedder for TaskVectors {
-            fn label(&self) -> &str { "task-affinity regression fixture" }
+            fn label(&self) -> &str {
+                "task-affinity regression fixture"
+            }
             fn embed_texts(&self, texts: &[String]) -> anyhow::Result<Vec<Vec<f32>>> {
-                Ok(texts.iter().map(|text| {
-                    let mut vector=vec![0.0;768];
-                    vector[usize::from(text=="task: search result | query: ocean wildlife photographs")]=1.0;
-                    vector
-                }).collect())
+                Ok(texts
+                    .iter()
+                    .map(|text| {
+                        let mut vector = vec![0.0; 768];
+                        vector[usize::from(
+                            text == "task: search result | query: ocean wildlife photographs",
+                        )] = 1.0;
+                        vector
+                    })
+                    .collect())
             }
         }
-        let suite: EvalSuite=serde_json::from_value(serde_json::json!({
+        let suite: EvalSuite = serde_json::from_value(serde_json::json!({
             "name":"code-task-affinity",
             "thresholds":{"min_recall_at_5":1.0,"min_mrr":1.0,"max_false_positive_rate":0.0},
             "entries":[{"path":"C:/Eval/cache.rs","name":"cache.rs","segments":[
@@ -1771,9 +1791,10 @@ mod tests {
                 {"query":"release stale cached values","mode":"code","expected_any":["cache.rs"]},
                 {"query":"ocean wildlife photographs","mode":"code","expect_empty":true}
             ]
-        })).unwrap();
-        let report=run_eval_suite_with(&suite,&TaskVectors).unwrap();
-        assert!(report.passed(),"{:#?}",report.outcomes);
+        }))
+        .unwrap();
+        let report = run_eval_suite_with(&suite, &TaskVectors).unwrap();
+        assert!(report.passed(), "{:#?}", report.outcomes);
     }
 
     #[test]

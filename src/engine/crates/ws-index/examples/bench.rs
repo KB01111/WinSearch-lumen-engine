@@ -7,10 +7,8 @@
 
 use std::time::Instant;
 
-use ws_index::model::{
-    EntryRecord, NewSegment, SearchRequest, VectorFilter, SEGMENT_KIND_NAME,
-};
-use ws_index::vectors::{EMBEDDING_DIM, VectorIndex};
+use ws_index::model::{EntryRecord, NewSegment, SearchRequest, VectorFilter, SEGMENT_KIND_NAME};
+use ws_index::vectors::{VectorIndex, EMBEDDING_DIM};
 use ws_index::IndexStore;
 
 fn main() {
@@ -24,7 +22,9 @@ fn main() {
     std::fs::create_dir_all(&dir).unwrap();
     let db_path = dir.join("bench.db");
 
-    let cpus = std::thread::available_parallelism().map(|p| p.get()).unwrap_or(0);
+    let cpus = std::thread::available_parallelism()
+        .map(|p| p.get())
+        .unwrap_or(0);
     println!("winsearch index/search benchmark");
     println!("entries: {n}, cpus: {cpus}");
 
@@ -36,12 +36,7 @@ fn main() {
     let records: Vec<EntryRecord> = (0..n)
         .map(|i| {
             let name = synthetic_name(i);
-            let path = format!(
-                "C:\\bench\\{}\\{}\\{}",
-                synthetic_area(i),
-                (i % 40),
-                name
-            );
+            let path = format!("C:\\bench\\{}\\{}\\{}", synthetic_area(i), (i % 40), name);
             EntryRecord {
                 root_id: root,
                 parent_id: None,
@@ -200,11 +195,28 @@ fn main() {
     let stats = store.stats().unwrap();
 
     println!();
-    println!("bulk insert ({n} entries):      {:>10.2?}  ({:.0} entries/s)", insert, n as f64 / insert.as_secs_f64());
-    println!("re-upsert (all unchanged):      {:>10.2?}  ({:.0} entries/s)", reupsert, n as f64 / reupsert.as_secs_f64());
-    println!("re-upsert (10% modified):       {:>10.2?}  ({:.0} entries/s)", update, n as f64 / update.as_secs_f64());
+    println!(
+        "bulk insert ({n} entries):      {:>10.2?}  ({:.0} entries/s)",
+        insert,
+        n as f64 / insert.as_secs_f64()
+    );
+    println!(
+        "re-upsert (all unchanged):      {:>10.2?}  ({:.0} entries/s)",
+        reupsert,
+        n as f64 / reupsert.as_secs_f64()
+    );
+    println!(
+        "re-upsert (10% modified):       {:>10.2?}  ({:.0} entries/s)",
+        update,
+        n as f64 / update.as_secs_f64()
+    );
     println!();
-    println!("query latency ({} queries, {}/{} return hits):", latencies.len(), matched, latencies.len());
+    println!(
+        "query latency ({} queries, {}/{} return hits):",
+        latencies.len(),
+        matched,
+        latencies.len()
+    );
     println!("  p50: {:>8.2?}", p(0.50));
     println!("  p95: {:>8.2?}", p(0.95));
     println!("  p99: {:>8.2?}", p(0.99));
@@ -285,8 +297,7 @@ fn run_semantic_bench(store: &mut IndexStore) {
 
     for &target_segs in &[1_000usize, 10_000] {
         let current = store.segment_count().unwrap() as usize;
-        for i in current..target_segs.min(entry_ids.len()) {
-            let eid = entry_ids[i];
+        for (i, &eid) in entry_ids.iter().enumerate().take(target_segs).skip(current) {
             let v = pseudo_vector(i + 100, EMBEDDING_DIM);
             store
                 .upsert_segment(NewSegment {

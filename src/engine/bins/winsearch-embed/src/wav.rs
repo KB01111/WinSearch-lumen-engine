@@ -66,7 +66,7 @@ pub fn read_pcm16(path: &Path, window: Option<(u64, u64)>) -> io::Result<Vec<f32
                 format = true;
             }
             b"data" => {
-                if !format || size == 0 || size % 2 != 0 {
+                if !format || size == 0 || !size.is_multiple_of(2) {
                     return Err(invalid("invalid audio data chunk"));
                 }
                 data = Some((start, size / 2));

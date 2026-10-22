@@ -8,11 +8,14 @@ mod code;
 mod crawl;
 mod embed_client;
 mod engine;
+mod enrichment;
 mod extract;
 mod extract_client;
 mod indexer;
+mod logging;
 mod model;
 mod policy;
+mod reset;
 mod server;
 mod watcher;
 
@@ -29,6 +32,17 @@ use ws_platform::SingleInstanceGuard;
 
 use engine::{EngineService, SharedEngine};
 use indexer::Indexer;
+
+#[cfg(test)]
+fn test_binary_path(name: &str) -> std::path::PathBuf {
+    // Cargo tests live in <target>/<profile>/deps, including alternate target directories.
+    std::env::current_exe()
+        .expect("test executable path")
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("Cargo test profile directory")
+        .join(name)
+}
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -66,7 +80,11 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let store = IndexStore::open(&paths::index_db_path())?;
+    let mut store = IndexStore::open(&paths::index_db_path())?;
+    if store.meta_get("index_reset_intent")?.is_some() {
+        let mut code = ws_code::CodeStore::open(&paths::code_db_path())?;
+        reset::recover(&mut store, &mut code)?;
+    }
     let indexer = if args.iter().any(|arg| arg == "--defer-root-admission") {
         Indexer::open_deferred(store)?
     } else {
@@ -92,9 +110,7 @@ fn main() -> anyhow::Result<()> {
     // Content extraction worker pool (P4.1): two background threads drain
     // non-name modality jobs (`doc`, `pdf`, `image`, `audio`, `video`) in
     // priority order (small + recent files first) under per-file budgets.
-    indexer.start_extract_workers(
-        engine.embed_supervisor(),
-        engine.extraction_registry());
+    indexer.start_extract_workers(engine.embed_supervisor(), engine.extraction_registry());
     engine.start_code_scheduler()?;
     spawn_status_pusher(Arc::clone(&engine));
     // Model progress/completion pushes fan out to every connected client.
@@ -158,12 +174,27 @@ fn run_crawl_bench(file_count: usize) -> anyhow::Result<()> {
     let stats = store.stats()?;
 
     println!("winsearch crawl-pipeline benchmark");
-    println!("files: {file_count}, dirs: {}, cpus: {}", file_count / 200, std::thread::available_parallelism().map(|p| p.get()).unwrap_or(0));
+    println!(
+        "files: {file_count}, dirs: {}, cpus: {}",
+        file_count / 200,
+        std::thread::available_parallelism()
+            .map(|p| p.get())
+            .unwrap_or(0)
+    );
     println!();
     println!("tree creation:               {build:>10.2?}");
-    println!("full crawl (scan+identity+upsert, {entries} entries): {full:>8.2?}  ({:.0} files/s)", file_count as f64 / full.as_secs_f64());
-    println!("incremental crawl (unchanged): {incremental:>10.2?}  ({:.0} files/s)", file_count as f64 / incremental.as_secs_f64());
-    println!("index size: {:.1} MiB", stats.index_size_bytes as f64 / 1_048_576.0);
+    println!(
+        "full crawl (scan+identity+upsert, {entries} entries): {full:>8.2?}  ({:.0} files/s)",
+        file_count as f64 / full.as_secs_f64()
+    );
+    println!(
+        "incremental crawl (unchanged): {incremental:>10.2?}  ({:.0} files/s)",
+        file_count as f64 / incremental.as_secs_f64()
+    );
+    println!(
+        "index size: {:.1} MiB",
+        stats.index_size_bytes as f64 / 1_048_576.0
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&db_dir);
@@ -195,21 +226,30 @@ fn init_logging() {
         eprintln!("warning: cannot create log directory: {e}");
         return;
     }
-    let appender = tracing_appender::rolling::daily(&logs_dir, "winsearchd.log");
-    let (writer, guard) = tracing_appender::non_blocking(appender);
+    let appender = match logging::BoundedFile::open(&logs_dir, logging::LOG_FILE_BYTES) {
+        Ok(appender) => appender,
+        Err(_) => {
+            eprintln!("warning: file logging unavailable");
+            return;
+        }
+    };
+    let (writer, guard) = tracing_appender::non_blocking::NonBlockingBuilder::default()
+        .buffered_lines_limit(256)
+        .lossy(true)
+        .finish(appender);
     // Keep the guard alive for the process lifetime.
     Box::leak(Box::new(guard));
 
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         EnvFilter::new("winsearchd=info,ws_platform=info,ws_protocol=warn,ws_index=warn")
     });
 
     tracing_subscriber::fmt()
         .with_env_filter(filter)
-        .with_writer(writer)
+        .with_writer(move || logging::LimitedWriter::new(writer.clone()))
         .with_ansi(false)
-        .init();
+        .try_init()
+        .ok();
 
-    warn!(path = %logs_dir.display(), "file logging active");
+    warn!("bounded file logging active");
 }

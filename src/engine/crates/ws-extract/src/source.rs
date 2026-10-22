@@ -54,6 +54,18 @@ pub fn with_source_sha256(
 }
 
 pub fn source_sha256(path: &Path, budget: &ExtractBudget) -> Result<Option<String>, ExtractError> {
+    source_sha256_while(path, budget, || true)
+}
+
+/// Recheck caller cancellation/admission before each bounded read.
+pub fn source_sha256_while(
+    path: &Path,
+    budget: &ExtractBudget,
+    mut admitted: impl FnMut() -> bool,
+) -> Result<Option<String>, ExtractError> {
+    if !admitted() {
+        return Err(ExtractError::SourceChanged);
+    }
     budget.check_deadline()?;
     if !path.is_absolute() || !ws_platform::content::local_content_allowed(path) {
         return Err(ExtractError::Decode(
@@ -61,7 +73,7 @@ pub fn source_sha256(path: &Path, budget: &ExtractBudget) -> Result<Option<Strin
         ));
     }
     let guard = ws_platform::source_guard::SourceReadGuard::open(path);
-    let source = source_digest(path, budget)?;
+    let source = source_digest_while(path, budget, &mut admitted)?;
     if guard.as_ref().is_some_and(|guard| {
         !guard.intact()
             || source
@@ -78,6 +90,14 @@ pub fn source_sha256(path: &Path, budget: &ExtractBudget) -> Result<Option<Strin
 fn source_digest(
     path: &Path,
     budget: &ExtractBudget,
+) -> Result<Option<SourceDigest>, ExtractError> {
+    source_digest_while(path, budget, &mut || true)
+}
+
+fn source_digest_while(
+    path: &Path,
+    budget: &ExtractBudget,
+    admitted: &mut impl FnMut() -> bool,
 ) -> Result<Option<SourceDigest>, ExtractError> {
     budget.check_deadline()?;
     let changed = || ExtractError::SourceChanged;
@@ -122,6 +142,9 @@ fn source_digest(
     let mut buffer = [0; 64 * 1024];
     let mut total = 0;
     loop {
+        if !admitted() {
+            return Err(ExtractError::SourceChanged);
+        }
         budget.check_deadline()?;
         let capacity = (snapshot.0 - total + 1).min(buffer.len() as u64) as usize;
         let count = file.read(&mut buffer[..capacity])?;
@@ -145,6 +168,9 @@ fn source_digest(
     {
         return Err(changed());
     }
+    if !admitted() {
+        return Err(ExtractError::SourceChanged);
+    }
     budget.check_deadline()?;
     Ok(Some(SourceDigest {
         sha256: format!("{:x}", hash.finalize()),
@@ -163,6 +189,19 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
         time::Duration,
     };
+
+    #[test]
+    fn complete_source_hash_stops_between_reads_when_admission_is_revoked() {
+        let fixture = Fixture::new(&vec![7; 256 * 1024]);
+        let budget = ExtractBudget::new(MAX_SOURCE_HASH_BYTES, Duration::from_secs(10), 256);
+        let mut checks = 0;
+        let result = source_sha256_while(&fixture.path(), &budget, || {
+            checks += 1;
+            checks < 4
+        });
+        assert!(matches!(result, Err(ExtractError::SourceChanged)));
+        assert_eq!(checks, 4, "revocation must stop further file reads");
+    }
 
     struct Fixture(PathBuf);
     impl Fixture {
@@ -360,12 +399,10 @@ mod tests {
         let fixture = Fixture::new(b"abc");
         let request = request(&fixture);
         let legacy = response();
-        assert!(
-            serde_json::to_value(&legacy)
-                .unwrap()
-                .get("source_sha256")
-                .is_none()
-        );
+        assert!(serde_json::to_value(&legacy)
+            .unwrap()
+            .get("source_sha256")
+            .is_none());
         crate::worker::validate_response(&request, &legacy).unwrap();
         let mut valid = response();
         valid.source_sha256 = Some("a".repeat(64));

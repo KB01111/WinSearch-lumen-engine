@@ -164,7 +164,9 @@ pub fn extract_video_batch(
     } else {
         None
     };
-    Ok(ExtractResponse { source_sha256: None, code: None,
+    Ok(ExtractResponse {
+        source_sha256: None,
+        code: None,
         output: ExtractOutput::extracted(segments),
         next_cursor,
         total_units: Some(total_units(&plan)),

@@ -175,7 +175,9 @@ pub fn extract_pdf_batch(
     } else {
         vec![]
     };
-    Ok(ExtractResponse { source_sha256: None, code: None,
+    Ok(ExtractResponse {
+        source_sha256: None,
+        code: None,
         output: ExtractOutput::extracted(segments),
         next_cursor: (page < total).then_some(encode_cursor(page, chunk)),
         total_units: Some(u64::from(total)),

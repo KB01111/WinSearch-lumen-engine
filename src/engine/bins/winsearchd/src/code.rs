@@ -85,7 +85,46 @@ fn snapshot(path: &Path) -> Option<String> {
     ))
 }
 
+/// A denied control appearing after crawler setup still retires its old rules.
+/// Controls inside a denied governing directory cannot affect admitted sources.
+fn governing_control_directory(path: &Path) -> Option<&Path> {
+    let named = |path: &Path, name: &str| {
+        path.file_name()
+            .is_some_and(|value| value.to_string_lossy().eq_ignore_ascii_case(name))
+    };
+    if named(path, ".gitignore") || named(path, ".ignore") {
+        return path.parent();
+    }
+    let git = if named(path, "exclude") && named(path.parent()?, "info") {
+        path.parent()?.parent()?
+    } else if named(path, "info") {
+        path.parent()?
+    } else {
+        path
+    };
+    named(git, ".git").then(|| git.parent()).flatten()
+}
+
 impl CodeService {
+    pub(crate) fn reset_runtime(&self) {
+        self.epoch.fetch_add(1, Ordering::AcqRel);
+        *self.scan.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        *self.vectors.lock().unwrap_or_else(|p| p.into_inner()) = VectorState::default();
+        *self.config.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        self.signal();
+    }
+    pub(crate) fn reconcile_after_gate(&self) -> anyhow::Result<()> {
+        self.policy_changed();
+        let policy = self.policy();
+        if policy.code_enabled {
+            let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+            for root in policy.code_roots {
+                store.enqueue_job(&root, &root, true, now())?;
+            }
+        }
+        self.signal();
+        Ok(())
+    }
     pub fn new(
         store: CodeStore,
         indexer: Arc<Indexer>,
@@ -138,62 +177,131 @@ impl CodeService {
             && snapshot(Path::new(&file.path)).as_deref() == stored
     }
     #[cfg(test)]
-    pub fn exact(&self,text:&str,limit:usize)->Vec<CodeSearchHit> {self.exact_filtered(text,limit,&[])}
+    pub fn exact(&self, text: &str, limit: usize) -> Vec<CodeSearchHit> {
+        self.exact_filtered(text, limit, &[])
+    }
 
     #[cfg(test)]
-    pub fn exact_filtered(&self,text:&str,limit:usize,extensions:&[String])->Vec<CodeSearchHit> {
-        self.exact_filtered_checked(text,limit,extensions,&[]).unwrap_or_default()
+    pub fn exact_filtered(
+        &self,
+        text: &str,
+        limit: usize,
+        extensions: &[String],
+    ) -> Vec<CodeSearchHit> {
+        self.exact_filtered_checked(text, limit, extensions, &[])
+            .unwrap_or_default()
     }
-    pub fn exact_filtered_checked(&self, text: &str, limit: usize,extensions:&[String],file_kinds:&[ws_protocol::FileKind]) -> Result<Vec<CodeSearchHit>,ws_code::store::CodeStoreError> {
+    pub fn exact_filtered_checked(
+        &self,
+        text: &str,
+        limit: usize,
+        extensions: &[String],
+        file_kinds: &[ws_protocol::FileKind],
+    ) -> Result<Vec<CodeSearchHit>, ws_code::store::CodeStoreError> {
         let store = self.store.lock().unwrap_or_else(|p| p.into_inner());
-        let failure=std::cell::RefCell::new(None);
-        let hits=store
-            .search_exact(text, limit, |file| {
-                if !ws_protocol::search_extension_allowed(extensions,&file.ext) {return false;}
-                if !ws_protocol::search_file_kind_allowed(file_kinds,&file.ext,false) {return false;}
-                match store.source_snapshot(file.id) {
-                    Ok(source)=>self.visible(file,source.as_deref()),
-                    Err(error)=>{*failure.borrow_mut()=Some(error);false}
+        let failure = std::cell::RefCell::new(None);
+        let hits = store.search_exact(text, limit, |file| {
+            if !ws_protocol::search_extension_allowed(extensions, &file.ext) {
+                return false;
+            }
+            if !ws_protocol::search_file_kind_allowed(file_kinds, &file.ext, false) {
+                return false;
+            }
+            match store.source_snapshot(file.id) {
+                Ok(source) => self.visible(file, source.as_deref()),
+                Err(error) => {
+                    *failure.borrow_mut() = Some(error);
+                    false
                 }
-            })?;
-        if let Some(error)=failure.into_inner() {return Err(error);}
+            }
+        })?;
+        if let Some(error) = failure.into_inner() {
+            return Err(error);
+        }
         Ok(hits)
     }
     #[cfg(test)]
-    pub fn semantic(&self,vector:&[f32],corroboration:&[f32],limit:usize)->Vec<CodeSearchHit> {
-        self.semantic_filtered(vector,corroboration,limit,&[])
+    pub fn semantic(
+        &self,
+        vector: &[f32],
+        corroboration: &[f32],
+        limit: usize,
+    ) -> Vec<CodeSearchHit> {
+        self.semantic_filtered(vector, corroboration, limit, &[])
     }
 
     #[cfg(test)]
-    pub fn semantic_filtered(&self,vector:&[f32],corroboration:&[f32],limit:usize,extensions:&[String])->Vec<CodeSearchHit> {
-        self.semantic_filtered_checked(vector,corroboration,limit,extensions).unwrap_or_default().0
+    pub fn semantic_filtered(
+        &self,
+        vector: &[f32],
+        corroboration: &[f32],
+        limit: usize,
+        extensions: &[String],
+    ) -> Vec<CodeSearchHit> {
+        self.semantic_filtered_checked(vector, corroboration, limit, extensions)
+            .unwrap_or_default()
+            .0
     }
     #[cfg(test)]
-    pub fn semantic_filtered_checked(&self, vector: &[f32], corroboration: &[f32], limit: usize,extensions:&[String])
-        ->Result<(Vec<CodeSearchHit>,bool),ws_protocol::SemanticIssue> {
-        self.semantic_excluding_checked(vector,corroboration,limit,extensions,&[],None)
+    pub fn semantic_filtered_checked(
+        &self,
+        vector: &[f32],
+        corroboration: &[f32],
+        limit: usize,
+        extensions: &[String],
+    ) -> Result<(Vec<CodeSearchHit>, bool), ws_protocol::SemanticIssue> {
+        self.semantic_excluding_checked(vector, corroboration, limit, extensions, &[], None)
     }
-    pub fn semantic_excluding_checked(&self, vector: &[f32], corroboration: &[f32], limit: usize,extensions:&[String],file_kinds:&[ws_protocol::FileKind],excluded:Option<i64>)
-        ->Result<(Vec<CodeSearchHit>,bool),ws_protocol::SemanticIssue> {
+    pub fn semantic_excluding_checked(
+        &self,
+        vector: &[f32],
+        corroboration: &[f32],
+        limit: usize,
+        extensions: &[String],
+        file_kinds: &[ws_protocol::FileKind],
+        excluded: Option<i64>,
+    ) -> Result<(Vec<CodeSearchHit>, bool), ws_protocol::SemanticIssue> {
         use ws_protocol::SemanticIssue::RetrievalFailed;
-        let fingerprint=self.fingerprint_checked().map_err(|_|RetrievalFailed)?;
+        let fingerprint = self.fingerprint_checked().map_err(|_| RetrievalFailed)?;
         let store = self.store.lock().unwrap_or_else(|p| p.into_inner());
-        if store.meta_get("vector_fingerprint").map_err(|_|RetrievalFailed)?.as_deref()!=Some(&fingerprint) {
-            return Ok((Vec::new(),false));
+        if store
+            .meta_get("vector_fingerprint")
+            .map_err(|_| RetrievalFailed)?
+            .as_deref()
+            != Some(&fingerprint)
+        {
+            return Ok((Vec::new(), false));
         }
-        let failed=std::cell::Cell::new(false);
-        let report=store
-            .search_semantic_report(vector, corroboration, limit, |file| {
-                if excluded==Some(file.id) {return false;}
-                if !ws_protocol::search_extension_allowed(extensions,&file.ext) {return false;}
-                if !ws_protocol::search_file_kind_allowed(file_kinds,&file.ext,false) {return false;}
-                match store.source_snapshot(file.id) {
-                    Ok(source)=>self.visible(file,source.as_deref()),
-                    Err(_)=>{failed.set(true);false}
-                }
-            }, |score|ws_index::retrieval::semantic_admitted("code",score))
-            .map_err(|_|RetrievalFailed)?;
-        if failed.get() {return Err(RetrievalFailed);}
+        let failed = std::cell::Cell::new(false);
+        let report = store
+            .search_semantic_report(
+                vector,
+                corroboration,
+                limit,
+                |file| {
+                    if excluded == Some(file.id) {
+                        return false;
+                    }
+                    if !ws_protocol::search_extension_allowed(extensions, &file.ext) {
+                        return false;
+                    }
+                    if !ws_protocol::search_file_kind_allowed(file_kinds, &file.ext, false) {
+                        return false;
+                    }
+                    match store.source_snapshot(file.id) {
+                        Ok(source) => self.visible(file, source.as_deref()),
+                        Err(_) => {
+                            failed.set(true);
+                            false
+                        }
+                    }
+                },
+                |score| ws_index::retrieval::semantic_admitted("code", score),
+            )
+            .map_err(|_| RetrievalFailed)?;
+        if failed.get() {
+            return Err(RetrievalFailed);
+        }
         Ok(report)
     }
     pub fn result_allowed(&self, path: &str, epoch: u64) -> bool {
@@ -209,85 +317,187 @@ impl CodeService {
             && self.query_epoch() == epoch
     }
 
-    pub fn preview_text(&self,file:i64,entry:&ws_protocol::ResolvedEntry,location:Option<ws_protocol::MatchLocation>)
-        ->Result<(Vec<ws_protocol::PreviewTextPart>,bool),ws_code::store::CodeStoreError> {
-        let store=self.store.lock().unwrap_or_else(|p|p.into_inner());
-        store.preview_text(file,entry.index_revision.unwrap_or(0),location,|row,state| {
-            row.path==entry.path && state.sha256==entry.content_sha256
-                && self.visible(row,Some(&state.snapshot))
-                && ws_code::parse::guard_source_path(Path::new(&row.path)).is_ok()
-                && ws_platform::identity::file_identity(Path::new(&row.path))==Some((row.volume_serial,row.file_id))
-        })
+    pub fn preview_text(
+        &self,
+        file: i64,
+        entry: &ws_protocol::ResolvedEntry,
+        location: Option<ws_protocol::MatchLocation>,
+    ) -> Result<(Vec<ws_protocol::PreviewTextPart>, bool), ws_code::store::CodeStoreError> {
+        let store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+        store.preview_text(
+            file,
+            entry.index_revision.unwrap_or(0),
+            location,
+            |row, state| {
+                row.path == entry.path
+                    && state.sha256 == entry.content_sha256
+                    && self.visible(row, Some(&state.snapshot))
+                    && ws_code::parse::guard_source_path(Path::new(&row.path)).is_ok()
+                    && ws_platform::identity::file_identity(Path::new(&row.path))
+                        == Some((row.volume_serial, row.file_id))
+            },
+        )
     }
 
-    pub fn resolve_metadata(&self,file_id:i64,reference:&ws_protocol::EntryReference,incarnation:windows::core::GUID)
-        ->Result<ws_protocol::ResolvedEntry,ws_protocol::ErrorCode> {
+    pub fn resolve_metadata(
+        &self,
+        file_id: i64,
+        reference: &ws_protocol::EntryReference,
+        incarnation: windows::core::GUID,
+    ) -> Result<ws_protocol::ResolvedEntry, ws_protocol::ErrorCode> {
         use ws_protocol::ErrorCode;
-        let policy_epoch=self.indexer.policy_epoch();
-        let generation=self.indexer.store_lock().model_generation().map_err(|_|ErrorCode::Internal)?;
-        let policy=self.policy();
-        let (file,repo,state)={
-            let store=self.store.lock().unwrap_or_else(|p|p.into_inner());
-            let file=store.get_file(file_id).map_err(|_|ErrorCode::Internal)?.ok_or(ErrorCode::NotReady)?;
-            let repo=store.get_repo(file.repo_id).map_err(|_|ErrorCode::Internal)?.ok_or(ErrorCode::NotReady)?;
-            let state=store.source_provenance(file_id).map_err(|_|ErrorCode::Internal)?;
-            (file,repo,state)
+        let policy_epoch = self.indexer.policy_epoch();
+        let generation = self
+            .indexer
+            .store_lock()
+            .model_generation()
+            .map_err(|_| ErrorCode::Internal)?;
+        let policy = self.policy();
+        let (file, repo, state) = {
+            let store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+            let file = store
+                .get_file(file_id)
+                .map_err(|_| ErrorCode::Internal)?
+                .ok_or(ErrorCode::NotReady)?;
+            let repo = store
+                .get_repo(file.repo_id)
+                .map_err(|_| ErrorCode::Internal)?
+                .ok_or(ErrorCode::NotReady)?;
+            let state = store
+                .source_provenance(file_id)
+                .map_err(|_| ErrorCode::Internal)?;
+            (file, repo, state)
         };
-        let path=Path::new(&file.path);
-        if !repo.enabled || !crate::policy::contains(&repo.root_path,&file.path) || !self.allowed(path)
-            || ws_code::parse::guard_source_path(path).is_err() {
-            return Err(ErrorCode::NotReady);
-        }
-        let root_path=policy.code_roots.iter().filter(|root|crate::policy::contains(root,&file.path))
-            .max_by_key(|root|root.len()).cloned().ok_or(ErrorCode::NotReady)?;
-        if ws_platform::identity::file_identity(path)!=Some((file.volume_serial,file.file_id)) {
-            return Err(ErrorCode::NotReady);
-        }
-        let source=snapshot(path).ok_or(ErrorCode::NotReady)?;
-        let metadata=std::fs::metadata(path).map_err(|_|ErrorCode::NotReady)?;
-        let revision=state.as_ref().map_or(0,|state|state.revision);
-        let indexed=state.as_ref().is_some_and(|state|state.snapshot==source);
-        let proof=format!("{incarnation:?}:code:{policy_epoch}:{generation}:{revision}:{source}:{}",file.path);
-        if proof.len()>65536 || reference.source_revision.as_ref().is_some_and(|expected|expected!=&proof) {
-            return Err(ErrorCode::NotReady);
-        }
-        if self.indexer.policy_epoch()!=policy_epoch
-            || self.indexer.store_lock().model_generation().map_err(|_|ErrorCode::Internal)?!=generation
-            || self.policy()!=policy {return Err(ErrorCode::NotReady);}
+        let path = Path::new(&file.path);
+        if !repo.enabled
+            || !crate::policy::contains(&repo.root_path, &file.path)
+            || !self.allowed(path)
+            || ws_code::parse::guard_source_path(path).is_err()
         {
-            let store=self.store.lock().unwrap_or_else(|p|p.into_inner());
-            if store.get_file(file_id).map_err(|_|ErrorCode::Internal)?.as_ref()!=Some(&file)
-                || store.get_repo(file.repo_id).map_err(|_|ErrorCode::Internal)?.as_ref()!=Some(&repo)
-                || store.source_provenance(file_id).map_err(|_|ErrorCode::Internal)?!=state
-                || !self.allowed(path) || ws_code::parse::guard_source_path(path).is_err()
-                || ws_platform::identity::file_identity(path)!=Some((file.volume_serial,file.file_id))
-                || snapshot(path).as_deref()!=Some(source.as_str()) {
+            return Err(ErrorCode::NotReady);
+        }
+        let root_path = policy
+            .code_roots
+            .iter()
+            .filter(|root| crate::policy::contains(root, &file.path))
+            .max_by_key(|root| root.len())
+            .cloned()
+            .ok_or(ErrorCode::NotReady)?;
+        if ws_platform::identity::file_identity(path) != Some((file.volume_serial, file.file_id)) {
+            return Err(ErrorCode::NotReady);
+        }
+        let source = snapshot(path).ok_or(ErrorCode::NotReady)?;
+        let metadata = std::fs::metadata(path).map_err(|_| ErrorCode::NotReady)?;
+        let revision = state.as_ref().map_or(0, |state| state.revision);
+        let indexed = state.as_ref().is_some_and(|state| state.snapshot == source);
+        let proof = format!(
+            "{incarnation:?}:code:{policy_epoch}:{generation}:{revision}:{source}:{}",
+            file.path
+        );
+        if proof.len() > 65536
+            || reference
+                .source_revision
+                .as_ref()
+                .is_some_and(|expected| expected != &proof)
+        {
+            return Err(ErrorCode::NotReady);
+        }
+        if self.indexer.policy_epoch() != policy_epoch
+            || self
+                .indexer
+                .store_lock()
+                .model_generation()
+                .map_err(|_| ErrorCode::Internal)?
+                != generation
+            || self.policy() != policy
+        {
+            return Err(ErrorCode::NotReady);
+        }
+        {
+            let store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+            if store
+                .get_file(file_id)
+                .map_err(|_| ErrorCode::Internal)?
+                .as_ref()
+                != Some(&file)
+                || store
+                    .get_repo(file.repo_id)
+                    .map_err(|_| ErrorCode::Internal)?
+                    .as_ref()
+                    != Some(&repo)
+                || store
+                    .source_provenance(file_id)
+                    .map_err(|_| ErrorCode::Internal)?
+                    != state
+                || !self.allowed(path)
+                || ws_code::parse::guard_source_path(path).is_err()
+                || ws_platform::identity::file_identity(path)
+                    != Some((file.volume_serial, file.file_id))
+                || snapshot(path).as_deref() != Some(source.as_str())
+            {
                 return Err(ErrorCode::NotReady);
             }
         }
-        if self.indexer.policy_epoch()!=policy_epoch
-            || self.indexer.store_lock().model_generation().map_err(|_|ErrorCode::Internal)?!=generation {
+        if self.indexer.policy_epoch() != policy_epoch
+            || self
+                .indexer
+                .store_lock()
+                .model_generation()
+                .map_err(|_| ErrorCode::Internal)?
+                != generation
+        {
             return Err(ErrorCode::NotReady);
         }
-        Ok(ws_protocol::ResolvedEntry {result_id:reference.result_id.clone(),root_path,
-            path:file.path.clone(),name:file.name.clone(),kind:ws_protocol::ResultKind::Code,
-            size_bytes:metadata.len(),modified_unix_seconds:metadata.modified().ok().and_then(ws_platform::identity::unix_seconds),
-            index_revision:indexed.then_some(revision),source_revision:proof,
-            content_sha256:state.filter(|_|indexed).and_then(|state|state.sha256)})
+        Ok(ws_protocol::ResolvedEntry {
+            result_id: reference.result_id.clone(),
+            root_path,
+            path: file.path.clone(),
+            name: file.name.clone(),
+            kind: ws_protocol::ResultKind::Code,
+            size_bytes: metadata.len(),
+            modified_unix_seconds: metadata
+                .modified()
+                .ok()
+                .and_then(ws_platform::identity::unix_seconds),
+            index_revision: indexed.then_some(revision),
+            source_revision: proof,
+            content_sha256: state.filter(|_| indexed).and_then(|state| state.sha256),
+        })
     }
     fn fingerprint(&self) -> Option<String> {
         self.fingerprint_checked().ok()
     }
-    fn fingerprint_checked(&self)->Result<String,ws_index::StoreError> {
+    fn fingerprint_checked(&self) -> Result<String, ws_index::StoreError> {
         let generation = self.indexer.store_lock().model_generation()?;
         let compat = self
             .indexer
-            .meta_get(ws_modelmgr::EMBEDDING_MODEL_META_KEY)
-            ?
+            .meta_get(ws_modelmgr::EMBEDDING_MODEL_META_KEY)?
             .unwrap_or_default();
         Ok(format!("{generation}:{compat}:code-v1"))
     }
     pub fn changed(&self, root: &str, event: WatchEvent) -> anyhow::Result<()> {
+        let Some(_work) = self.indexer.work_gate.enter() else {
+            return Ok(());
+        };
+        // Excluded subtrees cannot postpone admitted work. Use lexical policy,
+        // never live metadata: deleted/replaced admitted paths still invalidate.
+        // Hidden ignore/control files can affect the crawl and remain relevant.
+        let policy = self.policy();
+        let allowed = |path: &Path| {
+            crate::policy::code_control_path_allowed(&policy, &path.to_string_lossy())
+        };
+        let relevant =
+            |path: &Path| allowed(path) || governing_control_directory(path).is_some_and(allowed);
+        let relevant = match &event {
+            WatchEvent::Created(path) | WatchEvent::Modified(path) | WatchEvent::Deleted(path) => {
+                relevant(path)
+            }
+            WatchEvent::Renamed { from, to } => relevant(from) || relevant(to),
+            WatchEvent::Overflow => true,
+        };
+        if !relevant {
+            return Ok(());
+        }
         self.epoch.fetch_add(1, Ordering::AcqRel);
         let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
         match event {
@@ -308,6 +518,9 @@ impl CodeService {
         Ok(())
     }
     pub(crate) fn configure(self: &Arc<Self>) -> anyhow::Result<()> {
+        let Some(_work) = self.indexer.work_gate.enter() else {
+            return Ok(());
+        };
         let policy = self.policy();
         let mut previous = self.config.lock().unwrap_or_else(|p| p.into_inner());
         if previous.as_ref() == Some(&policy) {
@@ -388,7 +601,9 @@ impl CodeService {
     }
     fn wait_for_work(&self) {
         if self.indexer.indexing_pause_reason().is_none()
-            && self.parser_work_due() && !self.extract.admission_available() {
+            && self.parser_work_due()
+            && !self.extract.admission_available()
+        {
             self.extract.wait_for_admission(PARSER_ADMISSION_WAIT);
             return;
         }
@@ -429,10 +644,18 @@ impl CodeService {
         jobs.into_iter().chain(vectors).min()
     }
     fn parser_work_due(&self) -> bool {
-        self.store.lock().unwrap_or_else(|p| p.into_inner()).next_job_due()
-            .ok().flatten().is_some_and(|due| due <= now())
+        self.store
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .next_job_due()
+            .ok()
+            .flatten()
+            .is_some_and(|due| due <= now())
     }
     pub fn turn(&self) -> anyhow::Result<bool> {
+        let Some(_work) = self.indexer.work_gate.enter() else {
+            return Ok(false);
+        };
         if self.indexer.indexing_pause_reason().is_some() {
             return Ok(false);
         }
@@ -449,13 +672,22 @@ impl CodeService {
                     *self.scan.lock().unwrap_or_else(|p| p.into_inner()) = Some(scan);
                 }
                 Err(e) => {
+                    let changed = e.to_string().contains("changed");
+                    // Policy/model admission can obsolete the initial scan.
+                    // Retry its unchanged claim promptly. Watcher successors
+                    // have a newer revision, so retry_job cannot shorten their quiet period.
                     self.store
                         .lock()
                         .unwrap_or_else(|p| p.into_inner())
                         .retry_job(
                             &scan.job,
-                            now() + 60_000,
-                            !e.to_string().contains("changed"),
+                            now()
+                                + if changed {
+                                    PARSER_ADMISSION_WAIT.as_millis() as i64
+                                } else {
+                                    60_000
+                                },
+                            !changed,
                         )?;
                     tracing::warn!(error=%e,"code scan deferred");
                 }
@@ -522,13 +754,27 @@ impl CodeService {
     fn complete_parse_job(&self, job: &CodeJob, outcome: anyhow::Result<()>) -> anyhow::Result<()> {
         let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
         match outcome {
-            Ok(()) => { store.finish_job(job)?; }
+            Ok(()) => {
+                store.finish_job(job)?;
+            }
             Err(error) => {
-                let capacity = matches!(error.downcast_ref::<crate::extract_client::ExtractClientError>(),
-                    Some(crate::extract_client::ExtractClientError::AdmissionUnavailable));
-                let delay = if capacity { PARSER_ADMISSION_WAIT.as_millis() as i64 } else { 60_000 };
-                store.retry_job(job, now() + delay, !capacity && !error.to_string().contains("changed"))?;
-                if !capacity { tracing::warn!(path=%job.path,error=%error,"code job deferred"); }
+                let capacity = matches!(
+                    error.downcast_ref::<crate::extract_client::ExtractClientError>(),
+                    Some(crate::extract_client::ExtractClientError::AdmissionUnavailable)
+                );
+                let delay = if capacity {
+                    PARSER_ADMISSION_WAIT.as_millis() as i64
+                } else {
+                    60_000
+                };
+                store.retry_job(
+                    job,
+                    now() + delay,
+                    !capacity && !error.to_string().contains("changed"),
+                )?;
+                if !capacity {
+                    tracing::warn!(path=%job.path,error=%error,"code job deferred");
+                }
             }
         }
         Ok(())
@@ -537,14 +783,19 @@ impl CodeService {
         let valid =
             |p: &Path| self.fence(&state.job, state.epoch, &state.policy) && self.allowed(p);
         // Fixed ignore controls govern traversal even when hidden sources are not indexed.
-        let control_valid =
-            |p: &Path| self.fence(&state.job, state.epoch, &state.policy) && self.control_allowed(p);
+        let control_valid = |p: &Path| {
+            self.fence(&state.job, state.epoch, &state.policy) && self.control_allowed(p)
+        };
         anyhow::ensure!(valid(Path::new(&state.job.path)), "code policy changed");
         if state.active.is_none() {
             let Some(repo) = state.repos.pop_front() else {
                 return Ok(true);
             };
-            let crawler = ws_code::crawl::CodeCrawler::open_with_control(Path::new(&repo.root_path), &valid, &control_valid)?;
+            let crawler = ws_code::crawl::CodeCrawler::open_with_control(
+                Path::new(&repo.root_path),
+                &valid,
+                &control_valid,
+            )?;
             let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
             let id = store.ensure_repo(&repo)?;
             let generation = store.begin_generation(id)?;
@@ -559,7 +810,10 @@ impl CodeService {
         }
         let active = state.active.as_mut().unwrap();
         if !active.walk_done {
-            let (records, done) = active.crawler.next_batch_with_control(512, &valid, &control_valid)?;
+            let (records, done) =
+                active
+                    .crawler
+                    .next_batch_with_control(512, &valid, &control_valid)?;
             anyhow::ensure!(valid(Path::new(&state.job.path)), "code policy changed");
             self.store
                 .lock()
@@ -578,8 +832,11 @@ impl CodeService {
         let outcomes = store.apply_file_batch(active.id, active.generation, &records)?;
         for (record, outcome) in records.iter().zip(outcomes) {
             let stored = store.source_snapshot(outcome.file_id())?;
-            if stored.is_none() || stored.as_deref() != snapshot(Path::new(&record.path)).as_deref()
-                || store.source_provenance(outcome.file_id())?.is_none_or(|state|state.sha256.is_none())
+            if stored.is_none()
+                || stored.as_deref() != snapshot(Path::new(&record.path)).as_deref()
+                || store
+                    .source_provenance(outcome.file_id())?
+                    .is_none_or(|state| state.sha256.is_none())
             {
                 store.enqueue_file_job(&record.path, &active.root, record.mtime, now())?;
             }
@@ -623,9 +880,13 @@ impl CodeService {
             let batch = response
                 .code
                 .ok_or_else(|| anyhow::anyhow!("missing typed code batch"))?;
-            anyhow::ensure!(source_sha256.as_ref().is_none_or(|expected|expected==&batch.source_sha256),
-                "source bytes changed between code batches");
-            source_sha256=Some(batch.source_sha256);
+            anyhow::ensure!(
+                source_sha256
+                    .as_ref()
+                    .is_none_or(|expected| expected == &batch.source_sha256),
+                "source bytes changed between code batches"
+            );
+            source_sha256 = Some(batch.source_sha256);
             anyhow::ensure!(
                 parsed.language.is_empty() || parsed.language == batch.language,
                 "code language changed"
@@ -683,8 +944,14 @@ impl CodeService {
         let file = store
             .find_file_by_path(&job.path)?
             .ok_or_else(|| anyhow::anyhow!("code file disappeared"))?;
-        store.commit_parsed_source(file.id,&parsed,&before,
-            source_sha256.as_deref().ok_or_else(||anyhow::anyhow!("missing code source hash"))?)?;
+        store.commit_parsed_source(
+            file.id,
+            &parsed,
+            &before,
+            source_sha256
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("missing code source hash"))?,
+        )?;
         self.epoch.fetch_add(1, Ordering::AcqRel);
         Ok(())
     }
@@ -825,31 +1092,57 @@ pub(crate) mod tests {
         }
         std::fs::write(root.join("oversize.rs"), "x".repeat(65)).unwrap();
         let mut policy = code.policy();
-        policy.root_policies = vec![ws_protocol::RootPolicy { root:root.to_string_lossy().into_owned(),
-            include_hidden:false, max_file_size_bytes:64, exclusions:vec![] }];
+        policy.root_policies = vec![ws_protocol::RootPolicy {
+            root: root.to_string_lossy().into_owned(),
+            include_hidden: false,
+            max_file_size_bytes: 64,
+            exclusions: vec![],
+        }];
         code.indexer.set_indexing_config(&policy).unwrap();
-        let mut crawler = ws_code::crawl::CodeCrawler::open_with_control(&root,
-            &|path| code.allowed(path), &|path| code.control_allowed(path)).unwrap();
-        let (records, done) = crawler.next_batch_with_control(512,
-            &|path| code.allowed(path), &|path| code.control_allowed(path)).unwrap();
+        let mut crawler = ws_code::crawl::CodeCrawler::open_with_control(
+            &root,
+            &|path| code.allowed(path),
+            &|path| code.control_allowed(path),
+        )
+        .unwrap();
+        let (records, done) = crawler
+            .next_batch_with_control(512, &|path| code.allowed(path), &|path| {
+                code.control_allowed(path)
+            })
+            .unwrap();
         assert!(done);
-        assert_eq!(records.iter().map(|record|record.name.as_str()).collect::<Vec<_>>(), vec!["allowed.rs"]);
+        assert_eq!(
+            records
+                .iter()
+                .map(|record| record.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["allowed.rs"]
+        );
         policy.root_policies[0].exclusions = vec![".gitignore".into()];
         code.indexer.set_indexing_config(&policy).unwrap();
-        assert!(ws_code::crawl::CodeCrawler::open_with_control(&root,
-            &|path| code.allowed(path), &|path| code.control_allowed(path)).is_err(),
-            "an explicitly revoked ignore control cannot silently disable ignore rules");
+        assert!(
+            ws_code::crawl::CodeCrawler::open_with_control(
+                &root,
+                &|path| code.allowed(path),
+                &|path| code.control_allowed(path)
+            )
+            .is_err(),
+            "an explicitly revoked ignore control cannot silently disable ignore rules"
+        );
         drop(code);
         std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
     }
 
     fn occupy_parser_capacity(root: &Path) -> Vec<crate::extract_client::tests::CleanupFixture> {
-        (0..2).map(|number| {
-            let directory = root.join(format!("capacity-{number}"));
-            std::fs::create_dir(&directory).unwrap();
-            let client = ExtractClient::new(directory.join("unused.exe"), directory.join("cache"));
-            crate::extract_client::tests::cleanup_trigger(&client, directory)()
-        }).collect()
+        (0..2)
+            .map(|number| {
+                let directory = root.join(format!("capacity-{number}"));
+                std::fs::create_dir(&directory).unwrap();
+                let client =
+                    ExtractClient::new(directory.join("unused.exe"), directory.join("cache"));
+                crate::extract_client::tests::cleanup_trigger(&client, directory)()
+            })
+            .collect()
     }
 
     #[test]
@@ -857,8 +1150,11 @@ pub(crate) mod tests {
         let (code, _indexer, root) = indexed_fixture();
         let path = root.join("lib.rs");
         let due = now();
-        code.store.lock().unwrap().enqueue_file_job(&path.to_string_lossy(),
-            &root.to_string_lossy(), 0, due).unwrap();
+        code.store
+            .lock()
+            .unwrap()
+            .enqueue_file_job(&path.to_string_lossy(), &root.to_string_lossy(), 0, due)
+            .unwrap();
         let occupied = occupy_parser_capacity(root.parent().unwrap());
         let worked = code.turn().unwrap();
         let (after_due, attempts) = {
@@ -874,10 +1170,19 @@ pub(crate) mod tests {
         *code.wake.0.lock().unwrap() = false;
         let started = std::time::Instant::now();
         code.wait_for_work();
-        assert!(started.elapsed() >= Duration::from_millis(20), "busy admission must wait for resource availability");
-        assert!(started.elapsed() < Duration::from_millis(500), "resource wait must remain policy-responsive");
+        assert!(
+            started.elapsed() >= Duration::from_millis(20),
+            "busy admission must wait for resource availability"
+        );
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "resource wait must remain policy-responsive"
+        );
         drop(occupied);
-        assert!(code.turn().unwrap(), "uncharged durable work must resume when capacity returns");
+        assert!(
+            code.turn().unwrap(),
+            "uncharged durable work must resume when capacity returns"
+        );
         assert!(!code.exact("needle", 2).is_empty());
         drop(code);
         std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
@@ -887,21 +1192,39 @@ pub(crate) mod tests {
     fn parser_capacity_race_after_claim_requeues_without_charging_poison_attempts() {
         let (code, _indexer, root) = indexed_fixture();
         let path = root.join("lib.rs");
-        code.store.lock().unwrap().enqueue_file_job(&path.to_string_lossy(),
-            &root.to_string_lossy(), 0, now()).unwrap();
-        let job = code.store.lock().unwrap().claim_job(now()).unwrap().unwrap();
+        code.store
+            .lock()
+            .unwrap()
+            .enqueue_file_job(&path.to_string_lossy(), &root.to_string_lossy(), 0, now())
+            .unwrap();
+        let job = code
+            .store
+            .lock()
+            .unwrap()
+            .claim_job(now())
+            .unwrap()
+            .unwrap();
         assert!(!job.scan);
         let occupied = occupy_parser_capacity(root.parent().unwrap());
         let outcome = code.parse(&job);
-        assert!(outcome.as_ref().err().is_some_and(|error|
-            matches!(error.downcast_ref::<crate::extract_client::ExtractClientError>(),
-                Some(crate::extract_client::ExtractClientError::AdmissionUnavailable))),
-            "this must exercise a real post-claim admission race: {outcome:?}");
+        assert!(
+            outcome.as_ref().err().is_some_and(|error| matches!(
+                error.downcast_ref::<crate::extract_client::ExtractClientError>(),
+                Some(crate::extract_client::ExtractClientError::AdmissionUnavailable)
+            )),
+            "this must exercise a real post-claim admission race: {outcome:?}"
+        );
         code.complete_parse_job(&job, outcome).unwrap();
         {
             let mut store = code.store.lock().unwrap();
-            let due = store.next_job_due().unwrap().expect("resource failure must retain a wake");
-            assert!(due <= now() + 1000, "capacity must not defer code for the poison backoff");
+            let due = store
+                .next_job_due()
+                .unwrap()
+                .expect("resource failure must retain a wake");
+            assert!(
+                due <= now() + 1000,
+                "capacity must not defer code for the poison backoff"
+            );
             let retried = store.claim_job(i64::MAX).unwrap().unwrap();
             assert_eq!(retried.attempts, 0);
             assert_eq!(retried.revision, job.revision);
@@ -939,8 +1262,7 @@ pub(crate) mod tests {
                 worker_bin: if missing_worker {
                     root.parent().unwrap().join("worker.exe")
                 } else {
-                    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                        .join("../../target/debug/winsearch-embed.exe")
+                    crate::test_binary_path("winsearch-embed.exe")
                 },
                 pipe_name: pipe.clone(),
                 worker_args: vec![
@@ -1024,28 +1346,35 @@ pub(crate) mod tests {
     fn background_vector_failure_retains_a_wake_and_recovers_without_signal() {
         let (code, root) = vector_fixture(0, true);
         stop_fixture_watchers(&code);
-        assert!(!code.exact("needle",1).is_empty(),"recovery fixture must have current parsed text before failing inference");
+        assert!(
+            !code.exact("needle", 1).is_empty(),
+            "recovery fixture must have current parsed text before failing inference"
+        );
         assert!(!code.embed_turn().unwrap());
-        assert!(code.vectors.lock().unwrap().failures>0,"the first attempt must actually fail on the missing worker");
+        assert!(
+            code.vectors.lock().unwrap().failures > 0,
+            "the first attempt must actually fail on the missing worker"
+        );
         let due = code.next_work_due();
         let worker = code.embed.worker_bin().clone();
-        std::fs::copy(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../target/debug/winsearch-embed.exe"),
-            &worker,
-        )
-        .unwrap();
+        std::fs::copy(crate::test_binary_path("winsearch-embed.exe"), &worker).unwrap();
         let recovered = if let Some(due) = due {
             assert!(due > now() && due <= now() + 60_000);
             // Exercise the same condition-variable deadline as the coordinator;
             // there is deliberately no watcher/model/policy signal after failure.
             *code.wake.0.lock().unwrap() = false;
-            let deadline=due+5_000;
+            let deadline = due + 5_000;
             loop {
-                if code.next_work_due().is_none_or(|next|next>deadline) {break false;}
+                if code.next_work_due().is_none_or(|next| next > deadline) {
+                    break false;
+                }
                 code.wait_for_work();
-                if code.turn().unwrap() {break true;}
-                if now()>=deadline {break false;}
+                if code.turn().unwrap() {
+                    break true;
+                }
+                if now() >= deadline {
+                    break false;
+                }
             }
         } else {
             false
@@ -1091,7 +1420,9 @@ pub(crate) mod tests {
             let repo = store.all_files().unwrap()[0].repo_id;
             for (path, count) in [(hidden, 96), (root.join("visible.rs"), 20)] {
                 std::fs::write(&path, "// generated deterministic vector fixture\n").unwrap();
-                let record = ws_code::record_for_code_path(&root, &path).unwrap().unwrap();
+                let record = ws_code::record_for_code_path(&root, &path)
+                    .unwrap()
+                    .unwrap();
                 let file = store.apply_file_batch(repo, 1, &[record]).unwrap()[0].file_id();
                 let parsed = ParsedCodeFile {
                     language: "rust".into(),
@@ -1158,6 +1489,190 @@ pub(crate) mod tests {
         fixture_with_admission(false)
     }
 
+    #[test]
+    fn excluded_only_notifications_cannot_defer_admitted_initial_code_work() {
+        let (code, root) = fixture();
+        let admitted = root.join("report.rs");
+        let excluded = root.join("private");
+        std::fs::create_dir(&excluded).unwrap();
+        std::fs::write(&admitted, "pub fn adapter_probe() {}\n").unwrap();
+        let mut policy = code.policy();
+        policy.root_policies = vec![ws_protocol::RootPolicy {
+            root: root.to_string_lossy().into_owned(),
+            exclusions: vec!["private".into()],
+            include_hidden: false,
+            max_file_size_bytes: 7 * 1024 * 1024,
+        }];
+        code.indexer.set_indexing_config(&policy).unwrap();
+        code.configure().unwrap();
+        stop_fixture_watchers(&code);
+        assert!(code.turn().unwrap()); // Own the admitted initial scan.
+        let epoch = code.query_epoch();
+        for event in [
+            WatchEvent::Created(excluded.clone()),
+            WatchEvent::Modified(excluded.clone()),
+            WatchEvent::Deleted(excluded.join("missing.rs")),
+            WatchEvent::Modified(excluded.join(".gitignore")),
+            WatchEvent::Renamed {
+                from: excluded.join("old.rs"),
+                to: excluded.join("new.rs"),
+            },
+        ] {
+            code.changed(&root.to_string_lossy(), event).unwrap();
+        }
+        let unaffected = code.query_epoch() == epoch;
+        for _ in 0..16 {
+            if !code.turn().unwrap() {
+                break;
+            }
+        }
+        let found = code.exact("adapter_probe", 20).len();
+        // A deleted admitted source, either side of a crossing rename, hidden
+        // control files and overflow must still invalidate/rescan immediately.
+        std::fs::remove_file(&admitted).unwrap();
+        for event in [
+            WatchEvent::Deleted(admitted.clone()),
+            WatchEvent::Renamed {
+                from: admitted.clone(),
+                to: excluded.join("moved.rs"),
+            },
+            WatchEvent::Renamed {
+                from: excluded.join("moved.rs"),
+                to: admitted.clone(),
+            },
+            WatchEvent::Modified(root.join(".gitignore")),
+            WatchEvent::Overflow,
+        ] {
+            let previous = code.query_epoch();
+            code.changed(&root.to_string_lossy(), event).unwrap();
+            assert_ne!(code.query_epoch(), previous);
+        }
+        assert!(code.exact("adapter_probe", 20).is_empty());
+        drop(code);
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+        assert!(unaffected, "excluded-only events retired an admitted scan");
+        assert_eq!(
+            found, 1,
+            "excluded notifications imposed the root quiet period"
+        );
+    }
+
+    #[test]
+    fn excluded_crawl_controls_still_retire_scans_in_admitted_directories() {
+        let (code, root) = fixture();
+        std::fs::write(root.join("report.rs"), "pub fn control_probe() {}\n").unwrap();
+        let mut policy = code.policy();
+        policy.root_policies = vec![ws_protocol::RootPolicy {
+            root: root.to_string_lossy().into_owned(),
+            exclusions: vec![".gitignore".into(), ".ignore".into(), ".git".into()],
+            include_hidden: false,
+            max_file_size_bytes: 7 * 1024 * 1024,
+        }];
+        code.indexer.set_indexing_config(&policy).unwrap();
+        code.configure().unwrap();
+        stop_fixture_watchers(&code);
+        assert!(code.turn().unwrap());
+        assert!(code.turn().unwrap()); // Crawler captured rules before creation.
+        std::fs::write(root.join(".gitignore"), "*.rs\n").unwrap();
+        let before = code.query_epoch();
+        code.changed(
+            &root.to_string_lossy(),
+            WatchEvent::Created(root.join(".gitignore")),
+        )
+        .unwrap();
+        let retired = code.query_epoch() != before;
+        for _ in 0..16 {
+            if !code.turn().unwrap() {
+                break;
+            }
+        }
+        let hidden = code.exact("control_probe", 20).is_empty();
+        let mut missed = Vec::new();
+        for relative in [".ignore", ".git", ".git/info", ".git/info/exclude"] {
+            let before = code.query_epoch();
+            code.changed(
+                &root.to_string_lossy(),
+                WatchEvent::Modified(root.join(relative)),
+            )
+            .unwrap();
+            if code.query_epoch() == before {
+                missed.push(relative);
+            }
+        }
+        drop(code);
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+        assert!(
+            retired,
+            "excluded crawl control did not retire its old rules"
+        );
+        assert!(hidden, "scan committed after its excluded control appeared");
+        assert!(
+            missed.is_empty(),
+            "missed governing control changes: {missed:?}"
+        );
+    }
+
+    #[test]
+    fn canonical_host_root_policy_indexes_exact_code_without_a_model() {
+        let (code, root) = fixture();
+        std::fs::write(
+            root.join("report.rs"),
+            "pub fn adapter_probe() -> u32 { 7 }\n",
+        )
+        .unwrap();
+        let canonical = std::fs::canonicalize(&root)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let mut policy = code.indexer.get_indexing_config().unwrap();
+        policy.roots = vec![canonical.clone()];
+        policy.code_roots = vec![canonical.clone()];
+        policy.root_policies = vec![ws_protocol::RootPolicy {
+            root: canonical,
+            exclusions: vec!["private".into()],
+            include_hidden: false,
+            max_file_size_bytes: 7 * 1024 * 1024,
+        }];
+        code.indexer.set_indexing_config(&policy).unwrap();
+        code.configure().unwrap();
+        for _ in 0..16 {
+            if !code.turn().unwrap() {
+                break;
+            }
+        }
+        assert_eq!(code.exact("adapter_probe", 20).len(), 1);
+        stop_fixture_watchers(&code);
+        drop(code);
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn policy_fence_during_initial_code_scan_recovers_without_a_minute_of_unavailability() {
+        let (code, root) = fixture();
+        std::fs::write(
+            root.join("report.rs"),
+            "pub fn adapter_probe() -> u32 { 7 }\n",
+        )
+        .unwrap();
+        code.configure().unwrap();
+        assert!(code.turn().unwrap()); // Claim and snapshot the initial scan.
+        code.policy_changed(); // Configuration/model admission changes its fence.
+        assert!(code.turn().unwrap()); // Retire the obsolete scan state.
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while code.exact("adapter_probe", 20).is_empty() && std::time::Instant::now() < deadline {
+            code.turn().unwrap();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let found = code.exact("adapter_probe", 20).len();
+        stop_fixture_watchers(&code);
+        drop(code);
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+        assert_eq!(
+            found, 1,
+            "a current policy must promptly resume a canceled scan"
+        );
+    }
+
     fn fixture_with_admission(deferred: bool) -> (Arc<CodeService>, PathBuf) {
         let root = std::env::temp_dir().join(format!(
             "winsearch-code-service-{}-{:?}",
@@ -1172,10 +1687,14 @@ pub(crate) mod tests {
         policy.respect_battery_saver = false;
         policy.index_on_battery = true;
         store.set_indexing_config(&policy).unwrap();
-        let indexer = if deferred { Indexer::open_deferred(store) } else { Indexer::open(store, &[]) }.unwrap();
+        let indexer = if deferred {
+            Indexer::open_deferred(store)
+        } else {
+            Indexer::open(store, &[])
+        }
+        .unwrap();
         let models = ModelService::new(root.join("models"), Arc::clone(&indexer));
-        let worker = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/debug/winsearch-extract.exe");
+        let worker = crate::test_binary_path("winsearch-extract.exe");
         let code = CodeService::new(
             CodeStore::open(&root.join("code.db")).unwrap(),
             indexer,
@@ -1191,9 +1710,22 @@ pub(crate) mod tests {
         let (code, root) = fixture_with_admission(true);
         let path = root.join("lib.rs");
         std::fs::write(&path, "fn current_host_consent() {}\n").unwrap();
-        let mut selected = code.indexer.store_lock().get_or_migrate_indexing_config().unwrap();
+        let mut selected = code
+            .indexer
+            .store_lock()
+            .get_or_migrate_indexing_config()
+            .unwrap();
         assert!(selected.code_enabled && !selected.code_roots.is_empty());
-        code.store.lock().unwrap().enqueue_job(&root.to_string_lossy(), &root.to_string_lossy(), true, now()).unwrap();
+        code.store
+            .lock()
+            .unwrap()
+            .enqueue_job(
+                &root.to_string_lossy(),
+                &root.to_string_lossy(),
+                true,
+                now(),
+            )
+            .unwrap();
         let due = code.store.lock().unwrap().next_job_due().unwrap();
         code.configure().unwrap();
         assert!(code.watchers.lock().unwrap().is_empty());
@@ -1201,7 +1733,13 @@ pub(crate) mod tests {
         assert!(!code.turn().unwrap());
         assert!(!code.embed_turn().unwrap());
         assert_eq!(code.store.lock().unwrap().next_job_due().unwrap(), due);
-        assert_eq!(code.indexer.store_lock().get_or_migrate_indexing_config().unwrap(), selected);
+        assert_eq!(
+            code.indexer
+                .store_lock()
+                .get_or_migrate_indexing_config()
+                .unwrap(),
+            selected
+        );
         selected.paused = true;
         code.indexer.set_indexing_config(&selected).unwrap();
         code.configure().unwrap();
@@ -1237,52 +1775,86 @@ pub(crate) mod tests {
         (code, indexer, root)
     }
 
-    pub(crate) fn unindexed_fixture() -> (Arc<CodeService>,Arc<Indexer>,PathBuf) {
-        let (code,root)=fixture();let indexer=Arc::clone(&code.indexer);(code,indexer,root)
+    pub(crate) fn unindexed_fixture() -> (Arc<CodeService>, Arc<Indexer>, PathBuf) {
+        let (code, root) = fixture();
+        let indexer = Arc::clone(&code.indexer);
+        (code, indexer, root)
     }
 
-    pub(crate) fn stop_fixture_watchers(code:&CodeService) {
+    pub(crate) fn stop_fixture_watchers(code: &CodeService) {
         code.watchers.lock().unwrap().clear();
     }
 
     #[test]
     fn code_provenance_native_parser_commits_actual_hash_and_advances_durable_content_revision() {
-        let (code,root)=fixture();
-        let path=root.join("lib.rs");
-        std::fs::write(&path,b"fn needle() {}\n").unwrap();
+        let (code, root) = fixture();
+        let path = root.join("lib.rs");
+        std::fs::write(&path, b"fn needle() {}\n").unwrap();
         code.configure().unwrap();
-        for _ in 0..16 {if !code.turn().unwrap() {break;}}
-        let (file,initial)={
-            let store=code.store.lock().unwrap();
-            let file=store.find_file_by_path(&path.to_string_lossy()).unwrap().unwrap();
-            let state=store.source_provenance(file.id).unwrap().expect("real parser must persist source provenance");
-            assert_eq!(state.sha256.as_deref(),Some("36bc22784d3cd4b5e6ae27ab2702f579957349879a55fed91582bb0861a43f9f"));
-            assert_eq!(state.snapshot,snapshot(&path).unwrap());
-            assert_eq!(state.revision,1);
-            (file,state)
+        for _ in 0..16 {
+            if !code.turn().unwrap() {
+                break;
+            }
+        }
+        let (file, initial) = {
+            let store = code.store.lock().unwrap();
+            let file = store
+                .find_file_by_path(&path.to_string_lossy())
+                .unwrap()
+                .unwrap();
+            let state = store
+                .source_provenance(file.id)
+                .unwrap()
+                .expect("real parser must persist source provenance");
+            assert_eq!(
+                state.sha256.as_deref(),
+                Some("36bc22784d3cd4b5e6ae27ab2702f579957349879a55fed91582bb0861a43f9f")
+            );
+            assert_eq!(state.snapshot, snapshot(&path).unwrap());
+            assert_eq!(state.revision, 1);
+            (file, state)
         };
-        code.store.lock().unwrap().enqueue_file_job(&file.path,&root.to_string_lossy(),0,now()).unwrap();
+        code.store
+            .lock()
+            .unwrap()
+            .enqueue_file_job(&file.path, &root.to_string_lossy(), 0, now())
+            .unwrap();
         assert!(code.turn().unwrap());
         {
-            let store=code.store.lock().unwrap();
-            let state=store.source_provenance(file.id).unwrap().unwrap();
-            assert_eq!(state.sha256,initial.sha256);
-            assert_eq!(state.snapshot,initial.snapshot);
-            assert_eq!(state.revision,initial.revision+1);
-            assert!(store.search_exact("needle",2,|_|true).unwrap().iter().any(|hit|hit.file.id==file.id));
+            let store = code.store.lock().unwrap();
+            let state = store.source_provenance(file.id).unwrap().unwrap();
+            assert_eq!(state.sha256, initial.sha256);
+            assert_eq!(state.snapshot, initial.snapshot);
+            assert_eq!(state.revision, initial.revision + 1);
+            assert!(store
+                .search_exact("needle", 2, |_| true)
+                .unwrap()
+                .iter()
+                .any(|hit| hit.file.id == file.id));
         }
         // Legacy caches have a current metadata snapshot but no byte digest.
-        code.store.lock().unwrap().set_source_snapshot(file.id,&initial.snapshot).unwrap();
+        code.store
+            .lock()
+            .unwrap()
+            .set_source_snapshot(file.id, &initial.snapshot)
+            .unwrap();
         drop(code);
-        let (code,reopened_root)=fixture();
-        assert_eq!(reopened_root,root);
+        let (code, reopened_root) = fixture();
+        assert_eq!(reopened_root, root);
         code.configure().unwrap();
-        for _ in 0..16 {if !code.turn().unwrap() {break;}}
+        for _ in 0..16 {
+            if !code.turn().unwrap() {
+                break;
+            }
+        }
         {
-            let store=code.store.lock().unwrap();
-            let recovered=store.source_provenance(file.id).unwrap().unwrap();
-            assert_eq!(recovered.sha256,initial.sha256,"restart must establish unknown legacy hash from a real source parse");
-            assert_eq!(recovered.revision,initial.revision+2);
+            let store = code.store.lock().unwrap();
+            let recovered = store.source_provenance(file.id).unwrap().unwrap();
+            assert_eq!(
+                recovered.sha256, initial.sha256,
+                "restart must establish unknown legacy hash from a real source parse"
+            );
+            assert_eq!(recovered.revision, initial.revision + 2);
         }
         drop(code);
         std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
@@ -1408,8 +1980,7 @@ pub(crate) mod tests {
         service.models = ModelService::with_manager(manager, Arc::clone(&service.indexer));
         service.embed = Arc::new(EmbedSupervisor::with_config(
             crate::embed_client::EmbedConfig {
-                worker_bin: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("../../target/debug/winsearch-embed.exe"),
+                worker_bin: crate::test_binary_path("winsearch-embed.exe"),
                 pipe_name: pipe.clone(),
                 worker_args: vec![
                     "--pipe".into(),
@@ -1454,8 +2025,12 @@ pub(crate) mod tests {
         );
         code.indexer.store_lock().reset_content_vectors().unwrap();
         assert!(
-            code.semantic(&[1.0; ws_embed_protocol::STUB_DIM], &[1.0; ws_embed_protocol::STUB_DIM], 1)
-                .is_empty(),
+            code.semantic(
+                &[1.0; ws_embed_protocol::STUB_DIM],
+                &[1.0; ws_embed_protocol::STUB_DIM],
+                1
+            )
+            .is_empty(),
             "stale recipe vectors must be hidden before invalidation"
         );
         let pending = Arc::clone(&code);

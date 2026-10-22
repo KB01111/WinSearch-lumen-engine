@@ -106,3 +106,22 @@ ownership and final runtime validation, and run clean
 installed Lumen/standalone, signing, licensing, update and uninstall gates.
 All [README TODOs](../README.md#v10-todo) remain open until their complete scope
 and acceptance checks are satisfied.
+
+## Building a current candidate
+
+`tools/build-engine-candidate.py` builds a model-free CPU/NPU release snapshot
+from a clean checkout. It requires explicit repository, target directory, XRT SDK,
+pinned SDK archive, clean pinned llama.cpp checkout, pinned FFmpeg/PDFium archives
+and fresh output paths. Decoders are staged from those archives independently of
+the Cargo target directory. The SDK inventory must match the pinned archive, and
+source/SDK/llama.cpp hashes must remain unchanged through the build. The tool
+retains the exact recipe, command, toolchain, raw log and copied executable/library
+hashes, and refuses a stub NPU runtime. CUDA and Vulkan are disabled for this
+declared candidate profile. It requires the x64 MSVC host toolchain and checks
+every copied PE executable/library's architecture. Inherited native source and
+compiler overrides are removed; validation remains active with Python `-O`.
+
+This creates an unsigned, unqualified candidate. Existing package assembly still
+requires fresh reference/retrieval proof bound to the selected source and binary
+hashes. Candidate compilation or runtime-info output does not replace those gates,
+the dependency/license closure, signing or installed acceptance.

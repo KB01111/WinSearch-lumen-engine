@@ -10,6 +10,48 @@ namespace WinSearch.Tests;
 
 public class IndexingPipeTests
 {
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    public async Task ResetRequiresCapabilityAndNeverRetriesAnUnknownMutation(bool supported, bool acknowledge)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var requestCancellation = new CancellationTokenSource();
+        var token = timeout.Token;
+        var pipe = "winsearch-reset-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        async Task Serve()
+        {
+            await server.WaitForConnectionAsync(token);
+            await ReadAsync(server, token);
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1, Features = supported ? ["index.reset"] : [] }, token);
+            if (supported)
+            {
+                var request = Assert.IsType<ResetIndexMessage>(await ReadAsync(server, token));
+                Assert.Equal(new string('a', 32), request.Request.ExpectedIndexId);
+                if (!acknowledge) { requestCancellation.Cancel(); return; }
+                await WriteAsync(server, new IndexResetMessage { Id = request.Id, Reset = new() { IndexId = new string('c', 32), CodeIndexId = new string('d', 32) } }, token);
+            }
+            var status = Assert.IsType<GetStatusMessage>(await ReadAsync(server, token));
+            await WriteAsync(server, new StatusMessage { Id = status.Id, Status = new() }, token);
+        }
+        var serving = Serve();
+        await using var client = new EngineClient(pipe);
+        await client.ConnectAsync(token);
+        var request = new ResetRequest { ExpectedIndexId = new string('a', 32), ExpectedCodeIndexId = new string('b', 32) };
+        if (!supported)
+            Assert.Equal(ErrorCode.Unsupported, (await Assert.ThrowsAsync<EngineException>(() => client.ResetIndexAsync(request, token))).Code);
+        else if (acknowledge)
+            Assert.Equal(new string('c', 32), (await client.ResetIndexAsync(request, token)).IndexId);
+        else
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.ResetIndexAsync(request, requestCancellation.Token));
+            Assert.Equal(ErrorCode.NotReady, (await Assert.ThrowsAsync<EngineException>(() => client.GetStatusAsync(token))).Code);
+        }
+        if (!supported || acknowledge) await client.GetStatusAsync(token);
+        await serving;
+    }
     [Fact]
     public void DiagnosticsRemainUnknownForLegacyAndRoundTripTypedReasons()
     {

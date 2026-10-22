@@ -55,7 +55,8 @@ pub fn encode_request(request: &ExtractRequest) -> Result<Vec<u8>, String> {
     if let Some(plan) = &request.media_plan {
         plan.validate()?;
         if !matches!(request.kind.as_str(), "audio" | "video")
-            || (request.kind == "audio" && !plan.frames_ms.is_empty()) {
+            || (request.kind == "audio" && !plan.frames_ms.is_empty())
+        {
             return Err("media plan belongs to another modality".into());
         }
     }
@@ -103,9 +104,14 @@ pub fn validate_response(
     if response.diagnostics.len() > 8 || response.diagnostics.iter().any(|s| s.len() > 1024) {
         return Err("worker diagnostics exceed bounds".into());
     }
-    if response.source_sha256.as_deref().is_some_and(|hash|request.kind=="code"
-        || !ws_protocol::valid_content_sha256(hash)
-        || !matches!(response.output.status,ExtractionStatus::Extracted|ExtractionStatus::ExactOnly)) {
+    if response.source_sha256.as_deref().is_some_and(|hash| {
+        request.kind == "code"
+            || !ws_protocol::valid_content_sha256(hash)
+            || !matches!(
+                response.output.status,
+                ExtractionStatus::Extracted | ExtractionStatus::ExactOnly
+            )
+    }) {
         return Err("invalid ordinary complete-source byte provenance".into());
     }
     if request.kind == "code" {
@@ -119,13 +125,16 @@ pub fn validate_response(
     }
     let segments = &response.output.segments;
     if segments.len() > MAX_DRAFTS
-        || (!matches!(request.kind.as_str(), "pdf" | "video") && segments.len() > request.max_units as usize)
+        || (!matches!(request.kind.as_str(), "pdf" | "video")
+            && segments.len() > request.max_units as usize)
     {
         return Err("too many drafts".into());
     }
     if matches!(
         response.output.status,
-        ExtractionStatus::Unsupported | ExtractionStatus::Failed(_) | ExtractionStatus::SourceChanged
+        ExtractionStatus::Unsupported
+            | ExtractionStatus::Failed(_)
+            | ExtractionStatus::SourceChanged
     ) && !segments.is_empty()
     {
         return Err("failed/unsupported response contains drafts".into());
@@ -173,7 +182,7 @@ pub fn validate_response(
         let valid_kind = draft.kind == request.kind
             || (matches!(request.kind.as_str(), "image" | "pdf") && draft.kind == "ocr")
             || (request.kind == "pdf" && draft.kind == crate::pdf::VISUAL_KIND)
-            || (request.kind == "video" && matches!(draft.kind.as_str(),"audio"|"ocr"));
+            || (request.kind == "video" && matches!(draft.kind.as_str(), "audio" | "ocr"));
         if !valid_kind || draft.kind.len() > 32 || draft.text.len() > MAX_SEGMENT_BYTES {
             return Err("invalid draft kind or text length".into());
         }
@@ -208,25 +217,24 @@ pub fn validate_response(
         }
         match &draft.embedding_input {
             crate::DraftEmbeddingInput::Text
-                if draft.kind != "audio" && !(request.kind == "video" && draft.kind == "video") =>
-            {
-                ()
+                if draft.kind != "audio" && !(request.kind == "video" && draft.kind == "video") => {
             }
-            crate::DraftEmbeddingInput::Image { path, token_budget } if request.kind == "video"
-                && draft.kind == "video" && draft.embed && draft.text.is_empty()
-                && matches!(token_budget,70|140) && path.is_absolute()
+            crate::DraftEmbeddingInput::Image { path, token_budget }
+                if request.kind == "video"
+                    && draft.kind == "video"
+                    && draft.embed
+                    && draft.text.is_empty()
+                    && matches!(token_budget, 70 | 140)
+                    && path.is_absolute()
                     && path.as_os_str().len() <= 32768
-                    && draft.thumbnail_hint.as_ref() == Some(path) =>
-            {
-                ()
-            }
-            crate::DraftEmbeddingInput::Audio { path } if draft.kind == "audio"
-                && draft.embed && draft.text.is_empty() && path.is_absolute()
+                    && draft.thumbnail_hint.as_ref() == Some(path) => {}
+            crate::DraftEmbeddingInput::Audio { path }
+                if draft.kind == "audio"
+                    && draft.embed
+                    && draft.text.is_empty()
+                    && path.is_absolute()
                     && path.as_os_str().len() <= 32768
-                    && draft.thumbnail_hint.is_none() =>
-            {
-                ()
-            }
+                    && draft.thumbnail_hint.is_none() => {}
             _ => return Err("invalid typed embedding input".into()),
         }
     }
@@ -237,7 +245,10 @@ fn validate_media_progress(
     request: &ExtractRequest,
     response: &ExtractResponse,
 ) -> Result<(), String> {
-    if !matches!(response.output.status, ExtractionStatus::Extracted | ExtractionStatus::ExactOnly) {
+    if !matches!(
+        response.output.status,
+        ExtractionStatus::Extracted | ExtractionStatus::ExactOnly
+    ) {
         if response.next_cursor.is_some()
             || response.media.is_some()
             || response.video_selection.is_some()
@@ -260,20 +271,31 @@ fn validate_media_progress(
     {
         return Err("long video skipped selection checkpoint".into());
     }
-    if request.media_plan.as_ref().is_some_and(|plan| plan != media) {
+    if request
+        .media_plan
+        .as_ref()
+        .is_some_and(|plan| plan != media)
+    {
         return Err("worker changed the revision-scoped media selection".into());
     }
     if request.kind == "video" {
-        return validate_video_progress(request,response,media);
+        return validate_video_progress(request, response, media);
     }
-    if media.duration_ms == 0 || media.duration_ms > crate::decoder::MAX_DURATION_MS
-        || !media.frames_ms.is_empty() || !media.has_audio {
+    if media.duration_ms == 0
+        || media.duration_ms > crate::decoder::MAX_DURATION_MS
+        || !media.frames_ms.is_empty()
+        || !media.has_audio
+    {
         return Err("invalid audio progress metadata".into());
     }
     let total = crate::audio::window_count(media.duration_ms);
-    if response.total_units != Some(total) || request.cursor > total { return Err("invalid audio total/cursor".into()); }
+    if response.total_units != Some(total) || request.cursor > total {
+        return Err("invalid audio total/cursor".into());
+    }
     let end = total.min(request.cursor + u64::from(request.max_units.min(30)));
-    if response.next_cursor != (end < total).then_some(end) { return Err("invalid audio continuation".into()); }
+    if response.next_cursor != (end < total).then_some(end) {
+        return Err("invalid audio continuation".into());
+    }
     validate_audio_drafts(
         &response.output.segments,
         request.cursor,
@@ -328,16 +350,27 @@ fn validate_video_selection(
     Ok(())
 }
 
-fn validate_audio_drafts(segments:&[crate::SegmentDraft],first:u64,end:u64,duration:u64) -> Result<(),String> {
+fn validate_audio_drafts(
+    segments: &[crate::SegmentDraft],
+    first: u64,
+    end: u64,
+    duration: u64,
+) -> Result<(), String> {
     let mut previous = None;
     for draft in segments {
         let start = draft.start_ms.ok_or("audio draft missing time")?;
         let finish = draft.end_ms.ok_or("audio draft missing end")?;
         let window = start / crate::audio::HOP_MS;
-        if draft.kind != "audio" || draft.page.is_some() || draft.line.is_some()
-            || start % crate::audio::HOP_MS != 0 || window < first || window >= end
-            || previous.is_some_and(|p| window <= p) || finish <= start
-            || finish > duration.min(start + crate::audio::WINDOW_MS) {
+        if draft.kind != "audio"
+            || draft.page.is_some()
+            || draft.line.is_some()
+            || start % crate::audio::HOP_MS != 0
+            || window < first
+            || window >= end
+            || previous.is_some_and(|p| window <= p)
+            || finish <= start
+            || finish > duration.min(start + crate::audio::WINDOW_MS)
+        {
             return Err("audio draft outside processed windows".into());
         }
         previous = Some(window);
@@ -345,72 +378,117 @@ fn validate_audio_drafts(segments:&[crate::SegmentDraft],first:u64,end:u64,durat
     Ok(())
 }
 
-fn validate_video_progress(request:&ExtractRequest,response:&ExtractResponse,plan:&MediaBatch) -> Result<(),String> {
-    use crate::video::{self,Cursor};
-    if response.total_units != Some(video::total_units(plan)) || (request.cursor != 0 && request.media_plan.is_none()) {
+fn validate_video_progress(
+    request: &ExtractRequest,
+    response: &ExtractResponse,
+    plan: &MediaBatch,
+) -> Result<(), String> {
+    use crate::video::{self, Cursor};
+    if response.total_units != Some(video::total_units(plan))
+        || (request.cursor != 0 && request.media_plan.is_none())
+    {
         return Err("invalid video units or missing continuation plan".into());
     }
     let cursor = video::decode_cursor(request.cursor)?;
     let audio_window = match cursor {
         Cursor::Audio { window } => Some(window),
-        Cursor::Frame { index:0,draft:0 } if plan.frames_ms.is_empty() => Some(0),
+        Cursor::Frame { index: 0, draft: 0 } if plan.frames_ms.is_empty() => Some(0),
         _ => None,
     };
     if let Some(first) = audio_window {
         let total = crate::audio::window_count(plan.duration_ms);
-        if !plan.has_audio || first > total { return Err("invalid video soundtrack cursor".into()); }
-        let end = total.min(first+u64::from(request.max_units.min(30)));
-        if response.next_cursor != (end<total).then_some(video::audio_cursor(end)) {
+        if !plan.has_audio || first > total {
+            return Err("invalid video soundtrack cursor".into());
+        }
+        let end = total.min(first + u64::from(request.max_units.min(30)));
+        if response.next_cursor != (end < total).then_some(video::audio_cursor(end)) {
             return Err("invalid video soundtrack continuation".into());
         }
-        return validate_audio_drafts(&response.output.segments,first,end,plan.duration_ms);
+        return validate_audio_drafts(&response.output.segments, first, end, plan.duration_ms);
     }
-    let Cursor::Frame { index:first,draft:offset } = cursor else { return Err("invalid visual phase".into()); };
+    let Cursor::Frame {
+        index: first,
+        draft: offset,
+    } = cursor
+    else {
+        return Err("invalid visual phase".into());
+    };
     let first = first as usize;
-    if first >= plan.frames_ms.len() { return Err("video frame cursor beyond selection".into()); }
-    let end_bound = (first+request.max_units.min(30) as usize).min(plan.frames_ms.len());
-    let mut counts = [0u32;30];
+    if first >= plan.frames_ms.len() {
+        return Err("video frame cursor beyond selection".into());
+    }
+    let end_bound = (first + request.max_units.min(30) as usize).min(plan.frames_ms.len());
+    let mut counts = [0u32; 30];
     for draft in &response.output.segments {
-        let time = draft.start_ms.ok_or("video draft missing source timestamp")?;
-        let index = plan.frames_ms.binary_search(&time).map_err(|_| "video time absent from selection")?;
-        if index<first || index>=end_bound || draft.end_ms!=Some(time) || draft.page.is_some() || draft.line.is_some()
-            || draft.thumbnail_hint.is_none() || !matches!(draft.kind.as_str(),"video"|"ocr") {
+        let time = draft
+            .start_ms
+            .ok_or("video draft missing source timestamp")?;
+        let index = plan
+            .frames_ms
+            .binary_search(&time)
+            .map_err(|_| "video time absent from selection")?;
+        if index < first
+            || index >= end_bound
+            || draft.end_ms != Some(time)
+            || draft.page.is_some()
+            || draft.line.is_some()
+            || draft.thumbnail_hint.is_none()
+            || !matches!(draft.kind.as_str(), "video" | "ocr")
+        {
             return Err("video draft outside visual batch".into());
         }
-        let count = &mut counts[index-first];
-        let ordinal = *count + if index==first { offset } else { 0 };
-        if ordinal >= video::MAX_FRAME_DRAFTS || (draft.kind=="video") != (ordinal==0)
-            || (draft.kind=="ocr" && draft.text.trim().is_empty()) {
+        let count = &mut counts[index - first];
+        let ordinal = *count + if index == first { offset } else { 0 };
+        if ordinal >= video::MAX_FRAME_DRAFTS
+            || (draft.kind == "video") != (ordinal == 0)
+            || (draft.kind == "ocr" && draft.text.trim().is_empty())
+        {
             return Err("invalid frame visual/OCR draft ordinal".into());
         }
-        *count+=1;
+        *count += 1;
     }
-    let (completed,partial) = match response.next_cursor {
+    let (completed, partial) = match response.next_cursor {
         Some(next) => match video::decode_cursor(next)? {
-            Cursor::Audio { window:0 } if plan.has_audio && end_bound==plan.frames_ms.len() => (end_bound,None),
-            Cursor::Frame { index,draft } => {
-                let index=index as usize;
-                if next<=request.cursor || index<first || index>end_bound || index>=plan.frames_ms.len() {
+            Cursor::Audio { window: 0 } if plan.has_audio && end_bound == plan.frames_ms.len() => {
+                (end_bound, None)
+            }
+            Cursor::Frame { index, draft } => {
+                let index = index as usize;
+                if next <= request.cursor
+                    || index < first
+                    || index > end_bound
+                    || index >= plan.frames_ms.len()
+                {
                     return Err("invalid visual cursor progress".into());
                 }
-                let n=counts.get(index-first).copied().unwrap_or(0);
-                if (index==first && (n==0 || draft!=offset+n))
-                    || (index>first && draft!=n) { return Err("visual cursor does not cover frame drafts".into()); }
-                (index,Some((index,draft)))
+                let n = counts.get(index - first).copied().unwrap_or(0);
+                if (index == first && (n == 0 || draft != offset + n))
+                    || (index > first && draft != n)
+                {
+                    return Err("visual cursor does not cover frame drafts".into());
+                }
+                (index, Some((index, draft)))
             }
             _ => return Err("video skipped a phase/window".into()),
         },
-        None if !plan.has_audio && end_bound==plan.frames_ms.len() => (end_bound,None),
+        None if !plan.has_audio && end_bound == plan.frames_ms.len() => (end_bound, None),
         None => return Err("video falsely completed before soundtrack/frames".into()),
     };
     for index in first..completed {
-        if counts[index-first]==0 { return Err("completed video frame has no representation".into()); }
+        if counts[index - first] == 0 {
+            return Err("completed video frame has no representation".into());
+        }
     }
-    if let Some((index,draft)) = partial {
-        let last_allowed = index + usize::from(draft>0);
-        if response.output.segments.iter().any(|s| {
-            plan.frames_ms.binary_search(&s.start_ms.unwrap()).unwrap() >= last_allowed
-        }) { return Err("video emitted drafts beyond continuation".into()); }
+    if let Some((index, draft)) = partial {
+        let last_allowed = index + usize::from(draft > 0);
+        if response
+            .output
+            .segments
+            .iter()
+            .any(|s| plan.frames_ms.binary_search(&s.start_ms.unwrap()).unwrap() >= last_allowed)
+        {
+            return Err("video emitted drafts beyond continuation".into());
+        }
     }
     Ok(())
 }
@@ -524,86 +602,125 @@ mod tests {
 
     #[test]
     fn video_transport_validates_opaque_phases_partial_frames_and_silence() {
-        let mut req=request(); req.kind="video".into(); req.max_units=1;
+        let mut req = request();
+        req.kind = "video".into();
+        req.max_units = 1;
         let plan = MediaBatch {
             duration_ms: 11000,
             frames_ms: vec![0, 5000, 10000],
             has_audio: true,
         };
-        let mut image=SegmentDraft::text("video","");
-        image.start_ms=Some(0); image.end_ms=Some(0); image.thumbnail_hint=Some("C:/scratch/frame.png".into());
+        let mut image = SegmentDraft::text("video", "");
+        image.start_ms = Some(0);
+        image.end_ms = Some(0);
+        image.thumbnail_hint = Some("C:/scratch/frame.png".into());
         image.embedding_input = crate::DraftEmbeddingInput::Image {
             path: "C:/scratch/frame.png".into(),
             token_budget: 140,
         };
-        let mut ocr=SegmentDraft::text("ocr","real screen text");
-        ocr.start_ms=Some(0); ocr.end_ms=Some(0); ocr.thumbnail_hint=image.thumbnail_hint.clone();
-        let mut response=ExtractResponse { source_sha256: None, code: None, output:ExtractOutput::extracted(vec![image.clone(),ocr.clone()]),
+        let mut ocr = SegmentDraft::text("ocr", "real screen text");
+        ocr.start_ms = Some(0);
+        ocr.end_ms = Some(0);
+        ocr.thumbnail_hint = image.thumbnail_hint.clone();
+        let mut response = ExtractResponse {
+            source_sha256: None,
+            code: None,
+            output: ExtractOutput::extracted(vec![image.clone(), ocr.clone()]),
             next_cursor: Some(crate::video::frame_cursor(1, 0)),
             total_units: Some(4),
             diagnostics: vec![],
             media: Some(plan.clone()),
             video_selection: None,
         };
-        validate_response(&req,&response).unwrap();
-        response.next_cursor=Some(crate::video::audio_cursor(0));
-        assert!(validate_response(&req,&response).is_err(),"visual phase cannot skip unprocessed frames");
-        response.next_cursor=None;
-        assert!(validate_response(&req,&response).is_err(),"soundtrack cannot be falsely completed");
-        response.next_cursor=Some(crate::video::frame_cursor(1,0));
+        validate_response(&req, &response).unwrap();
+        response.next_cursor = Some(crate::video::audio_cursor(0));
+        assert!(
+            validate_response(&req, &response).is_err(),
+            "visual phase cannot skip unprocessed frames"
+        );
+        response.next_cursor = None;
+        assert!(
+            validate_response(&req, &response).is_err(),
+            "soundtrack cannot be falsely completed"
+        );
+        response.next_cursor = Some(crate::video::frame_cursor(1, 0));
         response.output.segments.remove(0);
-        assert!(validate_response(&req,&response).is_err(),"first frame draft must be visual");
-        req.cursor=crate::video::frame_cursor(0,1); req.media_plan=Some(plan.clone());
-        validate_response(&req,&response).unwrap();
-        response.next_cursor=Some(crate::video::frame_cursor(0,3));
-        assert!(validate_response(&req,&response).is_err(),"partial cursor cannot invent omitted drafts");
-        req.cursor=crate::video::audio_cursor(0);
-        response.output.segments.clear(); response.next_cursor=None;
-        validate_response(&req,&response).unwrap();
-        response.next_cursor=Some(crate::video::audio_cursor(1));
-        assert!(validate_response(&req,&response).is_err(),"terminal audio window must complete");
-        response.next_cursor=None;
-        response.media.as_mut().unwrap().frames_ms[1]=6000;
-        assert!(validate_response(&req,&response).is_err(),"continuation cannot mutate the stored selection");
+        assert!(
+            validate_response(&req, &response).is_err(),
+            "first frame draft must be visual"
+        );
+        req.cursor = crate::video::frame_cursor(0, 1);
+        req.media_plan = Some(plan.clone());
+        validate_response(&req, &response).unwrap();
+        response.next_cursor = Some(crate::video::frame_cursor(0, 3));
+        assert!(
+            validate_response(&req, &response).is_err(),
+            "partial cursor cannot invent omitted drafts"
+        );
+        req.cursor = crate::video::audio_cursor(0);
+        response.output.segments.clear();
+        response.next_cursor = None;
+        validate_response(&req, &response).unwrap();
+        response.next_cursor = Some(crate::video::audio_cursor(1));
+        assert!(
+            validate_response(&req, &response).is_err(),
+            "terminal audio window must complete"
+        );
+        response.next_cursor = None;
+        response.media.as_mut().unwrap().frames_ms[1] = 6000;
+        assert!(
+            validate_response(&req, &response).is_err(),
+            "continuation cannot mutate the stored selection"
+        );
     }
 
     #[test]
     fn video_transport_rejects_outside_times_budgets_and_selection_bombs() {
-        let mut req=request(); req.kind="video".into(); req.max_units=1;
+        let mut req = request();
+        req.kind = "video".into();
+        req.max_units = 1;
         let plan = MediaBatch {
             duration_ms: 6000,
             frames_ms: vec![0, 5000],
             has_audio: false,
         };
-        let mut image=SegmentDraft::text("video","");
-        image.start_ms=Some(0); image.end_ms=Some(0); image.thumbnail_hint=Some("C:/scratch/frame.png".into());
+        let mut image = SegmentDraft::text("video", "");
+        image.start_ms = Some(0);
+        image.end_ms = Some(0);
+        image.thumbnail_hint = Some("C:/scratch/frame.png".into());
         image.embedding_input = crate::DraftEmbeddingInput::Image {
             path: "C:/scratch/frame.png".into(),
             token_budget: 70,
         };
-        let mut response=ExtractResponse { source_sha256: None, code: None, output:ExtractOutput::extracted(vec![image]),
+        let mut response = ExtractResponse {
+            source_sha256: None,
+            code: None,
+            output: ExtractOutput::extracted(vec![image]),
             next_cursor: Some(crate::video::frame_cursor(1, 0)),
             total_units: Some(2),
             diagnostics: vec![],
             media: Some(plan.clone()),
             video_selection: None,
         };
-        validate_response(&req,&response).unwrap();
-        response.output.segments[0].start_ms=Some(4999); response.output.segments[0].end_ms=Some(4999);
-        assert!(validate_response(&req,&response).is_err());
-        response.output.segments[0].start_ms=Some(0); response.output.segments[0].end_ms=Some(0);
+        validate_response(&req, &response).unwrap();
+        response.output.segments[0].start_ms = Some(4999);
+        response.output.segments[0].end_ms = Some(4999);
+        assert!(validate_response(&req, &response).is_err());
+        response.output.segments[0].start_ms = Some(0);
+        response.output.segments[0].end_ms = Some(0);
         response.output.segments[0].embedding_input = crate::DraftEmbeddingInput::Image {
             path: "C:/scratch/frame.png".into(),
             token_budget: 280,
         };
-        assert!(validate_response(&req,&response).is_err());
+        assert!(validate_response(&req, &response).is_err());
         req.media_plan = Some(MediaBatch {
             duration_ms: 2_000_000,
             frames_ms: (0..1201).map(|n| n * 1000).collect(),
             has_audio: false,
         });
         assert!(encode_request(&req).is_err());
-        req.media_plan=None; req.cursor=crate::video::audio_cursor(0);
+        req.media_plan = None;
+        req.cursor = crate::video::audio_cursor(0);
         assert!(encode_request(&req).is_err());
     }
 
@@ -763,9 +880,13 @@ mod tests {
         let mut req = request();
         req.kind = "audio".into();
         req.max_units = 30;
-        let mut response = ExtractResponse { source_sha256: None, code: None,
+        let mut response = ExtractResponse {
+            source_sha256: None,
+            code: None,
             output: ExtractOutput::extracted(vec![]),
-            next_cursor: Some(30), total_units: Some(48), diagnostics: vec![],
+            next_cursor: Some(30),
+            total_units: Some(48),
+            diagnostics: vec![],
             media: Some(MediaBatch {
                 duration_ms: 1_200_000,
                 frames_ms: vec![],
@@ -805,7 +926,9 @@ mod tests {
     fn protocol_roundtrip_preserves_text_and_line_metadata() {
         let mut segment = SegmentDraft::text("doc", "actual text\nsecond line");
         segment.line = Some(1);
-        let response = ExtractResponse { source_sha256: None, code: None,
+        let response = ExtractResponse {
+            source_sha256: None,
+            code: None,
             output: ExtractOutput::extracted(vec![segment]),
             next_cursor: None,
             total_units: Some(1),
@@ -824,15 +947,22 @@ mod tests {
 
     #[test]
     fn code_response_requires_typed_forward_units() {
-        let mut req=request();
-        req.kind="code".into();
-        let response=ExtractResponse { source_sha256: None, code: None, output:ExtractOutput::extracted(vec![]),next_cursor:Some(1),
+        let mut req = request();
+        req.kind = "code".into();
+        let response = ExtractResponse {
+            source_sha256: None,
+            code: None,
+            output: ExtractOutput::extracted(vec![]),
+            next_cursor: Some(1),
             total_units: Some(2),
             diagnostics: vec![],
             media: None,
             video_selection: None,
         };
-        assert!(validate_response(&req,&response).is_err(),"code cursor advanced without any typed source units");
+        assert!(
+            validate_response(&req, &response).is_err(),
+            "code cursor advanced without any typed source units"
+        );
     }
 
     #[test]
@@ -846,7 +976,9 @@ mod tests {
         let mut ocr = text.clone();
         ocr.kind = "ocr".into();
         ocr.line = Some(6);
-        let mut response = ExtractResponse { source_sha256: None, code: None,
+        let mut response = ExtractResponse {
+            source_sha256: None,
+            code: None,
             output: ExtractOutput::extracted(vec![text.clone(), ocr]),
             next_cursor: Some(1 << 32),
             total_units: Some(2),
@@ -882,7 +1014,9 @@ mod tests {
         let mut b = a.clone();
         b.page = Some(2);
         b.line = Some(1);
-        let mut response = ExtractResponse { source_sha256: None, code: None,
+        let mut response = ExtractResponse {
+            source_sha256: None,
+            code: None,
             output: ExtractOutput::extracted(vec![a.clone(), b]),
             next_cursor: None,
             total_units: Some(2),
@@ -908,7 +1042,9 @@ mod tests {
         req.cursor = 8191;
         let mut draft = SegmentDraft::text("pdf", "last valid draft");
         draft.page = Some(1);
-        let mut response = ExtractResponse { source_sha256: None, code: None,
+        let mut response = ExtractResponse {
+            source_sha256: None,
+            code: None,
             output: ExtractOutput::extracted(vec![draft.clone()]),
             next_cursor: None,
             total_units: Some(1),
@@ -934,7 +1070,9 @@ mod tests {
 
     #[test]
     fn text_batches_reject_empty_progress_and_false_completion() {
-        let mut response = ExtractResponse { source_sha256: None, code: None,
+        let mut response = ExtractResponse {
+            source_sha256: None,
+            code: None,
             output: ExtractOutput::extracted(vec![SegmentDraft::text("doc", "one")]),
             next_cursor: None,
             total_units: Some(75),
@@ -958,7 +1096,9 @@ mod tests {
         let mut req = request();
         req.path = PathBuf::from("界".repeat(100_000));
         assert!(encode_request(&req).is_err());
-        let mut response = ExtractResponse { source_sha256: None, code: None,
+        let mut response = ExtractResponse {
+            source_sha256: None,
+            code: None,
             output: ExtractOutput::extracted(vec![SegmentDraft::text("doc", "x"); 257]),
             next_cursor: None,
             total_units: None,
@@ -980,7 +1120,9 @@ mod tests {
 
     #[test]
     fn response_rejects_reversed_metadata_and_foreign_kinds() {
-        let mut response = ExtractResponse { source_sha256: None, code: None,
+        let mut response = ExtractResponse {
+            source_sha256: None,
+            code: None,
             output: ExtractOutput::extracted(vec![
                 SegmentDraft::text("doc", "one"),
                 SegmentDraft::text("doc", "two"),
