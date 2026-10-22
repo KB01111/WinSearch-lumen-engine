@@ -1,7 +1,6 @@
 //! Per-connection protocol loop: handshake, then request dispatch until the
 //! client disconnects.
 
-use std::io::Read;
 use std::sync::{Arc, Mutex};
 
 use tracing::{info, warn};
@@ -18,6 +17,7 @@ fn features() -> Vec<String> {
         "search.limits".to_string(),
         "index.root_policies".to_string(),
         "index.identity".to_string(),
+        "index.reset".to_string(),
         "search.exact".to_string(),
         "search.semantic".to_string(),
         "search.filters".to_string(),
@@ -28,18 +28,23 @@ fn features() -> Vec<String> {
         "entry.resolve".to_string(),
         "entry.resolve.code".to_string(),
         "search.entry_references".to_string(),
+        "search.match_source".to_string(),
         "entry.preview.text".to_string(),
         "entry.preview.code".to_string(),
     ]
 }
 
 pub fn handle_connection(stream: PipeStream, engine: SharedEngine) {
+    let mut reader = match stream.framed_reader() {
+        Ok(reader) => reader,
+        Err(error) => {
+            warn!(%error, "cannot create pipe reader");
+            return;
+        }
+    };
     let stream = Arc::new(Mutex::new(stream));
     let client = engine.register_client(stream.clone());
 
-    let mut reader = ReaderGuard {
-        stream: stream.clone(),
-    };
     let first = match read_message::<_, ClientMessage>(&mut reader) {
         Ok(Some(msg)) => msg,
         Ok(None) => {
@@ -68,6 +73,8 @@ pub fn handle_connection(stream: PipeStream, engine: SharedEngine) {
         engine.unregister_client(&client);
         return;
     };
+
+    reader.finish_read_frame();
 
     if protocol_version != PROTOCOL_VERSION {
         let _ = client.send(&ServerMessage::Error {
@@ -106,8 +113,10 @@ pub fn handle_connection(stream: PipeStream, engine: SharedEngine) {
                 break;
             }
         };
+        reader.finish_read_frame();
 
         match msg {
+            ClientMessage::ResetIndex { id, request } => engine.reset_index(&client, id, request),
             ClientMessage::ResolveEntry { id, reference } => {
                 engine.resolve_entry(&client, id, reference)
             }
@@ -187,35 +196,6 @@ pub fn handle_connection(stream: PipeStream, engine: SharedEngine) {
     engine.unregister_client(&client);
 }
 
-/// Adapter giving the framing codec read access to the shared pipe stream
-/// without holding the stream mutex (or blocking `ReadFile` on the synchronous
-/// pipe handle) while waiting for the peer to send the next frame.
-struct ReaderGuard {
-    stream: Arc<Mutex<PipeStream>>,
-}
-
-impl Read for ReaderGuard {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        if buf.is_empty() {
-            return Ok(0);
-        }
-        loop {
-            {
-                let mut guard = self
-                    .stream
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                match guard.peek_available()? {
-                    None => return Ok(0),
-                    Some(n) if n > 0 => return guard.read(buf),
-                    Some(_) => {}
-                }
-            }
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -231,6 +211,40 @@ mod tests {
     fn unique_pipe() -> String {
         let n = SERVER_PIPE_SEQ.fetch_add(1, Ordering::SeqCst);
         format!(r"\\.\pipe\winsearch-server-test-{}-{n}", std::process::id())
+    }
+
+    fn assert_partial_peer_retires(bytes: &[u8]) {
+        let engine = EngineService::new_with_model_dir(
+            Indexer::open(ws_index::IndexStore::open_in_memory().unwrap(), &[]).unwrap(),
+            std::env::temp_dir().join("winsearch-read-deadline-unused-models"),
+        );
+        let pipe = unique_pipe();
+        let server_pipe = pipe.clone();
+        let (finished, retired) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = ws_platform::pipe::serve(&server_pipe, move |stream| {
+                handle_connection(stream, engine.clone());
+                let _ = finished.send(());
+            });
+        });
+        let mut peer = connect_retry(&pipe);
+        std::io::Write::write_all(&mut peer, bytes).unwrap();
+        let result = retired.recv_timeout(Duration::from_secs(7));
+        drop(peer);
+        assert!(
+            result.is_ok(),
+            "silent or partial Hello retained its connection beyond the frame deadline"
+        );
+    }
+
+    #[test]
+    fn silent_peer_expires_before_handshake() {
+        assert_partial_peer_retires(&[]);
+    }
+
+    #[test]
+    fn partial_hello_frame_expires_without_more_input() {
+        assert_partial_peer_retires(&[64, 0]);
     }
 
     fn connect_retry(pipe: &str) -> PipeStream {
@@ -273,7 +287,7 @@ mod tests {
         std::fs::write(&source, "Header\nactual cached preview text").unwrap();
         let indexer = Indexer::open(
             ws_index::IndexStore::open_in_memory().unwrap(),
-            &[root.clone()],
+            std::slice::from_ref(&root),
         )
         .unwrap();
         indexer.enqueue_initial_scan().unwrap();
@@ -477,7 +491,7 @@ mod tests {
         std::fs::write(&source, "original text").unwrap();
         let indexer = Indexer::open(
             ws_index::IndexStore::open_in_memory().unwrap(),
-            &[root.clone()],
+            std::slice::from_ref(&root),
         )
         .unwrap();
         indexer.enqueue_initial_scan().unwrap();
@@ -722,15 +736,17 @@ mod tests {
         assert!(
             matches!(reply(&mut c,1),ServerMessage::IndexingConfig {config,..} if config.roots.is_empty())
         );
-        let mut config = ws_protocol::IndexingConfig::default();
-        config.roots = vec![r"Z:\offline-policy-fixture".into()];
-        config.code_roots = vec![r"Z:\code-fixture".into()];
-        config.excluded_paths = vec![r"Z:\offline-policy-fixture\skip".into()];
-        config.excluded_extensions = vec![".PDF".into()];
-        config.mode = ws_protocol::IndexingMode::Scheduled;
-        config.hours_start = 1320;
-        config.hours_end = 360;
-        config.paused = true;
+        let mut config = ws_protocol::IndexingConfig {
+            roots: vec![r"Z:\offline-policy-fixture".into()],
+            code_roots: vec![r"Z:\code-fixture".into()],
+            excluded_paths: vec![r"Z:\offline-policy-fixture\skip".into()],
+            excluded_extensions: vec![".PDF".into()],
+            mode: ws_protocol::IndexingMode::Scheduled,
+            hours_start: 1320,
+            hours_end: 360,
+            paused: true,
+            ..Default::default()
+        };
         write_message(
             &mut c,
             &ClientMessage::SetIndexingConfig {
@@ -802,7 +818,7 @@ mod tests {
         std::fs::write(files.join("banquet-hall.txt"), b"x").unwrap();
 
         let store = ws_index::IndexStore::open_in_memory().unwrap();
-        let indexer = Indexer::open(store, &[files.clone()]).unwrap();
+        let indexer = Indexer::open(store, std::slice::from_ref(&files)).unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
         indexer

@@ -245,7 +245,7 @@ impl ExtractClient {
                             ExtractClientError::Worker("worker exited without a response".into())
                         })
                 })();
-                let _ = sender.send(Event::Response(result));
+                let _ = sender.send(Event::Response(Box::new(result)));
             });
             let mut exchange = Exchange {
                 job: Some(job),
@@ -271,7 +271,7 @@ impl ExtractClient {
                             result?;
                             written = true;
                         }
-                        Ok(Event::Response(result)) => response = Some(result?),
+                        Ok(Event::Response(result)) => response = Some((*result)?),
                         Err(mpsc::RecvTimeoutError::Timeout) => (),
                         Err(mpsc::RecvTimeoutError::Disconnected)
                             if !written || response.is_none() =>
@@ -488,7 +488,7 @@ impl Drop for ArtifactLease {
 
 enum Event {
     Written(Result<(), ExtractClientError>),
-    Response(Result<ExtractResponse, ExtractClientError>),
+    Response(Box<Result<ExtractResponse, ExtractClientError>>),
 }
 struct ScratchAnchor {
     canonical: PathBuf,
@@ -751,12 +751,10 @@ pub(crate) mod tests {
         static BINARY: OnceLock<PathBuf> = OnceLock::new();
         BINARY
             .get_or_init(|| {
-                let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("../../target/debug")
-                    .join(format!(
-                        "extract-transport-fixture-{}.exe",
-                        std::process::id()
-                    ));
+                let path = crate::test_binary_path("").join(format!(
+                    "extract-transport-fixture-{}.exe",
+                    std::process::id()
+                ));
                 let result = Command::new("rustc")
                     .arg(
                         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -834,8 +832,7 @@ pub(crate) mod tests {
         let tree = Tree::new();
         let source = tree.0.join("example.rs");
         std::fs::write(&source, "pub fn first() { helper(); }\n").unwrap();
-        let worker = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/debug/winsearch-extract.exe");
+        let worker = crate::test_binary_path("winsearch-extract.exe");
         let client = ExtractClient::new(worker, tree.0.join("cache"));
         let request = client.request(source, "code", 64);
         let response = client.extract(&request, Duration::from_secs(10)).unwrap();
@@ -867,8 +864,7 @@ pub(crate) mod tests {
             .map(|n| format!("pub fn f{n}() {{ helper(); }}\n"))
             .collect::<String>();
         std::fs::write(&source, &text).unwrap();
-        let worker = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/debug/winsearch-extract.exe");
+        let worker = crate::test_binary_path("winsearch-extract.exe");
         let client = ExtractClient::new(worker, tree.0.join("cache"));
         let mut request = client.request(source, "code", 64);
         let mut reconstructed = String::new();
@@ -923,8 +919,7 @@ pub(crate) mod tests {
              "outputs":[{"text":"OUTPUT_MUST_NOT_BE_INDEXED"}],"attachments":{"fake":"ATTACHMENT_MUST_NOT_BE_INDEXED"}}
         ]});
         std::fs::write(&source, serde_json::to_vec(&notebook).unwrap()).unwrap();
-        let worker = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/debug/winsearch-extract.exe");
+        let worker = crate::test_binary_path("winsearch-extract.exe");
         let client = ExtractClient::new(worker, tree.0.join("cache"));
         let response = client
             .extract(&client.request(source, "code", 64), Duration::from_secs(10))
@@ -963,8 +958,7 @@ pub(crate) mod tests {
             .unwrap()
             .set_len(ws_code::MAX_CODE_FILE_BYTES + 1)
             .unwrap();
-        let worker = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/debug/winsearch-extract.exe");
+        let worker = crate::test_binary_path("winsearch-extract.exe");
         let client = ExtractClient::new(worker, tree.0.join("cache"));
         for (path, expected) in [
             (sensitive, "code source policy denied"),
@@ -1446,8 +1440,7 @@ pub(crate) mod tests {
     }
 
     fn real_client(tree: &Tree) -> ExtractClient {
-        let worker = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/debug/winsearch-extract.exe");
+        let worker = crate::test_binary_path("winsearch-extract.exe");
         assert!(
             worker.is_file(),
             "build winsearch-extract before integration tests"

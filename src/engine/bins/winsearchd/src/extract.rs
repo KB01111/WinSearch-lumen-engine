@@ -101,6 +101,7 @@ impl ExtractorRegistry {
     }
 
     /// Overrides how per-file [`ExtractBudget`]s are constructed for a given `kind`.
+    #[cfg(test)]
     pub fn set_budget_factory<F>(&mut self, factory: F)
     where
         F: Fn(&str) -> ExtractBudget + Send + Sync + 'static,
@@ -125,6 +126,7 @@ impl Indexer {
     /// and snapshot the entry, released while file extraction and embedding run,
     /// and re-acquired to verify the entry did not change mid-flight before
     /// writing `content_fts` and `segments`.
+    #[cfg(test)]
     pub fn extract_once_with<F>(
         &self,
         registry: &ExtractorRegistry,
@@ -139,6 +141,7 @@ impl Indexer {
     /// Like [`Self::extract_once_with`], with an optional `embed_image`
     /// callback for computing a visual embedding (`EmbedImage` via `mtmd`) on
     /// `image` modality jobs.
+    #[cfg(test)]
     pub fn extract_once_with_media<F, FI>(
         &self,
         registry: &ExtractorRegistry,
@@ -156,6 +159,7 @@ impl Indexer {
         )
     }
 
+    #[cfg(test)]
     fn extract_once_typed<F, FI>(
         &self,
         registry: &ExtractorRegistry,
@@ -188,6 +192,9 @@ impl Indexer {
         F: Fn(&[String]) -> Result<Vec<Vec<f32>>, EmbedError>,
         FI: Fn(&ws_extract::DraftEmbeddingInput) -> Result<Vec<f32>, EmbedError>,
     {
+        let Some(_work) = self.work_gate.enter() else {
+            return Ok(ExtractStepOutcome::default());
+        };
         if self.indexing_pause_reason().is_some() {
             return Ok(ExtractStepOutcome::default());
         }
@@ -620,11 +627,13 @@ impl Indexer {
         if !store.commit_content_batch_with_source(
             &job,
             &progress,
-            &chunks,
-            next_cursor,
-            media_plan.as_ref(),
-            video_selection.as_ref(),
-            source_sha256.as_deref(),
+            ws_index::store::ContentBatch {
+                chunks: &chunks,
+                next: next_cursor,
+                media: media_plan.as_ref(),
+                selection: video_selection.as_ref(),
+                source_sha256: source_sha256.as_deref(),
+            },
         )? {
             store.requeue_extract_job(job.id)?;
             return Ok(ExtractStepOutcome {
@@ -1127,7 +1136,7 @@ mod tests {
         let mut config = store.get_or_migrate_indexing_config().unwrap();
         config.respect_battery_saver = false;
         store.set_indexing_config(&config).unwrap();
-        let indexer = Indexer::open(store, &[tree.0.clone()]).unwrap();
+        let indexer = Indexer::open(store, std::slice::from_ref(&tree.0)).unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
         indexer
@@ -1245,8 +1254,7 @@ mod tests {
     }
 
     fn process_registry(cache: &TempTree) -> ExtractorRegistry {
-        let worker = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/debug/winsearch-extract.exe");
+        let worker = crate::test_binary_path("winsearch-extract.exe");
         assert!(
             worker.is_file(),
             "build winsearch-extract before integration tests"
@@ -1524,7 +1532,7 @@ mod tests {
             let mut config = store.get_or_migrate_indexing_config().unwrap();
             config.respect_battery_saver = false;
             store.set_indexing_config(&config).unwrap();
-            Indexer::open(store, &[tree.0.clone()]).unwrap()
+            Indexer::open(store, std::slice::from_ref(&tree.0)).unwrap()
         };
         let mut indexer = open();
         indexer.enqueue_initial_scan().unwrap();
@@ -2167,8 +2175,7 @@ mod tests {
         let before = indexer.store_lock().list_content_chunks(entry.id).unwrap();
         let vectors = indexer.search_vectors(&[1.0, 1.0], 10, None).unwrap();
         assert_eq!(vectors.len(), 2);
-        let worker = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/debug/winsearch-extract.exe");
+        let worker = crate::test_binary_path("winsearch-extract.exe");
         let no_dll = binaries.0.join("winsearch-extract.exe");
         fs::copy(worker, &no_dll).unwrap();
         let mut missing = ExtractorRegistry::production();
@@ -2228,7 +2235,11 @@ mod tests {
         let path = tree.0.join("unicode-Å界.pdf");
         fs::copy(pdf_fixture("fyrtio-Å界.pdf"), &path).unwrap();
         let db = data.0.join("index.db");
-        let indexer = Indexer::open(IndexStore::open(&db).unwrap(), &[tree.0.clone()]).unwrap();
+        let indexer = Indexer::open(
+            IndexStore::open(&db).unwrap(),
+            std::slice::from_ref(&tree.0),
+        )
+        .unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
         let registry = process_registry(&cache);
@@ -2260,7 +2271,11 @@ mod tests {
             .unwrap()
             .is_empty());
         drop(indexer);
-        let indexer = Indexer::open(IndexStore::open(&db).unwrap(), &[tree.0.clone()]).unwrap();
+        let indexer = Indexer::open(
+            IndexStore::open(&db).unwrap(),
+            std::slice::from_ref(&tree.0),
+        )
+        .unwrap();
         let step = indexer
             .extract_once_typed(
                 &registry,
@@ -2361,8 +2376,7 @@ mod tests {
                 .unwrap()
                 .complete
         );
-        let worker = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/debug/winsearch-extract.exe");
+        let worker = crate::test_binary_path("winsearch-extract.exe");
         let no_dll = binaries.0.join("winsearch-extract.exe");
         fs::copy(worker, &no_dll).unwrap();
         let mut missing = ExtractorRegistry::production();
@@ -2545,7 +2559,11 @@ mod tests {
         let path = tree.0.join("large.pdf");
         fs::copy(pdf_fixture("huge-text.pdf"), &path).unwrap();
         let db = data.0.join("index.db");
-        let indexer = Indexer::open(IndexStore::open(&db).unwrap(), &[tree.0.clone()]).unwrap();
+        let indexer = Indexer::open(
+            IndexStore::open(&db).unwrap(),
+            std::slice::from_ref(&tree.0),
+        )
+        .unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
         let registry = process_registry(&cache);
@@ -2573,7 +2591,11 @@ mod tests {
             256
         );
         drop(indexer);
-        let indexer = Indexer::open(IndexStore::open(&db).unwrap(), &[tree.0.clone()]).unwrap();
+        let indexer = Indexer::open(
+            IndexStore::open(&db).unwrap(),
+            std::slice::from_ref(&tree.0),
+        )
+        .unwrap();
         indexer
             .extract_once_typed(&registry, no_model, |_| Ok(None))
             .unwrap();
@@ -3062,7 +3084,11 @@ mod tests {
         let path = tree.0.join("long.txt");
         fs::write(&path, "a".repeat(1200 + 74 * 1020)).unwrap();
         let db = data.0.join("index.db");
-        let indexer = Indexer::open(IndexStore::open(&db).unwrap(), &[tree.0.clone()]).unwrap();
+        let indexer = Indexer::open(
+            IndexStore::open(&db).unwrap(),
+            std::slice::from_ref(&tree.0),
+        )
+        .unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
         let reg = process_registry(&cache);
@@ -3103,7 +3129,11 @@ mod tests {
             1
         );
         drop(indexer);
-        let indexer = Indexer::open(IndexStore::open(&db).unwrap(), &[tree.0.clone()]).unwrap();
+        let indexer = Indexer::open(
+            IndexStore::open(&db).unwrap(),
+            std::slice::from_ref(&tree.0),
+        )
+        .unwrap();
         // Fresh short files must jump ahead of the continuation.
         fs::write(tree.0.join("short.txt"), "newshortneedle").unwrap();
         indexer.enqueue_initial_scan().unwrap();
@@ -3395,11 +3425,12 @@ mod tests {
                 .commit_content_batch_with_source(
                     &job,
                     &progress,
-                    &chunks,
-                    None,
-                    original.media_plan.as_ref(),
-                    None,
-                    Some(&"b".repeat(64))
+                    ws_index::store::ContentBatch {
+                        chunks: &chunks,
+                        media: original.media_plan.as_ref(),
+                        source_sha256: Some(&"b".repeat(64)),
+                        ..Default::default()
+                    }
                 )
                 .unwrap());
             let chunks = store.claim_content_vectors(Some(entry)).unwrap();
@@ -3737,11 +3768,13 @@ mod tests {
         let cache = TempTree::new();
         fs::write(tree.0.join("actual.txt"), "uniquemissingworkerfixture").unwrap();
         let indexer = seeded_indexer(&tree);
-        let mut registry = ExtractorRegistry::default();
-        registry.worker = Some(ExtractClient::new(
-            cache.0.join("missing.exe"),
-            cache.0.clone(),
-        ));
+        let registry = ExtractorRegistry {
+            worker: Some(ExtractClient::new(
+                cache.0.join("missing.exe"),
+                cache.0.clone(),
+            )),
+            ..Default::default()
+        };
         let result = indexer.extract_once_with(&registry, fake_embed).unwrap();
         assert!(matches!(result.status, Some(ExtractionStatus::Failed(_))));
         assert_eq!(result.segments_stored, 0);
@@ -3887,7 +3920,7 @@ mod tests {
 
         {
             let store = IndexStore::open(&db_path).unwrap();
-            let indexer = Indexer::open(store, &[tree.0.clone()]).unwrap();
+            let indexer = Indexer::open(store, std::slice::from_ref(&tree.0)).unwrap();
             indexer.enqueue_initial_scan().unwrap();
             while indexer.scan_available(64) > 0 {}
 
@@ -3910,7 +3943,7 @@ mod tests {
         // Reopen Indexer on the same DB: `Indexer::open` releases claims, so the
         // interrupted content job is reclaimed and extracted cleanly.
         let store2 = IndexStore::open(&db_path).unwrap();
-        let indexer2 = Indexer::open(store2, &[tree.0.clone()]).unwrap();
+        let indexer2 = Indexer::open(store2, std::slice::from_ref(&tree.0)).unwrap();
         let registry = ExtractorRegistry::default();
         let out = indexer2.extract_once_with(&registry, fake_embed).unwrap();
         assert!(out.claimed);

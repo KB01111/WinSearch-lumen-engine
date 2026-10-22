@@ -11,16 +11,14 @@
 //! [`std::sync::atomic::AtomicBool`] cancel flag. Partial downloads live next
 //! to the destination as `<name>.part`; a later call resumes them.
 //!
-//! Stall semantics: the cancel flag is checked between socket reads, so a
-//! fully stalled connection blocks cancellation until the transfer-level
-//! `timeout_global` (30 min) fires; resume then recovers. ureq 3 offers no
-//! per-read timeout (only a total-body budget, which would break slow
-//! multi-hundred-MB downloads), so there is deliberately no read-timeout knob.
+//! A scoped cancellation observer interrupts bounded TCP waits below TLS,
+//! including stalled header/body reads. Slow transfers retain the overall budget.
 
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(test)]
 use std::time::Duration;
 
 use sha2::{Digest, Sha256};
@@ -36,17 +34,9 @@ pub type ProgressFn<'a> = dyn Fn(u64, u64) + Send + Sync + 'a;
 /// Tuning for one file download. `base_url_override` is test-only: it
 /// replaces the `https://huggingface.co/<id>/resolve/main` prefix so tests
 /// run against a local fixture server instead of Hugging Face.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DownloadOptions {
     pub base_url_override: Option<String>,
-}
-
-impl Default for DownloadOptions {
-    fn default() -> Self {
-        Self {
-            base_url_override: None,
-        }
-    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -83,6 +73,34 @@ pub fn download_file(
     options: &DownloadOptions,
     progress: &ProgressFn<'_>,
     cancel: &AtomicBool,
+) -> Result<PathBuf, DownloadError> {
+    if cancel.load(Ordering::Acquire) {
+        return Err(DownloadError::Cancelled(0, expected.size));
+    }
+    crate::download_transport::with_agent(cancel, |agent| {
+        download_file_inner(expected, dir, options, progress, cancel, &agent)
+    })
+    .map_err(|error| {
+        if cancel.load(Ordering::Acquire) {
+            let downloaded = dir
+                .join(format!("{}.part", expected.name))
+                .metadata()
+                .map(|m| m.len())
+                .unwrap_or(0);
+            DownloadError::Cancelled(downloaded, expected.size)
+        } else {
+            error
+        }
+    })
+}
+
+fn download_file_inner(
+    expected: &ExpectedFile,
+    dir: &Path,
+    options: &DownloadOptions,
+    progress: &ProgressFn<'_>,
+    cancel: &AtomicBool,
+    agent: &ureq::Agent,
 ) -> Result<PathBuf, DownloadError> {
     let dest = dir.join(expected.name);
     let part = dir.join(format!("{}.part", expected.name));
@@ -147,10 +165,6 @@ pub fn download_file(
         );
     }
 
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(30 * 60)))
-        .build()
-        .into();
     let mut request = agent.get(&url);
     if resume_from > 0 {
         request = request.header("Range", format!("bytes={resume_from}-"));
@@ -218,6 +232,9 @@ pub fn download_file(
     }
     out.flush()?;
     drop(out);
+    if cancel.load(Ordering::Acquire) {
+        return Err(DownloadError::Cancelled(downloaded, total));
+    }
 
     // Commit, then verify the committed file: exact size always, then the
     // streamed digest when the manifest pins a hash. A rejected file is
@@ -447,7 +464,6 @@ mod tests {
         fn options(&self) -> DownloadOptions {
             DownloadOptions {
                 base_url_override: Some(self.base_url.clone()),
-                ..DownloadOptions::default()
             }
         }
     }
@@ -481,7 +497,8 @@ mod tests {
         }
     }
 
-    fn last_progress() -> (Arc<Mutex<Vec<(u64, u64)>>>, &'static ProgressFn<'static>) {
+    type ProgressCalls = Arc<Mutex<Vec<(u64, u64)>>>;
+    fn last_progress() -> (ProgressCalls, &'static ProgressFn<'static>) {
         let calls: Arc<Mutex<Vec<(u64, u64)>>> = Arc::new(Mutex::new(Vec::new()));
         let calls2 = Arc::clone(&calls);
         let cb: &'static ProgressFn<'static> = Box::leak(Box::new(move |d: u64, t: u64| {
@@ -522,6 +539,111 @@ mod tests {
         assert_eq!(fx.seen_ranges.lock().unwrap().len(), before);
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn cancel_stalled_response(send_body_prefix: bool) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let options = DownloadOptions {
+            base_url_override: Some(format!("http://{}", listener.local_addr().unwrap())),
+        };
+        let bytes = fixture_bytes(19, 8192);
+        let expected = expected_for("stalled.gguf", &bytes);
+        let dir = temp_dir(if send_body_prefix {
+            "stall-body"
+        } else {
+            "stall-head"
+        });
+        let cancel = AtomicBool::new(false);
+        let (entered, stalled) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            let prefix = &bytes[..1024];
+            scope.spawn(move || {
+                let (mut socket, _) = listener.accept().unwrap();
+                let mut request = [0; 8192];
+                assert!(socket.read(&mut request).unwrap() > 0);
+                if send_body_prefix {
+                    socket
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 8192\r\nConnection: close\r\n\r\n",
+                        )
+                        .unwrap();
+                    socket.write_all(prefix).unwrap();
+                }
+                entered.send(()).unwrap();
+                let _ = released.recv_timeout(Duration::from_secs(4));
+            });
+            let cancel_ref = &cancel;
+            scope.spawn(move || {
+                stalled.recv_timeout(Duration::from_secs(2)).unwrap();
+                std::thread::sleep(Duration::from_millis(150));
+                cancel_ref.store(true, Ordering::Release);
+            });
+            let start = std::time::Instant::now();
+            let result = download_file(&expected, &dir, &options, &|_, _| {}, &cancel);
+            let elapsed = start.elapsed();
+            let _ = release.send(());
+            assert!(
+                matches!(result, Err(DownloadError::Cancelled(_, _))),
+                "stalled cancellation returned {result:?}"
+            );
+            assert!(
+                elapsed < Duration::from_secs(2),
+                "cancellation took {elapsed:?}"
+            );
+            assert!(!dir.join("stalled.gguf").exists());
+            if send_body_prefix {
+                assert_eq!(
+                    fs::read(dir.join("stalled.gguf.part")).unwrap(),
+                    bytes[..1024]
+                );
+            }
+        });
+        // The canceled prefix remains independently verifiable and resumable.
+        let fixture = Fixture::serve(
+            HashMap::from([("stalled.gguf".into(), bytes.clone())]),
+            Duration::ZERO,
+        );
+        let result = download_file(
+            &expected,
+            &dir,
+            &fixture.options(),
+            &|_, _| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(fs::read(result).unwrap(), bytes);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn cancellation_interrupts_stalled_response_headers() {
+        cancel_stalled_response(false);
+    }
+
+    #[test]
+    fn cancellation_interrupts_stalled_body_and_retains_resumable_bytes() {
+        cancel_stalled_response(true);
+    }
+
+    #[test]
+    fn progressing_download_is_not_limited_to_a_short_total_body_deadline() {
+        let bytes = fixture_bytes(37, 8192);
+        let fixture = Fixture::serve(
+            HashMap::from([("slow.gguf".into(), bytes.clone())]),
+            Duration::from_millis(300),
+        );
+        let dir = temp_dir("progressing-body");
+        let result = download_file(
+            &expected_for("slow.gguf", &bytes),
+            &dir,
+            &fixture.options(),
+            &|_, _| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(fs::read(result).unwrap(), bytes);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

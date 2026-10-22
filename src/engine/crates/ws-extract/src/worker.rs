@@ -217,9 +217,7 @@ pub fn validate_response(
         }
         match &draft.embedding_input {
             crate::DraftEmbeddingInput::Text
-                if draft.kind != "audio" && !(request.kind == "video" && draft.kind == "video") =>
-            {
-                ()
+                if draft.kind != "audio" && !(request.kind == "video" && draft.kind == "video") => {
             }
             crate::DraftEmbeddingInput::Image { path, token_budget }
                 if request.kind == "video"
@@ -229,20 +227,14 @@ pub fn validate_response(
                     && matches!(token_budget, 70 | 140)
                     && path.is_absolute()
                     && path.as_os_str().len() <= 32768
-                    && draft.thumbnail_hint.as_ref() == Some(path) =>
-            {
-                ()
-            }
+                    && draft.thumbnail_hint.as_ref() == Some(path) => {}
             crate::DraftEmbeddingInput::Audio { path }
                 if draft.kind == "audio"
                     && draft.embed
                     && draft.text.is_empty()
                     && path.is_absolute()
                     && path.as_os_str().len() <= 32768
-                    && draft.thumbnail_hint.is_none() =>
-            {
-                ()
-            }
+                    && draft.thumbnail_hint.is_none() => {}
             _ => return Err("invalid typed embedding input".into()),
         }
     }

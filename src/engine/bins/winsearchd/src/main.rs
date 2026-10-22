@@ -13,6 +13,7 @@ mod extract_client;
 mod indexer;
 mod model;
 mod policy;
+mod reset;
 mod server;
 mod watcher;
 
@@ -29,6 +30,17 @@ use ws_platform::SingleInstanceGuard;
 
 use engine::{EngineService, SharedEngine};
 use indexer::Indexer;
+
+#[cfg(test)]
+fn test_binary_path(name: &str) -> std::path::PathBuf {
+    // Cargo tests live in <target>/<profile>/deps, including alternate target directories.
+    std::env::current_exe()
+        .expect("test executable path")
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("Cargo test profile directory")
+        .join(name)
+}
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -66,7 +78,11 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let store = IndexStore::open(&paths::index_db_path())?;
+    let mut store = IndexStore::open(&paths::index_db_path())?;
+    if store.meta_get("index_reset_intent")?.is_some() {
+        let mut code = ws_code::CodeStore::open(&paths::code_db_path())?;
+        reset::recover(&mut store, &mut code)?;
+    }
     let indexer = if args.iter().any(|arg| arg == "--defer-root-admission") {
         Indexer::open_deferred(store)?
     } else {

@@ -86,6 +86,25 @@ fn snapshot(path: &Path) -> Option<String> {
 }
 
 impl CodeService {
+    pub(crate) fn reset_runtime(&self) {
+        self.epoch.fetch_add(1, Ordering::AcqRel);
+        *self.scan.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        *self.vectors.lock().unwrap_or_else(|p| p.into_inner()) = VectorState::default();
+        *self.config.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        self.signal();
+    }
+    pub(crate) fn reconcile_after_gate(&self) -> anyhow::Result<()> {
+        self.policy_changed();
+        let policy = self.policy();
+        if policy.code_enabled {
+            let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+            for root in policy.code_roots {
+                store.enqueue_job(&root, &root, true, now())?;
+            }
+        }
+        self.signal();
+        Ok(())
+    }
     pub fn new(
         store: CodeStore,
         indexer: Arc<Indexer>,
@@ -437,6 +456,9 @@ impl CodeService {
         Ok(format!("{generation}:{compat}:code-v1"))
     }
     pub fn changed(&self, root: &str, event: WatchEvent) -> anyhow::Result<()> {
+        let Some(_work) = self.indexer.work_gate.enter() else {
+            return Ok(());
+        };
         self.epoch.fetch_add(1, Ordering::AcqRel);
         let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
         match event {
@@ -457,6 +479,9 @@ impl CodeService {
         Ok(())
     }
     pub(crate) fn configure(self: &Arc<Self>) -> anyhow::Result<()> {
+        let Some(_work) = self.indexer.work_gate.enter() else {
+            return Ok(());
+        };
         let policy = self.policy();
         let mut previous = self.config.lock().unwrap_or_else(|p| p.into_inner());
         if previous.as_ref() == Some(&policy) {
@@ -589,6 +614,9 @@ impl CodeService {
             .is_some_and(|due| due <= now())
     }
     pub fn turn(&self) -> anyhow::Result<bool> {
+        let Some(_work) = self.indexer.work_gate.enter() else {
+            return Ok(false);
+        };
         if self.indexer.indexing_pause_reason().is_some() {
             return Ok(false);
         }
@@ -1186,8 +1214,7 @@ pub(crate) mod tests {
                 worker_bin: if missing_worker {
                     root.parent().unwrap().join("worker.exe")
                 } else {
-                    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                        .join("../../target/debug/winsearch-embed.exe")
+                    crate::test_binary_path("winsearch-embed.exe")
                 },
                 pipe_name: pipe.clone(),
                 worker_args: vec![
@@ -1282,12 +1309,7 @@ pub(crate) mod tests {
         );
         let due = code.next_work_due();
         let worker = code.embed.worker_bin().clone();
-        std::fs::copy(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../target/debug/winsearch-embed.exe"),
-            &worker,
-        )
-        .unwrap();
+        std::fs::copy(crate::test_binary_path("winsearch-embed.exe"), &worker).unwrap();
         let recovered = if let Some(due) = due {
             assert!(due > now() && due <= now() + 60_000);
             // Exercise the same condition-variable deadline as the coordinator;
@@ -1440,8 +1462,7 @@ pub(crate) mod tests {
         }
         .unwrap();
         let models = ModelService::new(root.join("models"), Arc::clone(&indexer));
-        let worker = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/debug/winsearch-extract.exe");
+        let worker = crate::test_binary_path("winsearch-extract.exe");
         let code = CodeService::new(
             CodeStore::open(&root.join("code.db")).unwrap(),
             indexer,
@@ -1727,8 +1748,7 @@ pub(crate) mod tests {
         service.models = ModelService::with_manager(manager, Arc::clone(&service.indexer));
         service.embed = Arc::new(EmbedSupervisor::with_config(
             crate::embed_client::EmbedConfig {
-                worker_bin: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("../../target/debug/winsearch-embed.exe"),
+                worker_bin: crate::test_binary_path("winsearch-embed.exe"),
                 pipe_name: pipe.clone(),
                 worker_args: vec![
                     "--pipe".into(),

@@ -20,8 +20,10 @@ pub mod preview;
 pub use entry::{valid_content_sha256, EntryReference, IndexedEntryId, ResolvedEntry};
 pub use framing::{read_message, write_message, FrameError, MAX_FRAME_BYTES};
 pub use messages::*;
+mod reset;
 pub use outcome::*;
 pub use preview::*;
+pub use reset::{valid_index_id, IndexReset, ResetRequest};
 
 // Model lifecycle snapshots ride the wire verbatim; the canonical shape lives
 // in ws-modelmgr so Rust and the C# mirror cannot drift.

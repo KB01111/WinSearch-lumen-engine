@@ -6,6 +6,7 @@
 //!   configured), or
 //! - the live `winsearch-embed` worker when `WS_EMBED_TEST_MODEL` points to a
 //!   valid GGUF file,
+//!
 //! and runs the hybrid exact + semantic ranking pipeline across all suite
 //! queries, computing Recall@5, MRR, and negative-control false-positive rate.
 

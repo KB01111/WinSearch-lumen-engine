@@ -144,6 +144,7 @@ impl CachedVectors {
 }
 
 pub struct Indexer {
+    pub(crate) work_gate: Arc<crate::reset::WorkGate>,
     code_service: Mutex<Option<std::sync::Weak<crate::code::CodeService>>>,
     store: Mutex<IndexStore>,
     vector_index: std::sync::RwLock<Option<CachedVectors>>,
@@ -152,6 +153,7 @@ pub struct Indexer {
     counters: Mutex<Counters>,
     wake: (Mutex<bool>, Condvar),
     shutdown: AtomicBool,
+    catalog_dirty: AtomicBool,
     roots: std::sync::RwLock<Vec<Arc<RootInfo>>>,
     policy: Arc<std::sync::RwLock<ws_protocol::IndexingConfig>>,
     policy_admitted: Arc<AtomicBool>,
@@ -187,6 +189,10 @@ impl Indexer {
         self: &Arc<Self>,
         config: &ws_protocol::IndexingConfig,
     ) -> Result<(), StoreError> {
+        let _work = self
+            .work_gate
+            .enter()
+            .ok_or_else(|| StoreError::InvalidConfig("index reset in progress".into()))?;
         let _change = self
             .configuration_change
             .lock()
@@ -351,6 +357,8 @@ impl Indexer {
             policy_admitted,
             watchers: Mutex::new(Vec::new()),
             configuration_change: Mutex::new(()),
+            catalog_dirty: AtomicBool::new(false),
+            work_gate: Arc::new(crate::reset::WorkGate::default()),
         }))
     }
 
@@ -395,6 +403,9 @@ impl Indexer {
 
     /// Enqueues a full scan of every root (first run, reconnect, or rescan).
     pub fn enqueue_initial_scan(&self) -> Result<(), StoreError> {
+        let Some(_work) = self.work_gate.enter() else {
+            return Ok(());
+        };
         if !self.policy_admitted.load(Ordering::Acquire) {
             return Ok(());
         }
@@ -445,9 +456,9 @@ impl Indexer {
         let policy = self.get_indexing_config()?;
         let need_build = {
             let guard = self.vector_index.read().unwrap_or_else(|p| p.into_inner());
-            !guard
+            guard
                 .as_ref()
-                .is_some_and(|cached| cached.index.dim() == dim)
+                .is_none_or(|cached| cached.index.dim() != dim)
         };
         let hits = if need_build {
             let epoch = self.cache_epoch.load(Ordering::Acquire);
@@ -509,6 +520,13 @@ impl Indexer {
     pub(crate) fn invalidate_vector_cache(&self) {
         self.cache_epoch.fetch_add(1, Ordering::AcqRel);
         *self.vector_index.write().unwrap_or_else(|p| p.into_inner()) = None;
+    }
+
+    pub(crate) fn reset_completed(&self) {
+        self.policy_epoch.fetch_add(1, Ordering::AcqRel);
+        *self.counters.lock().unwrap_or_else(|p| p.into_inner()) = Counters::default();
+        self.catalog_dirty.store(true, Ordering::Release);
+        self.invalidate_vector_cache();
     }
 
     pub(crate) fn update_vector_cache(&self, seg_id: i64, entry: &EntryRow, vec: &[f32]) {
@@ -647,11 +665,13 @@ impl Indexer {
     }
 
     /// Pending-or-claimed non-name content extraction jobs.
+    #[cfg(test)]
     pub fn content_extract_queue_depth(&self) -> Result<u64, StoreError> {
         self.store_lock().content_extract_queue_depth()
     }
 
     /// Name-segments stored (→ `EngineStatus.segments_indexed`).
+    #[cfg(test)]
     pub fn segments_indexed(&self) -> Result<u64, StoreError> {
         self.store
             .lock()
@@ -660,6 +680,7 @@ impl Indexer {
     }
 
     /// Pending-or-claimed `extract_jobs(kind='name')` (embed backlog).
+    #[cfg(test)]
     pub fn embed_queue_depth(&self) -> Result<u64, StoreError> {
         self.store
             .lock()
@@ -738,6 +759,9 @@ impl Indexer {
     /// Returns how many were processed. Used by tests and one-shot scans.
     #[allow(dead_code)] // exercised by tests; workers use crawl_worker in production
     pub fn scan_available(&self, max_dirs: usize) -> usize {
+        let Some(_work) = self.work_gate.enter() else {
+            return 0;
+        };
         let mut processed = 0;
         for _ in 0..max_dirs {
             if self.indexing_pause_reason().is_some() {
@@ -773,6 +797,10 @@ impl Indexer {
                 self.wait_for_work();
                 continue;
             }
+            let Some(_work) = self.work_gate.enter() else {
+                self.wait_for_work();
+                continue;
+            };
             let work = {
                 let mut store = self.store_lock();
                 if self.indexing_pause_reason().is_some() {
@@ -954,6 +982,9 @@ impl Indexer {
     // ---- watcher events ----
 
     pub(crate) fn handle_event(&self, root_id: i64, event: WatchEvent) {
+        let Some(_work) = self.work_gate.enter() else {
+            return;
+        };
         if let Err(e) = self.apply_event(root_id, &event) {
             warn!(?event, error = %e, "event handling failed");
         }
@@ -1225,7 +1256,10 @@ impl Indexer {
             }
             // Sleep in small steps so shutdown is responsive.
             let mut remaining = CATALOG_REFRESH_INTERVAL;
-            while remaining > std::time::Duration::ZERO && !self.shutdown.load(Ordering::SeqCst) {
+            while remaining > std::time::Duration::ZERO
+                && !self.shutdown.load(Ordering::SeqCst)
+                && !self.catalog_dirty.swap(false, Ordering::AcqRel)
+            {
                 let step = remaining.min(std::time::Duration::from_secs(1));
                 std::thread::sleep(step);
                 remaining -= step;
@@ -1234,6 +1268,9 @@ impl Indexer {
     }
 
     fn refresh_catalog(&self) -> Result<(), StoreError> {
+        let Some(_work) = self.work_gate.enter() else {
+            return Ok(());
+        };
         if !self.policy_admitted.load(Ordering::Acquire) {
             return Ok(());
         }
@@ -1348,6 +1385,9 @@ impl Indexer {
     where
         F: Fn(&[String]) -> Result<Vec<Vec<f32>>, String>,
     {
+        let Some(_work) = self.work_gate.enter() else {
+            return Ok(EmbedBatchOutcome::default());
+        };
         if self.indexing_pause_reason().is_some() {
             return Ok(EmbedBatchOutcome::default());
         }
@@ -1595,6 +1635,9 @@ impl Indexer {
     /// One reconciliation pass over all roots: flags vanished volumes as
     /// missing (index preserved) and rescans roots that came back.
     fn reconcile_drives(self: &Arc<Self>) {
+        let Some(_work) = self.work_gate.enter() else {
+            return;
+        };
         for root in &self.root_snapshot() {
             let present = root.path.is_dir();
             let was_offline = root.offline.load(Ordering::Acquire);
@@ -1941,8 +1984,11 @@ mod tests {
             // Each policy change starts watchers; isolate cases so an earlier
             // watcher cannot commit the next file before the tested revocation.
             let tree = TempTree::new();
-            let indexer =
-                Indexer::open(IndexStore::open_in_memory().unwrap(), &[tree.0.clone()]).unwrap();
+            let indexer = Indexer::open(
+                IndexStore::open_in_memory().unwrap(),
+                std::slice::from_ref(&tree.0),
+            )
+            .unwrap();
             let root_id = indexer.root_snapshot()[0].id;
             let file = tree.0.join(if extension_rule {
                 "extension.race"
@@ -1984,8 +2030,11 @@ mod tests {
         fs::create_dir_all(&drive).unwrap();
         let file = drive.join("offline.txt");
         fs::write(&file, "old").unwrap();
-        let indexer =
-            Indexer::open(IndexStore::open_in_memory().unwrap(), &[drive.clone()]).unwrap();
+        let indexer = Indexer::open(
+            IndexStore::open_in_memory().unwrap(),
+            std::slice::from_ref(&drive),
+        )
+        .unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
         let id = indexer
@@ -2025,7 +2074,11 @@ mod tests {
         fs::create_dir_all(&b).unwrap();
         fs::write(a.join("uniquealpha.txt"), "ultrauniquepolicyalpha").unwrap();
         fs::write(b.join("uniquebeta.txt"), "beta content").unwrap();
-        let indexer = Indexer::open(IndexStore::open_in_memory().unwrap(), &[a.clone()]).unwrap();
+        let indexer = Indexer::open(
+            IndexStore::open_in_memory().unwrap(),
+            std::slice::from_ref(&a),
+        )
+        .unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
         indexer
@@ -2193,7 +2246,7 @@ mod tests {
 
     fn seeded(tree: &TempTree) -> Arc<Indexer> {
         let store = IndexStore::open_in_memory().unwrap();
-        let indexer = Indexer::open(store, &[tree.0.clone()]).unwrap();
+        let indexer = Indexer::open(store, std::slice::from_ref(&tree.0)).unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
         indexer
@@ -2331,7 +2384,7 @@ mod tests {
         let root = PathBuf::from("W:\\");
 
         let store = IndexStore::open_in_memory().unwrap();
-        let indexer = Indexer::open(store, &[root.clone()]).unwrap();
+        let indexer = Indexer::open(store, std::slice::from_ref(&root)).unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
 
@@ -2906,7 +2959,7 @@ mod tests {
 
         {
             let store = IndexStore::open(&db).unwrap();
-            let indexer = Indexer::open(store, &[tree.0.clone()]).unwrap();
+            let indexer = Indexer::open(store, std::slice::from_ref(&tree.0)).unwrap();
             indexer.enqueue_initial_scan().unwrap();
             while indexer.scan_available(64) > 0 {}
         }
@@ -2914,7 +2967,7 @@ mod tests {
         // Remove the root directory while the daemon is stopped, then reopen.
         fs::remove_dir_all(&tree.0).unwrap();
         let store = IndexStore::open(&db).unwrap();
-        let indexer = Indexer::open(store, &[tree.0.clone()]).unwrap();
+        let indexer = Indexer::open(store, std::slice::from_ref(&tree.0)).unwrap();
         indexer.reconcile_drives();
 
         assert!(
@@ -2956,7 +3009,8 @@ mod tests {
         let file = root.join("keep.txt");
         fs::write(&file, b"keep").unwrap();
         let db = tree.0.join("index.db");
-        let indexer = Indexer::open(IndexStore::open(&db).unwrap(), &[root.clone()]).unwrap();
+        let indexer =
+            Indexer::open(IndexStore::open(&db).unwrap(), std::slice::from_ref(&root)).unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
         let conn = rusqlite::Connection::open(&db).unwrap();

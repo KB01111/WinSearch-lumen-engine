@@ -23,6 +23,10 @@ pub enum ClientMessage {
     Ping {
         id: RequestId,
     },
+    ResetIndex {
+        id: RequestId,
+        request: crate::ResetRequest,
+    },
     ResolveEntry {
         id: RequestId,
         reference: crate::EntryReference,
@@ -105,6 +109,10 @@ pub enum ClientMessage {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
+    IndexReset {
+        id: RequestId,
+        reset: crate::IndexReset,
+    },
     IndexingConfig {
         id: Option<RequestId>,
         config: IndexingConfig,
@@ -367,6 +375,46 @@ pub struct MatchingMoment {
     pub thumbnail_path: Option<String>,
 }
 
+#[cfg(test)]
+mod match_source_tests {
+    use super::SearchResult;
+
+    #[test]
+    fn match_source_rejects_unknown_wire_values() {
+        assert!(serde_json::from_value::<SearchResult>(
+            serde_json::json!({"match_source":"guessed_from_display_text"})
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn match_source_preserves_closed_values_and_legacy_absence() {
+        for source in ["filename", "content", "semantic", "related"] {
+            let result: SearchResult =
+                serde_json::from_value(serde_json::json!({"match_source":source})).unwrap();
+            assert_eq!(
+                serde_json::to_value(result).unwrap()["match_source"],
+                source
+            );
+        }
+        let legacy: SearchResult = serde_json::from_str("{}").unwrap();
+        assert!(serde_json::to_value(legacy)
+            .unwrap()
+            .get("match_source")
+            .is_none());
+    }
+}
+
+/// Machine-readable match origin. Display explanations are not a protocol contract.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MatchSource {
+    Filename,
+    Content,
+    Semantic,
+    Related,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct SearchResult {
@@ -378,6 +426,9 @@ pub struct SearchResult {
     pub subtitle: String,
     /// Human-readable reason this result matched ("Matches PDF page 14").
     pub match_explanation: String,
+    /// Absent for legacy peers; advertised by `search.match_source`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_source: Option<MatchSource>,
     /// Ranking score in [0, 1]; results stream in descending order.
     pub score: f64,
     pub path: Option<String>,
@@ -399,6 +450,7 @@ impl Default for SearchResult {
             title: String::new(),
             subtitle: String::new(),
             match_explanation: String::new(),
+            match_source: None,
             score: 0.0,
             path: None,
             location: None,
@@ -631,6 +683,7 @@ mod tests {
                 title: "rental-agreement.pdf".into(),
                 subtitle: "C:\\Docs\\rental-agreement.pdf".into(),
                 match_explanation: "Matches PDF page 14".into(),
+                match_source: Some(MatchSource::Content),
                 score: 0.91,
                 path: Some("C:\\Docs\\rental-agreement.pdf".into()),
                 location: Some(MatchLocation::Page { page: 14 }),

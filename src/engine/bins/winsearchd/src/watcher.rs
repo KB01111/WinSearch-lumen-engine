@@ -318,7 +318,6 @@ mod tests {
         let mut stream = r1.clone();
         stream.extend_from_slice(&r2);
         // First record's "next" must point at the second record's start.
-        let mut stream = stream;
         let first_next = r1.len() as u32;
         stream[0..4].copy_from_slice(&first_next.to_le_bytes());
 

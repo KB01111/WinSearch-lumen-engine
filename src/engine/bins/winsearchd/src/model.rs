@@ -444,7 +444,7 @@ impl ModelService {
         let last_push = Mutex::new(Instant::now());
         let progress_cb = |npu: bool, downloaded: u64, total: u64| {
             let active = self.active.lock().unwrap_or_else(|p| p.into_inner());
-            if !active.as_ref().is_some_and(|op| op.id == id) {
+            if active.as_ref().is_none_or(|op| op.id != id) {
                 return;
             }
             let mut snapshot = self
@@ -532,7 +532,7 @@ impl ModelService {
 
         // Publish terminal bookkeeping before allowing another operation to start.
         let mut active = self.active.lock().unwrap_or_else(|p| p.into_inner());
-        if !active.as_ref().is_some_and(|op| op.id == id) {
+        if active.as_ref().is_none_or(|op| op.id != id) {
             return;
         }
 
@@ -724,7 +724,6 @@ mod tests {
             .collect();
         let options = DownloadOptions {
             base_url_override: Some(fx.base_url.clone()),
-            ..DownloadOptions::default()
         };
         let manager = ModelManager::with_files(dir, options, files);
         ModelService::with_manager(manager, test_indexer())
@@ -992,7 +991,7 @@ mod tests {
 
         let dir = temp_dir("incompat-restart");
         let store = ws_index::IndexStore::open_in_memory().unwrap();
-        let indexer = crate::indexer::Indexer::open(store, &[tree.clone()]).unwrap();
+        let indexer = crate::indexer::Indexer::open(store, std::slice::from_ref(&tree)).unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
         // Seed one name vector through the pipeline's fake path.
@@ -1094,7 +1093,8 @@ mod tests {
             // This fixture tests migration; host Battery Saver must not skip its scan.
             config.respect_battery_saver = false;
             store.set_indexing_config(&config).unwrap();
-            let indexer = crate::indexer::Indexer::open(store, &[root.clone()]).unwrap();
+            let indexer =
+                crate::indexer::Indexer::open(store, std::slice::from_ref(&root)).unwrap();
             assert!(
                 indexer.indexing_pause_reason().is_none(),
                 "fixture scan paused: {:?}",

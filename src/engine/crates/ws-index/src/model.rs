@@ -302,10 +302,10 @@ impl VideoSelection {
             || self.duration_ms > MAX_MEDIA_DURATION_MS
             || self.scan_span_ms < VIDEO_SELECTION_SPAN_MS
             || self.scan_span_ms > MAX_VIDEO_SELECTION_SPAN_MS
-            || self.scan_span_ms % VIDEO_SELECTION_SPAN_MS != 0
+            || !self.scan_span_ms.is_multiple_of(VIDEO_SELECTION_SPAN_MS)
             || self.next_ms == 0
             || self.next_ms > self.duration_ms
-            || (self.next_ms != self.duration_ms && self.next_ms % self.scan_span_ms != 0)
+            || (self.next_ms != self.duration_ms && !self.next_ms.is_multiple_of(self.scan_span_ms))
             || self.sample_count as usize > MAX_VIDEO_SHOT_SAMPLES
             || self.candidates_ms.len() > MAX_VIDEO_SHOT_SAMPLES + 2
             || self.last_gray.len()

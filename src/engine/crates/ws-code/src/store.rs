@@ -886,6 +886,27 @@ impl CodeStore {
         &self.database_id
     }
 
+    /// Idempotent durable reset, preserving schema and numeric ID watermarks.
+    pub fn reset_to(&mut self, database_id: &str) -> Result<(), CodeStoreError> {
+        if !ws_protocol::valid_index_id(database_id) {
+            return Err(CodeStoreError::InvalidIdentity);
+        }
+        if self.database_id == database_id {
+            return Ok(());
+        }
+        self.conn.pragma_update(None, "synchronous", "FULL")?;
+        let tx = self.conn.transaction()?;
+        tx.execute_batch("DELETE FROM code_chunks_fts; DELETE FROM code_symbols_fts; DELETE FROM code_symbols_tri; DELETE FROM code_jobs; DELETE FROM code_scan_files; DELETE FROM repos;")?;
+        tx.execute(
+            "UPDATE meta SET value=?1 WHERE key='database_id'",
+            [database_id],
+        )?;
+        tx.commit()?;
+        self.database_id = database_id.to_owned();
+        self.conn.pragma_update(None, "synchronous", "NORMAL")?;
+        Ok(())
+    }
+
     pub fn schema_version(&self) -> Result<String, CodeStoreError> {
         let v: String = self.conn.query_row(
             "SELECT value FROM meta WHERE key = 'schema_version'",
@@ -1857,6 +1878,22 @@ pub fn dot_fp16_row_vs_normalized(stored_fp16: &[u8], normed_query: &[f32]) -> f
         dot += half::f16::from_bits(bits).to_f32() * normed_query[i];
     }
     dot.clamp(-1.0, 1.0)
+}
+
+fn map_notebook(
+    row: &rusqlite::Row<'_>,
+    first: usize,
+) -> rusqlite::Result<Option<crate::model::NotebookLocation>> {
+    let ordinal: Option<u32> = row.get(first)?;
+    ordinal
+        .map(|cell_ordinal| {
+            Ok(crate::model::NotebookLocation {
+                cell_ordinal,
+                start_line: row.get(first + 1)?,
+                end_line: row.get(first + 2)?,
+            })
+        })
+        .transpose()
 }
 
 #[cfg(test)]
@@ -2981,10 +3018,9 @@ mod tests {
 
         // Verify the rename outcome preserved the exact `code_files.id`.
         assert!(
-            outcomes2.iter().any(|o| *o
-                == FileUpsertOutcome::Renamed {
-                    id: engine_row_before.id
-                }),
+            outcomes2.contains(&FileUpsertOutcome::Renamed {
+                id: engine_row_before.id
+            }),
             "expected Renamed outcome with preserved id {}, got {outcomes2:?}",
             engine_row_before.id
         );
@@ -3271,20 +3307,4 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
-}
-
-fn map_notebook(
-    row: &rusqlite::Row<'_>,
-    first: usize,
-) -> rusqlite::Result<Option<crate::model::NotebookLocation>> {
-    let ordinal: Option<u32> = row.get(first)?;
-    ordinal
-        .map(|cell_ordinal| {
-            Ok(crate::model::NotebookLocation {
-                cell_ordinal,
-                start_line: row.get(first + 1)?,
-                end_line: row.get(first + 2)?,
-            })
-        })
-        .transpose()
 }

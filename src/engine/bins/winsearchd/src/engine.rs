@@ -87,6 +87,7 @@ pub struct EngineService {
     cancels: Mutex<HashMap<(u64, RequestId), Arc<AtomicBool>>>,
     preview_jobs: Arc<std::sync::atomic::AtomicUsize>,
     related_jobs: std::sync::atomic::AtomicUsize,
+    search_jobs: std::sync::atomic::AtomicUsize,
     next_client_id: std::sync::atomic::AtomicU64,
     indexer: Arc<Indexer>,
     extractors: Arc<crate::extract::ExtractorRegistry>,
@@ -169,7 +170,138 @@ struct ResultSource {
     content_only: bool,
 }
 
+struct SearchWork {
+    engine: SharedEngine,
+    client_id: u64,
+    id: RequestId,
+    cancel: Arc<AtomicBool>,
+}
+
+impl Drop for SearchWork {
+    fn drop(&mut self) {
+        self.engine
+            .end_request_for_client(self.client_id, self.id, &self.cancel);
+        self.engine.search_jobs.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 impl EngineService {
+    fn resume_after_reset_gate(&self) {
+        self.indexer.work_gate.reopen();
+        // Watcher notifications were deliberately excluded while draining.
+        // Reconcile even an aborted reset, so no event can disappear silently.
+        if let Err(error) = self.indexer.enqueue_initial_scan() {
+            warn!(%error, "resuming reset scan failed");
+        }
+        if let Some(code) = self.code_service() {
+            if let Err(error) = code.reconcile_after_gate() {
+                warn!(%error, "resuming code scan failed");
+            }
+        }
+        self.indexer.notify_work();
+    }
+    pub fn reset_index(
+        self: &Arc<Self>,
+        client: &ClientHandle,
+        id: RequestId,
+        request: ws_protocol::ResetRequest,
+    ) {
+        if !request.is_valid() {
+            let _ = client.send(&ServerMessage::Error {
+                id: Some(id),
+                code: ErrorCode::InvalidRequest,
+                message: "invalid reset namespaces".into(),
+            });
+            return;
+        }
+        if !self.indexer.work_gate.close() {
+            let _ = client.send(&ServerMessage::Error {
+                id: Some(id),
+                code: ErrorCode::NotReady,
+                message: "index reset unavailable".into(),
+            });
+            return;
+        }
+        for cancel in self
+            .cancels
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .values()
+        {
+            cancel.store(true, Ordering::Release);
+        }
+        let engine = self.clone();
+        let client = client.clone();
+        let failure_client = client.clone();
+        if std::thread::Builder::new()
+            .name("winsearch-reset".into())
+            .spawn(move || {
+                let reply = engine.reset_index_inner(&request);
+                let message = match reply {
+                    Ok(reset) => ServerMessage::IndexReset { id, reset },
+                    Err(code) => ServerMessage::Error {
+                        id: Some(id),
+                        code,
+                        message: "index reset failed; restart the owned engine if unavailable"
+                            .into(),
+                    },
+                };
+                let _ = client.send(&message);
+            })
+            .is_err()
+        {
+            self.resume_after_reset_gate();
+            let _ = failure_client.send(&ServerMessage::Error {
+                id: Some(id),
+                code: ErrorCode::NotReady,
+                message: "reset worker could not start".into(),
+            });
+        }
+    }
+
+    fn reset_index_inner(
+        &self,
+        request: &ws_protocol::ResetRequest,
+    ) -> Result<ws_protocol::IndexReset, ErrorCode> {
+        if !self.indexer.work_gate.drain(Duration::from_secs(10)) {
+            self.resume_after_reset_gate();
+            return Err(ErrorCode::NotReady);
+        }
+        let Some(code) = self.code_service() else {
+            self.resume_after_reset_gate();
+            return Err(ErrorCode::NotReady);
+        };
+        let mut ordinary = self.indexer.store_lock();
+        let mut code_store = code.store.lock().unwrap_or_else(|p| p.into_inner());
+        if ordinary.database_id() != request.expected_index_id
+            || code_store.database_id() != request.expected_code_index_id
+        {
+            drop(code_store);
+            drop(ordinary);
+            self.resume_after_reset_gate();
+            return Err(ErrorCode::InvalidRequest);
+        }
+        let reset = crate::reset::execute(&mut ordinary, &mut code_store).map_err(|error| {
+            warn!(%error, "durable reset failed; admission remains closed until restart recovery");
+            self.status.lock().unwrap_or_else(|p| p.into_inner()).state = EngineRunState::Error;
+            ErrorCode::Internal
+        })?;
+        drop(code_store);
+        drop(ordinary);
+        code.reset_runtime();
+        self.indexer.reset_completed();
+        *self.query_cache.lock().unwrap_or_else(|p| p.into_inner()) =
+            QueryEmbeddingCache::new(QUERY_CACHE_CAP);
+        self.status
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .index_id = Some(reset.index_id.clone());
+        self.resume_after_reset_gate();
+        // A rescan failure does not make the completed reset ambiguous. Durable
+        // roots survive and are reconciled on the next configuration/startup.
+        Ok(reset)
+    }
+    #[cfg(test)]
     pub fn new(indexer: Arc<Indexer>) -> SharedEngine {
         Self::new_with_model_dir(indexer, paths::model_dir())
     }
@@ -180,6 +312,7 @@ impl EngineService {
     }
 
     /// Test hook: same engine with an isolated model directory.
+    #[cfg(test)]
     pub fn new_with_model_dir(
         indexer: Arc<Indexer>,
         model_dir: std::path::PathBuf,
@@ -219,6 +352,7 @@ impl EngineService {
             cancels: Mutex::new(HashMap::new()),
             preview_jobs: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             related_jobs: std::sync::atomic::AtomicUsize::new(0),
+            search_jobs: std::sync::atomic::AtomicUsize::new(0),
             next_client_id: std::sync::atomic::AtomicU64::new(1),
             indexer,
             extractors: Arc::new(crate::extract::ExtractorRegistry::production()),
@@ -231,6 +365,7 @@ impl EngineService {
     }
 
     /// Test seam: embed query texts through `hook` instead of the worker.
+    #[cfg(test)]
     pub fn set_query_embed_hook(&self, hook: QueryEmbedHook) {
         *self
             .query_embed_hook
@@ -239,6 +374,7 @@ impl EngineService {
     }
 
     /// Test seam: force the semantic stage's model-readiness check.
+    #[cfg(test)]
     pub fn set_model_ready_override(&self, ready: Option<bool>) {
         *self
             .model_ready_override
@@ -403,6 +539,7 @@ impl EngineService {
         }
     }
 
+    #[cfg(test)]
     pub fn cancel(&self, id: RequestId) {
         let guard = self.cancels.lock().unwrap_or_else(|p| p.into_inner());
         for ((_, req_id), flag) in guard.iter() {
@@ -431,6 +568,14 @@ impl EngineService {
         id: RequestId,
         reference: ws_protocol::EntryReference,
     ) {
+        let Some(_work) = self.indexer.work_gate.enter() else {
+            let _ = client.send(&ServerMessage::Error {
+                id: Some(id),
+                code: ErrorCode::NotReady,
+                message: "index reset in progress".into(),
+            });
+            return;
+        };
         let mut stream = client.stream.lock().unwrap_or_else(|p| p.into_inner());
         let response = match self.resolve_entry_snapshot(&reference) {
             Ok(entry) => ServerMessage::ResolvedEntry { id, entry },
@@ -475,6 +620,14 @@ impl EngineService {
         if std::thread::Builder::new()
             .name("winsearch-preview".into())
             .spawn(move || {
+                let Some(_ticket) = work.engine.indexer.work_gate.enter() else {
+                    let _ = client.send(&ServerMessage::Error {
+                        id: Some(id),
+                        code: ErrorCode::NotReady,
+                        message: "index reset in progress".into(),
+                    });
+                    return;
+                };
                 let response = match work.engine.preview_snapshot(&request, &work.cancel) {
                     Ok(preview) => ServerMessage::EntryPreview { id, preview },
                     Err(code) => ServerMessage::Error {
@@ -652,6 +805,7 @@ impl EngineService {
         &self,
         reference: &ws_protocol::EntryReference,
     ) -> Result<ws_protocol::ResolvedEntry, ErrorCode> {
+        let _work = self.indexer.work_gate.enter().ok_or(ErrorCode::NotReady)?;
         let invalid = ErrorCode::InvalidRequest;
         if !reference.is_valid() {
             return Err(invalid);
@@ -1412,6 +1566,11 @@ impl EngineService {
                 entry.thumbnail_path
             };
             out.push(SearchResult {
+                match_source: Some(if exclude.is_some() {
+                    ws_protocol::MatchSource::Related
+                } else {
+                    ws_protocol::MatchSource::Semantic
+                }),
                 id: format!("s{entry_id}"),
                 kind: to_result_kind(kind),
                 title: entry.name.clone(),
@@ -1477,9 +1636,39 @@ impl EngineService {
             self.end_request_for_client(client.id(), id, &cancel);
             return;
         }
-        if let Err(error) = self.run_search(client, id, query, Arc::clone(&cancel)) {
-            warn!(id,error=%error,"search transport failed");
+        if self
+            .search_jobs
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                (n < 8).then_some(n + 1)
+            })
+            .is_err()
+        {
+            let _ = self.send_search_failure(client, id, &cancel, ErrorCode::NotReady);
             self.end_request_for_client(client.id(), id, &cancel);
+            return;
+        }
+        let work = Arc::new(SearchWork {
+            engine: self.clone(),
+            client_id: client.id(),
+            id,
+            cancel: cancel.clone(),
+        });
+        let worker = work.clone();
+        let thread_client = client.clone();
+        if let Err(error) = std::thread::Builder::new()
+            .name("winsearch-search".into())
+            .spawn(move || {
+                if let Err(error) =
+                    worker
+                        .engine
+                        .run_search(&thread_client, id, query, worker.cancel.clone())
+                {
+                    warn!(id, %error, "search transport failed");
+                }
+            })
+        {
+            warn!(id, %error, "search worker could not start");
+            let _ = self.send_search_failure(client, id, &cancel, ErrorCode::NotReady);
         }
     }
 
@@ -1615,6 +1804,9 @@ impl EngineService {
         cancel: &Arc<AtomicBool>,
         revision: SearchRevision,
     ) -> Result<(), FrameError> {
+        let Some(_work) = self.indexer.work_gate.enter() else {
+            return self.send_search_failure(client, id, cancel, ErrorCode::NotReady);
+        };
         let mut query = SearchQuery {
             mode: if matches!(
                 request.source.indexed_id(),
@@ -1664,9 +1856,13 @@ impl EngineService {
             related_source: Some(&request.source),
         };
         match planned {
-            Ok((hits, outcome)) => self
-                .send_results(client, id, hits, Some(outcome), &delivery)
-                .map(|_| ()),
+            Ok((mut hits, outcome)) => {
+                for hit in &mut hits {
+                    hit.match_source = Some(ws_protocol::MatchSource::Related);
+                }
+                self.send_results(client, id, hits, Some(outcome), &delivery)
+                    .map(|_| ())
+            }
             Err(code) => {
                 self.send_search_failure_checked(client, id, cancel, code, Some(&delivery))
             }
@@ -1764,6 +1960,12 @@ impl EngineService {
         query: SearchQuery,
         cancel: Arc<AtomicBool>,
     ) -> Result<(), FrameError> {
+        let Some(_work) = self.indexer.work_gate.enter() else {
+            return self.send_search_failure(client, id, &cancel, ErrorCode::NotReady);
+        };
+        if cancel.load(Ordering::Acquire) {
+            return self.send_search_failure(client, id, &cancel, ErrorCode::Cancelled);
+        }
         let code_epoch = self
             .code_service()
             .filter(|_| query.mode == SearchMode::Code)
@@ -1802,46 +2004,8 @@ impl EngineService {
             return Ok(());
         }
 
-        // Semantic stage runs off the connection read loop so an in-band
-        // `Cancel` or superseding `Search` on the same pipe can be read and
-        // applied while `embed_query` is in flight.
-        let this = Arc::clone(self);
-        let thread_client = client.clone();
-        let thread_cancel = Arc::clone(&cancel);
-        let thread_query = query.clone();
-        if let Err(e) = std::thread::Builder::new()
-            .name("winsearch-semantic".into())
-            .spawn(move || {
-                let outcome = this.run_semantic_stage(
-                    &thread_client,
-                    id,
-                    &thread_query,
-                    &first,
-                    &thread_cancel,
-                    revision,
-                );
-                this.end_request_for_client(thread_client.id(), id, &thread_cancel);
-                if let Err(err) = outcome {
-                    warn!(id,error=%err,"semantic result transport failed");
-                }
-            })
-        {
-            warn!(error = %e, "semantic stage: thread spawn failed; closing stream");
-            let outcome = self
-                .send_results(
-                    client,
-                    id,
-                    Vec::new(),
-                    Some(SearchOutcome::complete(SemanticOutcome::degraded(
-                        SemanticIssue::RetrievalFailed,
-                    ))),
-                    &delivery,
-                )
-                .map(|_| ());
-            self.end_request_for_client(client.id(), id, &cancel);
-            return outcome;
-        }
-        Ok(())
+        // Exact and semantic stages share one bounded worker; control reads stay independent.
+        self.run_semantic_stage(client, id, &query, &first, &cancel, revision)
     }
 
     fn query_current(&self, query: &SearchQuery, revision: SearchRevision) -> bool {
@@ -2022,6 +2186,9 @@ impl EngineService {
             semantic = unavailable;
         }
         hits.truncate((query.limit.max(1) as usize).saturating_sub(first.usage.results));
+        for hit in &mut hits {
+            hit.match_source = Some(ws_protocol::MatchSource::Semantic);
+        }
         self.send_results_after(
             client,
             id,
@@ -2294,6 +2461,11 @@ impl EngineService {
                             })
                             .collect();
                         results.push(SearchResult {
+                            match_source: Some(if hit.content_only {
+                                ws_protocol::MatchSource::Content
+                            } else {
+                                ws_protocol::MatchSource::Filename
+                            }),
                             entry_reference: None,
                             id: format!("e{}", hit.entry_id),
                             kind: to_result_kind(hit.kind),
@@ -2388,6 +2560,7 @@ fn code_result(hit: ws_code::model::CodeSearchHit) -> SearchResult {
         format!("{} · line {}", hit.symbol_kind, hit.start_line)
     };
     SearchResult {
+        match_source: Some(ws_protocol::MatchSource::Content),
         entry_reference: Some(ws_protocol::EntryReference {
             result_id: format!("c{}", hit.file.id),
             source_revision: None,
@@ -2778,7 +2951,7 @@ mod tests {
             fs::write(tree.0.join(f), b"x").unwrap();
         }
         let store = fixture_store();
-        let indexer = Indexer::open(store, &[tree.0.clone()]).unwrap();
+        let indexer = Indexer::open(store, std::slice::from_ref(&tree.0)).unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
         EngineService::new(indexer)
@@ -4630,7 +4803,7 @@ mod tests {
             fs::write(tree.0.join(f), b"x").unwrap();
         }
         let store = fixture_store();
-        let indexer = Indexer::open(store, &[tree.0.clone()]).unwrap();
+        let indexer = Indexer::open(store, std::slice::from_ref(&tree.0)).unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
         let engine = EngineService::new(indexer);
@@ -4820,7 +4993,7 @@ mod tests {
             fs::write(tree.0.join(f), b"x").unwrap();
         }
         let store = fixture_store();
-        let indexer = Indexer::open(store, &[tree.0.clone()]).unwrap();
+        let indexer = Indexer::open(store, std::slice::from_ref(&tree.0)).unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
         let engine = EngineService::new(indexer);
@@ -4858,7 +5031,7 @@ mod tests {
         let tree = TempTree::new();
         let path = tree.0.join("sampletoken-notes.txt");
         fs::write(&path, "sampletoken documentonlytoken passage").unwrap();
-        let indexer = Indexer::open(fixture_store(), &[tree.0.clone()]).unwrap();
+        let indexer = Indexer::open(fixture_store(), std::slice::from_ref(&tree.0)).unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
         indexer
@@ -5439,7 +5612,7 @@ mod tests {
         let tree = TempTree::new();
         fs::write(tree.0.join("banquet-hall.txt"), b"x").unwrap();
         let store = fixture_store();
-        let indexer = Indexer::open(store, &[tree.0.clone()]).unwrap();
+        let indexer = Indexer::open(store, std::slice::from_ref(&tree.0)).unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
         indexer
@@ -5907,6 +6080,243 @@ mod tests {
     fn unique_pipe() -> String {
         let n = PIPE_SEQ.fetch_add(1, Ordering::SeqCst);
         format!(r"\\.\pipe\winsearch-task6-{}-{n}", std::process::id())
+    }
+
+    #[test]
+    fn ordinary_search_dispatch_does_not_block_control_on_a_busy_store() {
+        let indexer = Indexer::open(ws_index::IndexStore::open_in_memory().unwrap(), &[]).unwrap();
+        let engine = EngineService::new_with_model_dir(
+            indexer,
+            std::env::temp_dir().join("winsearch-dispatch-unused"),
+        );
+        let pipe = unique_pipe();
+        let serving = pipe.clone();
+        let registering = engine.clone();
+        let (registered, clients) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = ws_platform::pipe::serve(&serving, move |stream| {
+                let client = registering.register_client(Arc::new(Mutex::new(stream)));
+                let _ = registered.send(client);
+            });
+        });
+        let mut peer = connect_retry(&pipe);
+        let client = clients.recv_timeout(Duration::from_secs(2)).unwrap();
+        let guard = engine.indexer.store_lock();
+        let searching = engine.clone();
+        let searching_client = client.clone();
+        let (returned, complete) = std::sync::mpsc::channel();
+        let caller = std::thread::spawn(move || {
+            searching.search(
+                &searching_client,
+                911,
+                SearchQuery {
+                    text: "invoice".into(),
+                    include_semantic: false,
+                    ..Default::default()
+                },
+            );
+            let _ = returned.send(());
+        });
+        let dispatched = complete.recv_timeout(Duration::from_millis(500));
+        drop(guard);
+        caller.join().unwrap();
+        while !read_one(&mut peer).1 {}
+        engine.unregister_client(&client);
+        assert!(
+            dispatched.is_ok(),
+            "exact planning blocked the protocol/control thread on the store lock"
+        );
+    }
+
+    #[test]
+    fn reset_pipe_drains_work_preserves_policy_and_rejects_replayed_namespaces() {
+        let (code, indexer, root) = crate::code::tests::indexed_fixture();
+        let normal = root.parent().unwrap().join("ordinary");
+        fs::create_dir_all(&normal).unwrap();
+        let source = normal.join("invoice.txt");
+        fs::write(&source, "current ordinary content").unwrap();
+        let mut policy = indexer.get_indexing_config().unwrap();
+        policy.roots = vec![normal.to_string_lossy().into()];
+        indexer.set_indexing_config(&policy).unwrap();
+        while indexer.scan_available(64) > 0 {}
+        let old_entry = indexer
+            .store_lock()
+            .find_by_path(&source.to_string_lossy())
+            .unwrap()
+            .unwrap()
+            .id;
+        let old_code = code.store.lock().unwrap().all_files().unwrap()[0].id;
+        let models = root.parent().unwrap().join("retained-models");
+        fs::create_dir_all(&models).unwrap();
+        fs::write(models.join("sentinel"), b"retained model").unwrap();
+        let engine = EngineService::new_with_model_dir(indexer.clone(), models.clone());
+        *engine.code.lock().unwrap() = Some(code.clone());
+        let request = ws_protocol::ResetRequest {
+            expected_index_id: indexer.store_lock().database_id().into(),
+            expected_code_index_id: code.store.lock().unwrap().database_id().into(),
+        };
+        let pipe = unique_pipe();
+        let serving = pipe.clone();
+        let handler = engine.clone();
+        std::thread::spawn(move || {
+            let _ = ws_platform::pipe::serve(&serving, move |stream| {
+                crate::server::handle_connection(stream, handler.clone())
+            });
+        });
+        let mut peer = connect_retry(&pipe);
+        ws_protocol::write_message(
+            &mut peer,
+            &ws_protocol::ClientMessage::Hello {
+                protocol_version: 1,
+                client: "reset-native-test".into(),
+                client_version: "1".into(),
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            ws_protocol::read_message::<_, ServerMessage>(&mut peer).unwrap(),
+            Some(ServerMessage::HelloAck { .. })
+        ));
+        let _ = ws_protocol::read_message::<_, ServerMessage>(&mut peer).unwrap();
+        let work = indexer.work_gate.enter().unwrap();
+        ws_protocol::write_message(
+            &mut peer,
+            &ws_protocol::ClientMessage::ResetIndex {
+                id: 501,
+                request: request.clone(),
+            },
+        )
+        .unwrap();
+        ws_protocol::write_message(&mut peer, &ws_protocol::ClientMessage::Ping { id: 502 })
+            .unwrap();
+        assert_eq!(
+            ws_protocol::read_message::<_, ServerMessage>(&mut peer).unwrap(),
+            Some(ServerMessage::Pong { id: 502 })
+        );
+        drop(work);
+        let Some(ServerMessage::IndexReset { id: 501, reset }) =
+            ws_protocol::read_message::<_, ServerMessage>(&mut peer).unwrap()
+        else {
+            panic!("reset acknowledgment");
+        };
+        assert_ne!(reset.index_id, request.expected_index_id);
+        assert_ne!(reset.code_index_id, request.expected_code_index_id);
+        assert_eq!(indexer.get_indexing_config().unwrap(), policy);
+        assert_eq!(
+            fs::read(models.join("sentinel")).unwrap(),
+            b"retained model"
+        );
+        assert_eq!(indexer.store_lock().stats().unwrap().entries_total, 0);
+        assert!(code.store.lock().unwrap().all_files().unwrap().is_empty());
+        for result_id in [format!("e{old_entry}"), format!("c{old_code}")] {
+            assert!(engine
+                .resolve_entry_snapshot(&ws_protocol::EntryReference {
+                    result_id,
+                    source_revision: None
+                })
+                .is_err());
+        }
+        ws_protocol::write_message(
+            &mut peer,
+            &ws_protocol::ClientMessage::ResetIndex { id: 503, request },
+        )
+        .unwrap();
+        assert!(matches!(
+            ws_protocol::read_message::<_, ServerMessage>(&mut peer).unwrap(),
+            Some(ServerMessage::Error {
+                id: Some(503),
+                code: ErrorCode::InvalidRequest,
+                ..
+            })
+        ));
+        assert_eq!(indexer.store_lock().database_id(), reset.index_id);
+        while indexer.scan_available(64) > 0 {}
+        assert!(
+            indexer
+                .store_lock()
+                .find_by_path(&source.to_string_lossy())
+                .unwrap()
+                .unwrap()
+                .id
+                > old_entry
+        );
+        drop(peer);
+        crate::code::tests::stop_fixture_watchers(&code);
+        // The accept-loop fixture intentionally outlives this test. Revoke its
+        // roots before deleting the test tree so it retains no source grants.
+        let mut revoked = policy;
+        revoked.roots.clear();
+        revoked.code_roots.clear();
+        revoked.code_enabled = false;
+        indexer.set_indexing_config(&revoked).unwrap();
+        *engine.code.lock().unwrap() = None;
+        drop(code);
+        fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn ordinary_search_admission_counts_canceled_work_until_it_retires() {
+        let tree = TempTree::new();
+        let engine = service_with(&tree, &[]);
+        let pipe = unique_pipe();
+        let serving = pipe.clone();
+        let registering = engine.clone();
+        let (registered, clients) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = ws_platform::pipe::serve(&serving, move |stream| {
+                let _ = registered.send(registering.register_client(Arc::new(Mutex::new(stream))));
+            });
+        });
+        let mut peers = Vec::new();
+        let mut handles = Vec::new();
+        for _ in 0..9 {
+            peers.push(connect_retry(&pipe));
+            handles.push(clients.recv_timeout(Duration::from_secs(2)).unwrap());
+        }
+        let guard = engine.indexer.store_lock();
+        let request = SearchQuery {
+            text: "invoice".into(),
+            ..Default::default()
+        };
+        for handle in &handles[..8] {
+            engine.search(handle, 1, request.clone());
+        }
+        assert_eq!(engine.search_jobs.load(Ordering::Acquire), 8);
+        engine.search(&handles[8], 1, request.clone());
+        assert!(matches!(
+            ws_protocol::read_message::<_, ServerMessage>(&mut peers[8]).unwrap(),
+            Some(ServerMessage::Error {
+                code: ErrorCode::NotReady,
+                ..
+            })
+        ));
+        let _ = read_one(&mut peers[8]);
+        for handle in &handles[..8] {
+            engine.cancel_for_client(handle.id(), 1);
+        }
+        // Workers that already reached the store remain charged; allow workers
+        // not yet started to retire instead of asserting scheduler timing.
+        handles[8].send(&ServerMessage::Pong { id: 2 }).unwrap();
+        assert_eq!(
+            ws_protocol::read_message::<_, ServerMessage>(&mut peers[8]).unwrap(),
+            Some(ServerMessage::Pong { id: 2 })
+        );
+        drop(guard);
+        for peer in &mut peers[..8] {
+            while !read_one(peer).1 {}
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while engine.search_jobs.load(Ordering::Acquire) != 0
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(engine.search_jobs.load(Ordering::Acquire), 0);
+        engine.search(&handles[8], 3, request);
+        while !read_one(&mut peers[8]).1 {}
+        for handle in handles {
+            engine.unregister_client(&handle);
+        }
     }
 
     /// Serves one `search` per connection on a background thread (detached:

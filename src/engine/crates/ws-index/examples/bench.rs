@@ -297,8 +297,7 @@ fn run_semantic_bench(store: &mut IndexStore) {
 
     for &target_segs in &[1_000usize, 10_000] {
         let current = store.segment_count().unwrap() as usize;
-        for i in current..target_segs.min(entry_ids.len()) {
-            let eid = entry_ids[i];
+        for (i, &eid) in entry_ids.iter().enumerate().take(target_segs).skip(current) {
             let v = pseudo_vector(i + 100, EMBEDDING_DIM);
             store
                 .upsert_segment(NewSegment {

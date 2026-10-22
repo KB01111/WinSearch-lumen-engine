@@ -214,16 +214,15 @@ impl Extractor for ImageExtractor {
         let thumb_path = match stat_thumbnail_key(path) {
             Ok((vol, fid, mtime)) => {
                 let candidate = thumbnail_cache_path(&self.thumb_dir, vol, fid, mtime);
-                if candidate.is_file() {
-                    Some(candidate)
-                } else if write_bgra_thumbnail_png(
-                    &wic.bgra8,
-                    wic.scaled_width,
-                    wic.scaled_height,
-                    self.thumb_max_edge,
-                    &candidate,
-                )
-                .is_ok()
+                if candidate.is_file()
+                    || write_bgra_thumbnail_png(
+                        &wic.bgra8,
+                        wic.scaled_width,
+                        wic.scaled_height,
+                        self.thumb_max_edge,
+                        &candidate,
+                    )
+                    .is_ok()
                 {
                     Some(candidate)
                 } else {

@@ -351,12 +351,10 @@ fn walk_xml_text(
                     out.push('\n');
                 }
             }
-            Ok(Event::Empty(e)) => {
-                if skip_depth == 0 {
-                    let tag = local_tag_lower(e.name().as_ref());
-                    if matches!(tag.as_str(), "br" | "hr") && !out.ends_with('\n') {
-                        out.push('\n');
-                    }
+            Ok(Event::Empty(e)) if skip_depth == 0 => {
+                let tag = local_tag_lower(e.name().as_ref());
+                if matches!(tag.as_str(), "br" | "hr") && !out.ends_with('\n') {
+                    out.push('\n');
                 }
             }
             Ok(Event::End(e)) => {
@@ -371,20 +369,16 @@ fn walk_xml_text(
                     out.push('\n');
                 }
             }
-            Ok(Event::Text(t)) => {
-                if skip_depth == 0 {
-                    let decoded = t
-                        .unescape()
-                        .map(|c| c.into_owned())
-                        .unwrap_or_else(|_| String::from_utf8_lossy(t.as_ref()).into_owned());
-                    append_inline_text(&mut out, &decoded);
-                }
+            Ok(Event::Text(t)) if skip_depth == 0 => {
+                let decoded = t
+                    .unescape()
+                    .map(|c| c.into_owned())
+                    .unwrap_or_else(|_| String::from_utf8_lossy(t.as_ref()).into_owned());
+                append_inline_text(&mut out, &decoded);
             }
-            Ok(Event::CData(c)) => {
-                if skip_depth == 0 {
-                    let s = String::from_utf8_lossy(c.as_ref());
-                    append_inline_text(&mut out, &s);
-                }
+            Ok(Event::CData(c)) if skip_depth == 0 => {
+                let s = String::from_utf8_lossy(c.as_ref());
+                append_inline_text(&mut out, &s);
             }
             Ok(Event::Eof) => break,
             Err(_) => {
@@ -501,15 +495,11 @@ fn extract_docx_text(path: &Path, budget: &ExtractBudget) -> Result<String, Extr
             },
             Ok(Event::End(e)) => match e.name().as_ref() {
                 b"w:t" | b"t" => in_wt = false,
-                b"w:p" | b"p" | b"w:tr" => {
-                    if !out.is_empty() && !out.ends_with('\n') {
-                        out.push('\n');
-                    }
+                b"w:p" | b"p" | b"w:tr" if !out.is_empty() && !out.ends_with('\n') => {
+                    out.push('\n');
                 }
-                b"w:tc" => {
-                    if !out.is_empty() && !out.ends_with(['\t', '\n']) {
-                        out.push('\t');
-                    }
+                b"w:tc" if !out.is_empty() && !out.ends_with(['\t', '\n']) => {
+                    out.push('\t');
                 }
                 _ => {}
             },
@@ -819,10 +809,8 @@ pub fn strip_rtf(input: &str, budget: &ExtractBudget) -> Result<String, ExtractE
                         }
 
                         match word {
-                            "par" | "line" | "sect" | "page" | "row" => {
-                                if !out.ends_with('\n') {
-                                    out.push('\n');
-                                }
+                            "par" | "line" | "sect" | "page" | "row" if !out.ends_with('\n') => {
+                                out.push('\n');
                             }
                             "tab" | "cell" => {
                                 out.push('\t');

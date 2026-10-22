@@ -301,8 +301,7 @@ impl VectorIndex {
         let victims: Vec<i64> = self
             .ids
             .iter()
-            .enumerate()
-            .filter_map(|(_, &id)| {
+            .filter_map(|&id| {
                 let slot = self.pos[&id];
                 (self.entry_ids[slot] == entry_id).then_some(id)
             })
@@ -501,10 +500,7 @@ mod tests {
         // Deterministic pseudo-random vectors; f64 is the oracle.
         fn pseudo(i: usize, dim: usize) -> Vec<f32> {
             (0..dim)
-                .map(|j| {
-                    let x = ((i * 2654435761 + j * 40503) % 10000) as f32 / 5000.0 - 1.0;
-                    x
-                })
+                .map(|j| ((i * 2654435761 + j * 40503) % 10000) as f32 / 5000.0 - 1.0)
                 .collect()
         }
         for dim in [4, 16, 64] {

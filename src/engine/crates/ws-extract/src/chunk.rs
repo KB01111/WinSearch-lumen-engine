@@ -174,8 +174,8 @@ fn snap_overlap_start(chars: &[(usize, char)], raw_start: usize, end: usize) -> 
     }
     // Look forward up to halfway through the overlap for the next whitespace.
     let limit = (raw_start + (end - raw_start) / 2).min(end);
-    for i in raw_start..limit {
-        if chars[i].1.is_whitespace() {
+    for (i, &(_, ch)) in chars.iter().enumerate().take(limit).skip(raw_start) {
+        if ch.is_whitespace() {
             return i + 1;
         }
     }
@@ -298,8 +298,13 @@ fn render_excerpt(
     let mut start = best_start.min(total_chars.saturating_sub(window));
     // Snap `start` to a word boundary if not at index 0.
     if start > 0 && !chars[start - 1].1.is_whitespace() {
-        for i in start..(start + 16).min(total_chars) {
-            if chars[i].1.is_whitespace() {
+        for (i, &(_, ch)) in chars
+            .iter()
+            .enumerate()
+            .take((start + 16).min(total_chars))
+            .skip(start)
+        {
+            if ch.is_whitespace() {
                 start = i + 1;
                 break;
             }

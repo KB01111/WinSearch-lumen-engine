@@ -56,12 +56,13 @@ pub fn scan_catalog_full(roots: &[PathBuf]) -> CatalogScan {
             complete = false;
         }
     }
-    apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    apps.sort_by_key(|a| a.name.to_lowercase());
     apps.dedup_by(|a, b| a.path.eq_ignore_ascii_case(&b.path));
     CatalogScan { apps, complete }
 }
 
 /// Recursively scans catalog roots for application items.
+#[cfg(test)]
 pub fn scan_catalog(roots: &[PathBuf]) -> Vec<AppEntry> {
     scan_catalog_full(roots).apps
 }
@@ -249,7 +250,7 @@ mod tests {
         fs::write(menu.join("Acme Editor.exe"), b"MZ").unwrap();
         fs::write(menu.join("notes.txt"), b"not an app").unwrap();
 
-        let apps = scan_catalog(&[tree.0.clone()]);
+        let apps = scan_catalog(std::slice::from_ref(&tree.0));
         assert_eq!(apps.len(), 1);
         assert_eq!(apps[0].name, "Acme Editor");
         assert!(apps[0].path.ends_with("Acme Editor.exe"));
@@ -307,7 +308,7 @@ mod tests {
         assert!(args.contains("--flag"));
 
         // Full catalog scan picks the shortcut up as an app entry.
-        let apps = scan_catalog(&[tree.0.clone()]);
+        let apps = scan_catalog(std::slice::from_ref(&tree.0));
         let app = apps
             .iter()
             .find(|a| a.name == "Acme App")

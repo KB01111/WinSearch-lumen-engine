@@ -14,6 +14,8 @@ namespace WinSearch.Core.Ipc;
 /// </summary>
 public interface IEngineClient : IAsyncDisposable
 {
+    Task<IndexReset> ResetIndexAsync(ResetRequest request, CancellationToken cancellationToken = default)
+        => throw new EngineException(ErrorCode.Unsupported, "index reset is unavailable");
     event EventHandler<EngineStatus>? StatusChanged;
     event EventHandler<ModelStatus>? ModelStatusChanged;
     event EventHandler<EngineConfig>? ConfigChanged;
@@ -69,6 +71,40 @@ public sealed class EngineClient : IEngineClient
     private string[] _features = [];
     private bool _disposed;
     private bool _oneShot;
+    private int _resetState;
+
+    public async Task<IndexReset> ResetIndexAsync(ResetRequest request, CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        if (!request.IsValid()) throw new EngineException(ErrorCode.InvalidRequest, "invalid reset namespace");
+        if (!_features.Contains("index.reset", StringComparer.Ordinal))
+            throw new EngineException(ErrorCode.Unsupported, "index reset is unavailable");
+        if (Interlocked.CompareExchange(ref _resetState, 1, 0) != 0)
+            throw new EngineException(ErrorCode.NotReady, "reset already active or uncertain");
+        var snapshot = new ResetRequest { ExpectedIndexId = request.ExpectedIndexId, ExpectedCodeIndexId = request.ExpectedCodeIndexId };
+        try
+        {
+            var reset = await UnaryAsync(id => new ResetIndexMessage { Id = id, Request = snapshot }, message =>
+            {
+                var reset = ((IndexResetMessage)message).Reset;
+                if (!reset.IsValid() || reset.IndexId == snapshot.ExpectedIndexId || reset.CodeIndexId == snapshot.ExpectedCodeIndexId)
+                    throw new IOException("invalid reset acknowledgment");
+                return reset;
+            }, cancellationToken);
+            Volatile.Write(ref _resetState, 0);
+            return reset;
+        }
+        catch (EngineException error) when (error.Code != ErrorCode.Internal)
+        {
+            Volatile.Write(ref _resetState, 0);
+            throw;
+        }
+        catch
+        {
+            Volatile.Write(ref _resetState, 2);
+            throw;
+        }
+    }
 
     private sealed class SearchReceiveBudget(long maximum)
     {
@@ -672,6 +708,9 @@ public sealed class EngineClient : IEngineClient
     {
         switch (message)
         {
+            case IndexResetMessage reset:
+                if (_unary.TryRemove(reset.Id, out var resetTcs)) resetTcs.TrySetResult(reset);
+                break;
             case ResolvedEntryMessage resolved:
                 if (_unary.TryRemove(resolved.Id, out var resolvedTcs))
                     resolvedTcs.TrySetResult(resolved);
@@ -821,6 +860,8 @@ public sealed class EngineClient : IEngineClient
 
     private void ThrowIfDisposed()
     {
+        if (Volatile.Read(ref _resetState) == 2)
+            throw new EngineException(ErrorCode.NotReady, "reset outcome unknown; restart the owned engine and create a new client");
         ObjectDisposedException.ThrowIf(_disposed, this);
     }
 

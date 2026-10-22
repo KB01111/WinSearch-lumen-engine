@@ -596,8 +596,7 @@ fn cmd_model_with_pipe(
                 let mut last_pct = 0u64;
                 let mut progress = |s: &ws_modelmgr::ModelStatus| {
                     print_npu_progress(s, include_npu);
-                    if s.total_bytes > 0 {
-                        let pct = (s.bytes * 100) / s.total_bytes;
+                    if let Some(pct) = (s.bytes * 100).checked_div(s.total_bytes) {
                         if pct >= last_pct + 10 || s.bytes == s.total_bytes {
                             last_pct = pct;
                             println!("  progress: {pct}% ({}/{} bytes)", s.bytes, s.total_bytes);

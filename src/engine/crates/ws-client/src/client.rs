@@ -364,6 +364,43 @@ impl Client {
         Ok(self.open(false, None).await?.session.info.clone())
     }
 
+    pub async fn reset_index(
+        &self,
+        request: ws_protocol::ResetRequest,
+    ) -> Result<ws_protocol::IndexReset, Error> {
+        if !request.is_valid() {
+            return Err(Error::InvalidInput("invalid reset namespace"));
+        }
+        let expected = request.clone();
+        let result = self
+            .unary(
+                true,
+                Some("index.reset"),
+                |id| ClientMessage::ResetIndex { id, request },
+                |message| match message {
+                    ServerMessage::IndexReset { reset, .. }
+                        if reset.is_valid()
+                            && reset.index_id != expected.expected_index_id
+                            && reset.code_index_id != expected.expected_code_index_id =>
+                    {
+                        Ok(reset)
+                    }
+                    _ => Err(Error::Protocol("invalid reset acknowledgment")),
+                },
+            )
+            .await;
+        if matches!(
+            result,
+            Err(Error::Remote {
+                code: ws_protocol::ErrorCode::Internal,
+                ..
+            })
+        ) {
+            self.0.mutation_uncertain.store(true, Ordering::Release);
+        }
+        result
+    }
+
     pub async fn status(&self) -> Result<EngineStatus, Error> {
         self.unary(
             false,
@@ -915,6 +952,7 @@ fn validate_id(message: &ServerMessage, expected: u64) -> Result<(), Error> {
         | ServerMessage::IndexingConfig { id, .. }
         | ServerMessage::Error { id, .. } => *id,
         ServerMessage::Pong { id }
+        | ServerMessage::IndexReset { id, .. }
         | ServerMessage::ResolvedEntry { id, .. }
         | ServerMessage::EntryPreview { id, .. }
         | ServerMessage::Results { id, .. } => Some(*id),
@@ -963,6 +1001,73 @@ mod tests {
             }
         ));
         send_server(peer, &ack()).await;
+    }
+
+    #[tokio::test]
+    async fn reset_capability_and_acknowledgment_are_validated_without_retry() {
+        for variant in 0..4 {
+            let (client, mut peer) = fixture();
+            let task = tokio::spawn(async move {
+                peer.connect().await.unwrap();
+                let _ = read_client(&mut peer).await;
+                let mut reply = ack();
+                if variant != 0 {
+                    if let ServerMessage::HelloAck { features, .. } = &mut reply {
+                        features.push("index.reset".into());
+                    }
+                }
+                send_server(&mut peer, &reply).await;
+                if variant == 0 {
+                    return;
+                }
+                let ClientMessage::ResetIndex { id, .. } = read_client(&mut peer).await else {
+                    panic!("expected one reset");
+                };
+                if variant == 3 {
+                    std::future::pending::<()>().await;
+                }
+                send_server(
+                    &mut peer,
+                    &ServerMessage::IndexReset {
+                        id,
+                        reset: ws_protocol::IndexReset {
+                            index_id: if variant == 2 {
+                                "a".repeat(32)
+                            } else {
+                                "c".repeat(32)
+                            },
+                            code_index_id: "d".repeat(32),
+                        },
+                    },
+                )
+                .await;
+            });
+            let request = ws_protocol::ResetRequest {
+                expected_index_id: "a".repeat(32),
+                expected_code_index_id: "b".repeat(32),
+            };
+            if variant == 3 {
+                assert!(tokio::time::timeout(
+                    Duration::from_millis(100),
+                    client.reset_index(request)
+                )
+                .await
+                .is_err());
+                assert!(matches!(
+                    client.set_config(EngineConfig::default()).await,
+                    Err(Error::MutationOutcomeUnknown)
+                ));
+                task.abort();
+            } else {
+                let result = client.reset_index(request).await;
+                match variant {
+                    0 => assert!(matches!(result, Err(Error::Unsupported("index.reset")))),
+                    1 => assert_eq!(result.unwrap().index_id, "c".repeat(32)),
+                    _ => assert!(matches!(result, Err(Error::Protocol(_)))),
+                }
+                task.await.unwrap();
+            }
+        }
     }
 
     #[tokio::test]

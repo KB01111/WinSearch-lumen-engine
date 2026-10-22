@@ -86,7 +86,11 @@ fn per_root_policy_filters_exact_and_cached_vectors_before_candidate_limits() {
         tree.file(&format!("needle-{n:03}.txt"), b"larger than host policy");
     }
     let wanted = tree.file("needle-wanted.txt", b"x");
-    let indexer = Indexer::open(IndexStore::open_in_memory().unwrap(), &[tree.0.clone()]).unwrap();
+    let indexer = Indexer::open(
+        IndexStore::open_in_memory().unwrap(),
+        std::slice::from_ref(&tree.0),
+    )
+    .unwrap();
     indexer.enqueue_initial_scan().unwrap();
     while indexer.scan_available(64) > 0 {}
     {

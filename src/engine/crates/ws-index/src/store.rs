@@ -80,6 +80,18 @@ pub struct SegmentSource {
     pub source: Option<String>,
 }
 
+#[derive(Default)]
+pub struct ContentBatch<'a> {
+    pub chunks: &'a [crate::model::ContentChunk],
+    pub next: Option<u64>,
+    pub media: Option<&'a crate::model::MediaPlan>,
+    pub selection: Option<&'a crate::model::VideoSelection>,
+    pub source_sha256: Option<&'a str>,
+}
+
+pub type RawSegmentVector = (i64, i64, String, Vec<u8>, f32);
+type ExistingEntry = (i64, i64, i64, String, bool, String, String, i64, i64);
+
 impl IndexStore {
     /// Offline fixture stores allow virtual paths; every production Indexer installs
     /// its metadata-only native/source policy before exposing retrieval.
@@ -256,19 +268,32 @@ impl IndexStore {
         media: Option<&crate::model::MediaPlan>,
         selection: Option<&crate::model::VideoSelection>,
     ) -> Result<bool, StoreError> {
-        self.commit_content_batch_with_source(job, progress, chunks, next, media, selection, None)
+        self.commit_content_batch_with_source(
+            job,
+            progress,
+            ContentBatch {
+                chunks,
+                next,
+                media,
+                selection,
+                source_sha256: None,
+            },
+        )
     }
 
     pub fn commit_content_batch_with_source(
         &mut self,
         job: &ExtractJob,
         progress: &crate::model::ContentProgress,
-        chunks: &[crate::model::ContentChunk],
-        next: Option<u64>,
-        media: Option<&crate::model::MediaPlan>,
-        selection: Option<&crate::model::VideoSelection>,
-        source_sha256: Option<&str>,
+        batch: ContentBatch<'_>,
     ) -> Result<bool, StoreError> {
+        let ContentBatch {
+            chunks,
+            next,
+            media,
+            selection,
+            source_sha256,
+        } = batch;
         if source_sha256.is_some_and(|hash| !ws_protocol::valid_content_sha256(hash)) {
             return Err(StoreError::InvalidConfig(
                 "invalid complete-source SHA256".into(),
@@ -933,13 +958,15 @@ impl IndexStore {
             return serde_json::from_str(&json)
                 .map_err(|e| StoreError::InvalidConfig(e.to_string()));
         }
-        let mut config = ws_protocol::IndexingConfig::default();
-        config.roots = self
-            .roots()?
-            .into_iter()
-            .filter(|r| r.enabled && r.path != "@apps")
-            .map(|r| r.path)
-            .collect();
+        let config = ws_protocol::IndexingConfig {
+            roots: self
+                .roots()?
+                .into_iter()
+                .filter(|r| r.enabled && r.path != "@apps")
+                .map(|r| r.path)
+                .collect(),
+            ..Default::default()
+        };
         self.set_indexing_config(&config)?;
         Ok(config)
     }
@@ -1146,6 +1173,26 @@ COMMIT;
         {
             return Err(StoreError::InvalidIdentity);
         }
+        let maximum: i64 =
+            conn.query_row("SELECT COALESCE(MAX(id),0) FROM entries", [], |row| {
+                row.get(0)
+            })?;
+        let watermark: Option<String> = conn
+            .query_row(
+                "SELECT value FROM meta WHERE key='entry_id_high_water'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let watermark = watermark
+            .as_deref()
+            .unwrap_or("0")
+            .parse::<i64>()
+            .ok()
+            .filter(|value| *value >= 0)
+            .ok_or(StoreError::InvalidIdentity)?;
+        conn.execute("INSERT INTO meta(key,value) VALUES('entry_id_high_water',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE CAST(meta.value AS INTEGER)<CAST(excluded.value AS INTEGER)", [watermark.max(maximum).to_string()])?;
+        conn.execute_batch("CREATE TRIGGER IF NOT EXISTS entries_id_high_water AFTER INSERT ON entries BEGIN UPDATE meta SET value=CAST(NEW.id AS TEXT) WHERE key='entry_id_high_water' AND CAST(value AS INTEGER)<NEW.id; END;")?;
         let store = Self { conn, database_id };
         store.set_query_source_guard(|_, _, _| true)?;
         store.conn.execute_batch("CREATE TEMP VIEW IF NOT EXISTS query_entries AS SELECT * FROM visible_entries WHERE query_source_allowed(path,NULL,is_app); CREATE TEMP VIEW IF NOT EXISTS query_content_rows AS SELECT f.rowid AS id FROM content_fts f JOIN query_entries e ON e.id=CAST(f.entry_id AS INTEGER) LEFT JOIN content_chunks c ON c.id=f.rowid AND c.entry_id=e.id LEFT JOIN content_revisions r ON r.entry_id=e.id LEFT JOIN content_progress p ON p.entry_id=c.entry_id AND p.kind=c.job_kind AND p.revision=r.revision WHERE query_source_allowed(e.path,COALESCE(p.source,''),e.is_app);")?;
@@ -1167,6 +1214,44 @@ COMMIT;
     /// Non-secret database incarnation, stable across process restarts.
     pub fn database_id(&self) -> &str {
         &self.database_id
+    }
+
+    pub fn begin_index_reset(&mut self, intent: &str) -> Result<(), StoreError> {
+        self.conn.pragma_update(None, "synchronous", "FULL")?;
+        self.conn.execute(
+            "INSERT INTO meta(key,value) VALUES('index_reset_intent',?1)",
+            [intent],
+        )?;
+        Ok(())
+    }
+
+    pub fn finish_index_reset(&mut self) -> Result<(), StoreError> {
+        self.conn.pragma_update(None, "synchronous", "FULL")?;
+        self.conn
+            .execute("DELETE FROM meta WHERE key='index_reset_intent'", [])?;
+        self.conn.pragma_update(None, "synchronous", "NORMAL")?;
+        Ok(())
+    }
+
+    /// Idempotent replay of a durable two-namespace reset. Preserve policy,
+    /// schema/model metadata and ID watermarks; no old numeric ID is reused.
+    pub fn reset_to(&mut self, database_id: &str) -> Result<(), StoreError> {
+        if !ws_protocol::valid_index_id(database_id) {
+            return Err(StoreError::InvalidIdentity);
+        }
+        if self.database_id == database_id {
+            return Ok(());
+        }
+        self.conn.pragma_update(None, "synchronous", "FULL")?;
+        let tx = self.conn.transaction()?;
+        tx.execute_batch("DELETE FROM content_fts; DELETE FROM entries_fts; DELETE FROM entries_tri; DELETE FROM entries_path_tri; DELETE FROM entries; DELETE FROM crawl_queue; DELETE FROM checkpoints; UPDATE roots SET current_generation=current_generation+1;")?;
+        tx.execute(
+            "UPDATE meta SET value=?1 WHERE key='database_id'",
+            [database_id],
+        )?;
+        tx.commit()?;
+        self.database_id = database_id.to_owned();
+        Ok(())
     }
 
     fn ensure_extract_jobs_priority_column(conn: &Connection) -> Result<(), StoreError> {
@@ -1363,10 +1448,10 @@ COMMIT;
                  FROM entries WHERE path = ?1",
             )?;
             let mut insert = tx.prepare_cached(
-                "INSERT INTO entries(root_id, parent_id, path, name, name_lower, ext, is_dir,
+                "INSERT INTO entries(id, root_id, parent_id, path, name, name_lower, ext, is_dir,
                                      size, mtime, volume_serial, file_id, is_app, app_target,
                                      missing, scan_generation)
-                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,0,?14)",
+                 VALUES((SELECT CAST(value AS INTEGER)+1 FROM meta WHERE key='entry_id_high_water'),?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,0,?14)",
             )?;
             let mut update = tx.prepare_cached(
                 "UPDATE entries SET root_id=?2, parent_id=?3, name=?4, name_lower=?5, ext=?6,
@@ -1390,22 +1475,21 @@ COMMIT;
                 let name_lower = rec.name.to_lowercase();
                 let path_lower = rec.path.to_lowercase();
                 let keywords = fts_keywords(rec);
-                let existing: Option<(i64, i64, i64, String, bool, String, String, i64, i64)> =
-                    select
-                        .query_row(params![rec.path], |row| {
-                            Ok((
-                                row.get(0)?,
-                                row.get(1)?,
-                                row.get(2)?,
-                                row.get(3)?,
-                                row.get::<_, i64>(4)? != 0,
-                                row.get(5)?,
-                                row.get(6)?,
-                                row.get(7)?,
-                                row.get(8)?,
-                            ))
-                        })
-                        .optional()?;
+                let existing: Option<ExistingEntry> = select
+                    .query_row(params![rec.path], |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get::<_, i64>(4)? != 0,
+                            row.get(5)?,
+                            row.get(6)?,
+                            row.get(7)?,
+                            row.get(8)?,
+                        ))
+                    })
+                    .optional()?;
 
                 match existing {
                     Some((
@@ -2044,9 +2128,7 @@ COMMIT;
 
     /// Raw `(id, entry_id, kind, fp16_bytes, norm)` rows for bulk loading a
     /// [`crate::vectors::VectorIndex`] without an intermediate `f32` decode.
-    pub fn all_segment_vectors_raw(
-        &self,
-    ) -> Result<Vec<(i64, i64, String, Vec<u8>, f32)>, StoreError> {
+    pub fn all_segment_vectors_raw(&self) -> Result<Vec<RawSegmentVector>, StoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT id, entry_id, kind, vector, norm FROM segments WHERE EXISTS (SELECT 1 FROM visible_entries v WHERE v.id = segments.entry_id) ORDER BY id",
         )?;
@@ -2817,10 +2899,7 @@ fn map_extract_job_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ExtractJob> 
 /// hit them at lower rank.
 fn fts_keywords(rec: &EntryRecord) -> String {
     let mut kw = String::with_capacity(rec.path.len() + rec.keywords.len());
-    for word in rec
-        .path
-        .split(|c: char| c == '\\' || c == '/' || c == '.' || c == '-' || c == '_')
-    {
+    for word in rec.path.split(['\\', '/', '.', '-', '_']) {
         let word = word.trim();
         if !word.is_empty() && !word.eq_ignore_ascii_case(&rec.name) {
             kw.push_str(word);
@@ -3016,6 +3095,39 @@ mod tests {
         );
         drop(recreated);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn ordinary_ids_do_not_alias_deleted_entries_and_exhaustion_rolls_back() {
+        let mut store = IndexStore::open_in_memory().unwrap();
+        let root = store.ensure_root("C:/identity").unwrap();
+        let first = rec("C:/identity/first.txt", "first.txt", 1, 1);
+        store.apply_batch(root, 1, &[first]).unwrap();
+        let old = store
+            .find_by_path("C:/identity/first.txt")
+            .unwrap()
+            .unwrap()
+            .id;
+        store.sweep_generation(root, 2).unwrap();
+        let second = rec("C:/identity/second.txt", "second.txt", 1, 1);
+        store.apply_batch(root, 2, &[second]).unwrap();
+        assert!(
+            store
+                .find_by_path("C:/identity/second.txt")
+                .unwrap()
+                .unwrap()
+                .id
+                > old
+        );
+        store
+            .meta_set("entry_id_high_water", &i64::MAX.to_string())
+            .unwrap();
+        let overflow = rec("C:/identity/overflow.txt", "overflow.txt", 1, 1);
+        assert!(store.apply_batch(root, 3, &[overflow]).is_err());
+        assert!(store
+            .find_by_path("C:/identity/overflow.txt")
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -3451,7 +3563,7 @@ mod tests {
             .commit_content_batch_with_media(
                 &job,
                 &progress,
-                &[chunk.clone()],
+                std::slice::from_ref(&chunk),
                 Some(65536),
                 Some(&plan)
             )
@@ -3692,7 +3804,7 @@ mod tests {
             path: std::path::PathBuf::from("C:/private/cache/時刻 window.wav"),
         };
         assert!(store
-            .commit_content_batch(&job, &progress, &[chunk.clone()], None)
+            .commit_content_batch(&job, &progress, std::slice::from_ref(&chunk), None)
             .unwrap());
         assert_eq!(
             store.list_content_chunks(job.entry_id).unwrap()[0].embedding_input,
@@ -3825,11 +3937,13 @@ mod tests {
             .commit_content_batch_with_source(
                 &job,
                 &progress,
-                &[chunk],
-                Some(1),
-                None,
-                None,
-                Some(&hash)
+                ContentBatch {
+                    chunks: &[chunk],
+                    next: Some(1),
+                    media: None,
+                    selection: None,
+                    source_sha256: Some(&hash)
+                }
             )
             .unwrap());
         assert_eq!(
@@ -3862,11 +3976,13 @@ mod tests {
                 .commit_content_batch_with_source(
                     &job,
                     &progress,
-                    &[content_chunk(&job, 0, "uncommitted")],
-                    None,
-                    None,
-                    None,
-                    Some(&invalid)
+                    ContentBatch {
+                        chunks: &[content_chunk(&job, 0, "uncommitted")],
+                        next: None,
+                        media: None,
+                        selection: None,
+                        source_sha256: Some(&invalid)
+                    }
                 )
                 .is_err());
             assert_eq!(
@@ -3882,11 +3998,13 @@ mod tests {
                 .commit_content_batch_with_source(
                     &job,
                     &progress,
-                    &[content_chunk(&job, 0, "first")],
-                    Some(1),
-                    None,
-                    None,
-                    Some(&hash)
+                    ContentBatch {
+                        chunks: &[content_chunk(&job, 0, "first")],
+                        next: Some(1),
+                        media: None,
+                        selection: None,
+                        source_sha256: Some(&hash)
+                    }
                 )
                 .unwrap());
             let next_job = store.claim_content_extract_job().unwrap().unwrap();
@@ -3898,11 +4016,13 @@ mod tests {
                 .commit_content_batch_with_source(
                     &next_job,
                     &saved,
-                    &[content_chunk(&job, 1, "different source")],
-                    None,
-                    None,
-                    None,
-                    next_hash.as_deref()
+                    ContentBatch {
+                        chunks: &[content_chunk(&job, 1, "different source")],
+                        next: None,
+                        media: None,
+                        selection: None,
+                        source_sha256: next_hash.as_deref()
+                    }
                 )
                 .unwrap());
             assert_eq!(
@@ -3925,11 +4045,13 @@ mod tests {
             .commit_content_batch_with_source(
                 &job,
                 &progress,
-                &[content_chunk(&job, 0, "first")],
-                Some(1),
-                None,
-                None,
-                Some(&hash)
+                ContentBatch {
+                    chunks: &[content_chunk(&job, 0, "first")],
+                    next: Some(1),
+                    media: None,
+                    selection: None,
+                    source_sha256: Some(&hash)
+                }
             )
             .unwrap());
         // An older binary changes only the columns it knows and leaves new columns untouched.
@@ -3964,11 +4086,13 @@ mod tests {
             .commit_content_batch_with_source(
                 &job,
                 &progress,
-                &[content_chunk(&job, 0, "legacy chunk")],
-                Some(1),
-                None,
-                None,
-                None
+                ContentBatch {
+                    chunks: &[content_chunk(&job, 0, "legacy chunk")],
+                    next: Some(1),
+                    media: None,
+                    selection: None,
+                    source_sha256: None
+                }
             )
             .unwrap());
         let resumed = store.claim_content_extract_job().unwrap().unwrap();
@@ -3980,11 +4104,13 @@ mod tests {
             .commit_content_batch_with_source(
                 &resumed,
                 &saved,
-                &[content_chunk(&job, 1, "newly hashed chunk")],
-                None,
-                None,
-                None,
-                Some(&hash)
+                ContentBatch {
+                    chunks: &[content_chunk(&job, 1, "newly hashed chunk")],
+                    next: None,
+                    media: None,
+                    selection: None,
+                    source_sha256: Some(&hash)
+                }
             )
             .unwrap());
         assert_eq!(store.list_content_chunks(job.entry_id).unwrap().len(), 2);
@@ -4008,11 +4134,13 @@ mod tests {
             .commit_content_batch_with_source(
                 &fresh_job,
                 &fresh,
-                &[content_chunk(&job, 0, "fresh full parse")],
-                None,
-                None,
-                None,
-                Some(&hash)
+                ContentBatch {
+                    chunks: &[content_chunk(&job, 0, "fresh full parse")],
+                    next: None,
+                    media: None,
+                    selection: None,
+                    source_sha256: Some(&hash)
+                }
             )
             .unwrap());
         assert_eq!(
@@ -4032,11 +4160,13 @@ mod tests {
             .commit_content_batch_with_source(
                 &job,
                 &progress,
-                &[chunk.clone()],
-                Some(1),
-                None,
-                None,
-                Some(&hash)
+                ContentBatch {
+                    chunks: std::slice::from_ref(&chunk),
+                    next: Some(1),
+                    media: None,
+                    selection: None,
+                    source_sha256: Some(&hash)
+                }
             )
             .is_err());
         assert_eq!(
@@ -4053,11 +4183,13 @@ mod tests {
             .commit_content_batch_with_source(
                 &job,
                 &progress,
-                &[chunk],
-                None,
-                None,
-                None,
-                Some(&hash)
+                ContentBatch {
+                    chunks: &[chunk],
+                    next: None,
+                    media: None,
+                    selection: None,
+                    source_sha256: Some(&hash)
+                }
             )
             .unwrap());
         assert_eq!(
@@ -4074,11 +4206,13 @@ mod tests {
             .commit_content_batch_with_source(
                 &job,
                 &progress,
-                &[content_chunk(&job, 0, "preservedprovenanceneedle")],
-                Some(1),
-                None,
-                None,
-                Some(&hash)
+                ContentBatch {
+                    chunks: &[content_chunk(&job, 0, "preservedprovenanceneedle")],
+                    next: Some(1),
+                    media: None,
+                    selection: None,
+                    source_sha256: Some(&hash)
+                }
             )
             .unwrap());
         let id = store.list_content_chunks(job.entry_id).unwrap()[0].id;
@@ -4402,8 +4536,10 @@ mod tests {
         };
         let mut store = IndexStore::open_in_memory().unwrap();
         let root = store.ensure_root(r"C:\scale").unwrap();
-        let mut config = ws_protocol::IndexingConfig::default();
-        config.roots = vec![r"C:\scale".into()];
+        let mut config = ws_protocol::IndexingConfig {
+            roots: vec![r"C:\scale".into()],
+            ..Default::default()
+        };
         store.set_indexing_config(&config).unwrap();
         let records: Vec<_> = (0..50_000)
             .map(|i| {
@@ -4540,9 +4676,11 @@ mod tests {
                 ],
             )
             .unwrap();
-        let mut c = ws_protocol::IndexingConfig::default();
-        c.roots = vec![r"C:\DÄTA".into()];
-        c.excluded_paths = vec![r"c:\däta\note.txt".into()];
+        let c = ws_protocol::IndexingConfig {
+            roots: vec![r"C:\DÄTA".into()],
+            excluded_paths: vec![r"c:\däta\note.txt".into()],
+            ..Default::default()
+        };
         store.set_indexing_config(&c).unwrap();
         assert!(!store
             .entry_visible(store.find_by_path(r"C:\DÄTA\note.txt").unwrap().unwrap().id)
@@ -4577,8 +4715,10 @@ mod tests {
     #[test]
     fn indexing_policy_write_failure_keeps_policy_and_visibility() {
         let mut store = IndexStore::open_in_memory().unwrap();
-        let mut c = ws_protocol::IndexingConfig::default();
-        c.roots = vec![r"C:\A".into()];
+        let c = ws_protocol::IndexingConfig {
+            roots: vec![r"C:\A".into()],
+            ..Default::default()
+        };
         store.set_indexing_config(&c).unwrap();
         let before = store.roots().unwrap();
         store.conn.execute_batch("CREATE TRIGGER fail_policy BEFORE UPDATE ON meta WHEN new.key='indexing_config' BEGIN SELECT RAISE(ABORT,'fixture write failure'); END;").unwrap();
@@ -4607,8 +4747,10 @@ mod tests {
         store
             .apply_batch(b, 0, &[rec(r"C:\B\matchgood.txt", "matchgood.txt", 1, 1)])
             .unwrap();
-        let mut c = ws_protocol::IndexingConfig::default();
-        c.roots = vec![r"C:\B".into()];
+        let mut c = ws_protocol::IndexingConfig {
+            roots: vec![r"C:\B".into()],
+            ..Default::default()
+        };
         store.set_indexing_config(&c).unwrap();
         let hits = store
             .search(&crate::model::SearchRequest {

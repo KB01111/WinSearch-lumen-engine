@@ -197,7 +197,7 @@ mod tests {
     #[cfg(all(feature = "xrt", taconite_xrt_stub))]
     #[test]
     fn stub_build_reports_missing_runtime() {
-        assert!(!super::XRT_LINKED);
+        const { assert!(!super::XRT_LINKED) };
         match super::Session::open(0) {
             Err(super::Error::Device(m)) => assert!(m.contains("XRT SDK"), "{m}"),
             Err(e) => panic!("unexpected error {e}"),

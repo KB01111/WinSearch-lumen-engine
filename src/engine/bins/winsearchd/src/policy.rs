@@ -419,9 +419,11 @@ mod tests {
     }
     #[test]
     fn consent_boundaries_and_reinclusion() {
-        let mut c = IndexingConfig::default();
-        c.roots = vec![r"C:\Data".into(), r"C:\Data\Skip\Chosen".into()];
-        c.excluded_paths = vec![r"C:\Data\Skip".into()];
+        let mut c = IndexingConfig {
+            roots: vec![r"C:\Data".into(), r"C:\Data\Skip\Chosen".into()],
+            excluded_paths: vec![r"C:\Data\Skip".into()],
+            ..Default::default()
+        };
         assert!(path_allowed(&c, r"c:\DATA\notes.txt"));
         assert!(!path_allowed(&c, r"C:\Database\notes.txt"));
         assert!(!path_allowed(&c, r"C:\Data\Skip\notes.txt"));
@@ -431,9 +433,11 @@ mod tests {
     }
     #[test]
     fn validates_and_normalizes_without_dropping_offline_roots() {
-        let mut c = IndexingConfig::default();
-        c.roots = vec![r"Z:\offline".into()];
-        c.excluded_extensions = vec![".PDF".into()];
+        let mut c = IndexingConfig {
+            roots: vec![r"Z:\offline".into()],
+            excluded_extensions: vec![".PDF".into()],
+            ..Default::default()
+        };
         assert_eq!(validate(&c).unwrap().excluded_extensions, vec!["pdf"]);
         c.roots = vec!["relative".into()];
         assert!(validate(&c).is_err());
@@ -507,8 +511,10 @@ mod tests {
             std::fs::write(media.join(format!("clip_{i:06}.jpg")), []).unwrap();
         }
         let file = media.join("clip_000000.jpg");
-        let mut c = IndexingConfig::default();
-        c.roots = vec![base.to_string_lossy().into_owned()];
+        let mut c = IndexingConfig {
+            roots: vec![base.to_string_lossy().into_owned()],
+            ..Default::default()
+        };
         assert_eq!(
             ordinary_content_reason(&c, &file),
             Some("Machine-named media dataset")
@@ -540,8 +546,10 @@ mod tests {
         let screenshot = docs.join("Screenshot 2026.png");
         std::fs::write(&document, b"private repository design").unwrap();
         std::fs::write(&screenshot, []).unwrap();
-        let mut config = IndexingConfig::default();
-        config.roots = vec![docs.to_string_lossy().into_owned()];
+        let config = IndexingConfig {
+            roots: vec![docs.to_string_lossy().into_owned()],
+            ..Default::default()
+        };
         for marker in [".git", "package.json"] {
             let marker = base.join("repo").join(marker);
             std::fs::write(&marker, []).unwrap();

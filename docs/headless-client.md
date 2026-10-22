@@ -94,8 +94,9 @@ deadline. A status broadcast can race the handshake; it is discarded until the
 version acknowledgement is validated.
 
 The shared 16 MiB frame cap is checked before allocating an incoming body.
-Search accepts at most 64 KiB of query text and a requested limit of 4,096;
-delivery is bounded to 4,096 total results and 64 result frames. These client
+Search accepts at most 64 KiB of query text. Peers advertising `search.limits`
+support requested totals through 10,000; legacy peers retain a 4,096-result
+bound. Delivery is additionally bounded to 64 MiB and 64 result frames. These client
 resource bounds do not change engine ranking or retrieval acceptance thresholds.
 `subscribe()` delivers typed status/model/configuration events on its own
 connection. Idle subscriptions can remain quiet indefinitely, but a started
