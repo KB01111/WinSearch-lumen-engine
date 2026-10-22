@@ -11,6 +11,7 @@ import threading
 import time
 import uuid
 from collections import Counter
+from retrieval_inputs import verify_fixture
 
 root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
@@ -34,17 +35,10 @@ projector = root/'artifacts/test-models/mmproj-embeddinggemma-2-Q8_0.gguf'
 binary = args.binary_dir.resolve()/'winsearch-cli.exe'
 worker = args.binary_dir.resolve()/'winsearch-embed.exe'
 suite = root/'evals'/f'{args.suite}.json'
-frozen = {
-    'names': '4640467f2867f24e61c2c5d6184ee1bb8200b1938807f36798fded8c55050037',
-    'retrieval-development': 'd8830a7fe8ed0491b8752634bce741b9d909afceebf2ec0c8a2de7be3450bbe9',
-    'retrieval-held-out': '4fba3a5dee353621501bba66a9ae785ce55e4d0f1a016abe450831545e2a58bd',
-    'code-development': '34a0a9951173d7f9e8469d66e36054269ca5a697541d6bb3d83742ab9d033f93',
-    'code-held-out': '38daace215c27241f6321b1a7f4e51bc38c2baaf5c8cb1719fdf5c40ec0fed86',
-}
 def digest(path):
     with path.open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
-assert digest(suite) == frozen[args.suite], 'Frozen fixture changed'
+canonical_suite_sha256 = verify_fixture(suite, args.suite)
 assets = sorted({segment['asset'] for entry in json.loads(suite.read_text(encoding='utf-8'))['entries']
     for segment in entry.get('segments', []) if segment.get('asset')})
 asset_hashes = {}
@@ -54,6 +48,7 @@ for asset in assets:
     asset_hashes[asset] = digest(resolved)
 lock = {
     'suite': args.suite, 'suite_sha256': digest(suite),
+    'canonical_suite_sha256': canonical_suite_sha256,
     'cli_sha256': digest(binary), 'model_sha256': digest(model),
     'projector_sha256': digest(projector), 'backend_requested': args.backend,
     'worker_sha256': digest(worker), 'generated_asset_sha256': asset_hashes,
