@@ -85,6 +85,26 @@ fn snapshot(path: &Path) -> Option<String> {
     ))
 }
 
+/// A denied control appearing after crawler setup still retires its old rules.
+/// Controls inside a denied governing directory cannot affect admitted sources.
+fn governing_control_directory(path: &Path) -> Option<&Path> {
+    let named = |path: &Path, name: &str| {
+        path.file_name()
+            .is_some_and(|value| value.to_string_lossy().eq_ignore_ascii_case(name))
+    };
+    if named(path, ".gitignore") || named(path, ".ignore") {
+        return path.parent();
+    }
+    let git = if named(path, "exclude") && named(path.parent()?, "info") {
+        path.parent()?.parent()?
+    } else if named(path, "info") {
+        path.parent()?
+    } else {
+        path
+    };
+    named(git, ".git").then(|| git.parent()).flatten()
+}
+
 impl CodeService {
     pub(crate) fn reset_runtime(&self) {
         self.epoch.fetch_add(1, Ordering::AcqRel);
@@ -459,6 +479,25 @@ impl CodeService {
         let Some(_work) = self.indexer.work_gate.enter() else {
             return Ok(());
         };
+        // Excluded subtrees cannot postpone admitted work. Use lexical policy,
+        // never live metadata: deleted/replaced admitted paths still invalidate.
+        // Hidden ignore/control files can affect the crawl and remain relevant.
+        let policy = self.policy();
+        let allowed = |path: &Path| {
+            crate::policy::code_control_path_allowed(&policy, &path.to_string_lossy())
+        };
+        let relevant =
+            |path: &Path| allowed(path) || governing_control_directory(path).is_some_and(allowed);
+        let relevant = match &event {
+            WatchEvent::Created(path) | WatchEvent::Modified(path) | WatchEvent::Deleted(path) => {
+                relevant(path)
+            }
+            WatchEvent::Renamed { from, to } => relevant(from) || relevant(to),
+            WatchEvent::Overflow => true,
+        };
+        if !relevant {
+            return Ok(());
+        }
         self.epoch.fetch_add(1, Ordering::AcqRel);
         let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
         match event {
@@ -1448,6 +1487,129 @@ pub(crate) mod tests {
     }
     fn fixture() -> (Arc<CodeService>, PathBuf) {
         fixture_with_admission(false)
+    }
+
+    #[test]
+    fn excluded_only_notifications_cannot_defer_admitted_initial_code_work() {
+        let (code, root) = fixture();
+        let admitted = root.join("report.rs");
+        let excluded = root.join("private");
+        std::fs::create_dir(&excluded).unwrap();
+        std::fs::write(&admitted, "pub fn adapter_probe() {}\n").unwrap();
+        let mut policy = code.policy();
+        policy.root_policies = vec![ws_protocol::RootPolicy {
+            root: root.to_string_lossy().into_owned(),
+            exclusions: vec!["private".into()],
+            include_hidden: false,
+            max_file_size_bytes: 7 * 1024 * 1024,
+        }];
+        code.indexer.set_indexing_config(&policy).unwrap();
+        code.configure().unwrap();
+        stop_fixture_watchers(&code);
+        assert!(code.turn().unwrap()); // Own the admitted initial scan.
+        let epoch = code.query_epoch();
+        for event in [
+            WatchEvent::Created(excluded.clone()),
+            WatchEvent::Modified(excluded.clone()),
+            WatchEvent::Deleted(excluded.join("missing.rs")),
+            WatchEvent::Modified(excluded.join(".gitignore")),
+            WatchEvent::Renamed {
+                from: excluded.join("old.rs"),
+                to: excluded.join("new.rs"),
+            },
+        ] {
+            code.changed(&root.to_string_lossy(), event).unwrap();
+        }
+        let unaffected = code.query_epoch() == epoch;
+        for _ in 0..16 {
+            if !code.turn().unwrap() {
+                break;
+            }
+        }
+        let found = code.exact("adapter_probe", 20).len();
+        // A deleted admitted source, either side of a crossing rename, hidden
+        // control files and overflow must still invalidate/rescan immediately.
+        std::fs::remove_file(&admitted).unwrap();
+        for event in [
+            WatchEvent::Deleted(admitted.clone()),
+            WatchEvent::Renamed {
+                from: admitted.clone(),
+                to: excluded.join("moved.rs"),
+            },
+            WatchEvent::Renamed {
+                from: excluded.join("moved.rs"),
+                to: admitted.clone(),
+            },
+            WatchEvent::Modified(root.join(".gitignore")),
+            WatchEvent::Overflow,
+        ] {
+            let previous = code.query_epoch();
+            code.changed(&root.to_string_lossy(), event).unwrap();
+            assert_ne!(code.query_epoch(), previous);
+        }
+        assert!(code.exact("adapter_probe", 20).is_empty());
+        drop(code);
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+        assert!(unaffected, "excluded-only events retired an admitted scan");
+        assert_eq!(
+            found, 1,
+            "excluded notifications imposed the root quiet period"
+        );
+    }
+
+    #[test]
+    fn excluded_crawl_controls_still_retire_scans_in_admitted_directories() {
+        let (code, root) = fixture();
+        std::fs::write(root.join("report.rs"), "pub fn control_probe() {}\n").unwrap();
+        let mut policy = code.policy();
+        policy.root_policies = vec![ws_protocol::RootPolicy {
+            root: root.to_string_lossy().into_owned(),
+            exclusions: vec![".gitignore".into(), ".ignore".into(), ".git".into()],
+            include_hidden: false,
+            max_file_size_bytes: 7 * 1024 * 1024,
+        }];
+        code.indexer.set_indexing_config(&policy).unwrap();
+        code.configure().unwrap();
+        stop_fixture_watchers(&code);
+        assert!(code.turn().unwrap());
+        assert!(code.turn().unwrap()); // Crawler captured rules before creation.
+        std::fs::write(root.join(".gitignore"), "*.rs\n").unwrap();
+        let before = code.query_epoch();
+        code.changed(
+            &root.to_string_lossy(),
+            WatchEvent::Created(root.join(".gitignore")),
+        )
+        .unwrap();
+        let retired = code.query_epoch() != before;
+        for _ in 0..16 {
+            if !code.turn().unwrap() {
+                break;
+            }
+        }
+        let hidden = code.exact("control_probe", 20).is_empty();
+        let mut missed = Vec::new();
+        for relative in [".ignore", ".git", ".git/info", ".git/info/exclude"] {
+            let before = code.query_epoch();
+            code.changed(
+                &root.to_string_lossy(),
+                WatchEvent::Modified(root.join(relative)),
+            )
+            .unwrap();
+            if code.query_epoch() == before {
+                missed.push(relative);
+            }
+        }
+        drop(code);
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+        assert!(
+            retired,
+            "excluded crawl control did not retire its old rules"
+        );
+        assert!(hidden, "scan committed after its excluded control appeared");
+        assert!(
+            missed.is_empty(),
+            "missed governing control changes: {missed:?}"
+        );
     }
 
     #[test]

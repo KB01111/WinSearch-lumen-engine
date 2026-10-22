@@ -171,6 +171,17 @@ latency gate. Lumen's local development pins/staging match this manifest; its
 expanded native adapter test still fails on queued code work and is under
 investigation. Default cutover remains disabled.
 
+The [code-event checkpoint](code-event-checkpoint.json) identifies that failure:
+a notification on the explicitly excluded `private` folder retired the initial
+code scan and deferred the entire root for 60 seconds. Excluded-only events now
+leave admitted work alone. Admitted deletions, either side of crossing renames,
+overflow and governing crawl controls still invalidate; even explicitly denied
+controls must retire previously captured rules for an admitted directory. Both
+regressions failed before their fixes. All 17 code tests, strict daemon Clippy and
+build pass, and a controlled native diagnostic changes from no result on the old
+release to a result on the corrected debug daemon. The corrected release and its
+Lumen integration still need revalidation; these diagnostics do not qualify them.
+
 ## Remaining acceptance
 
 Tasks 5-11 remain open. The Task 6 opt-in Lumen adapter has source regressions,

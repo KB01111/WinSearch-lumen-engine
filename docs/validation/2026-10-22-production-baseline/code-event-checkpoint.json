@@ -1,0 +1,59 @@
+{
+  "scope": "Source regression and controlled native excluded-event diagnostic; no final release or installed acceptance",
+  "base_commit": "ef14860eb1d026f9192132b57a380caa55ae2775",
+  "source_diff_sha256": "477da11379e10f968ec8076042ffaaf3c5fbd08a64b980874db41085ce7de92a",
+  "code_source_sha256": "491ea05e72930a9775062e28a94518fd457042832e9244e8bc67853958c465e9",
+  "checks": {
+    "strict_daemon_clippy": true,
+    "daemon_build": true,
+    "code_tests_passed": 17,
+    "source_unchanged_during_commands": true,
+    "owned_jobs_empty": true,
+    "rustfmt": true
+  },
+  "source_gate_sha256": "cb26e99ff6c71ebf3593f7ea2e96bc27c118c5da6d3f03fa3dbbb183c98497b9",
+  "red_unit_logs": {
+    "excluded-code-events-red.log": "e4ba56efe12a33ff7f56179a5b6c1862c0430f0313eefb5cb9a7d954b9814ea4",
+    "excluded-code-control-red.log": "c1bf04002c8fc3ac7702052cb78dc55caa956b5f35ed5e9a11690eefb0a0f881"
+  },
+  "native_diagnostic": {
+    "workload": "Defer root admission, configure paused code root with private excluded, deliver excluded file notification, unpause, query exact code; five-second diagnostic window",
+    "before": {
+      "build_profile": "release",
+      "source_commit": "9b7b01d86dce6c13abdfedc2c842d3095bbd796d",
+      "found": false,
+      "samples": 45,
+      "queued_scan": [
+        [
+          1,
+          7,
+          1792672418917,
+          0,
+          0
+        ]
+      ],
+      "owned_job_empty": true,
+      "report_sha256": "687ea87546b863b9db488a682570fc7926a59233bdc334f9ed9f9ba2b8a2de5e"
+    },
+    "after": {
+      "build_profile": "engine-validation",
+      "found": true,
+      "samples": 2,
+      "owned_job_empty": true,
+      "daemon_sha256": "180826d8b78143faf3358a37bd2318157e4d19cde89663eadb98f2b4f1e5eb95",
+      "report_sha256": "5fd6d7db4700996d4905413270f1f44c95f4d43de692b37cb36219b0352c35f6"
+    }
+  },
+  "behavior": [
+    "Excluded-only events do not retire or postpone an admitted scan",
+    "Both rename endpoints, admitted deletions/replacements and overflow retain invalidation",
+    "Explicitly denied crawl controls still retire rules when their governing source directory is admitted",
+    "Controls wholly inside excluded governing directories do not postpone admitted work"
+  ],
+  "unverified": [
+    "Corrected copied release package",
+    "Lumen native adapter against corrected release",
+    "Performance targets",
+    "Installed migration and acceptance"
+  ]
+}
