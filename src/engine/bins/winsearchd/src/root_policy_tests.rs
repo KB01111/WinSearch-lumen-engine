@@ -58,6 +58,42 @@ impl Drop for Tree {
 }
 
 #[test]
+fn query_pass_native_change_fences_and_policy_epochs_disable_reuse() {
+    let tree = Tree::new();
+    let path = tree.file("source.txt", b"before");
+    let indexer = Indexer::open(
+        IndexStore::open_in_memory().unwrap(),
+        std::slice::from_ref(&tree.0),
+    )
+    .unwrap();
+    let fence = indexer.source_query_fence().expect("local supported tree");
+    assert!(fence());
+    let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+    let mut writer = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+    writer.write_all(b"after!").unwrap();
+    writer
+        .set_times(std::fs::FileTimes::new().set_modified(modified))
+        .unwrap();
+    drop(writer);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    while fence() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(
+        !fence(),
+        "same-size/mtime restoration must break query reuse"
+    );
+    drop(fence);
+    let fence = indexer.source_query_fence().unwrap();
+    assert!(fence());
+    indexer.policy_epoch.fetch_add(1, Ordering::AcqRel);
+    assert!(
+        !fence(),
+        "a policy/reset epoch cannot inherit a prior pass's admission"
+    );
+}
+
+#[test]
 fn per_root_policies_stay_deferred_after_database_reopen() {
     let tree = Tree::new();
     let selected = tree.config(false, 1024, &["private"]);

@@ -23,3 +23,11 @@ Raw local logs can contain operational paths. They are not included in the
 sanitized export. Forced termination can lose queued logs. Retention/failure
 fixtures and export allowlist tests do not establish the full crash, low-disk,
 installed rollback or device-removal acceptance matrix.
+
+For local query profiling, the optional tracing targets
+`winsearchd::query_profile=debug` and `winsearchd::query_profile_detail=debug`
+record aggregate planning/delivery time, store-lock wait, guard-call count/time,
+result count and policy-classification time. These events contain no query,
+source path/text or entry identifier. Enable them only for a diagnostic run;
+instrumented timings do not establish quiet release performance. They use the
+same bounded local logger and are excluded from the sanitized CLI export.

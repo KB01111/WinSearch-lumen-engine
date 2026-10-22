@@ -330,6 +330,19 @@ pub fn dataset_names(names: &[String]) -> bool {
         .any(|(all, machine)| *all >= 300 && machine * 10 >= all * 7)
 }
 pub fn ordinary_content_reason(c: &IndexingConfig, path: &Path) -> Option<&'static str> {
+    let started =
+        tracing::enabled!(target: "winsearchd::query_profile_detail", tracing::Level::DEBUG)
+            .then(std::time::Instant::now);
+    let result = ordinary_content_reason_inner(c, path);
+    if let Some(started) = started {
+        tracing::debug!(target: "winsearchd::query_profile_detail",
+            elapsed_ms = started.elapsed().as_secs_f64() * 1000., denied = result.is_some(),
+            "ordinary content classification timing");
+    }
+    result
+}
+
+fn ordinary_content_reason_inner(c: &IndexingConfig, path: &Path) -> Option<&'static str> {
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     if crate::crawl::is_excluded(&name, false)
         || ws_code::EXCLUDED_CODE_FILES.contains(&name.to_ascii_lowercase().as_str())

@@ -26,6 +26,19 @@ struct Candidate {
 }
 
 impl IndexStore {
+    /// Query-pass reuse requires a native change fence and fresh delivery checks.
+    /// An unavailable or broken fence must retain the ordinary live guard path.
+    pub fn search_fenced(
+        &self,
+        req: &SearchRequest,
+        fence: Box<dyn Fn() -> bool + Send + Sync>,
+    ) -> Result<Vec<SearchHit>, StoreError> {
+        let _scope = self
+            .query_cache
+            .begin(fence)
+            .map_err(|message| StoreError::InvalidConfig(message.into()))?;
+        self.search(req)
+    }
     pub(crate) fn set_search_request_filter(&self, req: &SearchRequest) -> Result<(), StoreError> {
         if !ws_protocol::valid_search_extensions(&req.extensions)
             || !ws_protocol::valid_search_file_kinds(&req.file_kinds)
@@ -554,6 +567,63 @@ mod tests {
             .unwrap();
         assert_eq!(hits[0].name, "notes.txt");
         assert_eq!(hits[0].explanation, "Exact name match");
+    }
+
+    #[test]
+    fn query_pass_reuses_guards_only_while_fenced_and_never_across_operations() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc, Mutex,
+        };
+        let store = seeded_store();
+        let calls = Arc::new(Mutex::new(std::collections::HashMap::new()));
+        let observed = calls.clone();
+        let admitted = Arc::new(AtomicBool::new(true));
+        let admission = admitted.clone();
+        store
+            .set_query_source_guard(move |path, source, app| {
+                *observed
+                    .lock()
+                    .unwrap()
+                    .entry((path.to_owned(), source.map(str::to_owned), app))
+                    .or_insert(0) += 1;
+                admission.load(Ordering::SeqCst)
+            })
+            .unwrap();
+        let request = SearchRequest {
+            text: "notes".into(),
+            limit: 20,
+            ..Default::default()
+        };
+        let hits = store.search_fenced(&request, Box::new(|| true)).unwrap();
+        assert_eq!(hits.len(), 2);
+        assert!(
+            calls.lock().unwrap().values().all(|count| *count == 1),
+            "duplicate live filesystem work in one unchanged query pass: {:?}",
+            calls.lock().unwrap()
+        );
+        let entry = hits[0].entry_id;
+        assert!(store.entry_visible(entry).unwrap());
+        let path = hits[0].path.clone();
+        assert_eq!(
+            calls.lock().unwrap()[&(path, None, false)],
+            2,
+            "delivery/source operations must be fresh"
+        );
+        calls.lock().unwrap().clear();
+        store.search_fenced(&request, Box::new(|| false)).unwrap();
+        assert!(
+            calls.lock().unwrap().values().any(|count| *count > 1),
+            "broken fences cannot reuse prior validation"
+        );
+        admitted.store(false, Ordering::SeqCst);
+        assert!(
+            store
+                .search_fenced(&request, Box::new(|| true))
+                .unwrap()
+                .is_empty(),
+            "a new operation must recheck admission"
+        );
     }
 
     #[test]

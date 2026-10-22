@@ -149,7 +149,7 @@ pub struct Indexer {
     store: Mutex<IndexStore>,
     vector_index: std::sync::RwLock<Option<CachedVectors>>,
     cache_epoch: std::sync::atomic::AtomicU64,
-    policy_epoch: std::sync::atomic::AtomicU64,
+    policy_epoch: Arc<std::sync::atomic::AtomicU64>,
     counters: Mutex<Counters>,
     wake: (Mutex<bool>, Condvar),
     shutdown: AtomicBool,
@@ -157,6 +157,7 @@ pub struct Indexer {
     roots: std::sync::RwLock<Vec<Arc<RootInfo>>>,
     policy: Arc<std::sync::RwLock<ws_protocol::IndexingConfig>>,
     policy_admitted: Arc<AtomicBool>,
+    query_guard_timings: Arc<[std::sync::atomic::AtomicU64; 2]>,
     watchers: Mutex<Vec<Watcher>>,
     configuration_change: Mutex<()>,
 }
@@ -314,14 +315,28 @@ impl Indexer {
         let policy_admitted = Arc::new(AtomicBool::new(admitted));
         let query_admitted = policy_admitted.clone();
         let query_policy = policy.clone();
+        let query_guard_timings: Arc<[std::sync::atomic::AtomicU64; 2]> =
+            Arc::new(Default::default());
+        let guard_timings = query_guard_timings.clone();
         store.set_query_source_guard(move |path, source, is_app| {
-            query_admitted.load(Ordering::Acquire)
+            let started =
+                tracing::enabled!(target: "winsearchd::query_profile", tracing::Level::DEBUG)
+                    .then(std::time::Instant::now);
+            let allowed = query_admitted.load(Ordering::Acquire)
                 && query_source_allowed(
                     &query_policy.read().unwrap_or_else(|p| p.into_inner()),
                     path,
                     source,
                     is_app,
-                )
+                );
+            if let Some(started) = started {
+                guard_timings[0].fetch_add(1, Ordering::Relaxed);
+                guard_timings[1].fetch_add(
+                    started.elapsed().as_nanos().min(u64::MAX as u128) as u64,
+                    Ordering::Relaxed,
+                );
+            }
+            allowed
         })?;
         let selected: Vec<PathBuf> = if admitted {
             config.roots.iter().map(PathBuf::from).collect()
@@ -348,13 +363,14 @@ impl Indexer {
             store: Mutex::new(store),
             vector_index: std::sync::RwLock::new(None),
             cache_epoch: std::sync::atomic::AtomicU64::new(1),
-            policy_epoch: std::sync::atomic::AtomicU64::new(1),
+            policy_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             counters: Mutex::new(Counters::default()),
             wake: (Mutex::new(false), Condvar::new()),
             shutdown: AtomicBool::new(false),
             roots: std::sync::RwLock::new(infos),
             policy,
             policy_admitted,
+            query_guard_timings,
             watchers: Mutex::new(Vec::new()),
             configuration_change: Mutex::new(()),
             catalog_dirty: AtomicBool::new(false),
@@ -429,10 +445,65 @@ impl Indexer {
     // ---- search ----
 
     pub fn search(&self, req: &SearchRequest) -> Result<Vec<SearchHit>, StoreError> {
-        self.store
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .search(req)
+        let started = std::time::Instant::now();
+        let store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+        let lock_ms = started.elapsed().as_secs_f64() * 1000.;
+        let before = self
+            .query_guard_timings
+            .each_ref()
+            .map(|value| value.load(Ordering::Relaxed));
+        let result = match self.source_query_fence() {
+            Some(fence) => store.search_fenced(req, fence),
+            None => store.search(req),
+        };
+        let after = self
+            .query_guard_timings
+            .each_ref()
+            .map(|value| value.load(Ordering::Relaxed));
+        tracing::debug!(target: "winsearchd::query_profile", elapsed_ms = started.elapsed().as_secs_f64() * 1000.,
+            lock_ms, guard_calls = after[0].wrapping_sub(before[0]),
+            guard_ms = after[1].wrapping_sub(before[1]) as f64 / 1_000_000.,
+            results = result.as_ref().map_or(0, Vec::len), "exact index search timing");
+        result
+    }
+
+    /// Reuse is confined to lexical planning, under independent kernel change
+    /// notifications. Every delivery/source operation still uses live guards.
+    fn source_query_fence(&self) -> Option<Box<dyn Fn() -> bool + Send + Sync>> {
+        let epoch = self.policy_epoch();
+        let policy = self.policy.read().unwrap_or_else(|p| p.into_inner());
+        let mut directories = std::collections::HashMap::<PathBuf, bool>::new();
+        for root in &policy.roots {
+            for (depth, path) in Path::new(root).ancestors().enumerate() {
+                *directories.entry(path.to_path_buf()).or_default() |= depth == 0;
+                if directories.len() > 64 {
+                    return None;
+                }
+            }
+        }
+        drop(policy);
+        // Arm parents before descendants, so replacement during setup also
+        // breaks a fence. No watcher thread, TTL or persisted admission cache.
+        let mut directories: Vec<_> = directories.into_iter().collect();
+        directories.sort_by_key(|(path, _)| path.components().count());
+        let guards: Option<Vec<_>> = directories
+            .into_iter()
+            .map(|(path, recursive)| {
+                ws_platform::directory_guard::DirectoryChangeGuard::open(&path, recursive)
+            })
+            .collect();
+        let guards = Mutex::new(guards?);
+        let policy_epoch = self.policy_epoch.clone();
+        let admitted = self.policy_admitted.clone();
+        Some(Box::new(move || {
+            admitted.load(Ordering::Acquire)
+                && policy_epoch.load(Ordering::Acquire) == epoch
+                && guards
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .iter()
+                    .all(|guard| guard.intact())
+        }))
     }
 
     /// Cosine top-k over the `segments` table for the semantic query stage

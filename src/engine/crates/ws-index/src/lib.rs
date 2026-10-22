@@ -30,3 +30,4 @@ pub use model::{
 pub use settings::{search_settings, SettingsHit};
 pub use store::{EntryRow, IndexStats, IndexStore, Root, StoreError};
 pub use vectors::{VectorError, VectorHit, VectorIndex};
+mod query_cache;

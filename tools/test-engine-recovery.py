@@ -107,7 +107,7 @@ def main():
     parser.add_argument("--binary-directory", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--work-directory", type=Path, required=True)
-    parser.add_argument("--build-profile", choices=("debug", "release"), required=True)
+    parser.add_argument("--build-profile", choices=("debug", "engine-validation", "release"), required=True)
     args = parser.parse_args()
     output = args.output.resolve()
     assert output.is_relative_to(ROOT / "artifacts") and not output.exists()

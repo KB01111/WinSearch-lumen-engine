@@ -3,6 +3,7 @@
 
 pub mod child_job;
 pub mod content;
+pub mod directory_guard;
 pub mod identity;
 pub mod ifilter;
 pub mod npu;

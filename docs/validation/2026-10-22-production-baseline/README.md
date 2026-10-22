@@ -105,14 +105,57 @@ The proposed TCP-first order failed that fixture by bypassing the proxy; the
 original order was restored. These are local transport fixtures, not live
 corporate-proxy or public TLS certificate qualification.
 
+## Copied release checkpoint and measured latency failure
+
+The [release runtime checkpoint](release-runtime-checkpoint.json) binds the clean
+`ae7c8c6` CPU/NPU candidate to its native-source, executable, library, dependency
+and model hashes. Its copied native recovery fixture passed, including independent
+Stop in 97.98 ms, fresh grant admission after restart, and four SQLite integrity
+checks. An explicitly invoked real-NPU reference test passed unchanged cosine
+thresholds of at least 0.999. CPU/NPU media reference fixtures and ten frozen
+retrieval suites passed; all owned process jobs emptied. These are local copied
+candidate checks. The two media runs overlapped, so their timings do not qualify
+quiet performance. They do not establish installed Lumen acceptance or signing.
+
+The [retained release scale failure](exact-scale-release-failure.json) uses the
+same candidate and 1,000 generated files. Its 100 warm 20-result samples measured
+p50/p95/p99 of 4,581/5,804/7,998 ms, failing the unchanged 100/250 ms p95/p99 targets.
+After those samples and one bulk query, the operator stopped only the verified
+owned daemon to begin profiling. Bulk percentiles and larger corpora remain
+unmeasured; cleanup timing after that stop is not independent Stop evidence.
+
+Aggregate source profiling found repeated live source-policy checks dominating
+lexical planning. Query-pass reuse now has bounded memory and independent local
+directory-change/policy fences, with live delivery/source checks retained. A
+three-query debug diagnostic reduced guard calls from 5,654 to 1,473, but still
+took seconds. This is diagnostic evidence, not release latency acceptance. The
+copied candidate above predates these changes and cannot qualify them.
+
+The [query-source checkpoint](query-source-checkpoint.json) records the subsequent
+source gate: **782 Rust tests passed, 11 ignored, 28 suites**, strict workspace
+Clippy and build passed. Corrupt generated PDB/object files blocked the first
+attempt; its logs remain intact, and the successful retry disabled incremental
+compilation. Review then found a watcher callback shutdown could reuse a closed
+numeric handle. A deterministic regression reproduced that read; the loop now
+exits on closed state. All four watcher tests, strict daemon Clippy and build
+passed after that final change. No other runtime source changed after the full
+suite. Rustfmt, diff checks and all 29 Python contracts pass.
+
+The rebuilt unoptimized copied-native fixture passed reset/restart, fresh grants,
+two-profile isolation, sanitized diagnostics and four integrity checks. Independent
+Stop took 23.76 ms and both owned jobs emptied. This qualifies the recovery fixture
+for those recorded bytes; it does not qualify new release latency or installed
+Lumen behavior.
+
 ## Remaining acceptance
 
-Tasks 5 and 7-11 remain open. The Task 6 opt-in Lumen adapter has source regressions,
+Tasks 5-11 remain open. The Task 6 opt-in Lumen adapter has source regressions,
 but its expanded native code-search test currently fails against the historical
-85a915d payload. Default cutover remains disabled. The scale harness is a draft and
-has no measured result yet. Fresh hosted checks, backend/model quality, two-profile
-reset/package recovery, signing, installed upgrade/rollback and strict UI/resource
-acceptance still need evidence on the final pinned candidate. Existing 11 ignored
+85a915d payload. Default cutover remains disabled. The scale harness has retained
+debug and release failures; neither passes production latency. Final source,
+hosted, backend/model quality, package recovery, signing, installed upgrade/rollback
+and strict UI/resource acceptance still need evidence on the final pinned candidate.
+Existing 11 ignored
 model/hardware/benchmark tests are not passes.
 
 `tools/verify-engine.ps1` runs contracts, lint, test or release checks independently

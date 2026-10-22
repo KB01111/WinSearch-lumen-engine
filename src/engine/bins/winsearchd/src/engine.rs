@@ -2338,6 +2338,7 @@ impl EngineService {
         mut results: Vec<SearchResult>,
         sources: &HashMap<String, ResultSource>,
     ) -> Vec<SearchResult> {
+        let started = std::time::Instant::now();
         let store = self.indexer.store_lock();
         results.retain_mut(|result| {
             let Some(source) = sources.get(&result.id) else {
@@ -2432,6 +2433,8 @@ impl EngineService {
             }
             true
         });
+        tracing::debug!(target: "winsearchd::query_profile", elapsed_ms = started.elapsed().as_secs_f64() * 1000.,
+            results = results.len(), "delivery validation timing");
         results
     }
 

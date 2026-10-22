@@ -70,6 +70,7 @@ pub struct EntryRow {
 pub struct IndexStore {
     pub(crate) conn: Connection,
     database_id: String,
+    pub(crate) query_cache: crate::query_cache::QueryCache,
 }
 
 #[derive(Clone)]
@@ -99,16 +100,18 @@ impl IndexStore {
         &self,
         guard: impl Fn(&str, Option<&str>, bool) -> bool + Send + Sync + 'static,
     ) -> Result<(), StoreError> {
+        let cache = self.query_cache.clone();
         self.conn.create_scalar_function(
             "query_source_allowed",
             3,
             rusqlite::functions::FunctionFlags::SQLITE_UTF8,
             move |ctx| {
-                Ok(guard(
-                    &ctx.get::<String>(0)?,
-                    ctx.get::<Option<String>>(1)?.as_deref(),
+                let key = (
+                    ctx.get::<String>(0)?,
+                    ctx.get::<Option<String>>(1)?,
                     ctx.get::<bool>(2)?,
-                ))
+                );
+                Ok(cache.evaluate(&key, || guard(&key.0, key.1.as_deref(), key.2)))
             },
         )?;
         Ok(())
@@ -1205,7 +1208,11 @@ COMMIT;
             .ok_or(StoreError::InvalidIdentity)?;
         conn.execute("INSERT INTO meta(key,value) VALUES('entry_id_high_water',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE CAST(meta.value AS INTEGER)<CAST(excluded.value AS INTEGER)", [watermark.max(maximum).to_string()])?;
         conn.execute_batch("CREATE TRIGGER IF NOT EXISTS entries_id_high_water AFTER INSERT ON entries BEGIN UPDATE meta SET value=CAST(NEW.id AS TEXT) WHERE key='entry_id_high_water' AND CAST(value AS INTEGER)<NEW.id; END;")?;
-        let store = Self { conn, database_id };
+        let store = Self {
+            conn,
+            database_id,
+            query_cache: Default::default(),
+        };
         crate::enrichment::initialize(&store.conn)?;
         store.set_query_source_guard(|_, _, _| true)?;
         store.conn.execute_batch("CREATE TEMP VIEW IF NOT EXISTS query_entries AS SELECT * FROM visible_entries WHERE query_source_allowed(path,NULL,is_app); CREATE TEMP VIEW IF NOT EXISTS query_content_rows AS SELECT f.rowid AS id FROM content_fts f JOIN query_entries e ON e.id=CAST(f.entry_id AS INTEGER) LEFT JOIN content_chunks c ON c.id=f.rowid AND c.entry_id=e.id LEFT JOIN content_revisions r ON r.entry_id=e.id LEFT JOIN content_progress p ON p.entry_id=c.entry_id AND p.kind=c.job_kind AND p.revision=r.revision WHERE query_source_allowed(e.path,COALESCE(p.source,''),e.is_app);")?;

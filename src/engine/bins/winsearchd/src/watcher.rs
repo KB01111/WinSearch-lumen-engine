@@ -76,7 +76,12 @@ impl Watcher {
                 let _ = CancelIoEx(self.handle.raw(), None);
             }
             self.handle.close();
-            let _ = thread.join();
+            // A callback's last strong Indexer reference can release this
+            // watcher on its own thread. The closed state exits its loop;
+            // joining that same thread would deadlock forever.
+            if thread.thread().id() != std::thread::current().id() {
+                let _ = thread.join();
+            }
         }
     }
 }
@@ -159,7 +164,7 @@ fn watch_loop(root: &Path, handle: Arc<OwnedHandle>, on_event: &(dyn Fn(WatchEve
 
     let mut pending_rename: Option<PathBuf> = None;
 
-    loop {
+    while !handle.1.load(Ordering::SeqCst) {
         let mut returned = 0u32;
         let result = unsafe {
             ReadDirectoryChangesW(
@@ -197,6 +202,9 @@ fn watch_loop(root: &Path, handle: Arc<OwnedHandle>, on_event: &(dyn Fn(WatchEve
                 WatchEvent::Overflow => WatchEvent::Overflow,
             };
             on_event(full_event);
+            if handle.1.load(Ordering::SeqCst) {
+                return;
+            }
         }
     }
 }
@@ -376,5 +384,65 @@ mod tests {
         assert!(saw_create, "no create event");
         assert!(saw_rename, "no rename event");
         assert!(saw_delete, "no delete event");
+    }
+
+    #[test]
+    fn a_closed_watcher_never_reads_a_recycled_numeric_handle() {
+        use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+        let tree = TempTree::new();
+        let file = fs::OpenOptions::new()
+            .access_mode(FILE_LIST_DIRECTORY.0)
+            .share_mode(7)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0)
+            .open(&tree.0)
+            .unwrap();
+        // Model a closed watcher's numeric handle now owned by another open.
+        // File retains real ownership; this alias must never initiate I/O.
+        let alias = Arc::new(OwnedHandle(
+            HANDLE(file.as_raw_handle()),
+            AtomicBool::new(true),
+        ));
+        let root = tree.0.clone();
+        let (finished, exited) = mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            watch_loop(&root, alias, &|_| {
+                panic!("closed watcher dispatched an event")
+            });
+            finished.send(()).unwrap();
+        });
+        let returned = exited.recv_timeout(Duration::from_secs(1)).is_ok();
+        // Unblock the deliberately wrong read on the RED implementation.
+        unsafe {
+            let _ = CancelIoEx(HANDLE(file.as_raw_handle()), None);
+        }
+        drop(file);
+        thread.join().unwrap();
+        assert!(returned, "closed watcher used another owner's live handle");
+    }
+
+    #[test]
+    fn a_callback_can_release_its_last_watcher_owner_without_joining_itself() {
+        let tree = TempTree::new();
+        let slot = Arc::new(std::sync::Mutex::new(None::<Watcher>));
+        let weak = Arc::downgrade(&slot);
+        let (sent, received) = mpsc::channel();
+        let watcher = spawn(&tree.0, move |_| {
+            let owned = weak.upgrade().and_then(|slot| slot.lock().unwrap().take());
+            if let Some(owned) = owned {
+                drop(owned);
+                sent.send(()).unwrap();
+            }
+        })
+        .unwrap();
+        *slot.lock().unwrap() = Some(watcher);
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while std::time::Instant::now() < deadline {
+            fs::write(tree.0.join("controlled-callback.txt"), b"fixture").unwrap();
+            if received.recv_timeout(Duration::from_millis(10)).is_ok() {
+                assert!(slot.lock().unwrap().is_none());
+                return;
+            }
+        }
+        panic!("last-owner release inside its callback must return without self-join");
     }
 }

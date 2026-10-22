@@ -165,7 +165,7 @@ def run(args, count):
             result["first_process_query"] = query(search, f"scale-{count - 1:06}", 20)
             for _ in range(5):
                 query(search, "scale-", 20)
-            for limit in (20, 1000, 10000):
+            for limit in args.limits:
                 for iteration in range(args.iterations):
                     sample = query(search, "scale-", limit)
                     assert sample["results"] == min(limit, count)
@@ -174,14 +174,15 @@ def run(args, count):
                     if len(result["samples"]) % 10 == 0:
                         args.output.with_name(f"{args.output.stem}-{count}-raw.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
             result["latencies"] = {}
-            for limit in (20, 1000, 10000):
+            for limit in args.limits:
                 samples = [s for s in result["samples"] if s["limit"] == limit]
                 result["latencies"][str(limit)] = {
                     field: percentiles([s[field] for s in samples])
                     for field in ("first_batch_ms", "complete_ms")}
-            first = result["latencies"]["20"]["first_batch_ms"]
-            if first["p95"] > 100 or first["p99"] > 250:
-                result["failures"].append("warm exact first-batch target")
+            if "20" in result["latencies"]:
+                first = result["latencies"]["20"]["first_batch_ms"]
+                if first["p95"] > 100 or first["p99"] > 250:
+                    result["failures"].append("warm exact first-batch target")
         except Exception as error:
             result["failures"].append(f"{type(error).__name__}: {error}")
         finally:
@@ -206,6 +207,14 @@ def run(args, count):
             if expired.is_set():
                 result["failures"].append("absolute corpus-run watchdog")
             owner.close()
+            # Keep only aggregate profiling events; ordinary logs can contain
+            # application inventory and generated source paths.
+            profile_lines = []
+            for log_path in sorted((data / "logs").glob("winsearchd.log.*")):
+                profile_lines.extend(line for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+                                     if "winsearchd::query_profile" in line)
+            if profile_lines:
+                args.output.with_name(f"{args.output.stem}-{count}-profile.log").write_text("\n".join(profile_lines) + "\n", encoding="utf-8")
         if owner.peak_private_bytes > args.max_private_mib * 1024 * 1024:
             result["failures"].append("declared private-memory ceiling")
         if peak_disk[0] > args.max_disk_mib * 1024 * 1024:
@@ -228,6 +237,8 @@ def main():
     parser.add_argument("--work-directory", type=Path, required=True)
     parser.add_argument("--files", type=int, nargs="+", choices=(1000, 10000, 50000, 200000), default=[1000, 10000, 50000, 200000])
     parser.add_argument("--iterations", type=int, default=100)
+    parser.add_argument("--limits", type=int, nargs="+", choices=(20, 1000, 10000), default=[20, 1000, 10000],
+                        help="Select a diagnostic subset; omitted result limits remain unverified")
     parser.add_argument("--index-timeout-seconds", type=int, default=1800)
     parser.add_argument("--run-timeout-seconds", type=int, default=3600)
     parser.add_argument("--max-private-mib", type=int, required=True)
@@ -243,7 +254,8 @@ def main():
         harness_sha256=digest(Path(__file__)),
         binaries={name: digest(args.binary_directory / name) for name in
                   ("winsearchd.exe", "winsearch-cli.exe", "winsearch-embed.exe", "winsearch-extract.exe")},
-        declared_ceilings=dict(private_mib=args.max_private_mib, data_disk_mib=args.max_disk_mib),
+        declared_ceilings=dict(private_mib=args.max_private_mib, data_disk_mib=args.max_disk_mib), requested_limits=args.limits,
+        unmeasured_result_limits=[limit for limit in (20, 1000, 10000) if limit not in args.limits],
         unverified=["semantic/hybrid/Related", "code", "idle CPU ten-minute gate", "power/sleep", "installed Lumen", "hardware backends"], corpora=[])
     try:
         for count in args.files:
