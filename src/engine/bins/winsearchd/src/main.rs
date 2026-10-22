@@ -12,6 +12,7 @@ mod enrichment;
 mod extract;
 mod extract_client;
 mod indexer;
+mod logging;
 mod model;
 mod policy;
 mod reset;
@@ -225,8 +226,17 @@ fn init_logging() {
         eprintln!("warning: cannot create log directory: {e}");
         return;
     }
-    let appender = tracing_appender::rolling::daily(&logs_dir, "winsearchd.log");
-    let (writer, guard) = tracing_appender::non_blocking(appender);
+    let appender = match logging::BoundedFile::open(&logs_dir, logging::LOG_FILE_BYTES) {
+        Ok(appender) => appender,
+        Err(_) => {
+            eprintln!("warning: file logging unavailable");
+            return;
+        }
+    };
+    let (writer, guard) = tracing_appender::non_blocking::NonBlockingBuilder::default()
+        .buffered_lines_limit(256)
+        .lossy(true)
+        .finish(appender);
     // Keep the guard alive for the process lifetime.
     Box::leak(Box::new(guard));
 
@@ -236,9 +246,10 @@ fn init_logging() {
 
     tracing_subscriber::fmt()
         .with_env_filter(filter)
-        .with_writer(writer)
+        .with_writer(move || logging::LimitedWriter::new(writer.clone()))
         .with_ansi(false)
-        .init();
+        .try_init()
+        .ok();
 
-    warn!(path = %logs_dir.display(), "file logging active");
+    warn!("bounded file logging active");
 }

@@ -46,6 +46,47 @@ These changes still require Lumen consented fixture delivery and final rebuilt
 payload/native/installed acceptance. Current builds use the XRT stub; the real
 SDK and models must be selected and requalified separately.
 
+## Retained scale failure and diagnostics work
+
+The [failed debug scale run](exact-scale-debug-failure.json) used 1,000 generated
+files (800 extracted text chunks), with no semantic model. It retained 100 warm
+20-result samples and 37 bulk samples before the one-hour watchdog stopped the
+owned process tree. Warm 20-result first-batch p50/p95/p99 were
+5,509/8,725/10,716 ms, far above the proposed 100/250 ms p95/p99 targets. Independent
+Stop took 28.48 ms and the owned job emptied. Peaks were 26,234,880 private bytes,
+89,923,584 working-set bytes and 10,540,525 data bytes. This was a debug harness
+validation run under changing host load, not release or installed acceptance.
+It is a measured failure requiring profiling; no specific cause is established.
+
+Bounded logging and a sanitized CLI diagnostics export have focused source tests.
+Testing also identified mandatory log-directory creation before the best-effort
+logger; the shared layout now treats logging failure as optional while retaining
+mandatory database/model/cache errors. The focused logging, layout and diagnostics
+tests and strict workspace Clippy pass.
+
+The subsequent full source gate passed **771 Rust tests, 11 ignored**, 28 suites;
+the command/source ledger and raw logs are in `artifacts/production-tests-diagnostics`.
+The [copied native recovery fixture](native-reset-recovery.json) passed blocked-log
+startup/search, independent ordinary/code namespace reset, stale-reference/replay
+refusal, model/policy preservation, other-profile isolation, Stop, restart with
+fresh grant admission, sanitized CLI export and four SQLite integrity checks.
+Its hashes include the runtime source files, executables and adjacent libraries.
+It used the debug profile and stub XRT build, with no semantic model.
+
+The first harness attempt masked its reset error by deleting the deployment
+before stopping processes; cleanup is now ordered before temporary-file removal.
+The corrected failure exposed a real ten-second reset-drain timeout while shell
+catalog enumeration held a work ticket. A controlled regression failed before
+moving read-only enumeration outside the commit ticket. Its captured policy epoch
+now rejects a catalog snapshot that crossed reset before it can mutate the store.
+The later controlled regression, all 30 indexer tests and the native fixture pass.
+The timeout and workload were retained rather than enlarged or skipped.
+
+Release containment now uses OS `CREATE_SUSPENDED` plus Job Object assignment
+before resumption. An actual process/descendant fixture verifies this boundary;
+the former debug-only stdin gate could not establish it for optimized binaries.
+The broader low-disk/crash/device/installed Task 10 matrix remains open.
+
 ## Remaining acceptance
 
 Tasks 5 and 7-11 remain open. The Task 6 opt-in Lumen adapter has source regressions,

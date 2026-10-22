@@ -25,6 +25,9 @@ impl WorkGate {
         state.0 = true;
         true
     }
+    pub(crate) fn active_count(&self) -> usize {
+        self.state.lock().unwrap_or_else(|p| p.into_inner()).1
+    }
     pub(crate) fn drain(&self, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());

@@ -1268,14 +1268,35 @@ impl Indexer {
     }
 
     fn refresh_catalog(&self) -> Result<(), StoreError> {
-        let Some(_work) = self.work_gate.enter() else {
+        self.refresh_catalog_with(|| catalog::scan_catalog_full(&catalog::app_roots()))
+    }
+
+    fn refresh_catalog_with(
+        &self,
+        scan: impl FnOnce() -> catalog::CatalogScan,
+    ) -> Result<(), StoreError> {
+        let Some(admission) = self.work_gate.enter() else {
             return Ok(());
         };
         if !self.policy_admitted.load(Ordering::Acquire) {
             return Ok(());
         }
-        let scan = catalog::scan_catalog_full(&catalog::app_roots());
+        let epoch = self.policy_epoch();
+        drop(admission);
+        // Shell enumeration can wait on external COM/filesystem work. It has
+        // no database side effects; only its fenced commit needs a reset ticket.
+        tracing::debug!("application catalog scan starting");
+        let scan = scan();
+        tracing::debug!(apps = scan.apps.len(), "application catalog scan finished");
+        let Some(_work) = self.work_gate.enter() else {
+            self.catalog_dirty.store(true, Ordering::Release);
+            return Ok(());
+        };
         let mut store = self.store.lock().unwrap_or_else(|p| p.into_inner());
+        if !self.policy_admitted.load(Ordering::Acquire) || self.policy_epoch() != epoch {
+            self.catalog_dirty.store(true, Ordering::Release);
+            return Ok(());
+        }
         let root_id = store.ensure_root(CATALOG_ROOT)?;
         let generation = store.begin_generation(root_id)?;
 
@@ -1765,6 +1786,62 @@ mod root_policy_tests;
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn slow_catalog_enumeration_does_not_hold_reset_and_cannot_commit_across_it() {
+        use std::{sync::mpsc, time::Duration};
+        let indexer = Indexer::open(IndexStore::open_in_memory().unwrap(), &[]).unwrap();
+        let (started, ready) = mpsc::channel();
+        let (resume, blocked) = mpsc::channel();
+        let app = catalog::AppEntry {
+            name: "Owned catalogue fixture".into(),
+            path: "C:/fixture/catalogue.lnk".into(),
+            target: "C:/fixture/catalogue.exe".into(),
+            keywords: String::new(),
+        };
+        let scanned = app.clone();
+        let worker = indexer.clone();
+        let thread = std::thread::spawn(move || {
+            worker.refresh_catalog_with(|| {
+                started.send(()).unwrap();
+                blocked.recv_timeout(Duration::from_secs(5)).unwrap();
+                catalog::CatalogScan {
+                    apps: vec![scanned],
+                    complete: true,
+                }
+            })
+        });
+        ready.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(indexer.work_gate.close());
+        let drained = indexer.work_gate.drain(Duration::from_millis(20));
+        indexer.reset_completed();
+        indexer.work_gate.reopen();
+        resume.send(()).unwrap();
+        thread.join().unwrap().unwrap();
+        assert!(
+            drained,
+            "read-only catalogue enumeration must not occupy a reset commit ticket"
+        );
+        assert!(
+            indexer
+                .store_lock()
+                .find_by_path(&app.path)
+                .unwrap()
+                .is_none(),
+            "a pre-reset snapshot must not populate the new index"
+        );
+        indexer
+            .refresh_catalog_with(|| catalog::CatalogScan {
+                apps: vec![app.clone()],
+                complete: true,
+            })
+            .unwrap();
+        assert!(indexer
+            .store_lock()
+            .find_by_path(&app.path)
+            .unwrap()
+            .is_some());
+    }
 
     #[test]
     fn deferred_admission_preserves_saved_policy_entries_and_jobs_without_authorizing_them() {

@@ -2,6 +2,7 @@
 //! headless retrieval evaluation (`eval <suite>`), and embedding model
 //! management (`model download|import|verify|status`).
 
+mod diagnostics;
 pub mod eval;
 pub mod ipc;
 
@@ -20,6 +21,7 @@ pub enum CliCommand {
     Help,
     Version,
     Status,
+    Diagnostics,
     Search {
         query: String,
         mode: SearchMode,
@@ -50,6 +52,7 @@ pub fn parse_args(args: &[String]) -> anyhow::Result<CliCommand> {
         "-h" | "--help" | "help" => Ok(CliCommand::Help),
         "-V" | "--version" | "version" => Ok(CliCommand::Version),
         "status" => Ok(CliCommand::Status),
+        "diagnostics" if args.len() == 1 => Ok(CliCommand::Diagnostics),
         "search" => parse_search_args(&args[1..]),
         "eval" => {
             let suite = args.get(1).cloned().unwrap_or_else(|| "names".to_string());
@@ -211,6 +214,8 @@ USAGE:
 SUBCOMMANDS:
     status
         Connect to running winsearchd daemon and print engine/model/config status
+    diagnostics
+        Print a bounded, sanitized JSON status summary without paths or source text
         (falls back to local on-disk diagnostic when daemon is not running).
 
     search <query> [--mode <all|files|apps|code>] [--semantic] [--limit <N>] [--extension <ext>] [--json]
@@ -728,6 +733,12 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         CliCommand::Status => cmd_status(),
+        CliCommand::Diagnostics => {
+            let (summary, available) = diagnostics::collect();
+            println!("{}", serde_json::to_string_pretty(&summary)?);
+            anyhow::ensure!(available, "diagnostics unavailable");
+            Ok(())
+        }
         CliCommand::Search {
             query,
             mode,

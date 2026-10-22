@@ -379,6 +379,10 @@ impl EngineService {
         request: &ws_protocol::ResetRequest,
     ) -> Result<ws_protocol::IndexReset, ErrorCode> {
         if !self.indexer.work_gate.drain(Duration::from_secs(10)) {
+            warn!(
+                active_work = self.indexer.work_gate.active_count(),
+                "index reset drain timed out before durable intent"
+            );
             self.resume_after_reset_gate();
             return Err(ErrorCode::NotReady);
         }
