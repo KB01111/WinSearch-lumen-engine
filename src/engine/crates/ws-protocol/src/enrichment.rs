@@ -37,6 +37,7 @@ pub struct EnrichmentRequest {
 }
 impl EnrichmentRequest {
     pub fn is_valid(&self) -> bool {
+        let mut previous_end = 0.0;
         crate::valid_index_id(&self.index_id)
             && self.reference.is_bound()
             && matches!(
@@ -61,11 +62,13 @@ impl EnrichmentRequest {
                                 end_seconds,
                             }),
                         ) => {
-                            seconds.is_finite()
+                            let valid = seconds.is_finite()
                                 && end_seconds.is_finite()
-                                && seconds >= 0.0
+                                && seconds >= previous_end
                                 && seconds < end_seconds
-                                && end_seconds <= 366.0 * 24.0 * 60.0 * 60.0
+                                && end_seconds <= 366.0 * 24.0 * 60.0 * 60.0;
+                            previous_end = end_seconds;
+                            valid
                         }
                         _ => false,
                     }
@@ -142,5 +145,28 @@ mod tests {
         assert!(!invalid.is_valid());
         invalid.parts[0].location = Some(MatchLocation::Page { page: 1 });
         assert!(!invalid.is_valid());
+    }
+
+    #[test]
+    fn transcript_parts_must_be_monotonic_and_non_overlapping() {
+        let mut value = request();
+        value.kind = EnrichmentKind::Transcript;
+        for (ranges, valid) in [
+            ([(1.0, 2.0), (2.0, 3.0)], true),
+            ([(10.0, 11.0), (1.0, 2.0)], false),
+            ([(1.0, 3.0), (2.0, 4.0)], false),
+        ] {
+            value.parts = ranges
+                .into_iter()
+                .map(|(seconds, end_seconds)| EnrichmentPart {
+                    text: "timed fixture transcript".into(),
+                    location: Some(MatchLocation::Timestamp {
+                        seconds,
+                        end_seconds,
+                    }),
+                })
+                .collect();
+            assert_eq!(value.is_valid(), valid, "timestamp order {ranges:?}");
+        }
     }
 }

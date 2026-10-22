@@ -87,6 +87,24 @@ before resumption. An actual process/descendant fixture verifies this boundary;
 the former debug-only stdin gate could not establish it for optimized binaries.
 The broader low-disk/crash/device/installed Task 10 matrix remains open.
 
+## Review contract regressions
+
+Review exposed two valid enrichment gaps: post-commit-capable errors previously
+left later client mutations enabled, and multiple transcript ranges could be
+out of order or overlap. Both regressions failed before the fixes and now pass.
+The client poisons its control lane before releasing queued writers; protocol
+validation retains the existing timestamp/duration bounds and additionally checks
+ordering across parts.
+
+The proposed proxy-connector reorder was rejected after inspecting pinned ureq
+3.4.2 and its current upstream documentation. CONNECT recursively invokes the
+same chain without proxy configuration to obtain the bounded TCP transport.
+An actual local proxy fixture passes a tunneled HTTP body and cancellation during
+CONNECT response, real TLS handshake and body stalls with the original order.
+The proposed TCP-first order failed that fixture by bypassing the proxy; the
+original order was restored. These are local transport fixtures, not live
+corporate-proxy or public TLS certificate qualification.
+
 ## Remaining acceptance
 
 Tasks 5 and 7-11 remain open. The Task 6 opt-in Lumen adapter has source regressions,

@@ -159,6 +159,19 @@ impl DownloadTransport {
 }
 
 pub(super) fn with_agent<T>(cancel: &AtomicBool, transfer: impl FnOnce(ureq::Agent) -> T) -> T {
+    let config = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(30 * 60)))
+        .timeout_resolve(Some(Duration::from_secs(1)))
+        .timeout_connect(Some(Duration::from_secs(1)))
+        .build();
+    with_agent_config(cancel, config, transfer)
+}
+
+fn with_agent_config<T>(
+    cancel: &AtomicBool,
+    config: ureq::config::Config,
+    transfer: impl FnOnce(ureq::Agent) -> T,
+) -> T {
     let state = Arc::new(AtomicBool::new(cancel.load(Ordering::Acquire)));
     let (finished, done) = mpsc::channel::<()>();
     std::thread::scope(|scope| {
@@ -175,15 +188,13 @@ pub(super) fn with_agent<T>(cancel: &AtomicBool, transfer: impl FnOnce(ureq::Age
                 break;
             }
         });
+        // ureq 3.4.2 CONNECT recursively runs this same chain with a proxy-free
+        // configuration to obtain DownloadTransport. Putting TCP first would
+        // bypass CONNECT, whose Some(chained) branch passes through unchanged.
         let connector =
             ().chain(ConnectProxyConnector::default())
                 .chain(DownloadConnector(state))
                 .chain(RustlsConnector::default());
-        let config = ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(30 * 60)))
-            .timeout_resolve(Some(Duration::from_secs(1)))
-            .timeout_connect(Some(Duration::from_secs(1)))
-            .build();
         let result = transfer(ureq::Agent::with_parts(
             config,
             connector,
@@ -197,6 +208,119 @@ pub(super) fn with_agent<T>(cancel: &AtomicBool, transfer: impl FnOnce(ureq::Age
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connect_proxy_uses_the_bounded_transport_for_tunnel_tls_and_body_cancellation() {
+        use std::net::TcpListener;
+        fn header(socket: &mut TcpStream) -> Vec<u8> {
+            let mut value = Vec::new();
+            while !value.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                socket.read_exact(&mut byte).unwrap();
+                value.push(byte[0]);
+                assert!(value.len() < 16 * 1024);
+            }
+            value
+        }
+        for stage in ["complete", "connect_stall", "tls_stall", "body_stall"] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let address = listener.local_addr().unwrap();
+            let (started, ready) = mpsc::channel();
+            let (stop, stopped) = mpsc::channel();
+            let server = std::thread::spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(3);
+                let mut socket = loop {
+                    match listener.accept() {
+                        Ok((socket, _)) => break socket,
+                        Err(error)
+                            if error.kind() == io::ErrorKind::WouldBlock
+                                && Instant::now() < deadline =>
+                        {
+                            std::thread::sleep(Duration::from_millis(5))
+                        }
+                        Err(error) => panic!("proxy was bypassed: {error}"),
+                    }
+                };
+                socket.set_nonblocking(false).unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let tunnel = header(&mut socket);
+                let expected = if stage == "tls_stall" {
+                    "CONNECT only-via-proxy.invalid:443 HTTP/1.1"
+                } else {
+                    "CONNECT only-via-proxy.invalid:80 HTTP/1.1"
+                };
+                assert!(tunnel.starts_with(expected.as_bytes()));
+                if stage != "connect_stall" {
+                    socket
+                        .write_all(b"HTTP/1.1 200 Connection established\r\n\r\n")
+                        .unwrap();
+                    if stage == "tls_stall" {
+                        let mut record = [0; 5];
+                        socket.read_exact(&mut record).unwrap();
+                        assert_eq!(record[0], 22, "expected a real TLS handshake record");
+                    } else {
+                        assert!(header(&mut socket).starts_with(b"GET /model.bin HTTP/1.1"));
+                        socket
+                            .write_all(if stage == "complete" {
+                                b"HTTP/1.1 200 OK\r\nContent-Length: 7\r\n\r\nfixture"
+                            } else {
+                                b"HTTP/1.1 200 OK\r\nContent-Length: 32\r\n\r\nprefix"
+                            })
+                            .unwrap();
+                    }
+                }
+                started.send(()).unwrap();
+                let _ = stopped.recv_timeout(Duration::from_secs(3));
+            });
+            let config = ureq::Agent::config_builder()
+                .proxy(Some(
+                    ureq::Proxy::new(&format!("http://{address}")).unwrap(),
+                ))
+                .timeout_global(Some(Duration::from_secs(10)))
+                .timeout_connect(Some(Duration::from_secs(2)))
+                .build();
+            let cancel = Arc::new(AtomicBool::new(false));
+            let observed = cancel.clone();
+            let (finished, done) = mpsc::channel();
+            let transfer = std::thread::spawn(move || {
+                let result: Result<Vec<u8>, ureq::Error> =
+                    with_agent_config(&observed, config, |agent| {
+                        let scheme = if stage == "tls_stall" {
+                            "https"
+                        } else {
+                            "http"
+                        };
+                        let mut response = agent
+                            .get(format!("{scheme}://only-via-proxy.invalid/model.bin"))
+                            .call()?;
+                        let mut bytes = Vec::new();
+                        response.body_mut().as_reader().read_to_end(&mut bytes)?;
+                        Ok(bytes)
+                    });
+                let _ = finished.send(result);
+            });
+            ready
+                .recv_timeout(Duration::from_secs(4))
+                .expect("proxy tunnel was not established");
+            if stage != "complete" {
+                cancel.store(true, Ordering::Release);
+            }
+            let result = done.recv_timeout(Duration::from_millis(750));
+            let _ = stop.send(());
+            server.join().unwrap();
+            transfer.join().unwrap();
+            let result =
+                result.expect("proxy/TLS/body cancellation exceeded its socket wait bound");
+            if stage == "complete" {
+                assert_eq!(result.unwrap(), b"fixture");
+            } else {
+                assert!(result.is_err(), "cancelled {stage} succeeded");
+            }
+        }
+    }
 
     #[test]
     fn stalled_first_address_preserves_time_for_a_reachable_second_address() {

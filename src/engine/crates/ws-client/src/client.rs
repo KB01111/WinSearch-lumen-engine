@@ -34,6 +34,7 @@ struct Operation {
     session: Session,
     id: u64,
     deadline: Instant,
+    // This guard must drop before the control permit releases queued writers.
     mutation: Option<MutationGuard>,
     _permit: OwnedSemaphorePermit,
 }
@@ -347,9 +348,27 @@ impl Client {
             if is_push(&message) {
                 continue;
             }
-            if matches!(&message, ServerMessage::Error { id: Some(id), .. } if *id == operation.id)
+            if let ServerMessage::Error {
+                id: Some(id), code, ..
+            } = &message
             {
-                operation.acknowledge();
+                if *id == operation.id {
+                    // Ingestion can commit before the final admission/delivery
+                    // fence fails. Keep its mutation guard armed until it poisons
+                    // the client, before another control waiter obtains the lane.
+                    if control
+                        && feature == Some("entry.enrichment")
+                        && matches!(
+                            code,
+                            ws_protocol::ErrorCode::Cancelled
+                                | ws_protocol::ErrorCode::NotReady
+                                | ws_protocol::ErrorCode::Internal
+                        )
+                    {
+                        return Err(Error::MutationOutcomeUnknown);
+                    }
+                    operation.acknowledge();
+                }
             }
             validate_id(&message, operation.id)?;
             let response = response(message);
@@ -1105,8 +1124,10 @@ mod tests {
 
     #[tokio::test]
     async fn enrichment_requires_capability_and_rejects_changed_admission_acknowledgments() {
-        for variant in 0..4 {
+        for variant in 0..8 {
             let (client, mut peer) = fixture();
+            let (dispatched, dispatch_seen) = tokio::sync::oneshot::channel();
+            let (queued, queue_seen) = tokio::sync::oneshot::channel();
             let task = tokio::spawn(async move {
                 peer.connect().await.unwrap();
                 let _ = read_client(&mut peer).await;
@@ -1126,6 +1147,27 @@ mod tests {
                 };
                 if variant == 3 {
                     std::future::pending::<()>().await;
+                }
+                if variant >= 4 {
+                    if variant <= 6 {
+                        dispatched.send(()).unwrap();
+                        queue_seen.await.unwrap();
+                    }
+                    send_server(
+                        &mut peer,
+                        &ServerMessage::Error {
+                            id: Some(id),
+                            code: match variant {
+                                4 => ws_protocol::ErrorCode::Cancelled,
+                                5 => ws_protocol::ErrorCode::NotReady,
+                                6 => ws_protocol::ErrorCode::Internal,
+                                _ => ws_protocol::ErrorCode::InvalidRequest,
+                            },
+                            message: "synthetic peer error after request dispatch".into(),
+                        },
+                    )
+                    .await;
+                    return;
                 }
                 send_server(
                     &mut peer,
@@ -1178,13 +1220,59 @@ mod tests {
                 ));
                 task.abort();
             } else {
-                let result = client.ingest_enrichment(request).await;
+                let result = if (4..=6).contains(&variant) {
+                    let waiting = async {
+                        dispatch_seen.await.unwrap();
+                        let mut next = Box::pin(client.set_config(EngineConfig::default()));
+                        std::future::poll_fn(|context| {
+                            assert!(
+                                std::future::Future::poll(next.as_mut(), context).is_pending(),
+                                "control mutation bypassed the active ingestion"
+                            );
+                            std::task::Poll::Ready(())
+                        })
+                        .await;
+                        queued.send(()).unwrap();
+                        next.await
+                    };
+                    let (result, waiting) =
+                        tokio::time::timeout(Duration::from_millis(300), async {
+                            tokio::join!(client.ingest_enrichment(request), waiting)
+                        })
+                        .await
+                        .expect("an already queued mutation was not fenced immediately");
+                    assert!(matches!(waiting, Err(Error::MutationOutcomeUnknown)));
+                    result
+                } else {
+                    client.ingest_enrichment(request).await
+                };
                 match variant {
                     0 => assert!(matches!(
                         result,
                         Err(Error::Unsupported("entry.enrichment"))
                     )),
                     1 => assert_eq!(result.unwrap().content_revision, 1),
+                    4..=6 => {
+                        assert!(
+                            matches!(result, Err(Error::MutationOutcomeUnknown)),
+                            "post-commit-capable error was treated as definitive: {result:?}"
+                        );
+                        assert!(matches!(
+                            tokio::time::timeout(
+                                Duration::from_millis(100),
+                                client.set_config(EngineConfig::default())
+                            )
+                            .await,
+                            Ok(Err(Error::MutationOutcomeUnknown))
+                        ));
+                    }
+                    7 => assert!(matches!(
+                        result,
+                        Err(Error::Remote {
+                            code: ws_protocol::ErrorCode::InvalidRequest,
+                            ..
+                        })
+                    )),
                     _ => assert!(matches!(result, Err(Error::Protocol(_)))),
                 }
                 task.await.unwrap();
