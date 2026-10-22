@@ -35,6 +35,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=CUDA_PATH");
     println!("cargo:rerun-if-env-changed=WS_EMBED_NO_CUDA");
     println!("cargo:rerun-if-env-changed=WS_EMBED_NO_VULKAN");
+    println!("cargo:rerun-if-env-changed=CMAKE_GENERATOR");
 
     delay_load_npu_shim();
 
@@ -188,21 +189,29 @@ fn cmake_exe() -> PathBuf {
 /// caches GGML_CUDA/GGML_VULKAN, so a CPU-only build sharing a dir with a CUDA
 /// build would silently keep CUDA on.
 fn build_llama(src: &Path, cuda: bool, vulkan: bool) -> PathBuf {
-    let variant = format!(
+    let mut variant = format!(
         "{}-{}-{}",
         LLAMA_CPP_LABEL,
         if cuda { "cuda" } else { "nocuda" },
         if vulkan { "vulkan" } else { "novulkan" },
     );
+    if let Ok(generator) = env::var("CMAKE_GENERATOR") {
+        variant.push('-');
+        variant.extend(generator.chars().filter(char::is_ascii_alphanumeric));
+    }
     let build = cache_root().join(format!("build-{variant}-{}", profile()));
     let install = cache_root().join(format!("install-{variant}-{}", profile()));
 
     let mut cfg = Command::new(cmake_exe());
     cfg.arg("-S").arg(src).arg("-B").arg(&build);
-    cfg.arg("-G")
-        .arg("Visual Studio 17 2022")
-        .arg("-A")
-        .arg("x64");
+    // CMake chooses the newest installed Visual Studio on a fresh Windows
+    // build, and retains a compatible cached generator. The old fixed VS2022
+    // choice fails on clean VS2026 runners. Explicit Ninja overrides do not
+    // support the Visual Studio-only -A option.
+    if env::var("CMAKE_GENERATOR").map_or(true, |generator| generator.starts_with("Visual Studio "))
+    {
+        cfg.arg("-A").arg("x64");
+    }
     cfg.arg(format!("-DCMAKE_INSTALL_PREFIX={}", install.display()));
     cfg.arg(format!("-DCMAKE_BUILD_TYPE={}", profile()));
     cfg.args([
