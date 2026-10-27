@@ -48,18 +48,18 @@ use std::path::Path;
 
 pub mod compile;
 pub mod cpu;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+pub mod direct;
 pub mod json;
 pub mod pyre;
 mod timing;
 pub mod unicode;
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-pub mod direct;
 #[cfg(all(feature = "xrt", windows, not(taconite_xrt_stub)))]
 mod winload;
 #[cfg(feature = "xrt")]
 mod xrt;
 #[cfg(feature = "xrt")]
-pub use xrt::{Buffer, Kernel, Run, Session};
+pub use xrt::{set_execution_budget, Buffer, Kernel, Run, Session};
 
 pub use timing::Timing;
 
@@ -255,12 +255,9 @@ mod tests {
         assert!(fast_exp(-100.0) < 1e-37);
     }
 
-    #[cfg(feature = "xrt")]
+    #[cfg(all(feature = "xrt", taconite_xrt_stub))]
     #[test]
     fn opening_a_missing_device_is_an_error_not_a_crash() {
-        if npu_present() {
-            return; // covered by the tagger's live test on an NPU box
-        }
         assert!(matches!(Session::open(0), Err(Error::Device(_))));
     }
 }

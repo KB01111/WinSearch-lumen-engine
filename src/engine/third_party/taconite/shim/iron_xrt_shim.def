@@ -4,6 +4,7 @@ LIBRARY iron_xrt_shim
 EXPORTS
     iron_open
     iron_close
+    iron_set_deadline_ms
     iron_kernel_load
     iron_kernel_free
     iron_buffer_alloc

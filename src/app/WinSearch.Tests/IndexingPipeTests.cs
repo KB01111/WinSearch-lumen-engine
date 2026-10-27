@@ -10,6 +10,100 @@ namespace WinSearch.Tests;
 
 public class IndexingPipeTests
 {
+    [Fact]
+    public void DiagnosticsRemainUnknownForLegacyAndRoundTripTypedReasons()
+    {
+        var legacy = JsonSerializer.Deserialize<EngineStatus>("{}", ProtocolJson.Options)!;
+        Assert.Null(legacy.Embedding);
+        Assert.Null(JsonSerializer.Deserialize<ModelStatus>("{}", ProtocolJson.Options)!.NpuBundle);
+        const string json = "{\"embedding\":{\"requested_backend\":\"npu\",\"text_backend\":\"npu+cpu\",\"image_backend\":\"cpu\",\"audio_backend\":\"cpu\",\"npu\":\"quarantined\"}}";
+        var status = JsonSerializer.Deserialize<EngineStatus>(json, ProtocolJson.Options)!;
+        Assert.Equal(NpuState.Quarantined, status.Embedding!.Npu);
+        Assert.Equal("npu+cpu", status.Embedding.TextBackend);
+        Assert.Equal("cpu", status.Embedding.ImageBackend);
+        Assert.Equal("cpu", status.Embedding.AudioBackend);
+        Assert.Equal(NpuState.Quarantined, JsonSerializer.Deserialize<EngineStatus>(
+            JsonSerializer.Serialize(status, ProtocolJson.Options), ProtocolJson.Options)!.Embedding!.Npu);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OptionalNpuRequestsRequireCapabilityBeforeAnyMutation(bool import)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = timeout.Token;
+        var pipe = "winsearch-npu-legacy-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        async Task Serve()
+        {
+            await server.WaitForConnectionAsync(token);
+            Assert.IsType<HelloMessage>(await ReadAsync(server, token));
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1 }, token);
+            var request = Assert.IsType<GetStatusMessage>(await ReadAsync(server, token));
+            await WriteAsync(server, new StatusMessage { Id = request.Id, Status = new() }, token);
+        }
+        var serving = Serve();
+        await using var client = new EngineClient(pipe);
+        await client.ConnectAsync(token);
+        var error = await Assert.ThrowsAsync<EngineException>(() => import
+            ? client.ImportModelAsync("C:/models", true, token)
+            : client.StartModelDownloadAsync(true, token));
+        Assert.Equal(ErrorCode.Unsupported, error.Code);
+        await client.GetStatusAsync(token);
+        await serving;
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task ModelRequestsCarryExplicitNpuChoiceAndIndependentProgress(bool import, bool includeNpu)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var token = timeout.Token;
+        var pipe = "winsearch-npu-choice-" + Guid.NewGuid();
+        using var server = new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        async Task Serve()
+        {
+            await server.WaitForConnectionAsync(token);
+            await ReadAsync(server, token);
+            await WriteAsync(server, new HelloAckMessage { ProtocolVersion = 1, Features = ["model.npu_bundle"] }, token);
+            var request = await ReadAsync(server, token);
+            ulong id;
+            if (import)
+            {
+                var message = Assert.IsType<ModelImportMessage>(request);
+                Assert.Equal(includeNpu, message.IncludeNpu);
+                Assert.Equal("C:/models", message.Path);
+                id = message.Id;
+            }
+            else
+            {
+                var message = Assert.IsType<ModelDownloadStartMessage>(request);
+                Assert.Equal(includeNpu, message.IncludeNpu);
+                id = message.Id;
+            }
+            await WriteAsync(server, new ModelStatusMessage { Id = id, Status = new ModelStatus
+            {
+                State = ModelState.Ready, Bytes = 4, TotalBytes = 4,
+                NpuBundle = new ModelComponentStatus { State = ModelState.Downloading, Bytes = 10, TotalBytes = 1_085_278_625 },
+            } }, token);
+        }
+        var serving = Serve();
+        await using var client = new EngineClient(pipe);
+        await client.ConnectAsync(token);
+        var status = import
+            ? includeNpu ? await client.ImportModelAsync("C:/models", true, token) : await client.ImportModelAsync("C:/models", token)
+            : includeNpu ? await client.StartModelDownloadAsync(true, token) : await client.StartModelDownloadAsync(token);
+        Assert.Equal(ModelState.Ready, status.State);
+        Assert.Equal(4UL, status.TotalBytes);
+        Assert.Equal(ModelState.Downloading, status.NpuBundle!.State);
+        Assert.Equal(1_085_278_625UL, status.NpuBundle.TotalBytes);
+        await serving;
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

@@ -8,6 +8,51 @@ namespace WinSearch.Tests;
 public sealed class SettingsViewModelTests
 {
     [Fact]
+    public void OptionalNpuDownload_PreservesReadyBaseModelAndAllowsPause()
+    {
+        var status = System.Text.Json.JsonSerializer.Deserialize<ModelStatus>("""
+            {"state":"ready","bytes":4,"total_bytes":4,
+             "npu_bundle":{"state":"downloading","bytes":10,"total_bytes":1085278625}}
+            """, ProtocolJson.Options)!;
+        using var vm = new SettingsViewModel(new AppSettings(), new FakeEngineClient());
+        vm.ApplyModelStatus(status);
+        Assert.Equal(ModelState.Ready, vm.ModelState);
+        Assert.Equal(100, vm.ModelProgressPercent);
+        Assert.True(vm.CanPauseDownload);
+        Assert.False(vm.CanImportModel);
+        Assert.False(vm.CanDeleteModel);
+    }
+
+    [Fact]
+    public async Task OptionalNpuInstall_RequiresExplicitActionAndReportsIndependentError()
+    {
+        var fake = new FakeEngineClient { CurrentModelStatus = new ModelStatus
+        {
+            State = ModelState.Ready, Bytes = 4, TotalBytes = 4,
+            NpuBundle = new ModelComponentStatus { State = ModelState.NotDownloaded, TotalBytes = 1_085_278_625 },
+        } };
+        using var vm = new SettingsViewModel(new AppSettings(), fake);
+        await vm.InitializeAsync();
+        Assert.Equal(0, fake.NpuDownloadStartCalls);
+        Assert.True(vm.CanInstallNpuBundle);
+        Assert.Contains("1,085,278,625", vm.NpuBundleSummary);
+        await vm.InstallNpuBundleAsync();
+        Assert.Equal(1, fake.NpuDownloadStartCalls);
+        Assert.Equal(0, fake.DownloadStartCalls);
+        Assert.False(vm.CanInstallNpuBundle);
+        fake.PushModelStatus(new ModelStatus
+        {
+            State = ModelState.Ready, Bytes = 4, TotalBytes = 4,
+            NpuBundle = new ModelComponentStatus { State = ModelState.Error, Error = "hash mismatch" },
+        });
+        Assert.Equal(ModelState.Ready, vm.ModelState);
+        Assert.Equal("", vm.ModelErrorText);
+        Assert.Contains("hash mismatch", vm.NpuBundleSummary);
+        Assert.True(vm.CanInstallNpuBundle);
+        Assert.Equal("Retry NPU bundle", vm.NpuBundleActionLabel);
+    }
+
+    [Fact]
     public async Task ModelLifecycle_TransitionsAndActionStates_FollowStateMachine()
     {
         var fake = new FakeEngineClient();

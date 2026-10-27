@@ -33,6 +33,7 @@ internal sealed class FakeEngineClient : IEngineClient
     public List<string> ImportCalls { get; } = new();
     public List<SearchQuery> SearchCalls { get; } = new();
     public int DownloadStartCalls { get; private set; }
+    public int NpuDownloadStartCalls { get; private set; }
     public int DownloadCancelCalls { get; private set; }
     public int DeleteModelCalls { get; private set; }
 
@@ -80,6 +81,19 @@ internal sealed class FakeEngineClient : IEngineClient
             State = ModelState.Downloading,
             Bytes = CurrentModelStatus.Bytes,
             TotalBytes = CurrentModelStatus.TotalBytes == 0 ? 864_676_480UL : CurrentModelStatus.TotalBytes,
+        };
+        ModelStatusChanged?.Invoke(this, CurrentModelStatus);
+        return Task.FromResult(CurrentModelStatus);
+    }
+
+    public Task<ModelStatus> StartModelDownloadAsync(bool includeNpu, CancellationToken cancellationToken = default)
+    {
+        if (!includeNpu) return StartModelDownloadAsync(cancellationToken);
+        NpuDownloadStartCalls++;
+        CurrentModelStatus.NpuBundle = new ModelComponentStatus
+        {
+            State = ModelState.Downloading,
+            TotalBytes = 1_085_278_625,
         };
         ModelStatusChanged?.Invoke(this, CurrentModelStatus);
         return Task.FromResult(CurrentModelStatus);

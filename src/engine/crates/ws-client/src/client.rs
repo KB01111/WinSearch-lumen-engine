@@ -424,10 +424,17 @@ impl Client {
         .await
     }
     pub async fn start_model_download(&self) -> Result<ModelStatus, Error> {
+        self.start_model_download_with_npu(false).await
+    }
+    /// Explicit optional bundle installation; legacy engines must advertise support.
+    pub async fn start_model_download_with_npu(
+        &self,
+        include_npu: bool,
+    ) -> Result<ModelStatus, Error> {
         self.unary(
             true,
-            None,
-            |id| ClientMessage::ModelDownloadStart { id },
+            include_npu.then_some("model.npu_bundle"),
+            |id| ClientMessage::ModelDownloadStart { id, include_npu },
             model_reply,
         )
         .await
@@ -442,10 +449,19 @@ impl Client {
         .await
     }
     pub async fn import_model(&self, path: String) -> Result<ModelStatus, Error> {
+        self.import_model_with_npu(path, false).await
+    }
+    pub async fn import_model_with_npu(
+        &self,
+        path: String,
+        include_npu: bool,
+    ) -> Result<ModelStatus, Error> {
         self.unary(
             true,
-            None,
-            |id| ClientMessage::ModelImport { id, path },
+            include_npu.then_some("model.npu_bundle"),
+            |id| ClientMessage::ModelImport { id, path,
+                include_npu,
+            },
             model_reply,
         )
         .await
@@ -487,15 +503,29 @@ impl Client {
             return Err(Error::InvalidInput("preview exceeds its request budget"));
         }
         let feature=match request.reference.indexed_id() {
-            Some(ws_protocol::IndexedEntryId::File(_)) if ws_protocol::valid_preview_location(request.location)=>"entry.preview.text",
-            Some(ws_protocol::IndexedEntryId::Code(_)) if ws_protocol::valid_code_preview_location(request.location)=>"entry.preview.code",
-            _=>return Err(Error::InvalidInput("invalid preview location for this entry")),
+            Some(ws_protocol::IndexedEntryId::File(_)) if ws_protocol::valid_preview_location(request.location)=>
+            {
+                "entry.preview.text"
+            }
+            Some(ws_protocol::IndexedEntryId::Code(_)) if ws_protocol::valid_code_preview_location(request.location)=>
+            {
+                "entry.preview.code"
+            }
+            _=> {
+                return Err(Error::InvalidInput("invalid preview location for this entry",
+                ))
+            }
         };
         let expected=request.clone();
         self.unary(false,Some(feature),|id|ClientMessage::PreviewEntry {id,request},|message|match message {
-            ServerMessage::EntryPreview {preview,..} if preview_matches(&preview,&expected)=>Ok(preview),
-            _=>Err(Error::Protocol("preview identity, location, state or budget changed")),
-        }).await
+            ServerMessage::EntryPreview {preview,..} if preview_matches(&preview,&expected)=>
+                {
+                    Ok(preview)
+                }
+                _=>Err(Error::Protocol("preview identity, location, state or budget changed",
+                )),
+            },
+        ).await
     }
 
     pub async fn search(&self, query: SearchQuery) -> Result<SearchStream, Error> {
@@ -633,7 +663,9 @@ fn entry_matches(entry: &ResolvedEntry, expected: &EntryReference) -> bool {
         || !expected.is_valid() || !reference_matches_kind(expected,entry.kind)
         || entry.source_revision.trim().is_empty()
         || entry.source_revision.len()>64*1024
-        || entry.content_sha256.as_ref().is_some_and(|hash|entry.index_revision.is_none() || !ws_protocol::valid_content_sha256(hash))
+        || entry.content_sha256.as_ref().is_some_and(|hash| {
+            entry.index_revision.is_none() || !ws_protocol::valid_content_sha256(hash)
+        })
         || entry.name.trim().is_empty()
         || entry.index_revision.is_some_and(|value| value <= 0)
         || expected
@@ -658,7 +690,9 @@ fn entry_matches(entry: &ResolvedEntry, expected: &EntryReference) -> bool {
 fn preview_matches(preview:&ws_protocol::EntryPreview,expected:&ws_protocol::PreviewRequest)->bool {
     use ws_protocol::{MatchLocation,PreviewState,MAX_PREVIEW_EXTRACTIONS,MAX_PREVIEW_TEXT_BYTES,MAX_PREVIEW_TEXT_PARTS};
     let code=matches!(expected.reference.indexed_id(),Some(ws_protocol::IndexedEntryId::Code(_)));
-    let known_kind=|kind:&str|if code {kind=="code"}else{matches!(kind,"doc"|"pdf"|"ocr"|"image"|"audio"|"video")};
+    let known_kind=|kind:&str| {
+        if code {kind=="code"}else{matches!(kind,"doc"|"pdf"|"ocr"|"image"|"audio"|"video")}
+    };
     if !entry_matches(&preview.entry,&expected.reference) || preview.parts.len()>MAX_PREVIEW_TEXT_PARTS
         || preview.extraction.len()>MAX_PREVIEW_EXTRACTIONS {return false;}
     let ready=preview.state==PreviewState::Ready;
@@ -675,12 +709,20 @@ fn preview_matches(preview:&ws_protocol::EntryPreview,expected:&ws_protocol::Pre
         }
         let matches=match (expected.location,part.location) {
             (None,_)=>true,
-            (Some(MatchLocation::Page {page:expected}),Some(MatchLocation::Page {page}))=>expected==page,
-            (Some(MatchLocation::Line {line:expected}),Some(MatchLocation::Line {line}))=>expected>=line
-                && u64::from(expected-line)<part.text.lines().count().max(1) as u64,
+            (Some(MatchLocation::Page {page:expected}),Some(MatchLocation::Page {page}))=> {
+                expected==page
+            }
+            (Some(MatchLocation::Line {line:expected}),Some(MatchLocation::Line {line}))=> {
+                expected>=line
+                && u64::from(expected-line)<part.text.lines().count().max(1) as u64
+            }
             (Some(MatchLocation::Notebook {cell_ordinal:expected_cell,line:expected,end_line:expected_end}),
-                Some(MatchLocation::Notebook {cell_ordinal,line,end_line}))=>expected_cell==cell_ordinal && expected>=line && expected_end<=end_line,
-            (Some(MatchLocation::Timestamp {seconds:expected,end_seconds:expected_end}),Some(MatchLocation::Timestamp {seconds,end_seconds}))=>expected==seconds && expected_end==end_seconds,
+                Some(MatchLocation::Notebook {cell_ordinal,line,end_line,
+                }),
+            )=>expected_cell==cell_ordinal && expected>=line && expected_end<=end_line,
+            (Some(MatchLocation::Timestamp {seconds:expected,end_seconds:expected_end}),Some(MatchLocation::Timestamp {seconds,end_seconds,
+                }),
+            )=>expected==seconds && expected_end==end_seconds,
             _=>false,
         };
         if !matches {return false;}
@@ -837,13 +879,14 @@ mod tests {
         let (unbound, mut peer) = fixture();
         let pipe = unbound.0.pipe.clone();
         let client = Client::for_process(
-            pipe.clone(), NonZeroU32::new(std::process::id()).unwrap(),
-        ).unwrap();
+            pipe.clone(), NonZeroU32::new(std::process::id()).unwrap()).unwrap();
         let task = tokio::spawn(async move {
             hello(&mut peer).await;
             let ClientMessage::GetStatus { id } = read_client(&mut peer).await else { panic!("expected status"); };
             send_server(&mut peer, &ServerMessage::Status { id: Some(id),
-                status: EngineStatus { files_indexed: 17, ..Default::default() } }).await;
+                status: EngineStatus { files_indexed: 17, ..Default::default() },
+                },
+            ).await;
         });
         assert_eq!(client.clone().status().await.unwrap().files_indexed, 17);
         task.await.unwrap();
@@ -876,7 +919,9 @@ mod tests {
             for n in 0..8 {
                 send_server(&mut peer, &ServerMessage::Results {id,batch:vec![SearchResult {
                     id:format!("large-{n}"),title:"x".repeat(9*1024*1024),..Default::default()}],
-                    done:n==7,outcome:None}).await;
+                    done:n==7,outcome:None,
+                    },
+                ).await;
             }
         });
         let mut stream = client.search(SearchQuery {text:"fixture".into(),limit:20,..Default::default()}).await.unwrap();
@@ -884,7 +929,7 @@ mod tests {
         loop {
             match stream.next().await {
                 Ok(Some(batch)) if !batch.done => (),
-                Err(Error::Protocol(_)) => {rejected=true;break;},
+                Err(Error::Protocol(_)) => {rejected=true;break;}
                 _ => break,
             }
         }
@@ -938,7 +983,9 @@ mod tests {
             assert_eq!(query.limit, 10_000);
             send_server(&mut peer, &ServerMessage::Results {id,batch:(0..10_000).map(|n|SearchResult {
                 id:format!("fixture-{n}"),title:format!("fixture-{n}.txt"),..Default::default()}).collect(),
-                done:true,outcome:None}).await;
+                done:true,outcome:None,
+                },
+            ).await;
         });
         let mut stream = client.search(SearchQuery {text:"fixture".into(),limit:10_000,..Default::default()}).await.unwrap();
         let batch = stream.next().await.unwrap().unwrap();
@@ -957,7 +1004,9 @@ mod tests {
             if let ServerMessage::HelloAck {features,..} = &mut response {features.push("search.limits".into());}
             send_server(&mut peer, &response).await;
             let ClientMessage::Search {id,..} = read_client(&mut peer).await else {panic!("missing search")};
-            send_server(&mut peer, &ServerMessage::Results {id,batch:vec![SearchResult::default();2],done:true,outcome:None}).await;
+            send_server(&mut peer, &ServerMessage::Results {id,batch:vec![SearchResult::default();2],done:true,outcome:None,
+                },
+            ).await;
         });
         let mut stream = client.search(SearchQuery {text:"fixture".into(),limit:1,..Default::default()}).await.unwrap();
         assert!(matches!(stream.next().await,Err(Error::Protocol(_))));
@@ -977,6 +1026,87 @@ mod tests {
         let result = client.set_indexing_config(config).await;
         assert!(matches!(result, Err(Error::Unsupported("index.root_policies"))), "{result:?}");
         task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn optional_npu_installation_requires_capability_before_mutation() {
+        use tokio::io::AsyncReadExt;
+        for import in [false, true] {
+            let (client, mut peer) = fixture();
+            let task = tokio::spawn(async move {
+                hello(&mut peer).await;
+                assert_eq!(
+                    peer.read(&mut [0]).await.unwrap(),
+                    0,
+                    "legacy engine must not silently ignore NPU opt-in"
+                );
+            });
+            let result = if import {
+                client.import_model_with_npu("C:/models".into(), true).await
+            } else {
+                client.start_model_download_with_npu(true).await
+            };
+            assert!(
+                matches!(result, Err(Error::Unsupported("model.npu_bundle"))),
+                "{result:?}"
+            );
+            task.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn optional_npu_installation_preserves_explicit_flag_and_component_status() {
+        for import in [false, true] {
+            let (client, mut peer) = fixture();
+            let task = tokio::spawn(async move {
+                peer.connect().await.unwrap();
+                assert!(matches!(
+                    read_client(&mut peer).await,
+                    ClientMessage::Hello { .. }
+                ));
+                let mut response = ack();
+                if let ServerMessage::HelloAck { features, .. } = &mut response {
+                    features.push("model.npu_bundle".into());
+                }
+                send_server(&mut peer, &response).await;
+                let request = read_client(&mut peer).await;
+                let id = match request {
+                    ClientMessage::ModelDownloadStart {
+                        id,
+                        include_npu: true,
+                    } if !import => id,
+                    ClientMessage::ModelImport {
+                        id,
+                        include_npu: true,
+                        path,
+                    } if import && path == "C:/models" => id,
+                    other => panic!("unexpected NPU request: {other:?}"),
+                };
+                let status = serde_json::from_value(
+                    serde_json::json!({"state":"ready","bytes":4,"total_bytes":4,
+                    "npu_bundle":{"state":"downloading","bytes":10,"total_bytes":1085278625u64}}),
+                )
+                .unwrap();
+                send_server(
+                    &mut peer,
+                    &ServerMessage::ModelStatus {
+                        id: Some(id),
+                        status,
+                    },
+                )
+                .await;
+            });
+            let status = if import {
+                client.import_model_with_npu("C:/models".into(), true).await
+            } else {
+                client.start_model_download_with_npu(true).await
+            }
+            .unwrap();
+            assert_eq!(status.state, ws_protocol::ModelState::Ready);
+            assert_eq!(status.total_bytes, 4);
+            assert_eq!(status.npu_bundle.unwrap().total_bytes, 1_085_278_625);
+            task.await.unwrap();
+        }
     }
 
     #[tokio::test]
@@ -1020,7 +1150,9 @@ mod tests {
                 let ClientMessage::Search {id,query}=read_client(&mut peer).await else {panic!("expected search");};
                 assert_eq!(query.file_kinds,vec![selected]);
                 send_server(&mut peer,&ServerMessage::Results {id,batch:vec![SearchResult {path:path.map(str::to_owned),kind,..Default::default()}],
-                    done:true,outcome:None}).await;
+                    done:true,outcome:None,
+                    },
+                ).await;
             });
             let mut stream=client.search(SearchQuery {file_kinds:vec![selected],..Default::default()}).await.unwrap();
             let result=stream.next().await;
@@ -1050,7 +1182,9 @@ mod tests {
                 let mut response=ack();if let ServerMessage::HelloAck {features,..}=&mut response {features.push("search.filters".into());}
                 send_server(&mut peer,&response).await;
                 let ClientMessage::Search {id,..}=read_client(&mut peer).await else {panic!("expected filtered search");};
-                send_server(&mut peer,&ServerMessage::Results { outcome:None,id,batch:vec![SearchResult {id:"e1".into(),path,kind,..Default::default()}],done:true}).await;
+                send_server(&mut peer,&ServerMessage::Results { outcome:None,id,batch:vec![SearchResult {id:"e1".into(),path,kind,..Default::default()}],done:true,
+                    },
+                ).await;
             });
             let mut stream=client.search(SearchQuery {extensions:vec!["pdf".into()],..Default::default()}).await.unwrap();
             let result=stream.next().await;
@@ -1070,7 +1204,8 @@ mod tests {
 
     #[tokio::test]
     async fn search_outcomes_are_required_when_advertised_and_validated_before_delivery() {
-        use ws_protocol::{SearchDisposition as D,SearchOutcome as O,SemanticOutcome as S,SemanticPhase as P,SemanticIssue as I};
+        use ws_protocol::{SearchDisposition as D,SearchOutcome as O, SemanticIssue as I, SemanticOutcome as S,SemanticPhase as P,
+        };
         for case in 0..14 {
             let requested=matches!(case,3|7|9|10|11);
             let outcome=match case {
@@ -1096,7 +1231,9 @@ mod tests {
                 send_server(&mut peer,&response).await;
                 let ClientMessage::Search {id,..}=read_client(&mut peer).await else {panic!("expected search");};
                 send_server(&mut peer,&ServerMessage::Results {id,done:case!=1,outcome,
-                    batch:if case==5 {vec![SearchResult::default()]} else {vec![]}}).await;
+                    batch:if case==5 {vec![SearchResult::default()]} else {vec![]},
+                    },
+                ).await;
             });
             let mut stream=client.search(SearchQuery {include_semantic:requested,..Default::default()}).await.unwrap();
             let result=stream.next().await;
@@ -1153,7 +1290,9 @@ mod tests {
                     entry_reference:(case!=3).then_some(EntryReference {result_id:target.into(),source_revision:(case!=5).then_some("target-proof".into())}),
                     ..Default::default()};
                 send_server(&mut peer,&ServerMessage::Results {id,done:true,outcome:Some(SearchOutcome::complete(outcome)),
-                    batch:if case==8 {vec![hit.clone(),hit]} else {vec![hit]}}).await;
+                    batch:if case==8 {vec![hit.clone(),hit]} else {vec![hit]},
+                    },
+                ).await;
             });
             let mut stream=client.related(RelatedQuery {source:EntryReference {result_id:"e1".into(),source_revision:Some("source-proof".into())},
                 limit:1,categories:if case==6 {vec![ws_protocol::ResultKind::Audio]} else {vec![]},
@@ -1288,6 +1427,7 @@ mod tests {
                     bytes: 7,
                     total_bytes: 10,
                     error: None,
+                    npu_bundle: None,
                 };
                 let response = match (operation, request) {
                     (0, ClientMessage::GetConfig { id }) => ServerMessage::Config {
@@ -1313,13 +1453,19 @@ mod tests {
                         }
                     }
                     (4, ClientMessage::GetModelStatus { id })
-                    | (5, ClientMessage::ModelDownloadStart { id })
+                    | (5, ClientMessage::ModelDownloadStart { id,
+                            include_npu: false,
+                        },
+                    )
                     | (6, ClientMessage::ModelDownloadCancel { id })
                     | (8, ClientMessage::ModelDelete { id }) => ServerMessage::ModelStatus {
                         id: Some(id),
                         status: model,
                     },
-                    (7, ClientMessage::ModelImport { id, path }) => {
+                    (7, ClientMessage::ModelImport { id, path,
+                            include_npu: false,
+                        },
+                    ) => {
                         assert_eq!(path, r"C:\model-import");
                         ServerMessage::ModelStatus {
                             id: Some(id),
@@ -1415,7 +1561,9 @@ mod tests {
         let (client,peer)=fixture();drop(peer);
         for location in [MatchLocation::Page {page:0},MatchLocation::Page {page:5001},
             MatchLocation::Line {line:0},MatchLocation::Timestamp {seconds:f64::NAN,end_seconds:1.0},
-            MatchLocation::Timestamp {seconds:2.0,end_seconds:1.0}] {
+            MatchLocation::Timestamp {seconds:2.0,end_seconds:1.0,
+            },
+        ] {
             assert!(matches!(client.preview_text(PreviewRequest {reference:EntryReference {result_id:"e42".into(),source_revision:None},location:Some(location)}).await,Err(Error::InvalidInput(_))));
         }
     }
@@ -1489,7 +1637,7 @@ mod tests {
                     8 => entry.path = r"C:approved\report.txt".into(),
                     9 => entry.path = r"C:\approved-sibling\report.txt".into(),
                     10 => entry.content_sha256=Some("a".repeat(63)),
-                    11 => {entry.content_sha256=Some("a".repeat(64));entry.index_revision=None;},
+                    11 => {entry.content_sha256=Some("a".repeat(64));entry.index_revision=None;}
                     12 => entry.content_sha256=Some("A".repeat(64)),
                     13 => entry.kind=ws_protocol::ResultKind::Code,
                     14 => entry.source_revision="🌿".repeat(17000),
@@ -1517,8 +1665,11 @@ mod tests {
 
     #[tokio::test]
     async fn preview_text_trailing_terminator_does_not_cover_the_following_line() {
-        use ws_protocol::{PreviewRequest,EntryPreview,PreviewState,PreviewTextPart,MatchLocation};
-        let request=PreviewRequest {reference:EntryReference {result_id:"e42".into(),source_revision:Some("proof".into())},location:Some(MatchLocation::Line {line:3})};
+        use ws_protocol::{
+            EntryPreview, MatchLocation, PreviewRequest, PreviewState,PreviewTextPart,
+        };
+        let request=PreviewRequest {reference:EntryReference {result_id:"e42".into(),source_revision:Some("proof".into()),
+            },location:Some(MatchLocation::Line {line:3})};
         let preview=EntryPreview {entry:resolved(),state:PreviewState::Ready,
             parts:vec![PreviewTextPart {kind:"doc".into(),text:"first\nsecond\n".into(),location:Some(MatchLocation::Line {line:1})}],
             truncated:false,extraction:Vec::new()};
@@ -1545,17 +1696,26 @@ mod tests {
         use ws_protocol::{MatchLocation,PreviewRequest};
         let (client,_peer)=fixture();
         for (id,location) in [("c42",MatchLocation::Page {page:1}),
-            ("c42",MatchLocation::Timestamp {seconds:0.0,end_seconds:1.0}),
-            ("c42",MatchLocation::Notebook {cell_ordinal:0,line:0,end_line:1}),
-            ("c42",MatchLocation::Notebook {cell_ordinal:0,line:3,end_line:2}),
-            ("e42",MatchLocation::Notebook {cell_ordinal:0,line:1,end_line:1})] {
+            ("c42",MatchLocation::Timestamp {seconds:0.0,end_seconds:1.0,
+                },
+            ),
+            ("c42",MatchLocation::Notebook {cell_ordinal:0,line:0,end_line:1,
+                },
+            ),
+            ("c42",MatchLocation::Notebook {cell_ordinal:0,line:3,end_line:2,
+                },
+            ),
+            ("e42",MatchLocation::Notebook {cell_ordinal:0,line:1,end_line:1,
+                },
+            ),
+        ] {
             assert!(matches!(client.preview_text(PreviewRequest {reference:EntryReference {result_id:id.into(),source_revision:None},location:Some(location)}).await,Err(Error::InvalidInput(_))));
         }
     }
 
     #[tokio::test]
     async fn code_preview_client_validates_actual_cell_ranges_kinds_hashes_and_budgets() {
-        use ws_protocol::{EntryPreview,PreviewRequest,PreviewState,PreviewTextPart,PreviewExtraction,MatchLocation,ResultKind};
+        use ws_protocol::{EntryPreview, MatchLocation, PreviewExtraction, PreviewRequest,PreviewState,PreviewTextPart,ResultKind};
         for case in 0..12 {
             let (client,mut peer)=fixture();
             let task=tokio::spawn(async move {
@@ -1565,12 +1725,21 @@ mod tests {
                 let ClientMessage::PreviewEntry {id,..}=read_client(&mut peer).await else {panic!("code preview missing");};
                 let mut entry=resolved();entry.result_id="c42".into();entry.kind=ResultKind::Code;entry.content_sha256=Some("a".repeat(64));
                 let mut preview=EntryPreview {entry,state:PreviewState::Ready,parts:vec![PreviewTextPart {kind:"code".into(),text:"first\nsecond".into(),
-                    location:Some(if case==0 {MatchLocation::Line {line:1}}else{MatchLocation::Notebook {cell_ordinal:2,line:1,end_line:2}})}],truncated:false,
+                    location:Some(if case==0 {MatchLocation::Line {line:1}}else{MatchLocation::Notebook {cell_ordinal:2,line:1,end_line:2,
+                            }
+                        }),
+                    }],truncated:false,
                     extraction:vec![PreviewExtraction {kind:"code".into(),complete_within_limit:true,source_units:None,indexed_units:None,capped:None}]};
                 match case {
                     2=>preview.entry.result_id="e42".into(),
-                    3=>preview.parts[0].location=Some(MatchLocation::Notebook {cell_ordinal:3,line:1,end_line:2}),
-                    4=>preview.parts[0].location=Some(MatchLocation::Notebook {cell_ordinal:2,line:1,end_line:3}),
+                    3=> {
+                        preview.parts[0].location=Some(MatchLocation::Notebook {cell_ordinal:3,line:1,end_line:2,
+                        })
+                    }
+                    4=> {
+                        preview.parts[0].location=Some(MatchLocation::Notebook {cell_ordinal:2,line:1,end_line:3,
+                        })
+                    }
                     5=>preview.parts[0].location=Some(MatchLocation::Line {line:1}),
                     6=>preview.parts[0].kind="doc".into(),
                     7=>preview.extraction[0].kind="doc".into(),
@@ -1578,12 +1747,15 @@ mod tests {
                     9=>preview.entry.index_revision=None,
                     10=>preview.entry.content_sha256=Some("A".repeat(64)),
                     11=>preview.parts[0].text="first\n".into(),
-                    _=>{},
+                    _=>{}
                 }
                 send_server(&mut peer,&ServerMessage::EntryPreview {id,preview}).await;
             });
             let result=client.preview_text(PreviewRequest {reference:EntryReference {result_id:"c42".into(),source_revision:Some("proof".into())},
-                location:Some(if case==0 {MatchLocation::Line {line:2}}else{MatchLocation::Notebook {cell_ordinal:2,line:2,end_line:2}})}).await;
+                location:Some(if case==0 {MatchLocation::Line {line:2}}else{MatchLocation::Notebook {cell_ordinal:2,line:2,end_line:2,
+                        }
+                    }),
+                }).await;
             let good=if case<=1 {result.is_ok()}else{matches!(result,Err(Error::Protocol(_)))};
             if !good {task.abort();panic!("case {case}: {result:?}");}task.await.unwrap();
         }
@@ -1595,7 +1767,9 @@ mod tests {
         for reference in ["e0","e01","e+1","c-1","s42","code:42:1","e9223372036854775808"]
             .into_iter().map(|result_id|EntryReference {result_id:result_id.into(),source_revision:None})
             .chain([EntryReference {result_id:"c42".into(),source_revision:Some(" ".into())},
-                EntryReference {result_id:"e42".into(),source_revision:Some("🌿".repeat(17000))}]) {
+                EntryReference {result_id:"e42".into(),source_revision:Some("🌿".repeat(17000)),
+            },
+        ]) {
             let result=tokio::time::timeout(Duration::from_millis(300),client.resolve_entry(reference)).await;
             assert!(matches!(result,Ok(Err(Error::InvalidInput(_)))),"{result:?}");
         }
@@ -1656,14 +1830,18 @@ mod tests {
                     2=>hit.entry_reference.as_mut().unwrap().result_id="e042".into(),
                     3=>hit.entry_reference.as_mut().unwrap().source_revision=None,
                     4=>hit.entry_reference.as_mut().unwrap().source_revision=Some(" ".into()),
-                    5=>hit.entry_reference.as_mut().unwrap().source_revision=Some("🌿".repeat(17000)),
+                    5=> {
+                        hit.entry_reference.as_mut().unwrap().source_revision=Some("🌿".repeat(17000))
+                    }
                     6=>hit.entry_reference.as_mut().unwrap().result_id="c42".into(),
                     7=>hit.kind=ResultKind::Application,
-                    8|9=>{hit.kind=ResultKind::Code;hit.entry_reference.as_mut().unwrap().result_id="c42".into();},
+                    8|9=>{hit.kind=ResultKind::Code;hit.entry_reference.as_mut().unwrap().result_id="c42".into();}
                     10=>hit.kind=ResultKind::Code,
-                    _=>{},
+                    _=>{}
                 }
-                send_server(&mut peer,&ServerMessage::Results { outcome:None,id,batch:vec![hit],done:true}).await;
+                send_server(&mut peer,&ServerMessage::Results { outcome:None,id,batch:vec![hit],done:true,
+                    },
+                ).await;
             });
             let mut stream=client.search(SearchQuery {mode:if case>=9 {SearchMode::Code}else{SearchMode::Auto},..Default::default()}).await.unwrap();
             let result=stream.next().await;

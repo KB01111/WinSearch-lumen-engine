@@ -91,6 +91,9 @@ internal sealed partial class SettingsWindow : Window
             PauseModelButton.IsEnabled = _viewModel.CanPauseDownload;
             ImportModelButton.IsEnabled = _viewModel.CanImportModel;
             DeleteModelButton.IsEnabled = _viewModel.CanDeleteModel;
+            NpuBundleStatusText.Text = _viewModel.NpuBundleSummary;
+            InstallNpuBundleButton.Content = _viewModel.NpuBundleActionLabel;
+            InstallNpuBundleButton.IsEnabled = _viewModel.CanInstallNpuBundle;
 
             ModelErrorTextBlock.Text = _viewModel.ModelErrorText;
             ModelErrorTextBlock.Visibility = string.IsNullOrEmpty(_viewModel.ModelErrorText)
@@ -114,6 +117,9 @@ internal sealed partial class SettingsWindow : Window
             _syncingFromViewModel = false;
         }
     }
+
+    private async void OnInstallNpuBundleClick(object sender, RoutedEventArgs e)
+        => await _viewModel.InstallNpuBundleAsync();
 
     private void OnThemeChanged(object sender, SelectionChangedEventArgs e)
     {

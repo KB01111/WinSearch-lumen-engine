@@ -96,7 +96,10 @@ fn build_windows_dll(root: &Path) {
     let implib = out.join("iron_xrt_shim.lib");
     let compiler = cc::Build::new().cpp(true).get_compiler();
     let mut cmd = compiler.to_command();
-    cmd.args(["/nologo", "/std:c++17", "/EHsc", "/O2", "/MD", "/LD", "/D_CRT_SECURE_NO_WARNINGS"])
+    // XRT's public headers select std::any from __cplusplus, which MSVC
+    // otherwise reports as C++98 even with /std:c++17.
+    cmd.args(["/nologo", "/std:c++17",
+        "/Zc:__cplusplus", "/EHsc", "/O2", "/MD", "/LD", "/D_CRT_SECURE_NO_WARNINGS"])
         .arg("/Ishim")
         .arg(format!("/I{}", root.join("include").display()))
         .arg("shim/iron_xrt_shim.cpp")
@@ -124,9 +127,19 @@ fn stage(dll: &Path) {
         return;
     };
     for dir in [profile.clone(), profile.join("deps")] {
-        if fs::create_dir_all(&dir).is_ok() {
-            // A DLL held by a running process cannot be replaced; keep the old one.
-            let _ = fs::copy(dll, dir.join("iron_xrt_shim.dll"));
+        fs::create_dir_all(&dir).expect("create shim staging directory");
+        let target = dir.join("iron_xrt_shim.dll");
+        if let Err(error) = fs::copy(dll, &target) {
+            // Windows may lock a loaded DLL. An identical copy is acceptable;
+            // silently retaining a stale shim would invalidate native proof.
+            assert!(
+                fs::read(dll)
+                    .ok()
+                    .zip(fs::read(&target).ok())
+                    .is_some_and(|(source, staged)| source == staged),
+                "cannot stage current shim at {}: {error}",
+                target.display()
+            );
         }
     }
 }

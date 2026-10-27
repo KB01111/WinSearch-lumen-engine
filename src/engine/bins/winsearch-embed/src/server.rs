@@ -7,8 +7,8 @@
 //! concurrent connections serialize on a slot mutex.
 //!
 //! The message handlers ([`dispatch`]) are pure over [`Shared`] state and
-//! never exit the process themselves, so unit tests exercise them directly;
-//! only [`run`] installs the watchdog that calls `process::exit`.
+//! may retire a broken NPU process before native teardown; [`run`] also
+//! installs an independent watchdog for blocked NPU initialization/execution.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use tracing::{info, warn};
 use ws_embed_protocol::{
     stub_embed_texts, stub_vector, EmbedErrorCode, EmbedRequest, EmbedResponse,
-    EMBED_PROTOCOL_VERSION, MAX_TEXTS_PER_JOB, STUB_DIM,
+    EMBED_PROTOCOL_VERSION, MAX_TEXTS_PER_JOB, NPU_RETIRE_EXIT_CODE, STUB_DIM,
 };
 use ws_modelmgr::{MMPROJ_FILE, NPU_BUNDLE_DIR, TEXT_FILE};
 use ws_platform::{
@@ -50,6 +50,8 @@ pub struct WorkerConfig {
     /// Explicit IRON NPU bundle directory. `None` = `NPU_BUNDLE_DIR` next to
     /// the text GGUF.
     pub npu_bundle: Option<PathBuf>,
+    /// Supervisor quarantine: preserve the preference while bypassing NPU use.
+    pub disable_npu: bool,
     /// Artificial per-text delay in stub mode (widens the kill-mid-job test window).
     pub stub_delay: Duration,
 }
@@ -75,6 +77,7 @@ impl WorkerConfig {
                     );
                 }
                 "--stub" => self.stub = true,
+                "--disable-npu" => self.disable_npu = true,
                 "--model" => self.model_path = Some(take_value(raw, &mut i, "--model")?.into()),
                 "--npu-bundle" => {
                     self.npu_bundle = Some(take_value(raw, &mut i, "--npu-bundle")?.into())
@@ -140,6 +143,7 @@ impl WorkerConfig {
             model_path,
             backend,
             npu_bundle,
+            disable_npu: false,
             stub_delay,
         })
     }
@@ -175,6 +179,21 @@ struct Activity {
     last: Instant,
     active_jobs: u32,
     shutdown: bool,
+    /// Independent of `engine`: the driver can block while holding that mutex.
+    npu_deadline: Option<Instant>,
+}
+
+impl Activity {
+    fn exit_code_at(&self, now: Instant, idle: Duration) -> Option<i32> {
+        if self.npu_deadline.is_some_and(|deadline| now >= deadline) {
+            Some(NPU_RETIRE_EXIT_CODE)
+        } else if self.shutdown || (self.active_jobs == 0 && now.duration_since(self.last) >= idle)
+        {
+            Some(0)
+        } else {
+            None
+        }
+    }
 }
 
 /// The NPU runtime is tried once, lazily, and stays off after a failure:
@@ -182,7 +201,7 @@ struct Activity {
 enum NpuSlot {
     Untried,
     Ready(ws_embed::NpuRuntime),
-    Unavailable(String),
+    Unavailable(&'static str),
 }
 
 struct EngineSlot {
@@ -191,6 +210,7 @@ struct EngineSlot {
     /// llama.cpp runtime (CUDA > Vulkan > CPU): audio, and the fallback.
     runtime: Option<ws_embed::EmbedRuntime>,
     backend: Option<String>,
+    last_backend: Option<String>,
     jobs_served: u64,
     started: Instant,
 }
@@ -203,11 +223,13 @@ impl Shared {
                 last: Instant::now(),
                 active_jobs: 0,
                 shutdown: false,
+                npu_deadline: None,
             }),
             engine: Mutex::new(EngineSlot {
                 npu: NpuSlot::Untried,
                 runtime: None,
                 backend: None,
+                last_backend: None,
                 jobs_served: 0,
                 started: Instant::now(),
             }),
@@ -249,21 +271,19 @@ fn spawn_watchdog(shared: Arc<Shared>, idle: Duration) {
         .name("winsearch-embed-idle".into())
         .spawn(move || loop {
             std::thread::sleep(WATCHDOG_POLL);
-            let done = {
+            let exit_code = {
                 let a = shared.activity.lock().unwrap_or_else(|p| p.into_inner());
-                a.shutdown || (a.active_jobs == 0 && a.last.elapsed() >= idle)
+                a.exit_code_at(Instant::now(), idle)
             };
-            if done {
+            if let Some(code) = exit_code {
                 // Process exit IS the full GPU release: the driver reclaims
                 // every allocation. No per-handle teardown needed (or wanted —
                 // a CPU `release_gpu` reload before dying would be pure waste).
-                let idle = shared
-                    .activity
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .shutdown;
-                info!(shutdown = idle, "embed worker exiting");
-                std::process::exit(0);
+                info!(code, "embed worker exiting");
+                if code == NPU_RETIRE_EXIT_CODE {
+                    ws_platform::child_job::terminate_current_process(code as u32);
+                }
+                std::process::exit(code);
             }
         })
         .expect("spawn idle watchdog");
@@ -364,11 +384,17 @@ fn job_guard(shared: &Shared, job: impl FnOnce() -> EmbedResponse) -> Action {
             .unwrap_or_else(|p| p.into_inner())
             .active_jobs += 1;
     }
-    let resp = job();
+    let mut resp = job();
+    if let EmbedResponse::Embeddings { npu, backend, .. } = &mut resp {
+        let mut engine = shared.engine.lock().unwrap_or_else(|p| p.into_inner());
+        engine.last_backend = Some(backend.clone());
+        *npu = npu_observation(&engine);
+    }
     {
         let mut a = shared.activity.lock().unwrap_or_else(|p| p.into_inner());
         a.active_jobs = a.active_jobs.saturating_sub(1);
         a.last = Instant::now();
+        a.npu_deadline = None;
     }
     Action::Respond(resp)
 }
@@ -378,9 +404,10 @@ fn hello_ack(shared: &Shared, id_version: u32) -> EmbedResponse {
     EmbedResponse::HelloAck {
         protocol_version: id_version,
         worker_version: env!("CARGO_PKG_VERSION").to_string(),
-        features: features(&eng, shared.cfg.stub),
+        features: features(),
         model_loaded: model_loaded(&eng),
         stub: shared.cfg.stub,
+        npu: npu_observation(&eng),
     }
 }
 
@@ -393,17 +420,22 @@ fn status_response(shared: &Shared, id: u64) -> EmbedResponse {
     EmbedResponse::WorkerStatus {
         id,
         model_loaded: model_loaded(&eng),
-        // The NPU is primary for text/image whenever it is resident.
-        backend: npu_dim.map(|_| "npu".to_string()).or_else(|| eng.backend.clone()),
+        backend: eng.last_backend.clone(),
         stub: shared.cfg.stub,
-        dim: npu_dim.or_else(|| eng.runtime.as_ref().map(|r| r.n_embd())).unwrap_or(STUB_DIM),
+        dim: npu_dim
+            .or_else(|| eng.runtime.as_ref().map(|r| r.n_embd()))
+            .unwrap_or(STUB_DIM),
         uptime_secs: eng.started.elapsed().as_secs(),
         jobs_served: eng.jobs_served,
-        npu: match &eng.npu {
-            NpuSlot::Untried => None,
-            NpuSlot::Ready(_) => Some("ready".to_string()),
-            NpuSlot::Unavailable(reason) => Some(reason.clone()),
-        },
+        npu: npu_observation(&eng),
+    }
+}
+
+fn npu_observation(eng: &EngineSlot) -> Option<String> {
+    match &eng.npu {
+        NpuSlot::Untried => None,
+        NpuSlot::Ready(_) => Some("ready".into()),
+        NpuSlot::Unavailable(reason) => Some((*reason).into()),
     }
 }
 
@@ -411,26 +443,13 @@ fn model_loaded(eng: &EngineSlot) -> bool {
     eng.runtime.is_some() || matches!(eng.npu, NpuSlot::Ready(_))
 }
 
-fn features(eng: &std::sync::MutexGuard<'_, EngineSlot>, stub: bool) -> Vec<String> {
-    let mut f = vec!["embed_texts".to_string()];
-    if stub
-        || eng
-            .runtime
-            .as_ref()
-            .is_some_and(|r| r.mtmd_supports_audio())
-    {
-        f.push("embed_audio".to_string());
-    }
-    if stub
-        || matches!(eng.npu, NpuSlot::Ready(_))
-        || eng
-            .runtime
-            .as_ref()
-            .is_some_and(|r| r.mtmd_supports_vision())
-    {
-        f.push("embed_image".to_string());
-    }
-    f
+fn features() -> Vec<String> {
+    // These are implemented requests, not model-residency claims. Lazy audio
+    // must remain callable after NPU-only text/image jobs. The job returns a
+    // typed availability/unsupported error when its projector cannot load.
+    ["embed_texts", "embed_audio", "embed_image"]
+        .map(String::from)
+        .to_vec()
 }
 
 fn embed_texts_job(shared: &Shared, id: u64, texts: &[String]) -> EmbedResponse {
@@ -446,6 +465,7 @@ fn embed_texts_job(shared: &Shared, id: u64, texts: &[String]) -> EmbedResponse 
             dim: STUB_DIM,
             backend: "stub".to_string(),
             stub: true,
+            npu: None,
         };
     }
     let mut eng = shared.engine.lock().unwrap_or_else(|p| p.into_inner());
@@ -453,10 +473,17 @@ fn embed_texts_job(shared: &Shared, id: u64, texts: &[String]) -> EmbedResponse 
     // of long texts cannot outrun the client's job timeout; GPU/CPU embeds
     // whatever is left (same model, same space).
     let mut vecs = try_npu(&mut eng, shared, "texts", |npu| {
-        let started = Instant::now();
         let mut done = Vec::with_capacity(texts.len());
         for text in texts {
-            if !done.is_empty() && started.elapsed() >= NPU_TEXT_JOB_BUDGET {
+            let remaining = shared
+                .activity
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .npu_deadline
+                .unwrap()
+                .saturating_duration_since(Instant::now());
+            // Leave watchdog headroom before choosing the safe partial-batch fallback.
+            if !done.is_empty() && remaining <= WATCHDOG_POLL * 2 {
                 break;
             }
             done.extend(npu.embed_texts(std::slice::from_ref(text))?);
@@ -472,6 +499,7 @@ fn embed_texts_job(shared: &Shared, id: u64, texts: &[String]) -> EmbedResponse 
             vecs,
             backend: "npu".to_string(),
             stub: false,
+            npu: None,
         };
     }
     let on_npu = vecs.len();
@@ -480,7 +508,10 @@ fn embed_texts_job(shared: &Shared, id: u64, texts: &[String]) -> EmbedResponse 
     let (dim, result) = match ensure_runtime(&mut eng, shared) {
         Ok(rt) => {
             let dim = rt.n_embd();
-            (dim, rt.embed_texts(&texts[on_npu..]).map_err(|e| e.to_string()))
+            (
+                dim,
+                rt.embed_texts(&texts[on_npu..]).map_err(|e| e.to_string()),
+            )
         }
         Err(message) => {
             return EmbedResponse::Error {
@@ -504,6 +535,7 @@ fn embed_texts_job(shared: &Shared, id: u64, texts: &[String]) -> EmbedResponse 
                 dim,
                 backend,
                 stub: false,
+                npu: None,
             }
         }
         Err(message) => EmbedResponse::Error {
@@ -534,6 +566,7 @@ fn embed_image_job(shared: &Shared, id: u64, path_str: &str, token_budget: u32) 
             dim: STUB_DIM,
             backend: "stub".to_string(),
             stub: true,
+            npu: None,
         };
     }
 
@@ -558,9 +591,14 @@ fn embed_image_job(shared: &Shared, id: u64, path_str: &str, token_budget: u32) 
     let rgb = ws_platform::wic::bgra8_to_rgb8(&wic.bgra8);
 
     let mut eng = shared.engine.lock().unwrap_or_else(|p| p.into_inner());
-    if let Some(vec) = try_npu(&mut eng, shared, "image", |npu| {
-        npu.embed_image_with_budget(&rgb, wic.scaled_width, wic.scaled_height, token_budget)
-    }) {
+    if let Some(vec) = (token_budget != 70)
+        .then(|| {
+            try_npu(&mut eng, shared, "image", |npu| {
+                npu.embed_image_with_budget(&rgb, wic.scaled_width, wic.scaled_height, token_budget)
+            })
+        })
+        .flatten()
+    {
         let dim = vec.len();
         eng.jobs_served += 1;
         return EmbedResponse::Embeddings {
@@ -569,6 +607,7 @@ fn embed_image_job(shared: &Shared, id: u64, path_str: &str, token_budget: u32) 
             dim,
             backend: "npu".to_string(),
             stub: false,
+            npu: None,
         };
     }
     let (dim, result) = match ensure_runtime(&mut eng, shared) {
@@ -605,6 +644,7 @@ fn embed_image_job(shared: &Shared, id: u64, path_str: &str, token_budget: u32) 
                 dim,
                 backend,
                 stub: false,
+                npu: None,
             }
         }
         Err(message) => EmbedResponse::Error {
@@ -639,6 +679,7 @@ fn embed_audio_job(
             dim: STUB_DIM,
             backend: "stub".to_string(),
             stub: true,
+            npu: None,
         };
     }
     let pcm = match crate::wav::read_pcm16(std::path::Path::new(path), window) {
@@ -681,6 +722,7 @@ fn embed_audio_job(
                 dim,
                 backend,
                 stub: false,
+                npu: None,
             }
         }
         Err(error) => EmbedResponse::Error {
@@ -709,16 +751,25 @@ fn try_npu<T>(
     what: &str,
     job: impl FnOnce(&mut ws_embed::NpuRuntime) -> Result<T, ws_embed::EmbedError>,
 ) -> Option<T> {
-    ensure_npu(eng, &shared.cfg);
+    ensure_npu(eng, shared);
     let NpuSlot::Ready(npu) = &mut eng.npu else {
         return None;
     };
-    match job(npu) {
+    if let Err(error) = arm_npu_budget(shared) {
+        warn!(%error, "NPU budget could not be configured");
+        ws_platform::child_job::terminate_current_process(NPU_RETIRE_EXIT_CODE as u32);
+    }
+    let result = job(npu);
+    shared
+        .activity
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .npu_deadline = None;
+    match result {
         Ok(out) => Some(out),
         Err(e @ ws_embed::EmbedError::NpuFailed(_)) => {
-            warn!(error = %e, job = what, "NPU failed; falling back to GPU/CPU for this and later jobs");
-            eng.npu = NpuSlot::Unavailable(e.to_string());
-            None
+            warn!(error = %e, job = what, "NPU failed; retiring worker before native teardown");
+            ws_platform::child_job::terminate_current_process(NPU_RETIRE_EXIT_CODE as u32);
         }
         Err(e) => {
             warn!(error = %e, job = what, "NPU rejected input; serving this job on GPU/CPU");
@@ -730,11 +781,27 @@ fn try_npu<T>(
 /// Decides once whether the NPU serves text/image jobs: the preference must
 /// allow it (`auto`/`npu`), an AMD NPU2 must be present, and the bundle must
 /// load. Every "no" is logged once and leaves the GPU/CPU runtime in charge.
-fn ensure_npu(eng: &mut EngineSlot, cfg: &WorkerConfig) {
+fn ensure_npu(eng: &mut EngineSlot, shared: &Shared) {
     if !matches!(eng.npu, NpuSlot::Untried) {
         return;
     }
-    eng.npu = match probe_npu(cfg) {
+    eng.npu = match probe_npu(shared).and_then(|bundle| {
+        arm_npu_budget(shared).map_err(|error| {
+            warn!(%error, "NPU initialization unavailable");
+            "load_failed"
+        })?;
+        match ws_embed::NpuRuntime::load(&bundle) {
+            Ok(runtime) => Ok(runtime),
+            Err(error @ ws_embed::EmbedError::NpuFailed(_)) => {
+                warn!(%error, "NPU initialization failed; retiring worker before native teardown");
+                ws_platform::child_job::terminate_current_process(NPU_RETIRE_EXIT_CODE as u32);
+            }
+            Err(error) => {
+                warn!(%error, "NPU model unavailable");
+                Err("load_failed")
+            }
+        }
+    }) {
         Ok(rt) => {
             info!(bundle = %rt.bundle_dir().display(), "serving text and image embeddings on the AMD NPU");
             NpuSlot::Ready(rt)
@@ -744,31 +811,62 @@ fn ensure_npu(eng: &mut EngineSlot, cfg: &WorkerConfig) {
             NpuSlot::Unavailable(reason)
         }
     };
+    if !matches!(eng.npu, NpuSlot::Ready(_)) {
+        shared
+            .activity
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .npu_deadline = None;
+    }
 }
 
-fn probe_npu(cfg: &WorkerConfig) -> Result<ws_embed::NpuRuntime, String> {
+fn arm_npu_budget(shared: &Shared) -> Result<(), ws_embed::EmbedError> {
+    let armed = {
+        let mut activity = shared.activity.lock().unwrap_or_else(|p| p.into_inner());
+        if activity.npu_deadline.is_some() {
+            false
+        } else {
+            activity.npu_deadline = Some(Instant::now() + NPU_TEXT_JOB_BUDGET);
+            true
+        }
+    };
+    if armed {
+        ws_embed::NpuRuntime::set_job_budget(NPU_TEXT_JOB_BUDGET)?;
+    }
+    Ok(())
+}
+
+fn probe_npu(shared: &Shared) -> Result<PathBuf, &'static str> {
+    let cfg = &shared.cfg;
+    if cfg.disable_npu {
+        return Err("quarantined");
+    }
     if !cfg.backend.wants_npu() {
-        return Err(format!("backend preference {:?} excludes the NPU", cfg.backend));
+        return Err("disabled");
     }
     if !ws_embed::npu_runtime_compiled() {
-        return Err("worker built without the XRT SDK".into());
+        return Err("build_missing");
     }
-    let device = ws_platform::npu::detect_npu2().ok_or_else(|| {
-        match ws_platform::npu::detect().first() {
-            Some(d) => format!("AMD NPU {:?} ({}) cannot run NPU2 kernels", d.generation, d.instance),
-            None => "no AMD NPU detected".to_string(),
-        }
-    })?;
+    let device = ws_platform::npu::detect_npu2().ok_or("no_npu")?;
     let bundle = cfg.npu_bundle_dir();
     if !bundle.join("manifest.txt").is_file() {
-        return Err(format!(
-            "AMD NPU {} present but the NPU model is not installed at {} (download it in Settings → AI model)",
-            device.instance,
-            bundle.display()
-        ));
+        return Err("bundle_missing");
     }
+    verify_npu_bundle(&bundle)?;
     info!(device = %device.instance, bundle = %bundle.display(), "loading NPU embedding model");
-    ws_embed::NpuRuntime::load(&bundle).map_err(|e| format!("NPU model failed to load: {e}"))
+    Ok(bundle)
+}
+
+/// Kernel binaries and weights are untrusted until all pinned bytes match.
+/// This runs only during lazy initialization, never on public status reads.
+fn verify_npu_bundle(bundle: &std::path::Path) -> Result<(), &'static str> {
+    for expected in ws_modelmgr::NPU_BUNDLE_FILES {
+        let relative = expected.npu_bundle_path().ok_or("load_failed")?;
+        if ws_modelmgr::download::verify_file(&bundle.join(relative), &expected).is_err() {
+            return Err("bundle_missing");
+        }
+    }
+    Ok(())
 }
 
 /// Lazily loads the model on first use. The failure is returned as a message
@@ -810,6 +908,39 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
+    #[test]
+    fn manifest_alone_or_corrupted_files_are_not_a_verified_npu_bundle() {
+        let dir = std::env::temp_dir().join(format!("ws-npu-invalid-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("manifest.txt"), b"corrupt kernel references").unwrap();
+        assert_eq!(verify_npu_bundle(&dir), Err("bundle_missing"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn cold_capabilities_allow_lazy_audio_without_starting_any_runtime() {
+        let mut cfg = test_config();
+        cfg.stub = false;
+        cfg.model_path = Some(PathBuf::from("missing-cold-capability-model.gguf"));
+        let shared = Shared::for_config(cfg);
+        let EmbedResponse::HelloAck {
+            features,
+            model_loaded,
+            stub,
+            npu,
+            ..
+        } = hello_ack(&shared, 1)
+        else {
+            panic!("hello ack")
+        };
+        assert!(!model_loaded && !stub && npu.is_none());
+        for name in ["embed_texts", "embed_audio", "embed_image"] {
+            assert!(features.iter().any(|feature| feature == name));
+        }
+        let engine = shared.engine.lock().unwrap();
+        assert!(engine.runtime.is_none() && matches!(engine.npu, NpuSlot::Untried));
+    }
+
     fn getter(vars: HashMap<String, String>) -> impl Fn(&str) -> Option<String> {
         move |k: &str| vars.get(k).cloned()
     }
@@ -822,6 +953,7 @@ mod tests {
             model_path: None,
             backend: BackendPreference::Auto,
             npu_bundle: None,
+            disable_npu: false,
             stub_delay: Duration::ZERO,
         }
     }
@@ -834,6 +966,144 @@ mod tests {
         assert!(!cfg.stub);
         assert!(cfg.model_path.is_none());
         assert_eq!(cfg.backend, BackendPreference::Auto);
+    }
+
+    #[test]
+    fn quarantine_flag_preserves_the_requested_backend() {
+        let mut cfg = test_config();
+        cfg.backend = BackendPreference::Npu;
+        assert!(cfg.apply_args(&["--disable-npu".into()]).is_ok());
+        assert_eq!(cfg.backend, BackendPreference::Npu);
+        assert!(probe_npu(&Shared::for_config(cfg)).is_err());
+    }
+
+    #[test]
+    fn npu_deadline_takes_priority_over_active_jobs_and_idle_shutdown() {
+        let now = Instant::now();
+        let mut activity = Activity {
+            last: now,
+            active_jobs: 1,
+            shutdown: false,
+            npu_deadline: Some(now + Duration::from_secs(45)),
+        };
+        assert_eq!(
+            activity.exit_code_at(now + Duration::from_secs(44), Duration::from_secs(1)),
+            None
+        );
+        assert_eq!(
+            activity.exit_code_at(now + Duration::from_secs(45), Duration::from_secs(1)),
+            Some(75)
+        );
+        activity.npu_deadline = None;
+        assert_eq!(
+            activity.exit_code_at(now + Duration::from_secs(60), Duration::from_secs(1)),
+            None
+        );
+        activity.active_jobs = 0;
+        assert_eq!(
+            activity.exit_code_at(now + Duration::from_secs(60), Duration::from_secs(1)),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn completed_job_clears_npu_watchdog_before_cpu_or_idle_time() {
+        let shared = Shared::for_config(test_config());
+        shared.activity.lock().unwrap().npu_deadline =
+            Some(Instant::now() - Duration::from_secs(1));
+        dispatch(
+            &EmbedRequest::EmbedTexts {
+                id: 1,
+                texts: vec!["x".into()],
+            },
+            &shared,
+        );
+        let activity = shared.activity.lock().unwrap();
+        assert_eq!(activity.npu_deadline, None);
+        assert_eq!(activity.active_jobs, 0);
+        assert_eq!(
+            activity.exit_code_at(Instant::now(), Duration::from_secs(300)),
+            None
+        );
+    }
+
+    #[test]
+    fn watchdog_retires_a_stalled_job_without_taking_the_engine_lock() {
+        if std::env::var_os("WS_TEST_LOCKED_NPU_CHILD").is_some() {
+            use std::os::windows::ffi::OsStrExt;
+            #[link(name = "kernel32")]
+            unsafe extern "system" {
+                fn LoadLibraryW(path: *const u16) -> *mut std::ffi::c_void;
+            }
+            let dll = std::env::var_os("WS_TEST_LOCKED_NPU_DLL").unwrap();
+            let path: Vec<u16> = dll.encode_wide().chain(Some(0)).collect();
+            // SAFETY: absolute parent-owned fixture DLL, with a terminated path.
+            assert!(!unsafe { LoadLibraryW(path.as_ptr()) }.is_null());
+            let shared = Arc::new(Shared::for_config(test_config()));
+            {
+                let mut activity = shared.activity.lock().unwrap();
+                activity.active_jobs = 1;
+                // Fixture budget only; the production deadline remains45s.
+                activity.npu_deadline = Some(Instant::now() + Duration::from_millis(100));
+            }
+            spawn_watchdog(Arc::clone(&shared), Duration::from_secs(300));
+            let _engine = shared.engine.lock().unwrap();
+            std::thread::sleep(Duration::from_secs(10));
+            panic!("watchdog blocked behind a stalled native job");
+        }
+        let fixture = std::env::temp_dir().join(format!(
+            "ws-blocked-detach-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&fixture).unwrap();
+        let source = fixture.join("blocked_detach.rs");
+        let dll = fixture.join("blocked_detach.dll");
+        std::fs::write(&source, r#"
+            #[link(name="kernel32")]
+            unsafe extern "system" { fn Sleep(ms:u32); }
+            #[no_mangle]
+            pub extern "system" fn DllMain(_: *mut core::ffi::c_void, reason:u32, _: *mut core::ffi::c_void)->i32 {
+                if reason==0 { unsafe { Sleep(30000); } }
+                1
+            }
+        "#).unwrap();
+        assert!(std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-type=cdylib"])
+            .arg(&source)
+            .arg("-o")
+            .arg(&dll)
+            .status()
+            .unwrap()
+            .success());
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "server::tests::watchdog_retires_a_stalled_job_without_taking_the_engine_lock",
+                "--nocapture",
+            ])
+            .env("WS_TEST_LOCKED_NPU_CHILD", "1")
+            .env("WS_TEST_LOCKED_NPU_DLL", dll)
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert_eq!(status.code(), Some(NPU_RETIRE_EXIT_CODE));
+                let _ = std::fs::remove_dir_all(&fixture);
+                break;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = std::fs::remove_dir_all(&fixture);
+                panic!("worker retirement exceeded its independent parent deadline");
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
     }
 
     #[test]
@@ -1010,8 +1280,12 @@ mod tests {
     fn npu_bundle_defaults_next_to_the_text_model_and_is_configurable() {
         let mut cfg = test_config();
         cfg.model_path = Some(PathBuf::from("models").join("m.gguf"));
-        assert_eq!(cfg.npu_bundle_dir(), PathBuf::from("models").join(NPU_BUNDLE_DIR));
-        cfg.apply_args(&["--npu-bundle".into(), "custom-bundle".into()]).unwrap();
+        assert_eq!(
+            cfg.npu_bundle_dir(),
+            PathBuf::from("models").join(NPU_BUNDLE_DIR)
+        );
+        cfg.apply_args(&["--npu-bundle".into(), "custom-bundle".into()])
+            .unwrap();
         assert_eq!(cfg.npu_bundle_dir(), PathBuf::from("custom-bundle"));
         let vars = HashMap::from([("WS_EMBED_NPU_BUNDLE".to_string(), "env-bundle".to_string())]);
         let cfg = WorkerConfig::from_getter(&getter(vars)).unwrap();
@@ -1026,7 +1300,7 @@ mod tests {
     #[test]
     fn unusable_npu_falls_back_and_reports_why() {
         for (backend, expect) in [
-            (BackendPreference::Cpu, "excludes the NPU"),
+            (BackendPreference::Cpu, "disabled"),
             (BackendPreference::Auto, ""),
         ] {
             let mut cfg = test_config();
@@ -1035,15 +1309,22 @@ mod tests {
             cfg.model_path = Some(PathBuf::from("missing-model-for-npu-test.gguf"));
             let shared = Shared::for_config(cfg);
             let Action::Respond(EmbedResponse::Error { code, message, .. }) = dispatch(
-                &EmbedRequest::EmbedTexts { id: 1, texts: vec!["hi".into()] },
+                &EmbedRequest::EmbedTexts {
+                    id: 1,
+                    texts: vec!["hi".into()],
+                },
                 &shared,
             ) else {
                 panic!("expected the GPU/CPU fallback's missing-model error");
             };
             assert_eq!(code, EmbedErrorCode::ModelNotAvailable);
             assert!(message.contains("embedding model not found"), "{message}");
-            let Action::Respond(EmbedResponse::WorkerStatus { npu, model_loaded, backend: label, .. }) =
-                dispatch(&EmbedRequest::Status { id: 2 }, &shared)
+            let Action::Respond(EmbedResponse::WorkerStatus {
+                npu,
+                model_loaded,
+                backend: label,
+                ..
+            }) = dispatch(&EmbedRequest::Status { id: 2 }, &shared)
             else {
                 panic!("expected status");
             };
@@ -1058,7 +1339,13 @@ mod tests {
     #[test]
     fn stub_mode_never_probes_the_npu() {
         let shared = Shared::for_config(test_config());
-        dispatch(&EmbedRequest::EmbedTexts { id: 1, texts: vec!["x".into()] }, &shared);
+        dispatch(
+            &EmbedRequest::EmbedTexts {
+                id: 1,
+                texts: vec!["x".into()],
+            },
+            &shared,
+        );
         let Action::Respond(EmbedResponse::WorkerStatus { npu, .. }) =
             dispatch(&EmbedRequest::Status { id: 2 }, &shared)
         else {

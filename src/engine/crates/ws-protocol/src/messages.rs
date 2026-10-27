@@ -55,6 +55,8 @@ pub enum ClientMessage {
     /// frames (`id: None`) until the download completes or is cancelled.
     ModelDownloadStart {
         id: RequestId,
+        #[serde(default)]
+        include_npu: bool,
     },
     /// Cancel the in-flight model download; the partial files stay on disk
     /// so a later start resumes (status `paused`).
@@ -66,6 +68,8 @@ pub enum ClientMessage {
     ModelImport {
         id: RequestId,
         path: String,
+        #[serde(default)]
+        include_npu: bool,
     },
     /// Delete the downloaded model files.
     ModelDelete {
@@ -303,8 +307,9 @@ pub fn valid_search_extensions(extensions:&[String])->bool {
 }
 
 pub fn search_extension_allowed(extensions:&[String],extension:&str)->bool {
-    extensions.is_empty() || extensions.iter().any(|value|
-        value.strip_prefix('.').unwrap_or(value).eq_ignore_ascii_case(extension))
+    extensions.is_empty() || extensions.iter().any(|value| {
+            value.strip_prefix('.').unwrap_or(value).eq_ignore_ascii_case(extension)
+        })
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -397,6 +402,35 @@ pub enum EngineRunState {
     Error,
 }
 
+/// Closed, path-free NPU availability reason. `Ready` requires an actual
+/// successful NPU embedding; installed files alone are not runtime evidence.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum NpuState {
+    #[default]
+    Untried,
+    NoNpu,
+    BuildMissing,
+    BundleMissing,
+    LoadFailed,
+    Disabled,
+    Quarantined,
+    Ready,
+}
+
+/// Cached observations from validated worker replies, independently per modality.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EmbeddingDiagnostics {
+    pub requested_backend: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_backend: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_backend: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_backend: Option<String>,
+    pub npu: NpuState,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(default)]
 pub struct EngineStatus {
@@ -415,6 +449,9 @@ pub struct EngineStatus {
     pub queue_depth: u64,
     /// Whether the embedding model is loaded in the inference worker.
     pub model_loaded: bool,
+    /// Absent from older engines; unknown is distinct from unavailable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding: Option<EmbeddingDiagnostics>,
     pub index_size_bytes: u64,
 }
 
@@ -422,6 +459,30 @@ pub struct EngineStatus {
 mod tests {
     use super::*;
     use ws_modelmgr::ModelState;
+
+    #[test]
+    fn embedding_diagnostics_are_additive_and_use_closed_npu_reasons() {
+        let value = serde_json::json!({"embedding": {
+            "requested_backend":"npu", "text_backend":"npu", "audio_backend":"cpu",
+            "npu":"ready"
+        }});
+        let status: EngineStatus = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(status).unwrap()["embedding"],
+            value["embedding"]
+        );
+        let legacy: EngineStatus = serde_json::from_str("{}").unwrap();
+        assert!(serde_json::to_value(legacy)
+            .unwrap()
+            .get("embedding")
+            .is_none());
+        assert!(
+            serde_json::from_value::<EngineStatus>(serde_json::json!({"embedding": {
+                "requested_backend":"auto", "npu":"private path or unknown reason"
+            }}))
+            .is_err()
+        );
+    }
 
     #[test]
     fn database_identity_status_round_trips_and_keeps_legacy_unknown() {
@@ -546,11 +607,14 @@ mod tests {
     #[test]
     fn model_messages_round_trip() {
         for msg in [
-            ClientMessage::ModelDownloadStart { id: 1 },
+            ClientMessage::ModelDownloadStart { id: 1,
+                include_npu: true,
+            },
             ClientMessage::ModelDownloadCancel { id: 2 },
             ClientMessage::ModelImport {
                 id: 3,
                 path: "C:\\models".into(),
+                include_npu: true,
             },
             ClientMessage::ModelDelete { id: 4 },
             ClientMessage::GetModelStatus { id: 5 },
@@ -567,6 +631,7 @@ mod tests {
                 bytes: 10,
                 total_bytes: 100,
                 error: None,
+                npu_bundle: None,
             },
         };
         let json = serde_json::to_string(&status).unwrap();
@@ -586,9 +651,22 @@ mod tests {
             msg,
             ClientMessage::ModelImport {
                 id: 9,
-                path: "x".into()
+                path: "x".into(),
+                include_npu: false,
             }
         );
+        let msg: ClientMessage =
+            serde_json::from_str(r#"{"type":"model_download_start","id":10}"#).unwrap();
+        assert_eq!(
+            msg,
+            ClientMessage::ModelDownloadStart {
+                id: 10,
+                include_npu: false
+            }
+        );
+        let status: ModelStatus = serde_json::from_str(r#"{"state":"ready","bytes":4,"total_bytes":4,"npu_bundle":{"state":"error","bytes":10,"total_bytes":1085278625,"error":"hash mismatch"}}"#).unwrap();
+        assert_eq!(status.state, ModelState::Ready);
+        assert_eq!(status.npu_bundle.unwrap().state, ModelState::Error);
     }
 
     #[test]

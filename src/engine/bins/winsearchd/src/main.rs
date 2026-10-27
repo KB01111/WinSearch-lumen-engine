@@ -94,8 +94,7 @@ fn main() -> anyhow::Result<()> {
     // priority order (small + recent files first) under per-file budgets.
     indexer.start_extract_workers(
         engine.embed_supervisor(),
-        engine.extraction_registry(),
-    );
+        engine.extraction_registry());
     engine.start_code_scheduler()?;
     spawn_status_pusher(Arc::clone(&engine));
     // Model progress/completion pushes fan out to every connected client.
@@ -103,7 +102,7 @@ fn main() -> anyhow::Result<()> {
         let weak = Arc::downgrade(&engine);
         engine.model_service().set_notifier(Arc::new(move |msg| {
             if let Some(engine) = weak.upgrade() {
-                engine.push_to_all(&msg);
+                engine.model_lifecycle_update(&msg);
             }
         }));
     }
@@ -202,7 +201,9 @@ fn init_logging() {
     Box::leak(Box::new(guard));
 
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("winsearchd=info,ws_platform=info,ws_protocol=warn,ws_index=warn"));
+        .unwrap_or_else(|_| {
+        EnvFilter::new("winsearchd=info,ws_platform=info,ws_protocol=warn,ws_index=warn")
+    });
 
     tracing_subscriber::fmt()
         .with_env_filter(filter)
