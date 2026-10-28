@@ -74,10 +74,20 @@ deadlines. [Lumen PR #27](https://github.com/KB01111/Lumen/pull/27) now pins and
 stages that release with a passing two-profile native contract/PID/Stop test.
 Consumer integration and controlled performance acceptance remain open; earlier
 failures are retained.
+[Lumen PR #35](https://github.com/KB01111/Lumen/pull/35) (open) implements the typed
+native consumer: current folder grants and per-folder policies are forwarded to the owned
+engine and re-sent after restarts, and launcher searches stream from it with native
+cancellation and a local-index fallback. The earlier statements above that search/root-policy
+forwarding is open describe released builds and stay in force until that PR is merged and
+the consumer passes installed acceptance. The pinned runtime `85a915d` is reachable from this
+repository's `main` through [PR #4](https://github.com/KB01111/WinSearch-lumen-engine/pull/4).
+Recent/Related, pins/history, identity migration, the single crawler and installed
+acceptance remain open below.
 The [IPC writer checkpoint](docs/validation/2026-10-20-ipc-writer/README.md)
 bounds server frame writes, closes partial transports and removes failed
 broadcast clients without holding the global client registry. Its native
-regressions pass; the staged release still uses the earlier verified engine.
+regressions pass, and the pinned runtime `85a915d` descends from that change. Packaged,
+concurrent-client and installed control/cancellation checks remain open below.
 
 ### Lumen integration and native contract
 
