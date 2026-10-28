@@ -86,7 +86,8 @@ acceptance remain open below.
 The [IPC writer checkpoint](docs/validation/2026-10-20-ipc-writer/README.md)
 bounds server frame writes, closes partial transports and removes failed
 broadcast clients without holding the global client registry. Its native
-regressions pass; the staged release still uses the earlier verified engine.
+regressions pass, and the pinned runtime `85a915d` descends from that change. Packaged,
+concurrent-client and installed control/cancellation checks remain open below.
 
 ### Lumen integration and native contract
 
