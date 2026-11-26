@@ -315,30 +315,28 @@ impl IndexStore {
     }
 
     fn ensure_entries_path_tri_backfilled(conn: &Connection) -> Result<(), StoreError> {
-        let has_path_tri: bool = conn
-            .query_row("SELECT 1 FROM entries_path_tri LIMIT 1", [], |_| Ok(true))
+        let backfilled: bool = conn
+            .query_row("SELECT 1 FROM meta WHERE key = 'entries_path_tri_backfilled'", [], |_| Ok(true))
             .optional()?
             .unwrap_or(false);
-        if has_path_tri {
+        if backfilled {
             return Ok(());
         }
-        let has_entries: bool = conn
-            .query_row("SELECT 1 FROM entries LIMIT 1", [], |_| Ok(true))
-            .optional()?
-            .unwrap_or(false);
-        if !has_entries {
-            return Ok(());
-        }
+        let tx = conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM entries_path_tri", [])?;
         let rows: Vec<(i64, String)> = {
-            let mut stmt = conn.prepare("SELECT id, path FROM entries")?;
+            let mut stmt = tx.prepare("SELECT id, path FROM entries")?;
             let mapped = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
             mapped.collect::<Result<_, _>>()?
         };
-        let mut insert =
-            conn.prepare("INSERT INTO entries_path_tri(rowid, path) VALUES(?1, ?2)")?;
-        for (id, path) in rows {
-            insert.execute(params![id, path.to_lowercase()])?;
+        {
+            let mut insert = tx.prepare("INSERT INTO entries_path_tri(rowid, path) VALUES(?1, ?2)")?;
+            for (id, path) in rows {
+                insert.execute(params![id, path.to_lowercase()])?;
+            }
         }
+        tx.execute("INSERT INTO meta(key, value) VALUES('entries_path_tri_backfilled', '1')", [])?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -776,7 +774,9 @@ impl IndexStore {
                  ?2,
                  COALESCE((SELECT current_generation FROM roots WHERE id = ?1), 0)
              )
-             ON CONFLICT(root_id, dir_path) DO NOTHING",
+             ON CONFLICT(root_id, dir_path) DO UPDATE SET
+                 id = excluded.id, generation = excluded.generation, claimed = 0
+             WHERE crawl_queue.generation != excluded.generation",
             params![root_id, dir_path],
         )?;
         Ok(())
@@ -2762,6 +2762,30 @@ mod tests {
         assert_eq!(claimed.priority, 42);
         drop(store);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn partial_path_backfill_is_repaired_atomically() {
+        let (mut store, root) = setup();
+        let generation = store.begin_generation(root).unwrap();
+        store.apply_batch(root, generation, &[
+            rec("C:\\alpha\\one.txt", "one.txt", 1, 1),
+            rec("C:\\RÄKNING\\two.txt", "two.txt", 1, 1),
+        ]).unwrap();
+        store.conn.execute_batch("DELETE FROM meta WHERE key = 'entries_path_tri_backfilled';
+            DELETE FROM entries_path_tri WHERE rowid = (SELECT MAX(id) FROM entries);
+            CREATE TRIGGER fail_backfill BEFORE INSERT ON meta
+            WHEN NEW.key = 'entries_path_tri_backfilled'
+            BEGIN SELECT RAISE(FAIL, 'simulated migration failure'); END;").unwrap();
+        assert!(IndexStore::ensure_entries_path_tri_backfilled(&store.conn).is_err());
+        let count: i64 = store.conn.query_row("SELECT COUNT(*) FROM entries_path_tri", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 1, "failed migration must roll back its partial work");
+        store.conn.execute_batch("DROP TRIGGER fail_backfill;").unwrap();
+        IndexStore::ensure_entries_path_tri_backfilled(&store.conn).unwrap();
+        let hits = store.search(&crate::model::SearchRequest {
+            text: "räkning".into(), limit: 10, ..Default::default()
+        }).unwrap();
+        assert_eq!(hits.len(), 1);
     }
 
     #[test]

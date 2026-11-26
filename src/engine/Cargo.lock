@@ -1259,6 +1259,7 @@ name = "winsearchd"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "rusqlite",
  "serde_json",
  "sha2",
  "thiserror",

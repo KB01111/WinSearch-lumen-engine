@@ -298,7 +298,7 @@ impl CodeStore {
         records: &[CodeFileRecord],
     ) -> Result<Vec<FileUpsertOutcome>, CodeStoreError> {
         let tx = self.conn.transaction()?;
-        let mut outcomes = Vec::with_capacity(records.len());
+        let mut outcomes = vec![None; records.len()];
         {
             let mut by_path = tx.prepare_cached(
                 "SELECT id, size, mtime, name_lower, rel_path FROM code_files WHERE path = ?1",
@@ -322,7 +322,13 @@ impl CodeStore {
                  WHERE id = ?1",
             )?;
 
-            for rec in records {
+            // Move identities to newly seen paths before processing replacements
+            // at their old paths, regardless of crawl/batch order.
+            let mut ordered = records.iter().enumerate().map(|(index, rec)| {
+                by_path.exists(params![rec.path]).map(|exists| (exists, index, rec))
+            }).collect::<Result<Vec<_>, _>>()?;
+            ordered.sort_by_key(|(exists, _, _)| *exists);
+            for (_, index, rec) in ordered {
                 let name_lower = rec.name.to_lowercase();
                 let existing_path: Option<(i64, i64, i64, String, String)> = by_path
                     .query_row(params![rec.path], |r| {
@@ -340,7 +346,7 @@ impl CodeStore {
                             "UPDATE code_files SET scan_generation = ?2 WHERE id = ?1",
                             params![id, scan_generation],
                         )?;
-                        outcomes.push(FileUpsertOutcome::Unchanged { id });
+                        outcomes[index] = Some(FileUpsertOutcome::Unchanged { id });
                     } else {
                         update.execute(params![
                             id,
@@ -357,7 +363,7 @@ impl CodeStore {
                             rec.file_id as i64,
                             scan_generation,
                         ])?;
-                        outcomes.push(FileUpsertOutcome::Updated { id });
+                        outcomes[index] = Some(FileUpsertOutcome::Updated { id });
                     }
                     continue;
                 }
@@ -373,11 +379,15 @@ impl CodeStore {
                         )
                         .optional()?;
                     cand.and_then(|(id, old_path, old_gen)| {
-                        let in_batch = records.iter().any(|r| r.path == old_path);
+                        let in_batch = records.iter().any(|r| r.path == old_path
+                            && r.volume_serial == rec.volume_serial && r.file_id == rec.file_id);
                         let case_only_rename =
                             old_path.to_lowercase() == rec.path.to_lowercase();
-                        let still_exists =
-                            !case_only_rename && std::path::Path::new(&old_path).exists();
+                        let old_path = std::path::Path::new(&old_path);
+                        let still_exists = !case_only_rename &&
+                            ws_platform::identity::file_identity(old_path)
+                                .map(|identity| identity == (rec.volume_serial, rec.file_id))
+                                .unwrap_or_else(|| old_path.try_exists().unwrap_or(true));
                         if old_gen != scan_generation && !in_batch && !still_exists {
                             Some(id)
                         } else {
@@ -404,7 +414,7 @@ impl CodeStore {
                         rec.file_id as i64,
                         scan_generation,
                     ])?;
-                    outcomes.push(FileUpsertOutcome::Renamed { id });
+                    outcomes[index] = Some(FileUpsertOutcome::Renamed { id });
                 } else {
                     insert.execute(params![
                         repo_id,
@@ -421,12 +431,12 @@ impl CodeStore {
                         scan_generation,
                     ])?;
                     let id = tx.last_insert_rowid();
-                    outcomes.push(FileUpsertOutcome::Inserted { id });
+                    outcomes[index] = Some(FileUpsertOutcome::Inserted { id });
                 }
             }
         }
         tx.commit()?;
-        Ok(outcomes)
+        Ok(outcomes.into_iter().map(Option::unwrap).collect())
     }
 
     /// Explicitly moves/renames a stored file row by `id`, preserving its `id`
@@ -1260,6 +1270,38 @@ mod tests {
         assert_eq!(stats.chunks_total, 2);
         assert_eq!(stats.embedded_chunks_total, 2);
         assert_eq!(stats.symbols_total, 2);
+    }
+
+    #[test]
+    fn reused_old_path_preserves_moved_identity_in_either_batch_order() {
+        for replacement_first in [false, true] {
+            let dir = std::env::temp_dir().join(format!("ws-code-reuse-{}-{}-{}",
+                std::process::id(), replacement_first,
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+            fs::create_dir_all(&dir).unwrap();
+            let old = dir.join("old.rs");
+            let moved = dir.join("moved.rs");
+            fs::write(&old, "fn original() {}").unwrap();
+            let mut store = CodeStore::open_in_memory().unwrap();
+            let repo = store.ensure_repo(&DetectedRepo {
+                root_path: dir.to_string_lossy().into_owned(), name: "reuse".into(), has_git: false,
+            }).unwrap();
+            let record = crate::crawl::record_for_code_path(&dir, &old).unwrap().unwrap();
+            let g1 = store.begin_generation(repo).unwrap();
+            let id = store.apply_file_batch(repo, g1, &[record]).unwrap()[0].file_id();
+            fs::rename(&old, &moved).unwrap();
+            fs::write(&old, "fn replacement() {}").unwrap();
+            let mut records = vec![
+                crate::crawl::record_for_code_path(&dir, &moved).unwrap().unwrap(),
+                crate::crawl::record_for_code_path(&dir, &old).unwrap().unwrap(),
+            ];
+            if replacement_first { records.reverse(); }
+            let g2 = store.begin_generation(repo).unwrap();
+            store.apply_file_batch(repo, g2, &records).unwrap();
+            assert_eq!(store.find_file_by_path(&moved.to_string_lossy()).unwrap().unwrap().id, id);
+            assert_ne!(store.find_file_by_path(&old.to_string_lossy()).unwrap().unwrap().id, id);
+            fs::remove_dir_all(&dir).unwrap();
+        }
     }
 
     #[test]

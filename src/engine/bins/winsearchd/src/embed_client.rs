@@ -20,7 +20,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::{Child, Command};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -200,6 +200,12 @@ struct Slot {
     child: Option<Child>,
 }
 
+#[derive(Default)]
+struct BoundedCalls {
+    active: usize,
+    epoch: u64,
+}
+
 pub struct EmbedSupervisor {
     config: EmbedConfig,
     /// Serializes whole requests on the legacy direct path (`transact`,
@@ -215,7 +221,7 @@ pub struct EmbedSupervisor {
     /// even for foreign (unkillable-by-us) workers without disrupting other
     /// concurrent bounded callers.
     inflight_tids: Mutex<HashMap<u64, u32>>,
-    active_bounded: AtomicUsize,
+    bounded_calls: Mutex<BoundedCalls>,
     worker_gen: AtomicU64,
     preferred_backend: Mutex<Option<String>>,
     cancel_seq: AtomicU64,
@@ -237,7 +243,7 @@ impl EmbedSupervisor {
             conn: Mutex::new(()),
             slot: Mutex::new(Slot { child: None }),
             inflight_tids: Mutex::new(HashMap::new()),
-            active_bounded: AtomicUsize::new(0),
+            bounded_calls: Mutex::new(BoundedCalls::default()),
             worker_gen: AtomicU64::new(1),
             preferred_backend: Mutex::new(None),
             cancel_seq: AtomicU64::new(1),
@@ -271,7 +277,8 @@ impl EmbedSupervisor {
                 true
             }
         };
-        if changed && self.active_bounded.load(Ordering::Acquire) == 0 {
+        let idle = self.bounded_calls.lock().unwrap_or_else(|p| p.into_inner()).active == 0;
+        if changed && idle {
             self.terminate_worker();
         }
     }
@@ -328,21 +335,45 @@ impl EmbedSupervisor {
     }
 
     fn begin_bounded(&self) {
-        let _slot = self.slot.lock().unwrap_or_else(|p| p.into_inner());
-        self.active_bounded.fetch_add(1, Ordering::AcqRel);
+        let mut calls = self.bounded_calls.lock().unwrap_or_else(|p| p.into_inner());
+        calls.active += 1;
+        calls.epoch += 1;
     }
 
-    fn finish_bounded(&self, timed_out: bool) {
-        let mut slot = self.slot.lock().unwrap_or_else(|p| p.into_inner());
-        let prev = self.active_bounded.fetch_sub(1, Ordering::AcqRel);
-        if timed_out && prev == 1 {
-            match kill_locked(&mut slot) {
-                Ok(true) => {
-                    self.worker_gen.fetch_add(1, Ordering::Release);
-                    info!("embed worker killed");
-                }
-                Ok(false) => {}
-                Err(e) => warn!(error = %e, "embed worker kill failed"),
+    fn finish_bounded(self: &std::sync::Arc<Self>, timed_out: bool) {
+        let mut calls = self.bounded_calls.lock().unwrap_or_else(|p| p.into_inner());
+        calls.active -= 1;
+        if !timed_out || calls.active != 0 {
+            return;
+        }
+        let epoch = calls.epoch;
+        drop(calls);
+        // Startup may hold `slot` for 30s. Cleanup must never extend the caller's
+        // deadline, and a newer caller must invalidate deferred cleanup.
+        let sup = std::sync::Arc::clone(self);
+        if let Err(e) = std::thread::Builder::new().name("winsearch-embed-cleanup".into()).spawn(move || {
+            sup.retire_timed_out_worker(epoch);
+        }) {
+            warn!(error = %e, "cannot spawn embed timeout cleanup");
+        }
+    }
+
+    fn retire_timed_out_worker(&self, epoch: u64) {
+        let child = {
+            let mut slot = self.slot.lock().unwrap_or_else(|p| p.into_inner());
+            let calls = self.bounded_calls.lock().unwrap_or_else(|p| p.into_inner());
+            if calls.active != 0 || calls.epoch != epoch {
+                return;
+            }
+            let child = slot.child.take();
+            if child.is_some() {
+                self.worker_gen.fetch_add(1, Ordering::Release);
+            }
+            child
+        };
+        if let Some(mut child) = child {
+            if let Err(e) = child.kill().and_then(|()| child.wait().map(|_| ())) {
+                warn!(error = %e, "embed worker kill failed");
             }
         }
     }
@@ -466,9 +497,8 @@ impl EmbedSupervisor {
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 // Stop the helper promptly: flag it and cancel only this
-                // caller's synchronous pipe IO. `finish_bounded(true)` atomically
-                // decrements `active_bounded` and kills any hung worker under the
-                // `slot` mutex when this was the last active bounded caller.
+                // caller's synchronous pipe IO, then defer owned-worker cleanup
+                // if this was the last active bounded caller.
                 cancel.store(true, Ordering::Relaxed);
                 self.cancel_inflight_read_for(call_id);
                 self.finish_bounded(true);
@@ -1446,6 +1476,26 @@ mod tests {
         );
         assert_eq!(sup.stats().retries, 0);
         assert_eq!(fake.jobs_seen.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn bounded_accounting_never_waits_for_worker_startup_slot() {
+        use std::sync::mpsc;
+        let sup = Arc::new(test_supervisor("unused-test-pipe".into()));
+        let slot = sup.slot.lock().unwrap();
+        let (tx, rx) = mpsc::channel();
+        let other = Arc::clone(&sup);
+        let helper = std::thread::spawn(move || {
+            other.begin_bounded();
+            other.finish_bounded(false);
+            other.begin_bounded();
+            other.finish_bounded(true);
+            tx.send(()).unwrap();
+        });
+        let result = rx.recv_timeout(Duration::from_secs(1));
+        drop(slot);
+        helper.join().unwrap();
+        assert!(result.is_ok(), "bounded accounting waited on the worker slot");
     }
 
     #[test]

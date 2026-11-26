@@ -41,6 +41,7 @@ enum OpKind {
 
 struct ActiveOp {
     id: u64,
+    kind: OpKind,
     cancel: Arc<AtomicBool>,
 }
 
@@ -126,7 +127,7 @@ impl ModelService {
                     embedding_dim = stored.embedding_dim,
                     "embedding model changed: purging name vectors and requeueing for re-embed"
                 );
-                match this.indexer.purge_name_vectors_and_requeue() {
+                match this.indexer.purge_model_vectors_and_requeue() {
                     Ok((purged, enqueued)) => {
                         let _ = this.record_compat();
                         info!(
@@ -183,8 +184,10 @@ impl ModelService {
     /// No-op when idle.
     pub fn cancel_download(&self) -> ModelStatus {
         if let Some(op) = self.active.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
-            info!("cancelling model operation");
-            op.cancel.store(true, Ordering::Relaxed);
+            if op.kind == OpKind::Download {
+                info!("cancelling model download");
+                op.cancel.store(true, Ordering::Relaxed);
+            }
         }
         self.status()
     }
@@ -271,13 +274,15 @@ impl ModelService {
             ..Default::default()
         };
         *self.progress.lock().unwrap_or_else(|p| p.into_inner()) = started.clone();
-        self.push(&started);
+        let notification_order = Arc::new(Mutex::new(()));
+        let started_guard = notification_order.lock().unwrap_or_else(|p| p.into_inner());
 
         let this = Arc::clone(self);
         let thread_cancel = Arc::clone(&cancel);
+        let thread_order = Arc::clone(&notification_order);
         if let Err(e) = std::thread::Builder::new()
             .name("winsearch-model".into())
-            .spawn(move || this.run_op(id, kind, path.as_deref(), &thread_cancel))
+            .spawn(move || this.run_op(id, kind, path.as_deref(), &thread_cancel, &thread_order))
         {
             let msg = format!("cannot spawn model thread: {e}");
             let failed_status = ModelStatus {
@@ -290,17 +295,20 @@ impl ModelService {
             *self.outcome.lock().unwrap_or_else(|p| p.into_inner()) =
                 Some(Outcome::Failed(msg.clone()));
             *active = None;
+            drop(active);
             self.push(&failed_status);
             return Err(msg);
         }
-        *active = Some(ActiveOp { id, cancel });
+        *active = Some(ActiveOp { id, kind, cancel });
         drop(active);
+        self.push(&started);
+        drop(started_guard);
 
         info!(?kind, "model operation started");
         Ok(started)
     }
 
-    fn run_op(&self, id: u64, kind: OpKind, path: Option<&Path>, cancel: &AtomicBool) {
+    fn run_op(&self, id: u64, kind: OpKind, path: Option<&Path>, cancel: &AtomicBool, notification_order: &Mutex<()>) {
         let last_push = Mutex::new(Instant::now());
         let progress_cb = |downloaded: u64, total: u64| {
             let snapshot = ModelStatus {
@@ -313,7 +321,9 @@ impl ModelService {
             let mut last = last_push.lock().unwrap_or_else(|p| p.into_inner());
             if last.elapsed() >= PUSH_THROTTLE {
                 *last = Instant::now();
-                self.push(&snapshot);
+                if let Ok(_order) = notification_order.try_lock() {
+                    self.push(&snapshot);
+                }
             }
         };
 
@@ -348,6 +358,7 @@ impl ModelService {
                 }
                 let status = self.manager.status();
                 info!("model operation complete: {:?}", status.state);
+                let _order = notification_order.lock().unwrap_or_else(|p| p.into_inner());
                 self.push(&status);
             }
             Err(OpError::Cancelled) => {
@@ -356,12 +367,14 @@ impl ModelService {
                 // imports leave no residue (state: not_downloaded).
                 let status = self.manager.status();
                 info!("model operation cancelled");
+                let _order = notification_order.lock().unwrap_or_else(|p| p.into_inner());
                 self.push(&status);
             }
             Err(OpError::Failed(msg)) => {
                 *self.outcome.lock().unwrap_or_else(|p| p.into_inner()) =
                     Some(Outcome::Failed(msg.clone()));
                 warn!(error = %msg, "model operation failed");
+                let _order = notification_order.lock().unwrap_or_else(|p| p.into_inner());
                 self.push(&self.status());
             }
         }
@@ -529,6 +542,45 @@ mod tests {
     }
 
     #[test]
+    fn blocked_start_notification_does_not_hold_active_or_stop_import() {
+        use std::sync::mpsc;
+        let blobs = vec![("tiny.gguf".to_string(), vec![3u8; 1024])];
+        let fx = Fixture::serve(HashMap::new(), Duration::ZERO);
+        let srcdir = temp_dir("blocked-start-src");
+        std::fs::write(srcdir.join("tiny.gguf"), &blobs[0].1).unwrap();
+        let dir = temp_dir("blocked-start");
+        let service = tiny_service(dir.clone(), &fx, &blobs);
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let release_rx = StdMutex::new(release_rx);
+        let statuses = Arc::new(StdMutex::new(Vec::new()));
+        let recorded = Arc::clone(&statuses);
+        service.set_notifier(Arc::new(move |msg| {
+            if let ServerMessage::ModelStatus { status, .. } = msg {
+                if recorded.lock().unwrap().is_empty() {
+                    entered_tx.send(()).unwrap();
+                    release_rx.lock().unwrap().recv().unwrap();
+                }
+                recorded.lock().unwrap().push(status.state);
+            }
+        }));
+        let other = Arc::clone(&service);
+        let source = srcdir.join("tiny.gguf");
+        let caller = std::thread::spawn(move || other.start_import(source));
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let active_unlocked = service.active.try_lock().is_ok();
+        let imported = wait_until(Duration::from_secs(2), || dir.join("tiny.gguf").exists());
+        release_tx.send(()).unwrap();
+        caller.join().unwrap().unwrap();
+        assert!(wait_until(Duration::from_secs(2), || statuses.lock().unwrap().len() >= 2));
+        assert!(active_unlocked, "broadcast held the operation lock");
+        assert!(imported, "broadcast prevented the import from running");
+        assert_eq!(*statuses.lock().unwrap(), vec![ModelState::Downloading, ModelState::Ready]);
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(srcdir);
+    }
+
+    #[test]
     fn compat_record_written_and_checked() {
         let service = ModelService::new(temp_dir("compat"), test_indexer());
 
@@ -587,6 +639,18 @@ mod tests {
             .unwrap();
         assert!(out.embedded >= 1);
         assert!(indexer.segments_indexed().unwrap() >= 1);
+        let entry_id = indexer.store_lock().find_by_path(&tree.join("keep.txt").to_string_lossy()).unwrap().unwrap().id;
+        {
+            let mut store = indexer.store_lock();
+            store.upsert_segment(ws_index::model::NewSegment {
+                entry_id, kind: "doc", chunk_index: 0, text: "old model content",
+                page: None, start_ms: None, end_ms: None, line: None,
+                vector: &[1.0, 0.0],
+            }).unwrap();
+            for job in store.claim_extract_jobs_batch_for_kind("doc", 10).unwrap() {
+                store.complete_extract_job(job.id).unwrap();
+            }
+        }
 
         let first = ModelService::with_manager(
             ws_modelmgr::ModelManager::new(dir.clone()),
@@ -594,12 +658,12 @@ mod tests {
         );
         first.record_compat().unwrap();
         assert_eq!(first.check_compat().unwrap(), CompatCheck::Compatible);
-        // Flip to an incompatible dim (simulating a model swap on disk).
+        // Different pinned weights with the same model id and width.
         indexer
             .meta_set(
                 EMBEDDING_MODEL_META_KEY,
                 &ModelCompat {
-                    embedding_dim: 384,
+                    repo_commit: "other-weights".into(),
                     ..ModelCompat::current()
                 }
                 .to_json(),
@@ -619,6 +683,11 @@ mod tests {
             indexer.embed_queue_depth().unwrap() >= 1,
             "re-embed jobs must be queued"
         );
+        {
+            let store = indexer.store_lock();
+            assert!(store.list_segments_for_entry(entry_id).unwrap().is_empty());
+            assert_eq!(store.extract_queue_depth_for_kind("doc").unwrap(), 1);
+        }
         // The queued job re-embeds through the pipeline's fake path.
         let out = indexer
             .embed_once_with(|texts| {
@@ -631,6 +700,17 @@ mod tests {
         assert!(out.embedded >= 1);
         let _ = std::fs::remove_dir_all(&tree);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cancel_download_does_not_cancel_an_import() {
+        let service = ModelService::new(temp_dir("import-cancel"), test_indexer());
+        let cancel = Arc::new(AtomicBool::new(false));
+        *service.active.lock().unwrap() = Some(ActiveOp {
+            id: 1, kind: OpKind::Import, cancel: Arc::clone(&cancel),
+        });
+        service.cancel_download();
+        assert!(!cancel.load(Ordering::Relaxed));
     }
 
     #[test]

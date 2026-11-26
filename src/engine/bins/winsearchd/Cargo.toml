@@ -26,3 +26,4 @@ windows.workspace = true
 
 [dev-dependencies]
 sha2.workspace = true
+rusqlite = { version = "0.40", features = ["bundled"] }
