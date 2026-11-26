@@ -40,23 +40,39 @@ fn main() {
     match xrt_root(windows) {
         Some(root) if !forced_stub && windows && msvc => build_windows_dll(&root),
         Some(root) if !forced_stub && !windows => build_linux(&root),
-        _ => build_stub(if forced_stub { "TACONITE_XRT_STUB=1" } else { "no XRT SDK found" }),
+        _ => build_stub(if forced_stub {
+            "TACONITE_XRT_STUB=1"
+        } else {
+            "no XRT SDK found"
+        }),
     }
 }
 
 /// `$XRT_ROOT` (or the platform default) when it holds XRT's headers and
 /// core library; `None` means the stub.
 fn xrt_root(windows: bool) -> Option<PathBuf> {
-    let root = env::var_os("XRT_ROOT").map(PathBuf::from).unwrap_or_else(|| {
-        PathBuf::from(if windows { r"C:\Xilinx\XRT" } else { "/opt/xilinx/xrt" })
-    });
+    let root = env::var_os("XRT_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(if windows {
+                r"C:\Xilinx\XRT"
+            } else {
+                "/opt/xilinx/xrt"
+            })
+        });
     let lib = root.join("lib");
     let has_lib = if windows {
         lib.join("xrt_coreutil.lib").is_file()
     } else {
         lib.join("libxrt_coreutil.so").exists() || lib.join("libxrt_coreutil.so.2").exists()
     };
-    (root.join("include").join("xrt").join("xrt_device.h").is_file() && has_lib).then_some(root)
+    (root
+        .join("include")
+        .join("xrt")
+        .join("xrt_device.h")
+        .is_file()
+        && has_lib)
+        .then_some(root)
 }
 
 fn out_dir() -> PathBuf {
@@ -98,20 +114,34 @@ fn build_windows_dll(root: &Path) {
     let mut cmd = compiler.to_command();
     // XRT's public headers select std::any from __cplusplus, which MSVC
     // otherwise reports as C++98 even with /std:c++17.
-    cmd.args(["/nologo", "/std:c++17",
-        "/Zc:__cplusplus", "/EHsc", "/O2", "/MD", "/LD", "/D_CRT_SECURE_NO_WARNINGS"])
-        .arg("/Ishim")
-        .arg(format!("/I{}", root.join("include").display()))
-        .arg("shim/iron_xrt_shim.cpp")
-        .arg(format!("/Fo{}\\", out.display()))
-        .arg(format!("/Fe{}", dll.display()))
-        .arg("/link")
-        .arg("/DEF:shim/iron_xrt_shim.def")
-        .arg(format!("/LIBPATH:{}", root.join("lib").display()))
-        .arg("xrt_coreutil.lib")
-        .arg(format!("/IMPLIB:{}", implib.display()));
-    let status = cmd.status().expect("run the MSVC compiler for iron_xrt_shim.dll");
-    assert!(status.success(), "building iron_xrt_shim.dll against {} failed", root.display());
+    cmd.args([
+        "/nologo",
+        "/std:c++17",
+        "/Zc:__cplusplus",
+        "/EHsc",
+        "/O2",
+        "/MD",
+        "/LD",
+        "/D_CRT_SECURE_NO_WARNINGS",
+    ])
+    .arg("/Ishim")
+    .arg(format!("/I{}", root.join("include").display()))
+    .arg("shim/iron_xrt_shim.cpp")
+    .arg(format!("/Fo{}\\", out.display()))
+    .arg(format!("/Fe{}", dll.display()))
+    .arg("/link")
+    .arg("/DEF:shim/iron_xrt_shim.def")
+    .arg(format!("/LIBPATH:{}", root.join("lib").display()))
+    .arg("xrt_coreutil.lib")
+    .arg(format!("/IMPLIB:{}", implib.display()));
+    let status = cmd
+        .status()
+        .expect("run the MSVC compiler for iron_xrt_shim.dll");
+    assert!(
+        status.success(),
+        "building iron_xrt_shim.dll against {} failed",
+        root.display()
+    );
 
     println!("cargo:rustc-link-search=native={}", out.display());
     println!("cargo:rustc-link-lib=dylib=iron_xrt_shim");

@@ -14,9 +14,8 @@ use windows::Win32::Foundation::{GENERIC_READ, S_FALSE, S_OK};
 use windows::Win32::Graphics::Imaging::{
     CLSID_WICImagingFactory, GUID_ContainerFormatPng, GUID_WICPixelFormat24bppBGR,
     GUID_WICPixelFormat32bppBGRA, IWICBitmapDecoder, IWICBitmapFrameDecode, IWICBitmapSource,
-    IWICImagingFactory, IWICMetadataQueryReader, WICBitmapDitherTypeNone,
-    WICBitmapEncoderNoCache, WICBitmapInterpolationModeFant, WICBitmapPaletteTypeCustom,
-    WICDecodeMetadataCacheOnDemand,
+    IWICImagingFactory, IWICMetadataQueryReader, WICBitmapDitherTypeNone, WICBitmapEncoderNoCache,
+    WICBitmapInterpolationModeFant, WICBitmapPaletteTypeCustom, WICDecodeMetadataCacheOnDemand,
 };
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
 use windows::Win32::System::Com::{
@@ -93,8 +92,8 @@ fn open_decoder(
         )
     }
     .map_err(|e| format!("WIC CreateDecoderFromFilename failed: {e}"))?;
-    let frame = unsafe { decoder.GetFrame(0) }
-        .map_err(|e| format!("WIC GetFrame(0) failed: {e}"))?;
+    let frame =
+        unsafe { decoder.GetFrame(0) }.map_err(|e| format!("WIC GetFrame(0) failed: {e}"))?;
     Ok((decoder, frame))
 }
 
@@ -145,7 +144,7 @@ pub fn decode_image_wic(path: &Path, max_edge: u32) -> Result<WicDecodedImage, S
         return Err("WIC image has zero dimensions".into());
     }
 
-    let ( mut camera_make, mut camera_model, mut date_taken) = (None, None, None);
+    let (mut camera_make, mut camera_model, mut date_taken) = (None, None, None);
     if let Ok(reader) = unsafe { frame.GetMetadataQueryReader() } {
         camera_make = query_first_string(
             &reader,
@@ -259,13 +258,7 @@ pub fn write_bgra_thumbnail_png(
 
     let stride = width * 4;
     let mem_bitmap = unsafe {
-        factory.CreateBitmapFromMemory(
-            width,
-            height,
-            &GUID_WICPixelFormat32bppBGRA,
-            stride,
-            bgra,
-        )
+        factory.CreateBitmapFromMemory(width, height, &GUID_WICPixelFormat32bppBGRA, stride, bgra)
     }
     .map_err(|e| format!("CreateBitmapFromMemory: {e}"))?;
 

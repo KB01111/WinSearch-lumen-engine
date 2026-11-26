@@ -200,7 +200,7 @@ impl Activity {
 /// every later job goes straight to the GPU/CPU runtime.
 enum NpuSlot {
     Untried,
-    Ready(ws_embed::NpuRuntime),
+    Ready(Box<ws_embed::NpuRuntime>),
     Unavailable(&'static str),
 }
 
@@ -804,7 +804,7 @@ fn ensure_npu(eng: &mut EngineSlot, shared: &Shared) {
     }) {
         Ok(rt) => {
             info!(bundle = %rt.bundle_dir().display(), "serving text and image embeddings on the AMD NPU");
-            NpuSlot::Ready(rt)
+            NpuSlot::Ready(Box::new(rt))
         }
         Err(reason) => {
             info!(%reason, "NPU not used; GPU/CPU fallback serves every job");

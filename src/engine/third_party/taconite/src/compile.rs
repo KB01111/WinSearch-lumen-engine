@@ -103,7 +103,12 @@ impl Toolchain {
             .filter(|p| p.is_dir())
             .or_else(|| Some(mlir_aie.join("peano")).filter(|p| p.is_dir()))
             .unwrap_or_else(|| mlir_aie.parent().unwrap_or(Path::new("")).join("llvm-aie"));
-        Self { mlir_aie, aiecc, peano, launcher: Vec::new() }
+        Self {
+            mlir_aie,
+            aiecc,
+            peano,
+            launcher: Vec::new(),
+        }
     }
 
     /// [`new`](Self::new) on `$MLIR_AIE_INSTALL_DIR` (what mlir-aie's
@@ -167,7 +172,10 @@ impl Toolchain {
     pub fn compile_kernel(&self, kernel: &KernelSource, output: &Path) -> Result<(), Error> {
         let source = absolute(&kernel.source)?;
         if !source.is_file() {
-            return Err(Error::Compile(format!("kernel source {} does not exist", source.display())));
+            return Err(Error::Compile(format!(
+                "kernel source {} does not exist",
+                source.display()
+            )));
         }
         let output = absolute(output)?;
         if let Some(dir) = output.parent() {
@@ -201,8 +209,16 @@ impl Toolchain {
         cmd.arg("-D__AIE_API_AIE_ADF_HPP__");
         cmd.arg(format!("--target={arch}-none-unknown-elf"));
         // The stack accounting aiecc's llc gives a core's own code.
-        cmd.args(["-ffunction-sections", "-fdata-sections", "-fstack-size-section"]);
-        cmd.arg("-I").arg(self.mlir_aie.join("aie_runtime_lib").join(arch.runtime_lib_dir()));
+        cmd.args([
+            "-ffunction-sections",
+            "-fdata-sections",
+            "-fstack-size-section",
+        ]);
+        cmd.arg("-I").arg(
+            self.mlir_aie
+                .join("aie_runtime_lib")
+                .join(arch.runtime_lib_dir()),
+        );
         for dir in &kernel.include_dirs {
             cmd.arg("-I").arg(absolute(dir)?);
         }
@@ -220,7 +236,12 @@ impl Toolchain {
     /// `link_with = "mul.o"`. aiecc packages the xclbin with XRT's
     /// `xclbinutil`, which has to be on its `PATH` (XRT's `setup.sh` puts it
     /// there).
-    pub fn compile_design(&self, design: &Design, xclbin: &Path, insts: &Path) -> Result<(), Error> {
+    pub fn compile_design(
+        &self,
+        design: &Design,
+        xclbin: &Path,
+        insts: &Path,
+    ) -> Result<(), Error> {
         let mlir_path = absolute(&design.mlir)?;
         let mlir = std::fs::read_to_string(&mlir_path)
             .map_err(|e| Error::Compile(format!("reading {}: {e}", mlir_path.display())))?;
@@ -242,22 +263,32 @@ impl Toolchain {
         // The MLIR goes into the work directory as `aie.mlir`, next to the
         // objects it links, as mlir-aie's compile_mlir_module lays it out.
         let input = work_dir.join("aie.mlir");
-        std::fs::write(&input, &mlir).map_err(|e| Error::Compile(format!("writing {}: {e}", input.display())))?;
+        std::fs::write(&input, &mlir)
+            .map_err(|e| Error::Compile(format!("writing {}: {e}", input.display())))?;
         for obj in &design.link {
             let obj = absolute(obj)?;
-            let name = obj.file_name().ok_or_else(|| Error::Compile(format!("{} names no file", obj.display())))?;
+            let name = obj
+                .file_name()
+                .ok_or_else(|| Error::Compile(format!("{} names no file", obj.display())))?;
             let dst = work_dir.join(name);
             if dst != obj {
-                std::fs::copy(&obj, &dst)
-                    .map_err(|e| Error::Compile(format!("copying {} to {}: {e}", obj.display(), dst.display())))?;
+                std::fs::copy(&obj, &dst).map_err(|e| {
+                    Error::Compile(format!(
+                        "copying {} to {}: {e}",
+                        obj.display(),
+                        dst.display()
+                    ))
+                })?;
             }
         }
 
         let mut cmd = self.command(&self.aiecc);
         cmd.arg(&input);
         cmd.arg(format!("--peano={}", self.peano.display()));
-        cmd.arg("--get-npu-insts").arg(format!("--npu-insts-name={}", insts.display()));
-        cmd.arg("--get-xclbin").arg(format!("--xclbin-name={}", xclbin.display()));
+        cmd.arg("--get-npu-insts")
+            .arg(format!("--npu-insts-name={}", insts.display()));
+        cmd.arg("--get-xclbin")
+            .arg(format!("--xclbin-name={}", xclbin.display()));
         cmd.arg(format!("--tmpdir={}", work_dir.display()));
         cmd.arg(format!("-j{}", design.jobs));
         cmd.args(&design.flags);
@@ -292,7 +323,12 @@ pub struct KernelSource {
 
 impl KernelSource {
     pub fn new(source: impl Into<PathBuf>, arch: Arch) -> Self {
-        Self { source: source.into(), arch, include_dirs: Vec::new(), flags: Vec::new() }
+        Self {
+            source: source.into(),
+            arch,
+            include_dirs: Vec::new(),
+            flags: Vec::new(),
+        }
     }
 
     /// Adds `-I dir`.
@@ -375,14 +411,16 @@ fn with_suffix(p: &Path, suffix: &str) -> PathBuf {
 }
 
 fn create_dir(dir: &Path) -> Result<(), Error> {
-    std::fs::create_dir_all(dir).map_err(|e| Error::Compile(format!("creating {}: {e}", dir.display())))
+    std::fs::create_dir_all(dir)
+        .map_err(|e| Error::Compile(format!("creating {}: {e}", dir.display())))
 }
 
 fn remove_stale(p: &Path) -> Result<(), Error> {
     match std::fs::remove_file(p) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-            Err(Error::Compile(format!("removing stale {}: {e}", p.display())))
-        }
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(Error::Compile(format!(
+            "removing stale {}: {e}",
+            p.display()
+        ))),
         _ => Ok(()),
     }
 }
@@ -391,15 +429,21 @@ fn expect_file(p: &Path, tool: &str) -> Result<(), Error> {
     if p.is_file() {
         Ok(())
     } else {
-        Err(Error::Compile(format!("{tool} reported success but did not write {}", p.display())))
+        Err(Error::Compile(format!(
+            "{tool} reported success but did not write {}",
+            p.display()
+        )))
     }
 }
 
 /// Runs `cmd`, turning a failure into an error carrying the tool's output.
 fn run(mut cmd: Command, tool: &str, input: &Path) -> Result<Output, Error> {
-    let out = cmd
-        .output()
-        .map_err(|e| Error::Compile(format!("starting {tool} ({}): {e}", cmd.get_program().to_string_lossy())))?;
+    let out = cmd.output().map_err(|e| {
+        Error::Compile(format!(
+            "starting {tool} ({}): {e}",
+            cmd.get_program().to_string_lossy()
+        ))
+    })?;
     if out.status.success() {
         return Ok(out);
     }
@@ -408,7 +452,10 @@ fn run(mut cmd: Command, tool: &str, input: &Path) -> Result<Output, Error> {
     // its progress counter's carriage returns.
     let tail = |b: &[u8]| {
         let s = String::from_utf8_lossy(b);
-        let lines: Vec<&str> = s.lines().map(|l| l.rsplit('\r').next().unwrap_or(l).trim_end()).collect();
+        let lines: Vec<&str> = s
+            .lines()
+            .map(|l| l.rsplit('\r').next().unwrap_or(l).trim_end())
+            .collect();
         lines[lines.len().saturating_sub(40)..].join("\n")
     };
     Err(Error::Compile(format!(
@@ -426,7 +473,10 @@ mod tests {
 
     #[test]
     fn arch_follows_the_mlir_device() {
-        assert_eq!(Arch::of_mlir("module {\n  aie.device(npu2) {"), Some(Arch::Aie2p));
+        assert_eq!(
+            Arch::of_mlir("module {\n  aie.device(npu2) {"),
+            Some(Arch::Aie2p)
+        );
         assert_eq!(Arch::of_mlir("aie.device(npu2_4col) {"), Some(Arch::Aie2p));
         assert_eq!(Arch::of_mlir("aie.device(npu1_1col) {"), Some(Arch::Aie2));
         assert_eq!(Arch::of_mlir("aie.device(xcve2802) {"), None);
@@ -446,7 +496,9 @@ mod tests {
     fn a_missing_kernel_source_is_an_error_not_a_spawn() {
         let tc = Toolchain::new("/nonexistent/mlir_aie");
         let out = std::env::temp_dir().join("taconite-compile-test.o");
-        let err = tc.compile_kernel(&KernelSource::new("/nonexistent/k.cc", Arch::Aie2p), &out).unwrap_err();
+        let err = tc
+            .compile_kernel(&KernelSource::new("/nonexistent/k.cc", Arch::Aie2p), &out)
+            .unwrap_err();
         assert!(matches!(err, Error::Compile(m) if m.contains("does not exist")));
     }
 }

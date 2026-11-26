@@ -65,7 +65,9 @@ pub fn normalize_vector(v: &[f32]) -> (Vec<f32>, f32) {
     }
     let norm = (norm_f64 as f32).min(f32::MAX);
     (
-        v.iter().map(|&x| (f64::from(x) / norm_f64) as f32).collect(),
+        v.iter()
+            .map(|&x| (f64::from(x) / norm_f64) as f32)
+            .collect(),
         norm,
     )
 }
@@ -299,8 +301,7 @@ impl VectorIndex {
         let victims: Vec<i64> = self
             .ids
             .iter()
-            .enumerate()
-            .filter_map(|(_, &id)| {
+            .filter_map(|&id| {
                 let slot = self.pos[&id];
                 (self.entry_ids[slot] == entry_id).then_some(id)
             })
@@ -406,9 +407,8 @@ impl VectorIndex {
         if query_norm == 0.0 {
             return Ok(Vec::new());
         }
-        let entry_set: Option<HashSet<i64>> = filter.and_then(|f| {
-            (!f.entry_ids.is_empty()).then(|| f.entry_ids.iter().copied().collect())
-        });
+        let entry_set: Option<HashSet<i64>> = filter
+            .and_then(|f| (!f.entry_ids.is_empty()).then(|| f.entry_ids.iter().copied().collect()));
 
         let stride = self.dim * 2;
         let mut hits = Vec::with_capacity(self.ids.len().min(top_k.saturating_mul(2)));
@@ -436,12 +436,12 @@ impl VectorIndex {
                 cosine: dot,
             });
         }
-        hits.sort_by(|a, b| {
-            b.cosine
-                .total_cmp(&a.cosine)
-                .then_with(|| a.id.cmp(&b.id))
-        });
-        Ok(hits.into_iter().filter(|hit| allowed(hit)).take(top_k).collect())
+        hits.sort_by(|a, b| b.cosine.total_cmp(&a.cosine).then_with(|| a.id.cmp(&b.id)));
+        Ok(hits
+            .into_iter()
+            .filter(|hit| allowed(hit))
+            .take(top_k)
+            .collect())
     }
 }
 
@@ -483,7 +483,11 @@ mod tests {
 
     #[test]
     fn zero_and_nonfinite_vectors_encode_to_zero_norm() {
-        for v in [vec![0.0, 0.0, 0.0], vec![f32::NAN, 1.0], vec![f32::INFINITY, 1.0]] {
+        for v in [
+            vec![0.0, 0.0, 0.0],
+            vec![f32::NAN, 1.0],
+            vec![f32::INFINITY, 1.0],
+        ] {
             let (normed, norm) = normalize_vector(&v);
             assert_eq!(norm, 0.0);
             assert!(normed.iter().all(|&x| x == 0.0));
@@ -496,10 +500,7 @@ mod tests {
         // Deterministic pseudo-random vectors; f64 is the oracle.
         fn pseudo(i: usize, dim: usize) -> Vec<f32> {
             (0..dim)
-                .map(|j| {
-                    let x = ((i * 2654435761 + j * 40503) % 10000) as f32 / 5000.0 - 1.0;
-                    x
-                })
+                .map(|j| ((i * 2654435761 + j * 40503) % 10000) as f32 / 5000.0 - 1.0)
                 .collect()
         }
         for dim in [4, 16, 64] {
@@ -530,8 +531,16 @@ mod tests {
             }
         }
         // Known angles.
-        assert!(approx_eq(cosine_similarity(&[1.0, 0.0], &[1.0, 0.0]), 1.0, 1e-6));
-        assert!(approx_eq(cosine_similarity(&[1.0, 0.0], &[0.0, 1.0]), 0.0, 1e-6));
+        assert!(approx_eq(
+            cosine_similarity(&[1.0, 0.0], &[1.0, 0.0]),
+            1.0,
+            1e-6
+        ));
+        assert!(approx_eq(
+            cosine_similarity(&[1.0, 0.0], &[0.0, 1.0]),
+            0.0,
+            1e-6
+        ));
         assert!(approx_eq(
             cosine_similarity(&[1.0, 0.0], &[-1.0, 0.0]),
             -1.0,
@@ -607,13 +616,12 @@ mod tests {
 
         assert!(idx.search(&[], 10, None).unwrap().is_empty());
         assert!(idx.search(&[0.0, 0.0], 10, None).unwrap().is_empty());
-        assert!(
-            idx.search(&[f32::NAN, 1.0], 10, None)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(idx.search(&[f32::NAN, 1.0], 10, None).unwrap().is_empty());
         assert!(idx.search(&[1.0, 0.0], 0, None).unwrap().is_empty());
-        assert!(VectorIndex::new(2).search(&[1.0, 0.0], 10, None).unwrap().is_empty());
+        assert!(VectorIndex::new(2)
+            .search(&[1.0, 0.0], 10, None)
+            .unwrap()
+            .is_empty());
         assert_eq!(
             idx.search(&[1.0, 0.0, 0.0], 10, None).unwrap_err(),
             VectorError::DimensionMismatch {
@@ -648,7 +656,7 @@ mod tests {
             idx.add_or_update((i + 1) as i64, 42, kind, &[1.0, 0.0])
                 .unwrap();
         }
-        assert_eq!(idx.len(), 7);
+        assert_eq!(idx.len(), 9);
         assert_eq!(idx.get_kind(1), Some(SEGMENT_KIND_NAME));
         assert_eq!(idx.get_kind(2), Some(SEGMENT_KIND_DOC));
         assert_eq!(idx.get_kind(3), Some(SEGMENT_KIND_IMAGE));
@@ -656,6 +664,8 @@ mod tests {
         assert_eq!(idx.get_kind(5), Some(SEGMENT_KIND_PDF));
         assert_eq!(idx.get_kind(6), Some(SEGMENT_KIND_AUDIO));
         assert_eq!(idx.get_kind(7), Some(SEGMENT_KIND_VIDEO));
+        assert_eq!(idx.get_kind(8), Some("enriched_ocr"));
+        assert_eq!(idx.get_kind(9), Some("enriched_transcript"));
 
         // Filter to content kinds excludes `name`.
         let content_filter = VectorFilter::content_kinds();
@@ -667,7 +677,7 @@ mod tests {
         assert_eq!(idx.count_by_kind(SEGMENT_KIND_PDF), 1);
         assert_eq!(idx.remove_by_kind(SEGMENT_KIND_PDF), 1);
         assert_eq!(idx.count_by_kind(SEGMENT_KIND_PDF), 0);
-        assert_eq!(idx.len(), 6);
+        assert_eq!(idx.len(), 8);
     }
 
     #[test]

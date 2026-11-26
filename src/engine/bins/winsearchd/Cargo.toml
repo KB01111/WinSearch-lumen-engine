@@ -18,6 +18,7 @@ ws-modelmgr.workspace = true
 ws-embed-protocol.workspace = true
 ws-extract.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
@@ -26,5 +27,4 @@ tracing-appender.workspace = true
 windows.workspace = true
 
 [dev-dependencies]
-sha2.workspace = true
 rusqlite = { version = "0.40", features = ["bundled"] }

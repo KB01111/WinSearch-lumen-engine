@@ -97,13 +97,12 @@ def main():
                 assert stdout, executable
                 result["checks"].append(executable + " starts outside checkout with System32-only PATH")
             with (working / "daemon.log").open("wb") as log:
-                child = subprocess.Popen([str(deployed / "winsearchd.exe"), "--test-stdin-gate", "--defer-root-admission"],
-                                         cwd=working, env=environment, stdin=subprocess.PIPE,
-                                         stdout=log, stderr=log, creationflags=subprocess.CREATE_NO_WINDOW)
+                child = subprocess.Popen([str(deployed / "winsearchd.exe"), "--defer-root-admission"],
+                                         cwd=working, env=environment, stdin=subprocess.DEVNULL,
+                                         stdout=log, stderr=log, creationflags=subprocess.CREATE_NO_WINDOW | 0x00000004)
             children.append(child)
             owner.assign(child)
-            child.stdin.write(b"\1")
-            child.stdin.close()
+            owner.resume(child)
             control = parity.harness.Pipe(pipe, child)
             search = parity.Frames(pipe, child)
             clients.extend([control, search])

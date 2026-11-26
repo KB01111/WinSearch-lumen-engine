@@ -5,6 +5,8 @@
 //! machine — and nothing over the network — can talk to the engine.
 
 use std::io::{self, Read, Write};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tracing::{error, info, warn};
@@ -43,15 +45,20 @@ const FRAME_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 /// codecs operate on top of it. Server endpoints bound a frame's writes to five
 /// seconds, from its first byte through `flush`, and close on transport failure.
 pub struct PipeStream {
-    handle: Option<PipeHandle>,
+    handle: Option<Arc<PipeHandle>>,
+    closed: Arc<AtomicBool>,
     overlapped: bool,
     write_deadline: Option<Instant>,
+    read_deadline: Option<Instant>,
+    framed_reader: bool,
 }
 
 /// HANDLE wrapper: created by us, moved across a thread boundary exactly once,
 /// closed exactly once on drop (which also disconnects the pipe instance).
 struct PipeHandle(HANDLE);
 unsafe impl Send for PipeHandle {}
+// Windows kernel pipe/event handles support concurrent operations across threads.
+unsafe impl Sync for PipeHandle {}
 
 impl Drop for PipeHandle {
     fn drop(&mut self) {
@@ -64,9 +71,44 @@ impl Drop for PipeHandle {
 impl PipeStream {
     fn new(handle: PipeHandle, overlapped: bool) -> Self {
         Self {
-            handle: Some(handle),
+            handle: Some(Arc::new(handle)),
+            closed: Arc::new(AtomicBool::new(false)),
             overlapped,
             write_deadline: None,
+            read_deadline: None,
+            framed_reader: false,
+        }
+    }
+
+    /// A single independent read lane; writers retain their own serialization.
+    pub fn framed_reader(&self) -> io::Result<Self> {
+        if !self.overlapped || self.closed.load(Ordering::Acquire) {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "pipe cannot provide a reader",
+            ));
+        }
+        Ok(Self {
+            handle: self.handle.clone(),
+            closed: self.closed.clone(),
+            overlapped: true,
+            write_deadline: None,
+            read_deadline: Some(Instant::now() + FRAME_WRITE_TIMEOUT),
+            framed_reader: true,
+        })
+    }
+
+    /// After a complete frame an established peer may remain idle indefinitely.
+    pub fn finish_read_frame(&mut self) {
+        self.read_deadline = None;
+    }
+
+    fn close(&mut self) {
+        self.closed.store(true, Ordering::Release);
+        if let Some(handle) = self.handle.take() {
+            unsafe {
+                let _ = CancelIoEx(handle.0, None);
+            }
         }
     }
 
@@ -92,6 +134,9 @@ impl PipeStream {
     /// Returns `Ok(Some(n))` when `n` bytes are queued (possibly 0), or
     /// `Ok(None)` when the peer has disconnected (`ERROR_BROKEN_PIPE`).
     pub fn peek_available(&self) -> io::Result<Option<usize>> {
+        if self.closed.load(Ordering::Acquire) {
+            return Ok(None);
+        }
         let Some(handle) = &self.handle else {
             return Ok(None);
         };
@@ -111,24 +156,46 @@ impl Read for PipeStream {
         if buf.is_empty() {
             return Ok(0);
         }
-        let Some(handle) = &self.handle else {
+        if self.closed.load(Ordering::Acquire) {
+            return Ok(0);
+        }
+        let Some(handle) = self.handle.clone() else {
             return Ok(0);
         };
         let result = if self.overlapped {
             let mut operation = PipeOperation::new()?;
             let started =
                 unsafe { ReadFile(handle.0, Some(buf), None, Some(&mut operation.overlapped)) };
-            operation.complete(handle.0, started, None)
+            // A writer may have closed between our initial check and ReadFile.
+            if self.closed.load(Ordering::Acquire) {
+                unsafe {
+                    let _ = CancelIoEx(handle.0, Some(&operation.overlapped));
+                }
+            }
+            operation.complete(handle.0, started, self.read_deadline)
         } else {
             let mut read = 0;
             unsafe { ReadFile(handle.0, Some(buf), Some(&mut read), None) }
                 .map(|()| read)
                 .map_err(win32_io_error)
         };
+        if self.framed_reader && result.as_ref().is_ok_and(|count| *count > 0) {
+            self.read_deadline
+                .get_or_insert_with(|| Instant::now() + FRAME_WRITE_TIMEOUT);
+        }
+        if result.is_err() {
+            self.close();
+        }
         match result {
             Err(error) if error.raw_os_error() == Some(ERROR_BROKEN_PIPE.to_hresult().0) => Ok(0),
             result => result.map(|read| read as usize),
         }
+    }
+}
+
+impl Drop for PipeStream {
+    fn drop(&mut self) {
+        self.close();
     }
 }
 
@@ -173,10 +240,7 @@ impl PipeOperation {
             let wait = unsafe { WaitForSingleObject(self.overlapped.hEvent, milliseconds) };
             if wait != WAIT_OBJECT_0 {
                 let error = if wait == WAIT_TIMEOUT {
-                    io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        "pipe frame write deadline exceeded",
-                    )
+                    io::Error::new(io::ErrorKind::TimedOut, "pipe operation deadline exceeded")
                 } else {
                     io::Error::last_os_error()
                 };
@@ -198,6 +262,9 @@ impl PipeOperation {
 
 impl Write for PipeStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(io::Error::new(io::ErrorKind::BrokenPipe, "pipe closed"));
+        }
         let handle = self
             .handle
             .as_ref()
@@ -227,20 +294,20 @@ impl Write for PipeStream {
                 .map_err(win32_io_error)
         };
         if result.is_err() {
-            self.handle.take();
+            self.close();
         }
         result.map(|written| written as usize)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        if self.handle.is_none() {
+        if self.handle.is_none() || self.closed.load(Ordering::Acquire) {
             return Err(io::Error::new(io::ErrorKind::BrokenPipe, "pipe closed"));
         }
         if self
             .write_deadline
             .is_some_and(|deadline| Instant::now() >= deadline)
         {
-            self.handle.take();
+            self.close();
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 "pipe frame write deadline exceeded",
@@ -269,6 +336,7 @@ where
     let security = UserOnlySecurity::new().map_err(|e| io::Error::other(e.to_string()))?;
     let wide_name: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
     let on_connection = std::sync::Arc::new(on_connection);
+    let active = Arc::new(AtomicUsize::new(0));
 
     info!(pipe = name, "pipe accept loop starting");
     loop {
@@ -287,8 +355,33 @@ where
         }
 
         let stream = PipeStream::new(handle, true);
+        if active
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                (n < 32).then_some(n + 1)
+            })
+            .is_err()
+        {
+            drop(stream);
+            continue;
+        }
+        let permit = ConnectionPermit(active.clone());
         let handler = on_connection.clone();
-        std::thread::spawn(move || handler(stream));
+        if let Err(error) = std::thread::Builder::new()
+            .name("winsearch-pipe".into())
+            .spawn(move || {
+                let _permit = permit;
+                handler(stream);
+            })
+        {
+            warn!(%error, "pipe handler could not start");
+        }
+    }
+}
+
+struct ConnectionPermit(Arc<AtomicUsize>);
+impl Drop for ConnectionPermit {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
     }
 }
 

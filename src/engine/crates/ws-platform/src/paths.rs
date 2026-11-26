@@ -72,15 +72,21 @@ pub fn ensure_layout() -> std::io::Result<()> {
     if let Some(value) = std::env::var_os("WINSEARCH_DATA_DIR") {
         checked_data_override(PathBuf::from(value))?;
     }
+    ensure_layout_at(&data_dir())
+}
+
+fn ensure_layout_at(root: &std::path::Path) -> std::io::Result<()> {
     for dir in [
-        data_dir(),
-        logs_dir(),
-        db_dir(),
-        model_dir(),
-        thumbnail_cache_dir(),
+        root.to_path_buf(),
+        root.join("db"),
+        root.join("models"),
+        root.join("cache/thumbs"),
     ] {
         std::fs::create_dir_all(dir)?;
     }
+    // Diagnostics are optional even during first startup. The daemon's log
+    // initializer handles the unavailable sink after mandatory layout succeeds.
+    let _ = std::fs::create_dir_all(root.join("logs"));
     Ok(())
 }
 
@@ -98,9 +104,24 @@ mod tests {
 
     #[test]
     fn layout_creation_is_idempotent() {
-        ensure_layout().unwrap();
-        ensure_layout().unwrap();
-        assert!(data_dir().is_dir());
-        assert!(index_db_path().to_string_lossy().ends_with("index.db"));
+        let root = std::env::temp_dir().join(format!("winsearch-layout-{}", std::process::id()));
+        ensure_layout_at(&root).unwrap();
+        ensure_layout_at(&root).unwrap();
+        assert!(root.join("db").is_dir());
+        assert!(root.join("logs").is_dir());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn blocked_logging_does_not_prevent_the_required_database_layout() {
+        let root =
+            std::env::temp_dir().join(format!("winsearch-layout-blocked-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("logs"), b"owned logging failure fixture").unwrap();
+        ensure_layout_at(&root).expect("an unavailable log directory must not stop search startup");
+        assert!(root.join("db").is_dir());
+        assert!(root.join("models").is_dir());
+        assert!(root.join("logs").is_file());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

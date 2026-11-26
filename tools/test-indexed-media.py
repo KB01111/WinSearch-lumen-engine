@@ -77,6 +77,53 @@ class OwnedJob:
         self.peak_private_bytes = max(self.peak_private_bytes, total_private)
         return pids
 
+    def resume(self, child):
+        """Release a CREATE_SUSPENDED process only after verified job assignment.
+
+        This uses the OS suspension boundary in optimized builds as well; a
+        debug-only stdin gate cannot establish release containment.
+        """
+        assert child.poll() is None and child.pid in self.sample()
+        class ThreadEntry(c.Structure):
+            _fields_ = [("size", w.DWORD), ("usage", w.DWORD), ("thread", w.DWORD),
+                        ("process", w.DWORD), ("priority", w.LONG),
+                        ("delta", w.LONG), ("flags", w.DWORD)]
+        assert c.sizeof(ThreadEntry) == 28
+        signatures = {
+            "CreateToolhelp32Snapshot": ([w.DWORD, w.DWORD], w.HANDLE),
+            "Thread32First": ([w.HANDLE, c.POINTER(ThreadEntry)], w.BOOL),
+            "Thread32Next": ([w.HANDLE, c.POINTER(ThreadEntry)], w.BOOL),
+            "OpenThread": ([w.DWORD, w.BOOL, w.DWORD], w.HANDLE),
+            "ResumeThread": ([w.HANDLE], w.DWORD),
+        }
+        for name, (arguments, result) in signatures.items():
+            function = getattr(self.api, name)
+            function.argtypes, function.restype = arguments, result
+        snapshot = self.api.CreateToolhelp32Snapshot(4, 0)  # TH32CS_SNAPTHREAD
+        assert snapshot not in (None, c.c_void_p(-1).value), c.WinError(c.get_last_error())
+        resumed = 0
+        try:
+            entry = ThreadEntry()
+            entry.size = c.sizeof(entry)
+            present = self.api.Thread32First(snapshot, c.byref(entry))
+            assert present, c.WinError(c.get_last_error())
+            while present:
+                if entry.process == child.pid:
+                    thread = self.api.OpenThread(2, False, entry.thread)  # THREAD_SUSPEND_RESUME
+                    assert thread, c.WinError(c.get_last_error())
+                    try:
+                        previous = self.api.ResumeThread(thread)
+                        assert previous != 0xffffffff, c.WinError(c.get_last_error())
+                        resumed += previous > 0
+                    finally:
+                        self.api.CloseHandle(thread)
+                entry.size = c.sizeof(entry)
+                present = self.api.Thread32Next(snapshot, c.byref(entry))
+            assert c.get_last_error() == 18, c.WinError(c.get_last_error())  # NO_MORE_FILES
+            assert resumed > 0, "no suspended owned thread was resumed"
+        finally:
+            self.api.CloseHandle(snapshot)
+
     def terminate(self):
         if self.handle:
             assert self.api.TerminateJobObject(self.handle, 1), c.WinError(c.get_last_error())

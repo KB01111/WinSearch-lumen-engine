@@ -125,9 +125,17 @@ pub mod axlf {
         // struct aie_pdi: uuid[16], then pdi_image (array_offset of bytes,
         // offset from the section's start).
         let p = s + u32_at(xclbin, s + 124)? as usize;
-        let (size, off) = (u32_at(xclbin, p + 16)? as usize, u32_at(xclbin, p + 20)? as usize);
-        let pdi = xclbin.get(s + off..s + off + size).ok_or_else(|| io::Error::other("PDI outside the xclbin"))?;
-        Ok(Partition { column_width, pdi: pdi.to_vec() })
+        let (size, off) = (
+            u32_at(xclbin, p + 16)? as usize,
+            u32_at(xclbin, p + 20)? as usize,
+        );
+        let pdi = xclbin
+            .get(s + off..s + off + size)
+            .ok_or_else(|| io::Error::other("PDI outside the xclbin"))?;
+        Ok(Partition {
+            column_width,
+            pdi: pdi.to_vec(),
+        })
     }
 }
 
@@ -138,7 +146,14 @@ mod sys {
 
     unsafe extern "C" {
         pub fn ioctl(fd: c_int, request: c_ulong, ...) -> c_int;
-        pub fn mmap(addr: *mut c_void, len: usize, prot: c_int, flags: c_int, fd: c_int, off: i64) -> *mut c_void;
+        pub fn mmap(
+            addr: *mut c_void,
+            len: usize,
+            prot: c_int,
+            flags: c_int,
+            fd: c_int,
+            off: i64,
+        ) -> *mut c_void;
         pub fn munmap(addr: *mut c_void, len: usize) -> c_int;
         pub fn lseek(fd: c_int, off: i64, whence: c_int) -> i64;
     }
@@ -457,16 +472,27 @@ impl DeviceInner {
     }
 
     fn get_info<T>(&self, param: u32, out: &mut T) -> io::Result<u32> {
-        let mut gi = sys::GetInfo { param, buffer_size: std::mem::size_of::<T>() as u32, buffer: out as *mut T as u64 };
+        let mut gi = sys::GetInfo {
+            param,
+            buffer_size: std::mem::size_of::<T>() as u32,
+            buffer: out as *mut T as u64,
+        };
         sys::drm(self.fd(), sys::GET_INFO, &mut gi)?;
         Ok(gi.buffer_size)
     }
 
     /// `CREATE_BO` + `GET_BO_INFO`: (handle, map offset, device address).
     fn create_bo(&self, ty: u32, size: usize) -> io::Result<(u32, u64, u64)> {
-        let mut cb = sys::CreateBo { size: size as u64, ty, ..Default::default() };
+        let mut cb = sys::CreateBo {
+            size: size as u64,
+            ty,
+            ..Default::default()
+        };
         sys::drm(self.fd(), sys::CREATE_BO, &mut cb)?;
-        let mut info = sys::GetBoInfo { handle: cb.handle, ..Default::default() };
+        let mut info = sys::GetBoInfo {
+            handle: cb.handle,
+            ..Default::default()
+        };
         if let Err(e) = sys::drm(self.fd(), sys::GET_BO_INFO, &mut info) {
             self.gem_close(cb.handle);
             return Err(e);
@@ -477,7 +503,14 @@ impl DeviceInner {
     fn mmap(&self, map_offset: u64, size: usize) -> io::Result<*mut u8> {
         // SAFETY: a fresh shared mapping of the BO at its fake offset.
         let p = unsafe {
-            sys::mmap(std::ptr::null_mut(), size, sys::PROT_RW, sys::MAP_SHARED, self.fd(), map_offset as i64)
+            sys::mmap(
+                std::ptr::null_mut(),
+                size,
+                sys::PROT_RW,
+                sys::MAP_SHARED,
+                self.fd(),
+                map_offset as i64,
+            )
         };
         if p == sys::MAP_FAILED {
             return Err(io::Error::last_os_error());
@@ -486,7 +519,11 @@ impl DeviceInner {
     }
 
     fn gem_close(&self, handle: u32) {
-        let _ = sys::drm(self.fd(), sys::GEM_CLOSE, &mut sys::HandlePad { handle, pad: 0 });
+        let _ = sys::drm(
+            self.fd(),
+            sys::GEM_CLOSE,
+            &mut sys::HandlePad { handle, pad: 0 },
+        );
     }
 
     /// Host address of the device BO at device address `xdna_addr`.
@@ -588,13 +625,16 @@ impl Session {
         };
 
         // XRT's order: the heap, a query, then (per kernel) the context.
-        let (handle, map_offset, xdna_addr) =
-            inner.create_bo(sys::BO_DEV_HEAP, HEAP_SIZE).map_err(os("CREATE_BO(DEV_HEAP)")).map_err(Error::Device)?;
+        let (handle, map_offset, xdna_addr) = inner
+            .create_bo(sys::BO_DEV_HEAP, HEAP_SIZE)
+            .map_err(os("CREATE_BO(DEV_HEAP)"))
+            .map_err(Error::Device)?;
         inner.heap.0 = handle;
         // The firmware maps the heap onto its device window and refuses a
         // host address not aligned to the heap's size, so place it on one.
-        let host =
-            map_aligned(&inner, map_offset, HEAP_SIZE).map_err(os("mapping the device heap")).map_err(Error::Device)?;
+        let host = map_aligned(&inner, map_offset, HEAP_SIZE)
+            .map_err(os("mapping the device heap"))
+            .map_err(Error::Device)?;
         inner.heap = (handle, host, xdna_addr);
 
         let mut meta = sys::AieMetadata::default();
@@ -603,7 +643,10 @@ impl Session {
             .map_err(os("GET_INFO(AIE_METADATA)"))
             .map_err(Error::Device)?;
         inner.meta = meta;
-        Ok(Self { inner: Arc::new(inner), _not_sync: PhantomData })
+        Ok(Self {
+            inner: Arc::new(inner),
+            _not_sync: PhantomData,
+        })
     }
 
     /// Columns and rows of the AIE array.
@@ -634,7 +677,8 @@ impl Session {
         self.inner
             .get_info(sys::GET_POWER_MODE, &mut m)
             .map_err(|e| Error::Device(format!("GET_INFO(POWER_MODE): {e}")))?;
-        PowerMode::from_raw(m[0]).ok_or_else(|| Error::Device(format!("unknown power mode {}", m[0])))
+        PowerMode::from_raw(m[0])
+            .ok_or_else(|| Error::Device(format!("unknown power mode {}", m[0])))
     }
 
     /// Sets the NPU's power mode, for the whole device (every process's
@@ -642,7 +686,11 @@ impl Session {
     /// it only with `CAP_SYS_ADMIN`.
     pub fn set_power_mode(&self, mode: PowerMode) -> Result<(), Error> {
         let m = [mode as u8, 0, 0, 0, 0, 0, 0, 0];
-        let mut st = sys::SetState { param: sys::SET_POWER_MODE, buffer_size: 8, buffer: m.as_ptr() as u64 };
+        let mut st = sys::SetState {
+            param: sys::SET_POWER_MODE,
+            buffer_size: 8,
+            buffer: m.as_ptr() as u64,
+        };
         sys::drm(self.inner.fd(), sys::SET_STATE, &mut st)
             .map_err(|e| Error::Device(format!("SET_STATE(POWER_MODE): {e}")))
     }
@@ -694,7 +742,8 @@ impl Session {
         kernel_name: Option<&str>,
         ops_per_run: u64,
     ) -> Result<Kernel, Error> {
-        let insts = std::fs::read(insts).map_err(|e| Error::Kernel(format!("{}: {e}", insts.display())))?;
+        let insts =
+            std::fs::read(insts).map_err(|e| Error::Kernel(format!("{}: {e}", insts.display())))?;
         let key = format!("{}\n{}", xclbin.display(), kernel_name.unwrap_or(""));
         let ctx = {
             let mut contexts = self.inner.contexts.lock().unwrap();
@@ -742,10 +791,19 @@ impl Session {
             ..Default::default()
         };
         sys::drm(dev.fd(), sys::CREATE_HWCTX, &mut c).map_err(kerr("CREATE_HWCTX"))?;
-        let mut ctx = Context { dev: dev.clone(), handle: c.handle, syncobj: c.syncobj_handle, _pdi: None };
+        let mut ctx = Context {
+            dev: dev.clone(),
+            handle: c.handle,
+            syncobj: c.syncobj_handle,
+            _pdi: None,
+        };
 
         let pdi = self.device_bo(&part.pdi).map_err(kerr("PDI buffer"))?;
-        let mut cu = sys::ConfigCu { num_cus: 1, cu_bo: pdi.handle, ..Default::default() };
+        let mut cu = sys::ConfigCu {
+            num_cus: 1,
+            cu_bo: pdi.handle,
+            ..Default::default()
+        };
         let mut cfg = sys::ConfigHwctx {
             handle: ctx.handle,
             param_type: 0, // DRM_AMDXDNA_HWCTX_CONFIG_CU
@@ -766,7 +824,13 @@ impl Session {
         // SAFETY: the BO is data.len() bytes of the heap mapping at host.
         unsafe { std::ptr::copy_nonoverlapping(data.as_ptr(), host, data.len()) };
         flush(host, data.len());
-        Ok(Bo { dev: dev.clone(), handle, ptr: std::ptr::null_mut(), size: data.len(), xdna_addr })
+        Ok(Bo {
+            dev: dev.clone(),
+            handle,
+            ptr: std::ptr::null_mut(),
+            size: data.len(),
+            xdna_addr,
+        })
     }
 
     /// A zeroed buffer of `bytes` bytes the NPU and the host share, usable
@@ -777,14 +841,32 @@ impl Session {
     )]
     pub fn alloc(&self, bytes: usize) -> Result<Buffer, Error> {
         let dev = &self.inner;
-        let berr = |what: &'static str| move |e: io::Error| Error::Buffer(format!("{what} ({bytes} bytes): {e}"));
-        let (handle, map_offset, xdna_addr) = dev.create_bo(sys::BO_SHARE, bytes).map_err(berr("CREATE_BO(SHARE)"))?;
-        let ptr = dev.mmap(map_offset, bytes).inspect_err(|_| dev.gem_close(handle)).map_err(berr("mapping"))?;
+        let berr = |what: &'static str| {
+            move |e: io::Error| Error::Buffer(format!("{what} ({bytes} bytes): {e}"))
+        };
+        let (handle, map_offset, xdna_addr) = dev
+            .create_bo(sys::BO_SHARE, bytes)
+            .map_err(berr("CREATE_BO(SHARE)"))?;
+        let ptr = dev
+            .mmap(map_offset, bytes)
+            .inspect_err(|_| dev.gem_close(handle))
+            .map_err(berr("mapping"))?;
         // SAFETY: a fresh `bytes`-byte mapping.
         unsafe { std::ptr::write_bytes(ptr, 0, bytes) };
         flush(ptr, bytes);
-        let bo = Arc::new(Bo { dev: dev.clone(), handle, ptr, size: bytes, xdna_addr });
-        Ok(Buffer { bo, offset: 0, bytes, _not_sync: PhantomData })
+        let bo = Arc::new(Bo {
+            dev: dev.clone(),
+            handle,
+            ptr,
+            size: bytes,
+            xdna_addr,
+        });
+        Ok(Buffer {
+            bo,
+            offset: 0,
+            bytes,
+            _not_sync: PhantomData,
+        })
     }
 
     /// [`alloc`](Self::alloc) sized for `n` elements of `T`.
@@ -807,26 +889,61 @@ impl Session {
         // SAFETY: lseek on a live fd; a dma-buf reports its size at SEEK_END.
         let bytes = unsafe { sys::lseek(fd.as_raw_fd(), 0, sys::SEEK_END) };
         if bytes <= 0 {
-            return Err(Error::Buffer(format!("dma-buf size: {}", io::Error::last_os_error())));
+            return Err(Error::Buffer(format!(
+                "dma-buf size: {}",
+                io::Error::last_os_error()
+            )));
         }
         let bytes = bytes as usize;
-        let berr = |what: &'static str| move |e: io::Error| Error::Buffer(format!("{what} ({bytes} bytes): {e}"));
-        let mut p = sys::PrimeHandle { fd: fd.as_raw_fd(), ..Default::default() };
+        let berr = |what: &'static str| {
+            move |e: io::Error| Error::Buffer(format!("{what} ({bytes} bytes): {e}"))
+        };
+        let mut p = sys::PrimeHandle {
+            fd: fd.as_raw_fd(),
+            ..Default::default()
+        };
         sys::drm(dev.fd(), sys::PRIME_FD_TO_HANDLE, &mut p).map_err(berr("PRIME_FD_TO_HANDLE"))?;
         let handle = p.handle;
-        let mut info = sys::GetBoInfo { handle, ..Default::default() };
-        sys::drm(dev.fd(), sys::GET_BO_INFO, &mut info).inspect_err(|_| dev.gem_close(handle)).map_err(berr("GET_BO_INFO"))?;
-        let ptr = dev.mmap(info.map_offset, bytes).inspect_err(|_| dev.gem_close(handle)).map_err(berr("mapping"))?;
-        let bo = Arc::new(Bo { dev: dev.clone(), handle, ptr, size: bytes, xdna_addr: info.xdna_addr });
-        Ok(Buffer { bo, offset: 0, bytes, _not_sync: PhantomData })
+        let mut info = sys::GetBoInfo {
+            handle,
+            ..Default::default()
+        };
+        sys::drm(dev.fd(), sys::GET_BO_INFO, &mut info)
+            .inspect_err(|_| dev.gem_close(handle))
+            .map_err(berr("GET_BO_INFO"))?;
+        let ptr = dev
+            .mmap(info.map_offset, bytes)
+            .inspect_err(|_| dev.gem_close(handle))
+            .map_err(berr("mapping"))?;
+        let bo = Arc::new(Bo {
+            dev: dev.clone(),
+            handle,
+            ptr,
+            size: bytes,
+            xdna_addr: info.xdna_addr,
+        });
+        Ok(Buffer {
+            bo,
+            offset: 0,
+            bytes,
+            _not_sync: PhantomData,
+        })
     }
 }
 
 /// A command BO, mapped.
 fn command_bo(dev: &Arc<DeviceInner>) -> io::Result<Bo> {
     let (handle, map_offset, _) = dev.create_bo(sys::BO_CMD, CMD_BYTES)?;
-    let ptr = dev.mmap(map_offset, CMD_BYTES).inspect_err(|_| dev.gem_close(handle))?;
-    Ok(Bo { dev: dev.clone(), handle, ptr, size: CMD_BYTES, xdna_addr: u64::MAX })
+    let ptr = dev
+        .mmap(map_offset, CMD_BYTES)
+        .inspect_err(|_| dev.gem_close(handle))?;
+    Ok(Bo {
+        dev: dev.clone(),
+        handle,
+        ptr,
+        size: CMD_BYTES,
+        xdna_addr: u64::MAX,
+    })
 }
 
 /// Maps `size` bytes of the BO at `map_offset` at a host address aligned to
@@ -901,7 +1018,14 @@ struct Context {
 
 impl Drop for Context {
     fn drop(&mut self) {
-        let _ = sys::drm(self.dev.fd(), sys::DESTROY_HWCTX, &mut sys::HandlePad { handle: self.handle, pad: 0 });
+        let _ = sys::drm(
+            self.dev.fd(),
+            sys::DESTROY_HWCTX,
+            &mut sys::HandlePad {
+                handle: self.handle,
+                pad: 0,
+            },
+        );
     }
 }
 
@@ -924,7 +1048,9 @@ impl Kernel {
         let host = self.instr.dev.heap_host(self.instr.xdna_addr);
         for &(i, v) in words {
             if (i + 1) * 4 > self.ninstr_bytes as usize {
-                return Err(Error::Kernel(format!("instruction word {i} is past the stream")));
+                return Err(Error::Kernel(format!(
+                    "instruction word {i} is past the stream"
+                )));
             }
             // SAFETY: within the stream's ninstr_bytes bytes of the heap mapping at host.
             unsafe { std::ptr::write_unaligned(host.add(i * 4) as *mut u32, v) };
@@ -946,7 +1072,10 @@ impl Kernel {
     /// buffers until [`Run::wait`], as [`crate::Kernel::start`]'s does.
     pub fn start<'a>(&'a self, args: &[&'a Buffer]) -> Result<Run<'a>, Error> {
         if args.len() > MAX_ARGS {
-            return Err(Error::Run(format!("{} buffer arguments; the kernel takes at most {MAX_ARGS}", args.len())));
+            return Err(Error::Run(format!(
+                "{} buffer arguments; the kernel takes at most {MAX_ARGS}",
+                args.len()
+            )));
         }
         let dev = &self.ctx.dev;
         let idle = self.idle.borrow_mut().pop();
@@ -954,10 +1083,16 @@ impl Kernel {
             Some(cmd) => cmd,
             None => command_bo(dev).map_err(|e| Error::Run(format!("command buffer: {e}")))?,
         };
-        let packet = packet(self.instr.xdna_addr, self.ninstr_bytes, args.iter().map(|b| b.addr()));
+        let packet = packet(
+            self.instr.xdna_addr,
+            self.ninstr_bytes,
+            args.iter().map(|b| b.addr()),
+        );
         // SAFETY: the command BO is CMD_BYTES long and mapped; the packet is
         // far shorter.
-        unsafe { std::ptr::copy_nonoverlapping(packet.as_ptr().cast::<u8>(), cmd.ptr, packet.len() * 4) };
+        unsafe {
+            std::ptr::copy_nonoverlapping(packet.as_ptr().cast::<u8>(), cmd.ptr, packet.len() * 4)
+        };
         flush(cmd.ptr, packet.len() * 4);
 
         // The BOs the command references, for the driver to pin (a
@@ -982,7 +1117,13 @@ impl Kernel {
             self.idle.borrow_mut().push(cmd);
             return Err(Error::Run(format!("EXEC_CMD: {e}")));
         }
-        Ok(Run { kernel: self, cmd: Some(cmd), seq: exec.seq, start, _borrow: PhantomData })
+        Ok(Run {
+            kernel: self,
+            cmd: Some(cmd),
+            seq: exec.seq,
+            start,
+            _borrow: PhantomData,
+        })
     }
 
     /// Waits for fence point `seq` of the context, up to [`RUN_TIMEOUT`].
@@ -1037,14 +1178,20 @@ impl Run<'_> {
                 if state == ERT_COMPLETED {
                     Ok(elapsed)
                 } else {
-                    Err(Error::Run(format!("the command finished in state {}", ert_state(state))))
+                    Err(Error::Run(format!(
+                        "the command finished in state {}",
+                        ert_state(state)
+                    )))
                 }
             }
             // The firmware may still hold the command: never reuse or free
             // its BO under it.
             Ok(false) => {
                 std::mem::forget(cmd);
-                Err(Error::Run(format!("the command did not finish within 10 s, in state {}", ert_state(state))))
+                Err(Error::Run(format!(
+                    "the command did not finish within 10 s, in state {}",
+                    ert_state(state)
+                )))
             }
             Err(e) => {
                 std::mem::forget(cmd);
@@ -1159,7 +1306,12 @@ impl Buffer {
                 self.bytes
             )));
         }
-        Ok(Buffer { bo: self.bo.clone(), offset: self.offset + offset, bytes, _not_sync: PhantomData })
+        Ok(Buffer {
+            bo: self.bo.clone(),
+            offset: self.offset + offset,
+            bytes,
+            _not_sync: PhantomData,
+        })
     }
 
     /// [`sub`](Self::sub) in elements of `T`.
@@ -1173,14 +1325,24 @@ impl Buffer {
     pub fn as_slice<T: Copy>(&self) -> &[T] {
         // SAFETY: `bytes` bytes of a live mapping; a sub-buffer's offset is
         // the caller's to keep aligned for T, as with XRT's.
-        unsafe { std::slice::from_raw_parts(self.host() as *const T, self.bytes / std::mem::size_of::<T>()) }
+        unsafe {
+            std::slice::from_raw_parts(
+                self.host() as *const T,
+                self.bytes / std::mem::size_of::<T>(),
+            )
+        }
     }
 
     /// The buffer as mutable `T`s. Follow with [`sync_to_device`](Self::sync_to_device).
     pub fn as_mut_slice<T: Copy>(&mut self) -> &mut [T] {
         // SAFETY: as for as_slice; `&mut self` makes this the only view
         // through this Buffer (overlapping sub-buffers alias, as with XRT's).
-        unsafe { std::slice::from_raw_parts_mut(self.host() as *mut T, self.bytes / std::mem::size_of::<T>()) }
+        unsafe {
+            std::slice::from_raw_parts_mut(
+                self.host() as *mut T,
+                self.bytes / std::mem::size_of::<T>(),
+            )
+        }
     }
 
     pub fn sync_to_device(&self) -> Result<(), Error> {
@@ -1199,9 +1361,15 @@ impl Buffer {
     /// the buffer it views.
     pub fn export_dmabuf(&self) -> Result<OwnedFd, Error> {
         if self.offset != 0 || self.bytes != self.bo.size {
-            return Err(Error::Buffer("a sub-buffer cannot be exported; export its parent".into()));
+            return Err(Error::Buffer(
+                "a sub-buffer cannot be exported; export its parent".into(),
+            ));
         }
-        let mut p = sys::PrimeHandle { handle: self.bo.handle, flags: sys::PRIME_FLAGS, fd: -1 };
+        let mut p = sys::PrimeHandle {
+            handle: self.bo.handle,
+            flags: sys::PRIME_FLAGS,
+            fd: -1,
+        };
         sys::drm(self.bo.dev.fd(), sys::PRIME_HANDLE_TO_FD, &mut p)
             .map_err(|e| Error::Buffer(format!("PRIME_HANDLE_TO_FD: {e}")))?;
         // SAFETY: a fresh fd the ioctl opened for us.
@@ -1212,7 +1380,11 @@ impl Buffer {
     pub fn write<T: Copy>(&mut self, data: &[T]) -> Result<(), Error> {
         let dst = self.as_mut_slice::<T>();
         if data.len() > dst.len() {
-            return Err(Error::Buffer(format!("{} elements do not fit a buffer of {}", data.len(), dst.len())));
+            return Err(Error::Buffer(format!(
+                "{} elements do not fit a buffer of {}",
+                data.len(),
+                dst.len()
+            )));
         }
         dst[..data.len()].copy_from_slice(data);
         self.sync_to_device()
@@ -1226,7 +1398,11 @@ mod tests {
     #[test]
     fn the_packet_is_what_xrt_sends() {
         // Captured from the XRT path (ElementwiseMul, three buffers).
-        let p = packet(0x0402_8000, 0xcb0, [0x7b7d_41cd_f000u64, 0x7b7d_419b_f000, 0x7b7d_4169_f000].into_iter());
+        let p = packet(
+            0x0402_8000,
+            0xcb0,
+            [0x7b7d_41cd_f000u64, 0x7b7d_419b_f000, 0x7b7d_4169_f000].into_iter(),
+        );
         assert_eq!(
             p,
             [
@@ -1254,9 +1430,15 @@ mod tests {
     #[test]
     fn ioctl_numbers_match_the_uapi_header() {
         // DRM_IOCTL_AMDXDNA_EXEC_CMD and DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT.
-        assert_eq!(sys::drm_iowr(sys::EXEC_CMD, std::mem::size_of::<sys::ExecCmd>()), 0xc038_6446);
         assert_eq!(
-            sys::drm_iowr(sys::SYNCOBJ_TIMELINE_WAIT, std::mem::size_of::<sys::SyncobjTimelineWait>()),
+            sys::drm_iowr(sys::EXEC_CMD, std::mem::size_of::<sys::ExecCmd>()),
+            0xc038_6446
+        );
+        assert_eq!(
+            sys::drm_iowr(
+                sys::SYNCOBJ_TIMELINE_WAIT,
+                std::mem::size_of::<sys::SyncobjTimelineWait>()
+            ),
             0xc030_64ca
         );
         assert_eq!(std::mem::size_of::<sys::AieMetadata>(), 64);

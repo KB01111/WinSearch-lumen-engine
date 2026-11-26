@@ -23,6 +23,14 @@ pub enum ClientMessage {
     Ping {
         id: RequestId,
     },
+    ResetIndex {
+        id: RequestId,
+        request: crate::ResetRequest,
+    },
+    IngestEnrichment {
+        id: RequestId,
+        request: crate::EnrichmentRequest,
+    },
     ResolveEntry {
         id: RequestId,
         reference: crate::EntryReference,
@@ -105,6 +113,14 @@ pub enum ClientMessage {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
+    EnrichmentIngested {
+        id: RequestId,
+        result: crate::EnrichmentIngested,
+    },
+    IndexReset {
+        id: RequestId,
+        reset: crate::IndexReset,
+    },
     IndexingConfig {
         id: Option<RequestId>,
         config: IndexingConfig,
@@ -130,7 +146,7 @@ pub enum ServerMessage {
         id: RequestId,
         batch: Vec<SearchResult>,
         done: bool,
-        #[serde(default,skip_serializing_if="Option::is_none")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         outcome: Option<crate::SearchOutcome>,
     },
     /// `id: Some(_)` answers a `GetStatus` request; `id: None` is a pushed
@@ -291,24 +307,32 @@ pub struct SearchQuery {
     /// Restrict to these result kinds; empty means all.
     pub categories: Vec<ResultKind>,
     /// Restrict indexed files to these extensions; optional leading dot, ASCII case-insensitive.
-    #[serde(skip_serializing_if="Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub extensions: Vec<String>,
     /// Source-file classifications; alternatives within this list, intersecting other selectors.
-    #[serde(skip_serializing_if="Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub file_kinds: Vec<crate::FileKind>,
 }
 
-pub fn valid_search_extensions(extensions:&[String])->bool {
-    extensions.len()<=64 && extensions.iter().all(|value| {
-        let extension=value.strip_prefix('.').unwrap_or(value);
-        !extension.is_empty() && extension.len()<=32 && extension.bytes()
-            .all(|byte|byte.is_ascii_alphanumeric() || matches!(byte,b'+'|b'-'|b'_'))
-    })
+pub fn valid_search_extensions(extensions: &[String]) -> bool {
+    extensions.len() <= 64
+        && extensions.iter().all(|value| {
+            let extension = value.strip_prefix('.').unwrap_or(value);
+            !extension.is_empty()
+                && extension.len() <= 32
+                && extension
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'_'))
+        })
 }
 
-pub fn search_extension_allowed(extensions:&[String],extension:&str)->bool {
-    extensions.is_empty() || extensions.iter().any(|value| {
-            value.strip_prefix('.').unwrap_or(value).eq_ignore_ascii_case(extension)
+pub fn search_extension_allowed(extensions: &[String], extension: &str) -> bool {
+    extensions.is_empty()
+        || extensions.iter().any(|value| {
+            value
+                .strip_prefix('.')
+                .unwrap_or(value)
+                .eq_ignore_ascii_case(extension)
         })
 }
 
@@ -334,10 +358,21 @@ pub enum ResultKind {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MatchLocation {
-    Page { page: u32 },
-    Timestamp { seconds: f64, end_seconds: f64 },
-    Line { line: u32 },
-    Notebook { cell_ordinal:u32, line:u32, end_line:u32 },
+    Page {
+        page: u32,
+    },
+    Timestamp {
+        seconds: f64,
+        end_seconds: f64,
+    },
+    Line {
+        line: u32,
+    },
+    Notebook {
+        cell_ordinal: u32,
+        line: u32,
+        end_line: u32,
+    },
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -346,6 +381,46 @@ pub struct MatchingMoment {
     pub excerpt: String,
     pub location: Option<MatchLocation>,
     pub thumbnail_path: Option<String>,
+}
+
+#[cfg(test)]
+mod match_source_tests {
+    use super::SearchResult;
+
+    #[test]
+    fn match_source_rejects_unknown_wire_values() {
+        assert!(serde_json::from_value::<SearchResult>(
+            serde_json::json!({"match_source":"guessed_from_display_text"})
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn match_source_preserves_closed_values_and_legacy_absence() {
+        for source in ["filename", "content", "semantic", "related"] {
+            let result: SearchResult =
+                serde_json::from_value(serde_json::json!({"match_source":source})).unwrap();
+            assert_eq!(
+                serde_json::to_value(result).unwrap()["match_source"],
+                source
+            );
+        }
+        let legacy: SearchResult = serde_json::from_str("{}").unwrap();
+        assert!(serde_json::to_value(legacy)
+            .unwrap()
+            .get("match_source")
+            .is_none());
+    }
+}
+
+/// Machine-readable match origin. Display explanations are not a protocol contract.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MatchSource {
+    Filename,
+    Content,
+    Semantic,
+    Related,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -359,6 +434,9 @@ pub struct SearchResult {
     pub subtitle: String,
     /// Human-readable reason this result matched ("Matches PDF page 14").
     pub match_explanation: String,
+    /// Absent for legacy peers; advertised by `search.match_source`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_source: Option<MatchSource>,
     /// Ranking score in [0, 1]; results stream in descending order.
     pub score: f64,
     pub path: Option<String>,
@@ -368,7 +446,7 @@ pub struct SearchResult {
     pub excerpt: Option<String>,
     pub matching_moments: Vec<MatchingMoment>,
     /// Current native file identity; independent of the query-specific hit ID.
-    #[serde(default,skip_serializing_if="Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entry_reference: Option<crate::EntryReference>,
 }
 
@@ -380,6 +458,7 @@ impl Default for SearchResult {
             title: String::new(),
             subtitle: String::new(),
             match_explanation: String::new(),
+            match_source: None,
             score: 0.0,
             path: None,
             location: None,
@@ -440,6 +519,9 @@ pub struct EngineStatus {
     /// Separate code-index incarnation; absent when unavailable or legacy.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code_index_id: Option<String>,
+    /// Content/vector generation used to fence provider ingestion. Legacy unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_generation: Option<i64>,
     pub state: EngineRunState,
     /// Short human-readable activity line ("Indexing Pictures", "Paused").
     pub current_activity: String,
@@ -486,51 +568,100 @@ mod tests {
 
     #[test]
     fn database_identity_status_round_trips_and_keeps_legacy_unknown() {
-        let value = serde_json::json!({"index_id":"a".repeat(32),"code_index_id":"b".repeat(32)});
+        let value = serde_json::json!({"index_id":"a".repeat(32),"code_index_id":"b".repeat(32),"model_generation":7});
         let status: EngineStatus = serde_json::from_value(value.clone()).unwrap();
         let encoded = serde_json::to_value(status).unwrap();
         assert_eq!(encoded["index_id"], value["index_id"]);
         assert_eq!(encoded["code_index_id"], value["code_index_id"]);
+        assert_eq!(encoded["model_generation"], 7);
         let legacy: EngineStatus = serde_json::from_str("{}").unwrap();
         let legacy = serde_json::to_value(legacy).unwrap();
         assert!(legacy.get("index_id").is_none());
         assert!(legacy.get("code_index_id").is_none());
+        assert!(legacy.get("model_generation").is_none());
     }
 
     #[test]
     fn file_kind_selection_round_trips_closed_codes_and_keeps_legacy_requests_unchanged() {
-        let kinds=serde_json::json!(["folder","pdf","document","spreadsheet","presentation","source",
-            "image","video","audio","archive","executable","model","unknown"]);
-        let query:SearchQuery=serde_json::from_value(serde_json::json!({"text":"needle","file_kinds":kinds})).unwrap();
-        assert_eq!(serde_json::to_value(query).unwrap()["file_kinds"],kinds);
-        for invalid in [serde_json::json!(["PDF"]),serde_json::json!(["notebook"]),serde_json::json!([1]),serde_json::json!(null)] {
-            assert!(serde_json::from_value::<SearchQuery>(serde_json::json!({"file_kinds":invalid})).is_err());
+        let kinds = serde_json::json!([
+            "folder",
+            "pdf",
+            "document",
+            "spreadsheet",
+            "presentation",
+            "source",
+            "image",
+            "video",
+            "audio",
+            "archive",
+            "executable",
+            "model",
+            "unknown"
+        ]);
+        let query: SearchQuery =
+            serde_json::from_value(serde_json::json!({"text":"needle","file_kinds":kinds}))
+                .unwrap();
+        assert_eq!(serde_json::to_value(query).unwrap()["file_kinds"], kinds);
+        for invalid in [
+            serde_json::json!(["PDF"]),
+            serde_json::json!(["notebook"]),
+            serde_json::json!([1]),
+            serde_json::json!(null),
+        ] {
+            assert!(serde_json::from_value::<SearchQuery>(
+                serde_json::json!({"file_kinds":invalid})
+            )
+            .is_err());
         }
-        let legacy:SearchQuery=serde_json::from_value(serde_json::json!({"text":"needle"})).unwrap();
-        assert!(serde_json::to_value(legacy).unwrap().get("file_kinds").is_none());
+        let legacy: SearchQuery =
+            serde_json::from_value(serde_json::json!({"text":"needle"})).unwrap();
+        assert!(serde_json::to_value(legacy)
+            .unwrap()
+            .get("file_kinds")
+            .is_none());
     }
 
     #[test]
     fn search_extensions_validate_budgets_and_reject_path_or_wildcard_syntax() {
-        for values in [vec![],vec!["pdf".into(),".PDF".into(),"c++".into(),"7z".into()]] {
+        for values in [
+            vec![],
+            vec!["pdf".into(), ".PDF".into(), "c++".into(), "7z".into()],
+        ] {
             assert!(valid_search_extensions(&values));
         }
-        for value in ["",".","..pdf","../pdf","ab/c","ab\\c","*.pdf","a\0b","has space","å"] {
-            assert!(!valid_search_extensions(&[value.into()]),"{value:?}");
+        for value in [
+            "",
+            ".",
+            "..pdf",
+            "../pdf",
+            "ab/c",
+            "ab\\c",
+            "*.pdf",
+            "a\0b",
+            "has space",
+            "å",
+        ] {
+            assert!(!valid_search_extensions(&[value.into()]), "{value:?}");
         }
         assert!(!valid_search_extensions(&["a".repeat(33)]));
-        assert!(!valid_search_extensions(&vec!["pdf".into();65]));
+        assert!(!valid_search_extensions(&vec!["pdf".into(); 65]));
     }
 
     #[test]
     fn search_extensions_are_additive_and_match_only_explicit_file_extensions() {
-        let legacy:SearchQuery=serde_json::from_str(r#"{"text":"needle","mode":"files","limit":20}"#).unwrap();
+        let legacy: SearchQuery =
+            serde_json::from_str(r#"{"text":"needle","mode":"files","limit":20}"#).unwrap();
         assert!(legacy.extensions.is_empty());
-        assert!(serde_json::to_value(&legacy).unwrap().get("extensions").is_none());
-        let filters=vec![".PDF".into(),"rs".into()];
-        assert!(search_extension_allowed(&filters,"pdf"));assert!(search_extension_allowed(&filters,"RS"));
-        assert!(!search_extension_allowed(&filters,"png"));assert!(!search_extension_allowed(&filters,""));
-        assert!(search_extension_allowed(&[],""));
+        assert!(serde_json::to_value(&legacy)
+            .unwrap()
+            .get("extensions")
+            .is_none());
+        let filters = vec![".PDF".into(), "rs".into()];
+        assert!(search_extension_allowed(&filters, "pdf"));
+        assert!(search_extension_allowed(&filters, "RS"));
+        assert!(!search_extension_allowed(&filters, "png"));
+        assert!(!search_extension_allowed(&filters, ""));
+        assert!(search_extension_allowed(&[], ""));
     }
 
     #[test]
@@ -559,12 +690,13 @@ mod tests {
             outcome: None,
             id: 7,
             batch: vec![SearchResult {
-                entry_reference:None,
+                entry_reference: None,
                 id: "r1".into(),
                 kind: ResultKind::Document,
                 title: "rental-agreement.pdf".into(),
                 subtitle: "C:\\Docs\\rental-agreement.pdf".into(),
                 match_explanation: "Matches PDF page 14".into(),
+                match_source: Some(MatchSource::Content),
                 score: 0.91,
                 path: Some("C:\\Docs\\rental-agreement.pdf".into()),
                 location: Some(MatchLocation::Page { page: 14 }),
@@ -607,7 +739,8 @@ mod tests {
     #[test]
     fn model_messages_round_trip() {
         for msg in [
-            ClientMessage::ModelDownloadStart { id: 1,
+            ClientMessage::ModelDownloadStart {
+                id: 1,
                 include_npu: true,
             },
             ClientMessage::ModelDownloadCancel { id: 2 },

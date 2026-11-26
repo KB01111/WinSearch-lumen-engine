@@ -660,3 +660,65 @@ compiled defaults. Supervisor side: `WS_EMBED_BIN` (worker exe override),
 `WS_EMBED_PIPE`, `WS_EMBED_BACKOFF_MS`. `WS_EMBED_STUB=1` serves
 deterministic stub vectors (FNV-1a seeded, 768-d, unit-norm) with no model
 file; `WS_EMBED_TEST_MODEL` gates the real-model tests (never committed).
+# Recoverable index reset and typed match origin
+
+Peers advertising `search.match_source` supply the optional `SearchResult.match_source`
+closed code: `filename`, `content`, `semantic`, or `related`. Legacy absence means
+unknown; consumers must not parse display explanations to recover it.
+
+`index.reset` gates `reset_index { id, request: { expected_index_id,
+expected_code_index_id } }`. Both expected IDs are the currently acknowledged
+32-character lowercase hexadecimal database identities. The response is
+`index_reset { id, reset: { index_id, code_index_id } }`, with two fresh independent
+identities. A repeated request carrying old IDs fails without clearing the newer index.
+Saved folder/search policy and model files survive; ordinary/code entries, content,
+vectors and durable jobs are reset. Host pins and history remain host-owned.
+
+Admission closes before draining source work. A full-synchronous SQLite intent in
+the ordinary database records both destination IDs before either reset transaction.
+Each store replays idempotently to its destination ID; startup finishes pending
+intent before workers/admission begin. Completion is acknowledged only after both
+stores commit and the intent is removed. Failed durable resets leave admission
+closed until restart recovery. An aborted drain or stale request reconciles roots
+again because watcher notifications were excluded while the gate was closed.
+
+Rust client mutations remain ordered. A missing/invalid acknowledgment or an
+internal reset error requires stopping/restarting the host-owned child, reconciling
+current policy/status, and constructing a fresh client. Do not blindly retry reset.
+The C# client likewise refuses further operations after an uncertain reset.
+
+## Source-bound provider enrichment
+
+`entry.enrichment` gates `ingest_enrichment { id, request }` and
+`enrichment_ingested { id, result }`. The request contains the ordinary database
+`index_id`, current bound `reference`, complete lowercase `expected_sha256`,
+`model_generation`, nonzero host `grant_generation`, `kind` (`ocr` or
+`transcript`) and `parts`. Each part has `text` and optional typed `location`.
+There are at most 128 parts and 64 KiB aggregate UTF-8, with no empty/NUL text.
+Current status includes optional `model_generation`; an unknown generation cannot
+authorize ingestion. It is independent of the model-loaded diagnostic.
+The first contract admits image OCR without locations and audio transcripts
+without locations or with chronological, non-overlapping timestamps inside the
+cached media duration. Adjacent intervals may share an endpoint.
+PDF/video provider ingestion is explicitly unsupported by this first contract.
+
+The engine independently hashes complete current local bytes under the existing
+64 MiB/10-second synchronous budget, checks identity, source proof, root admission,
+model generation and cancellation, and atomically commits chunks, FTS, pending
+embedding work and a receipt. Larger or unattested sources are unavailable until
+background attestation exists. The caller supplies no arbitrary path or vectors.
+Credentials, provider execution, consent and dispatch budgets remain host-owned;
+`grant_generation` is an echoed host fence, not engine-issued consent.
+
+The result contains `index_id`, a fresh bound `reference`, `content_revision`,
+`model_generation`, echoed `grant_generation` and `duplicate`. A matching retry
+after fresh source resolution returns the committed revision without duplicate
+chunks. Changed source/model/reset invalidates the receipt. Only previously
+byte-attested native content for the same bytes/model can survive the new revision.
+Source and request identity are checked again after waiting for the peer writer.
+Cancel/revocation can withhold an acknowledgment after commit; a caller must
+reconcile the unknown mutation outcome, never infer that an error undid a commit.
+The Rust client treats correlated enrichment `cancelled`, `not_ready` and
+`internal` errors as `MutationOutcomeUnknown`. Its guard poisons mutation admission
+before releasing the serialized control lane, including already queued writers.
+Definitive input/capability errors keep their normal error behavior.

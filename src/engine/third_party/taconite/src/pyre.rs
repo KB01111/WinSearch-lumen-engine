@@ -142,7 +142,9 @@ const EXTRA: &[(u32, &[u32])] = &[
 ];
 
 fn extra(l: char) -> &'static [u32] {
-    EXTRA.binary_search_by_key(&(l as u32), |e| e.0).map_or(&[], |i| EXTRA[i].1)
+    EXTRA
+        .binary_search_by_key(&(l as u32), |e| e.0)
+        .map_or(&[], |i| EXTRA[i].1)
 }
 
 fn lower(c: char) -> char {
@@ -196,9 +198,9 @@ fn class_has(items: &[Item], ch: char, ci: bool, ascii: bool) -> bool {
         }
     }
     items.iter().any(|it| match *it {
-        Item::Range(a, b) => {
-            cands.iter().any(|&m| a <= m && m <= b && (lower(m) == l || extra(lower(m)).contains(&(l as u32))))
-        }
+        Item::Range(a, b) => cands
+            .iter()
+            .any(|&m| a <= m && m <= b && (lower(m) == l || extra(lower(m)).contains(&(l as u32)))),
         Item::Cat(k, neg) => cat(k, l, ascii) != neg,
     })
 }
@@ -252,7 +254,11 @@ impl Parser<'_> {
         while self.eat('|') {
             alts.push(self.concat()?);
         }
-        Ok(if alts.len() == 1 { alts.pop().unwrap() } else { Node::Alt(alts) })
+        Ok(if alts.len() == 1 {
+            alts.pop().unwrap()
+        } else {
+            Node::Alt(alts)
+        })
     }
 
     fn concat(&mut self) -> R<Node> {
@@ -267,7 +273,11 @@ impl Parser<'_> {
             let atom = self.quantified(atom)?;
             items.push(atom);
         }
-        Ok(if items.len() == 1 { items.pop().unwrap() } else { Node::Concat(items) })
+        Ok(if items.len() == 1 {
+            items.pop().unwrap()
+        } else {
+            Node::Concat(items)
+        })
     }
 
     /// `{m}`, `{m,}`, `{,n}`, `{m,n}` at the cursor, if one is there.
@@ -281,7 +291,15 @@ impl Parser<'_> {
             while s.peek().is_some_and(|c| c.is_ascii_digit()) {
                 s.i += 1;
             }
-            (s.i > st).then(|| s.p[st..s.i].iter().collect::<String>().parse::<usize>().ok()).flatten()
+            (s.i > st)
+                .then(|| {
+                    s.p[st..s.i]
+                        .iter()
+                        .collect::<String>()
+                        .parse::<usize>()
+                        .ok()
+                })
+                .flatten()
         };
         let lo = num(self);
         let r = if self.eat(',') {
@@ -328,7 +346,10 @@ impl Parser<'_> {
             if matches!(atom, Node::Repeat { .. }) {
                 return Err("multiple repeat".into());
             }
-            if matches!(atom, Node::Bol(_) | Node::Eol(_) | Node::StartText | Node::EndText | Node::Boundary(..)) {
+            if matches!(
+                atom,
+                Node::Bol(_) | Node::Eol(_) | Node::StartText | Node::EndText | Node::Boundary(..)
+            ) {
                 return Err("nothing to repeat".into());
             }
             let (greedy, possessive) = if self.eat('?') {
@@ -338,7 +359,13 @@ impl Parser<'_> {
             } else {
                 (true, false)
             };
-            atom = Node::Repeat { node: Box::new(atom), min, max, greedy, possessive };
+            atom = Node::Repeat {
+                node: Box::new(atom),
+                min,
+                max,
+                greedy,
+                possessive,
+            };
             if !matches!(self.peek(), Some('*' | '+' | '?' | '{')) {
                 return Ok(atom);
             }
@@ -346,7 +373,12 @@ impl Parser<'_> {
     }
 
     fn hex(&mut self, n: usize) -> R<char> {
-        let s: String = self.p.get(self.i..self.i + n).ok_or("incomplete escape")?.iter().collect();
+        let s: String = self
+            .p
+            .get(self.i..self.i + n)
+            .ok_or("incomplete escape")?
+            .iter()
+            .collect();
         let v = u32::from_str_radix(&s, 16).map_err(|_| format!("incomplete escape \\{s}"))?;
         self.i += n;
         char::from_u32(v).ok_or_else(|| "bad character code".to_string())
@@ -465,7 +497,12 @@ impl Parser<'_> {
                 items.push(Item::Range(lo, lo));
             }
         }
-        Ok(Node::Class(items, neg, self.flags.ignore_case, self.flags.ascii))
+        Ok(Node::Class(
+            items,
+            neg,
+            self.flags.ignore_case,
+            self.flags.ascii,
+        ))
     }
 
     fn flag_letters(&mut self) -> Flags {
@@ -579,7 +616,12 @@ impl Parser<'_> {
                         if !self.eat(')') {
                             return Err("missing ), unterminated subpattern".into());
                         }
-                        Node::Look { node: Box::new(inner), ahead: true, negate, width: 0 }
+                        Node::Look {
+                            node: Box::new(inner),
+                            ahead: true,
+                            negate,
+                            width: 0,
+                        }
                     }
                     Some('<') if matches!(self.p.get(self.i + 1), Some('=') | Some('!')) => {
                         let negate = self.p[self.i + 1] == '!';
@@ -588,8 +630,14 @@ impl Parser<'_> {
                         if !self.eat(')') {
                             return Err("missing ), unterminated subpattern".into());
                         }
-                        let width = fixed_width(&inner).ok_or("look-behind requires fixed-width pattern")?;
-                        Node::Look { node: Box::new(inner), ahead: false, negate, width }
+                        let width = fixed_width(&inner)
+                            .ok_or("look-behind requires fixed-width pattern")?;
+                        Node::Look {
+                            node: Box::new(inner),
+                            ahead: false,
+                            negate,
+                            width,
+                        }
                     }
                     _ => {
                         // flags: global "(?imsx)" or scoped "(?i-s:...)"
@@ -633,9 +681,12 @@ impl Parser<'_> {
 fn fixed_width(n: &Node) -> Option<usize> {
     match n {
         Node::Char(..) | Node::Any(_) | Node::Class(..) | Node::Cat(..) => Some(1),
-        Node::Bol(_) | Node::Eol(_) | Node::StartText | Node::EndText | Node::Boundary(..) | Node::Look { .. } => {
-            Some(0)
-        }
+        Node::Bol(_)
+        | Node::Eol(_)
+        | Node::StartText
+        | Node::EndText
+        | Node::Boundary(..)
+        | Node::Look { .. } => Some(0),
         Node::Group(n, _) => fixed_width(n),
         Node::Concat(v) => v.iter().map(fixed_width).sum(),
         Node::Alt(v) => {
@@ -669,19 +720,31 @@ impl Regex {
     /// Compiles `pattern` (`re.compile(pattern, flags)`).
     pub fn new(pattern: &str, flags: Flags) -> Result<Regex, String> {
         let chars: Vec<char> = pattern.chars().collect();
-        let mut p = Parser { p: &chars, i: 0, flags, groups: 0, names: Vec::new() };
+        let mut p = Parser {
+            p: &chars,
+            i: 0,
+            flags,
+            groups: 0,
+            names: Vec::new(),
+        };
         let root = p.alt()?;
         if p.i < chars.len() {
             return Err("unbalanced parenthesis".into());
         }
-        Ok(Regex { root, groups: p.groups })
+        Ok(Regex {
+            root,
+            groups: p.groups,
+        })
     }
 
     /// `re.fullmatch`: the whole of `text`.
     pub fn fullmatch(&self, text: &str) -> bool {
         let s: Vec<char> = text.chars().collect();
         let n = s.len();
-        let mut m = M { s: &s, caps: vec![None; self.groups + 1] };
+        let mut m = M {
+            s: &s,
+            caps: vec![None; self.groups + 1],
+        };
         m_node(&self.root, 0, &mut m, &mut |j, _| j == n)
     }
 
@@ -689,7 +752,10 @@ impl Regex {
     pub fn search(&self, text: &str) -> bool {
         let s: Vec<char> = text.chars().collect();
         (0..=s.len()).any(|st| {
-            let mut m = M { s: &s, caps: vec![None; self.groups + 1] };
+            let mut m = M {
+                s: &s,
+                caps: vec![None; self.groups + 1],
+            };
             m_node(&self.root, st, &mut m, &mut |_, _| true)
         })
     }
@@ -697,7 +763,10 @@ impl Regex {
     /// `re.match`: from the start of `text`.
     pub fn is_match_at_start(&self, text: &str) -> bool {
         let s: Vec<char> = text.chars().collect();
-        let mut m = M { s: &s, caps: vec![None; self.groups + 1] };
+        let mut m = M {
+            s: &s,
+            caps: vec![None; self.groups + 1],
+        };
         m_node(&self.root, 0, &mut m, &mut |_, _| true)
     }
 }
@@ -727,7 +796,10 @@ fn one(n: &Node, ch: char) -> bool {
 }
 
 fn single(n: &Node) -> bool {
-    matches!(n, Node::Char(..) | Node::Any(_) | Node::Class(..) | Node::Cat(..))
+    matches!(
+        n,
+        Node::Char(..) | Node::Any(_) | Node::Class(..) | Node::Cat(..)
+    )
 }
 
 /// A quantifier's bounds and greediness.
@@ -770,7 +842,9 @@ fn m_repeat(node: &Node, rep: Rep, count: usize, i: usize, m: &mut M, k: K) -> b
 fn m_node(n: &Node, i: usize, m: &mut M, k: K) -> bool {
     let len = m.s.len();
     match n {
-        Node::Char(..) | Node::Any(_) | Node::Class(..) | Node::Cat(..) => i < len && one(n, m.s[i]) && k(i + 1, m),
+        Node::Char(..) | Node::Any(_) | Node::Class(..) | Node::Cat(..) => {
+            i < len && one(n, m.s[i]) && k(i + 1, m)
+        }
         Node::Bol(ml) => (i == 0 || (*ml && m.s[i - 1] == '\n')) && k(i, m),
         Node::Eol(ml) => {
             let ok = i == len || (i + 1 == len && m.s[i] == '\n') || (*ml && m.s[i] == '\n');
@@ -807,7 +881,13 @@ fn m_node(n: &Node, i: usize, m: &mut M, k: K) -> bool {
                 })
             }
         },
-        Node::Repeat { node, min, max, greedy, possessive } => {
+        Node::Repeat {
+            node,
+            min,
+            max,
+            greedy,
+            possessive,
+        } => {
             if *possessive {
                 // as many as match, never given back
                 let mut pos = i;
@@ -849,7 +929,18 @@ fn m_node(n: &Node, i: usize, m: &mut M, k: K) -> bool {
                     j -= 1;
                 }
             }
-            m_repeat(node, Rep { min: *min, max: *max, greedy: *greedy }, 0, i, m, k)
+            m_repeat(
+                node,
+                Rep {
+                    min: *min,
+                    max: *max,
+                    greedy: *greedy,
+                },
+                0,
+                i,
+                m,
+                k,
+            )
         }
         Node::Backref(g, ci) => {
             let Some((a, b)) = m.caps[*g] else {
@@ -865,7 +956,12 @@ fn m_node(n: &Node, i: usize, m: &mut M, k: K) -> bool {
             });
             ok && k(i + w, m)
         }
-        Node::Look { node, ahead, negate, width } => {
+        Node::Look {
+            node,
+            ahead,
+            negate,
+            width,
+        } => {
             let saved = m.caps.clone();
             let found = if *ahead {
                 m_node(node, i, m, &mut |_, _| true)

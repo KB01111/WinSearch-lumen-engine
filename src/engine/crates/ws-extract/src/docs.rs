@@ -57,8 +57,8 @@ impl Extractor for DocumentExtractor {
             .unwrap_or_default();
 
         let text = match ext.as_str() {
-            "txt" | "md" | "markdown" | "rst" | "log" | "csv" | "tsv" | "json" | "yaml"
-            | "yml" | "toml" | "ini" | "cfg" => extract_plain_text(path, budget)?,
+            "txt" | "md" | "markdown" | "rst" | "log" | "csv" | "tsv" | "json" | "yaml" | "yml"
+            | "toml" | "ini" | "cfg" => extract_plain_text(path, budget)?,
             "xml" => extract_xml_text(path, budget)?,
             "html" | "htm" => extract_html_text(path, budget)?,
             "docx" => extract_docx_text(path, budget)?,
@@ -156,8 +156,23 @@ pub fn is_numeric_dominated(text: &str, ext: &str) -> bool {
             alpha += 1;
         } else if matches!(
             ch,
-            '.' | ',' | '+' | '-' | '$' | '%' | '€' | '£' | '¥' | ':' | '/' | ';' | '|' | '='
-                | '(' | ')' | '"' | '\''
+            '.' | ','
+                | '+'
+                | '-'
+                | '$'
+                | '%'
+                | '€'
+                | '£'
+                | '¥'
+                | ':'
+                | '/'
+                | ';'
+                | '|'
+                | '='
+                | '('
+                | ')'
+                | '"'
+                | '\''
         ) {
             num_punct += 1;
         }
@@ -246,15 +261,15 @@ fn extract_plain_text(path: &Path, budget: &ExtractBudget) -> Result<String, Ext
 
 fn extract_xml_text(path: &Path, budget: &ExtractBudget) -> Result<String, ExtractError> {
     let bytes = budget.read_bounded(path)?;
-    let xml = decode_text_bytes(&bytes)
-        .ok_or_else(|| ExtractError::Unsupported("binary xml".into()))?;
+    let xml =
+        decode_text_bytes(&bytes).ok_or_else(|| ExtractError::Unsupported("binary xml".into()))?;
     walk_xml_text(&xml, budget, false)
 }
 
 fn extract_html_text(path: &Path, budget: &ExtractBudget) -> Result<String, ExtractError> {
     let bytes = budget.read_bounded(path)?;
-    let html = decode_text_bytes(&bytes)
-        .ok_or_else(|| ExtractError::Unsupported("binary html".into()))?;
+    let html =
+        decode_text_bytes(&bytes).ok_or_else(|| ExtractError::Unsupported("binary html".into()))?;
     let stripped = strip_raw_html_blocks(&html, &["script", "style"]);
     walk_xml_text(&stripped, budget, true)
 }
@@ -336,12 +351,10 @@ fn walk_xml_text(
                     out.push('\n');
                 }
             }
-            Ok(Event::Empty(e)) => {
-                if skip_depth == 0 {
-                    let tag = local_tag_lower(e.name().as_ref());
-                    if matches!(tag.as_str(), "br" | "hr") && !out.ends_with('\n') {
-                        out.push('\n');
-                    }
+            Ok(Event::Empty(e)) if skip_depth == 0 => {
+                let tag = local_tag_lower(e.name().as_ref());
+                if matches!(tag.as_str(), "br" | "hr") && !out.ends_with('\n') {
+                    out.push('\n');
                 }
             }
             Ok(Event::End(e)) => {
@@ -356,20 +369,16 @@ fn walk_xml_text(
                     out.push('\n');
                 }
             }
-            Ok(Event::Text(t)) => {
-                if skip_depth == 0 {
-                    let decoded = t
-                        .unescape()
-                        .map(|c| c.into_owned())
-                        .unwrap_or_else(|_| String::from_utf8_lossy(t.as_ref()).into_owned());
-                    append_inline_text(&mut out, &decoded);
-                }
+            Ok(Event::Text(t)) if skip_depth == 0 => {
+                let decoded = t
+                    .unescape()
+                    .map(|c| c.into_owned())
+                    .unwrap_or_else(|_| String::from_utf8_lossy(t.as_ref()).into_owned());
+                append_inline_text(&mut out, &decoded);
             }
-            Ok(Event::CData(c)) => {
-                if skip_depth == 0 {
-                    let s = String::from_utf8_lossy(c.as_ref());
-                    append_inline_text(&mut out, &s);
-                }
+            Ok(Event::CData(c)) if skip_depth == 0 => {
+                let s = String::from_utf8_lossy(c.as_ref());
+                append_inline_text(&mut out, &s);
             }
             Ok(Event::Eof) => break,
             Err(_) => {
@@ -411,17 +420,48 @@ fn is_void_html_tag(tag: &str, html_mode: bool) -> bool {
     html_mode
         && matches!(
             tag,
-            "area" | "base" | "br" | "col" | "embed" | "hr" | "img" | "input" | "link" | "meta"
-                | "param" | "source" | "track" | "wbr"
+            "area"
+                | "base"
+                | "br"
+                | "col"
+                | "embed"
+                | "hr"
+                | "img"
+                | "input"
+                | "link"
+                | "meta"
+                | "param"
+                | "source"
+                | "track"
+                | "wbr"
         )
 }
 
 fn is_block_tag(tag: &str) -> bool {
     matches!(
         tag,
-        "p" | "div" | "section" | "article" | "header" | "footer" | "main" | "aside" | "nav"
-            | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "li" | "tr" | "td" | "th" | "blockquote"
-            | "pre" | "br" | "hr"
+        "p" | "div"
+            | "section"
+            | "article"
+            | "header"
+            | "footer"
+            | "main"
+            | "aside"
+            | "nav"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "li"
+            | "tr"
+            | "td"
+            | "th"
+            | "blockquote"
+            | "pre"
+            | "br"
+            | "hr"
     )
 }
 
@@ -442,14 +482,12 @@ fn extract_docx_text(path: &Path, budget: &ExtractBudget) -> Result<String, Extr
             budget.check_deadline()?;
         }
         match reader.read_event() {
-            Ok(Event::Start(e)) => {
-                match e.name().as_ref() {
-                    b"w:t" | b"t" => in_wt = true,
-                    b"w:tab" | b"tab" => out.push('\t'),
-                    b"w:br" | b"br" | b"w:cr" => out.push('\n'),
-                    _ => {}
-                }
-            }
+            Ok(Event::Start(e)) => match e.name().as_ref() {
+                b"w:t" | b"t" => in_wt = true,
+                b"w:tab" | b"tab" => out.push('\t'),
+                b"w:br" | b"br" | b"w:cr" => out.push('\n'),
+                _ => {}
+            },
             Ok(Event::Empty(e)) => match e.name().as_ref() {
                 b"w:tab" | b"tab" => out.push('\t'),
                 b"w:br" | b"br" | b"w:cr" => out.push('\n'),
@@ -457,15 +495,11 @@ fn extract_docx_text(path: &Path, budget: &ExtractBudget) -> Result<String, Extr
             },
             Ok(Event::End(e)) => match e.name().as_ref() {
                 b"w:t" | b"t" => in_wt = false,
-                b"w:p" | b"p" | b"w:tr" => {
-                    if !out.is_empty() && !out.ends_with('\n') {
-                        out.push('\n');
-                    }
+                b"w:p" | b"p" | b"w:tr" if !out.is_empty() && !out.ends_with('\n') => {
+                    out.push('\n');
                 }
-                b"w:tc" => {
-                    if !out.is_empty() && !out.ends_with(['\t', '\n']) {
-                        out.push('\t');
-                    }
+                b"w:tc" if !out.is_empty() && !out.ends_with(['\t', '\n']) => {
+                    out.push('\t');
                 }
                 _ => {}
             },
@@ -694,8 +728,7 @@ pub fn strip_rtf(input: &str, budget: &ExtractBudget) -> Result<String, ExtractE
                         // Hex escape \'hh
                         i += 1;
                         if i + 1 < len {
-                            if let (Some(hi), Some(lo)) =
-                                (hex_val(bytes[i]), hex_val(bytes[i + 1]))
+                            if let (Some(hi), Some(lo)) = (hex_val(bytes[i]), hex_val(bytes[i + 1]))
                             {
                                 let code = (hi << 4) | lo;
                                 if !is_skip {
@@ -776,10 +809,8 @@ pub fn strip_rtf(input: &str, budget: &ExtractBudget) -> Result<String, ExtractE
                         }
 
                         match word {
-                            "par" | "line" | "sect" | "page" | "row" => {
-                                if !out.ends_with('\n') {
-                                    out.push('\n');
-                                }
+                            "par" | "line" | "sect" | "page" | "row" if !out.ends_with('\n') => {
+                                out.push('\n');
                             }
                             "tab" | "cell" => {
                                 out.push('\t');
@@ -793,16 +824,11 @@ pub fn strip_rtf(input: &str, budget: &ExtractBudget) -> Result<String, ExtractE
                             "bullet" => out.push('•'),
                             "u" => {
                                 if let Some(n) = param {
-                                    let code = if n < 0 {
-                                        (n + 65536) as u32
-                                    } else {
-                                        n as u32
-                                    };
+                                    let code = if n < 0 { (n + 65536) as u32 } else { n as u32 };
                                     if let Some(ch) = char::from_u32(code) {
                                         out.push(ch);
                                     }
-                                    skip_ansi_chars =
-                                        stack.last().map(|s| s.uc_skip).unwrap_or(1);
+                                    skip_ansi_chars = stack.last().map(|s| s.uc_skip).unwrap_or(1);
                                 }
                             }
                             _ => {}
@@ -926,16 +952,22 @@ mod tests {
 
     #[test]
     fn task2_ifilter_unbounded_chunk_collection_keeps_decoded_text_limit() {
-        let budget=ExtractBudget { max_segments:usize::MAX,..Default::default() };
-        assert_eq!(ifilter_character_limit(&budget),budget.max_bytes as usize);
+        let budget = ExtractBudget {
+            max_segments: usize::MAX,
+            ..Default::default()
+        };
+        assert_eq!(ifilter_character_limit(&budget), budget.max_bytes as usize);
     }
 
     #[test]
     fn task2_ifilter_capped_or_over_budget_text_is_explicitly_incomplete() {
-        let budget=ExtractBudget::new(32,Duration::from_secs(5),30);
-        assert!(checked_ifilter_text("a".repeat(32),32,&budget).is_err());
-        assert!(checked_ifilter_text("é".repeat(17),100,&budget).is_err());
-        assert_eq!(checked_ifilter_text("complete".into(),32,&budget).unwrap(),Some("complete".into()));
+        let budget = ExtractBudget::new(32, Duration::from_secs(5), 30);
+        assert!(checked_ifilter_text("a".repeat(32), 32, &budget).is_err());
+        assert!(checked_ifilter_text("é".repeat(17), 100, &budget).is_err());
+        assert_eq!(
+            checked_ifilter_text("complete".into(), 32, &budget).unwrap(),
+            Some("complete".into())
+        );
     }
     use crate::chunk::select_excerpt;
     use crate::ExtractionStatus;
@@ -1113,14 +1145,32 @@ Purchase price is \'8042 million \u8212? subject to board approval.\par
         assert_eq!(out.status, ExtractionStatus::Extracted);
         assert_eq!(out.segments.len(), 1);
         let text = &out.segments[0].text;
-        assert!(text.contains("Confidential Merger Proposal"), "got {text:?}");
-        assert!(text.contains("€42 million — subject to board approval"), "got {text:?}");
+        assert!(
+            text.contains("Confidential Merger Proposal"),
+            "got {text:?}"
+        );
+        assert!(
+            text.contains("€42 million — subject to board approval"),
+            "got {text:?}"
+        );
         assert!(!text.contains("Arial"));
         assert!(!text.contains("CustomRtf"));
-        assert!(!text.contains("Left Page Header Secret"), "headerl must be skipped: {text:?}");
-        assert!(!text.contains("Right Page Header Secret"), "headerr must be skipped: {text:?}");
-        assert!(!text.contains("Left Page Footer Secret"), "footerl must be skipped: {text:?}");
-        assert!(!text.contains("Right Page Footer Secret"), "footerr must be skipped: {text:?}");
+        assert!(
+            !text.contains("Left Page Header Secret"),
+            "headerl must be skipped: {text:?}"
+        );
+        assert!(
+            !text.contains("Right Page Header Secret"),
+            "headerr must be skipped: {text:?}"
+        );
+        assert!(
+            !text.contains("Left Page Footer Secret"),
+            "footerl must be skipped: {text:?}"
+        );
+        assert!(
+            !text.contains("Right Page Footer Secret"),
+            "footerr must be skipped: {text:?}"
+        );
     }
 
     #[test]
@@ -1173,7 +1223,9 @@ Purchase price is \'8042 million \u8212? subject to board approval.\par
         assert!(
             matches!(
                 out.status,
-                ExtractionStatus::Unsupported | ExtractionStatus::Extracted | ExtractionStatus::ExactOnly
+                ExtractionStatus::Unsupported
+                    | ExtractionStatus::Extracted
+                    | ExtractionStatus::ExactOnly
             ),
             "unexpected status for .doc fixture: {:?}",
             out.status

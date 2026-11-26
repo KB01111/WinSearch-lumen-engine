@@ -11,7 +11,7 @@ pub struct RelatedQuery {
     pub categories: Vec<ResultKind>,
     #[serde(default)]
     pub extensions: Vec<String>,
-    #[serde(default, skip_serializing_if="Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub file_kinds: Vec<crate::FileKind>,
 }
 

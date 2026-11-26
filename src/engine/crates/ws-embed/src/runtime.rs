@@ -218,19 +218,31 @@ impl EmbedRuntime {
 
         // SAFETY: model is live and owned by rt.
         let ctx_raw = unsafe {
-            ffi::wse_context_new(model.as_ptr(), DEFAULT_N_CTX,
-                if opts.mmproj.is_some() { DEFAULT_N_CTX } else { DEFAULT_N_BATCH }, opts.n_threads)
+            ffi::wse_context_new(
+                model.as_ptr(),
+                DEFAULT_N_CTX,
+                if opts.mmproj.is_some() {
+                    DEFAULT_N_CTX
+                } else {
+                    DEFAULT_N_BATCH
+                },
+                opts.n_threads,
+            )
         };
-        rt.ctx = Some(
-            NonNull::new(ctx_raw)
-                .ok_or_else(|| {
+        rt.ctx =
+            Some(NonNull::new(ctx_raw).ok_or_else(|| {
                 EmbedError::ContextFailed(format!("{kind} context returned null"))
             })?);
         // SAFETY: model is live.
         rt.n_embd = unsafe { ffi::wse_model_n_embd(model.as_ptr()) }.max(0) as usize;
 
         if let Some(mmproj) = &opts.mmproj {
-            rt.mtmd = Some(open_mtmd(mmproj, model, kind != BackendKind::Cpu, opts.n_threads)?);
+            rt.mtmd = Some(open_mtmd(
+                mmproj,
+                model,
+                kind != BackendKind::Cpu,
+                opts.n_threads,
+            )?);
         }
 
         rt.warmup()?;
@@ -253,7 +265,8 @@ impl EmbedRuntime {
     }
 
     fn model_ptr(&self) -> Result<NonNull<ffi::LlamaModel>, EmbedError> {
-        self.model.ok_or_else(|| EmbedError::LoadFailed("model released".into()))
+        self.model
+            .ok_or_else(|| EmbedError::LoadFailed("model released".into()))
     }
 
     /// Whether a multimodal projector is attached.
@@ -374,7 +387,9 @@ impl EmbedRuntime {
         if texts.is_empty() {
             return Err(EmbedError::EmptyBatch);
         }
-        let ctx = self.ctx.ok_or(EmbedError::ContextFailed("context released".into()))?;
+        let ctx = self
+            .ctx
+            .ok_or(EmbedError::ContextFailed("context released".into()))?;
         // SAFETY: plain C call with no pointer arguments.
         let max_seqs = unsafe { ffi::wse_context_max_seqs() }.max(1) as usize;
         let budget = (DEFAULT_N_BATCH as usize).max(1);
@@ -522,7 +537,9 @@ fn normalize_media(out: &mut [f32]) -> Result<(), EmbedError> {
     }
     l2_normalize(out);
     if out.iter().any(|v| !v.is_finite()) || !out.iter().any(|v| *v != 0.0) {
-        return Err(EmbedError::MtmdFailed("invalid normalized media vector".into()));
+        return Err(EmbedError::MtmdFailed(
+            "invalid normalized media vector".into(),
+        ));
     }
     Ok(())
 }
@@ -539,7 +556,8 @@ fn open_mtmd(
     let c = path_to_cstring(mmproj)?;
     // SAFETY: c is valid for the call; model is live.
     let raw = unsafe { ffi::wse_mtmd_init(c.as_ptr(), model.as_ptr(), use_gpu, n_threads) };
-    NonNull::new(raw).ok_or_else(|| EmbedError::MtmdFailed(format!("mmproj init failed: {}", mmproj.display())))
+    NonNull::new(raw)
+        .ok_or_else(|| EmbedError::MtmdFailed(format!("mmproj init failed: {}", mmproj.display())))
 }
 
 impl Drop for EmbedRuntime {
@@ -597,7 +615,10 @@ mod tests {
     #[test]
     fn default_cpu_threads_preserve_interactive_headroom() {
         let threads = LoadOptions::default().n_threads;
-        assert!((1..=8).contains(&threads), "unbounded logical CPU use: {threads}");
+        assert!(
+            (1..=8).contains(&threads),
+            "unbounded logical CPU use: {threads}"
+        );
     }
 
     #[test]

@@ -8,17 +8,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
+use windows::core::PCWSTR;
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_LIST_DIRECTORY, FILE_SHARE_DELETE,
-    FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_ACTION_ADDED, FILE_ACTION_MODIFIED,
+    CreateFileW, ReadDirectoryChangesW, FILE_ACTION_ADDED, FILE_ACTION_MODIFIED,
     FILE_ACTION_REMOVED, FILE_ACTION_RENAMED_NEW_NAME, FILE_ACTION_RENAMED_OLD_NAME,
-    FILE_NOTIFY_CHANGE_CREATION, FILE_NOTIFY_CHANGE_DIR_NAME, FILE_NOTIFY_CHANGE_FILE_NAME,
-    FILE_NOTIFY_CHANGE_LAST_WRITE, FILE_NOTIFY_CHANGE_SIZE, OPEN_EXISTING,
-    ReadDirectoryChangesW,
+    FILE_FLAG_BACKUP_SEMANTICS, FILE_LIST_DIRECTORY, FILE_NOTIFY_CHANGE_CREATION,
+    FILE_NOTIFY_CHANGE_DIR_NAME, FILE_NOTIFY_CHANGE_FILE_NAME, FILE_NOTIFY_CHANGE_LAST_WRITE,
+    FILE_NOTIFY_CHANGE_SIZE, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows::Win32::System::IO::CancelIoEx;
-use windows::core::PCWSTR;
 
 /// One coalesced filesystem change under a watched root.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,7 +26,10 @@ pub enum WatchEvent {
     Deleted(PathBuf),
     Modified(PathBuf),
     /// A rename/move pair as reported by the OS (identity-preserving).
-    Renamed { from: PathBuf, to: PathBuf },
+    Renamed {
+        from: PathBuf,
+        to: PathBuf,
+    },
     /// The notification buffer overflowed: the subtree needs a rescan.
     Overflow,
 }
@@ -74,7 +76,12 @@ impl Watcher {
                 let _ = CancelIoEx(self.handle.raw(), None);
             }
             self.handle.close();
-            let _ = thread.join();
+            // A callback's last strong Indexer reference can release this
+            // watcher on its own thread. The closed state exits its loop;
+            // joining that same thread would deadlock forever.
+            if thread.thread().id() != std::thread::current().id() {
+                let _ = thread.join();
+            }
         }
     }
 }
@@ -157,7 +164,7 @@ fn watch_loop(root: &Path, handle: Arc<OwnedHandle>, on_event: &(dyn Fn(WatchEve
 
     let mut pending_rename: Option<PathBuf> = None;
 
-    loop {
+    while !handle.1.load(Ordering::SeqCst) {
         let mut returned = 0u32;
         let result = unsafe {
             ReadDirectoryChangesW(
@@ -181,7 +188,9 @@ fn watch_loop(root: &Path, handle: Arc<OwnedHandle>, on_event: &(dyn Fn(WatchEve
             on_event(WatchEvent::Overflow);
             continue;
         }
-        for event in parse_notifications_with_state(&buffer[..returned as usize], &mut pending_rename) {
+        for event in
+            parse_notifications_with_state(&buffer[..returned as usize], &mut pending_rename)
+        {
             let full_event = match event {
                 WatchEvent::Created(p) => WatchEvent::Created(root.join(p)),
                 WatchEvent::Deleted(p) => WatchEvent::Deleted(root.join(p)),
@@ -193,6 +202,9 @@ fn watch_loop(root: &Path, handle: Arc<OwnedHandle>, on_event: &(dyn Fn(WatchEve
                 WatchEvent::Overflow => WatchEvent::Overflow,
             };
             on_event(full_event);
+            if handle.1.load(Ordering::SeqCst) {
+                return;
+            }
         }
     }
 }
@@ -314,7 +326,6 @@ mod tests {
         let mut stream = r1.clone();
         stream.extend_from_slice(&r2);
         // First record's "next" must point at the second record's start.
-        let mut stream = stream;
         let first_next = r1.len() as u32;
         stream[0..4].copy_from_slice(&first_next.to_le_bytes());
 
@@ -351,16 +362,13 @@ mod tests {
         let mut saw_rename = false;
         let mut saw_delete = false;
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        while std::time::Instant::now() < deadline
-            && !(saw_create && saw_rename && saw_delete)
-        {
+        while std::time::Instant::now() < deadline && !(saw_create && saw_rename && saw_delete) {
             match rx.recv_timeout(Duration::from_millis(500)) {
                 Ok(WatchEvent::Created(ref p)) if p == &tree.0.join("hello.txt") => {
                     saw_create = true
                 }
                 Ok(WatchEvent::Renamed { ref from, ref to })
-                    if from == &tree.0.join("hello.txt")
-                        && to == &tree.0.join("renamed.txt") =>
+                    if from == &tree.0.join("hello.txt") && to == &tree.0.join("renamed.txt") =>
                 {
                     saw_rename = true
                 }
@@ -376,5 +384,65 @@ mod tests {
         assert!(saw_create, "no create event");
         assert!(saw_rename, "no rename event");
         assert!(saw_delete, "no delete event");
+    }
+
+    #[test]
+    fn a_closed_watcher_never_reads_a_recycled_numeric_handle() {
+        use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+        let tree = TempTree::new();
+        let file = fs::OpenOptions::new()
+            .access_mode(FILE_LIST_DIRECTORY.0)
+            .share_mode(7)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0)
+            .open(&tree.0)
+            .unwrap();
+        // Model a closed watcher's numeric handle now owned by another open.
+        // File retains real ownership; this alias must never initiate I/O.
+        let alias = Arc::new(OwnedHandle(
+            HANDLE(file.as_raw_handle()),
+            AtomicBool::new(true),
+        ));
+        let root = tree.0.clone();
+        let (finished, exited) = mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            watch_loop(&root, alias, &|_| {
+                panic!("closed watcher dispatched an event")
+            });
+            finished.send(()).unwrap();
+        });
+        let returned = exited.recv_timeout(Duration::from_secs(1)).is_ok();
+        // Unblock the deliberately wrong read on the RED implementation.
+        unsafe {
+            let _ = CancelIoEx(HANDLE(file.as_raw_handle()), None);
+        }
+        drop(file);
+        thread.join().unwrap();
+        assert!(returned, "closed watcher used another owner's live handle");
+    }
+
+    #[test]
+    fn a_callback_can_release_its_last_watcher_owner_without_joining_itself() {
+        let tree = TempTree::new();
+        let slot = Arc::new(std::sync::Mutex::new(None::<Watcher>));
+        let weak = Arc::downgrade(&slot);
+        let (sent, received) = mpsc::channel();
+        let watcher = spawn(&tree.0, move |_| {
+            let owned = weak.upgrade().and_then(|slot| slot.lock().unwrap().take());
+            if let Some(owned) = owned {
+                drop(owned);
+                sent.send(()).unwrap();
+            }
+        })
+        .unwrap();
+        *slot.lock().unwrap() = Some(watcher);
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while std::time::Instant::now() < deadline {
+            fs::write(tree.0.join("controlled-callback.txt"), b"fixture").unwrap();
+            if received.recv_timeout(Duration::from_millis(10)).is_ok() {
+                assert!(slot.lock().unwrap().is_none());
+                return;
+            }
+        }
+        panic!("last-owner release inside its callback must return without self-join");
     }
 }

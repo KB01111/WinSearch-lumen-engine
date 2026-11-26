@@ -2,8 +2,9 @@
 
 This report separates actual NPU inference, CPU references, synthetic recovery
 fixtures and the Lumen consumer. Runtime source is frozen at
-`85a915d460b1fa751bbe86f289ff77c18c032c25`; subsequent evidence/tooling commits
-do not change that source. The independently pinned package manifest SHA-256 is
+`85a915d460b1fa751bbe86f289ff77c18c032c25`. This certifies that historical runtime
+only: later commits `b176b44` and `41c8dd3` change runtime behavior and require
+fresh qualification before a replacement artifact is accepted. The independently pinned package manifest SHA-256 is
 `171aedbb142c712520b768f524ca848a79aab519081cfc0209e8781e96d7390d`.
 
 ## Actual hardware and model

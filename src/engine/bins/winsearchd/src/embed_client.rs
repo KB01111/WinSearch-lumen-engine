@@ -109,6 +109,7 @@ impl EmbedError {
 
 /// Snapshot of the worker's self-reported state (answers [`EmbedSupervisor::ping`]).
 #[derive(Debug, Clone)]
+#[cfg(test)]
 pub struct WorkerSnapshot {
     pub model_loaded: bool,
     pub backend: Option<String>,
@@ -370,6 +371,7 @@ impl EmbedSupervisor {
         self.model_loaded.load(Ordering::Relaxed) || self.stub.load(Ordering::Relaxed)
     }
 
+    #[cfg(test)]
     pub fn stats(&self) -> EmbedStats {
         self.stats.lock().unwrap_or_else(|p| p.into_inner()).clone()
     }
@@ -377,6 +379,7 @@ impl EmbedSupervisor {
     /// True while our spawned child is alive (reaps it once it exits, e.g.
     /// after its idle timeout). Never probes the pipe: a foreign worker is
     /// not ours to report on.
+    #[cfg(test)]
     pub fn is_worker_running(&self) -> bool {
         let mut slot = self.slot.lock().unwrap_or_else(|p| p.into_inner());
         match slot.child.as_mut() {
@@ -398,6 +401,7 @@ impl EmbedSupervisor {
     /// Test hook for the kill-mid-job test (and a future admin path).
     /// Kill failures are logged explicitly (a wedged child that refuses to
     /// die must be visible; the watchdog path depends on this break).
+    #[cfg(test)]
     pub fn terminate_worker(&self) {
         let mut slot = self.slot.lock().unwrap_or_else(|p| p.into_inner());
         match self.remove_worker_locked(&mut slot, false) {
@@ -525,6 +529,7 @@ impl EmbedSupervisor {
     /// Embed texts, one job per [`MAX_TEXTS_PER_JOB`] chunk, in order.
     /// Spawns the worker on first use; restarts it and retries once when the
     /// connection breaks mid-job.
+    #[cfg(test)]
     pub fn embed_texts(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbedError> {
         if texts.is_empty() {
             return Err(EmbedError::InvalidRequest(
@@ -755,6 +760,7 @@ impl EmbedSupervisor {
     /// Bounded single-image embed path (`EmbedRequest::EmbedImage { id, path }`)
     /// for the Phase 4 image extractor. Uses the same leak-free helper +
     /// `CancelSynchronousIo` watchdog as [`Self::embed_texts_bounded`].
+    #[cfg(test)]
     pub fn embed_image_bounded(
         self: &std::sync::Arc<Self>,
         path: &std::path::Path,
@@ -935,6 +941,7 @@ impl EmbedSupervisor {
 
     /// Health ping: handshake + `status` round-trip, spawning the worker if
     /// needed. Refreshes the cached `model_loaded` flags.
+    #[cfg(test)]
     pub fn ping(&self) -> Result<WorkerSnapshot, EmbedError> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         match self.transact(EmbedRequest::Status { id }) {
@@ -969,6 +976,7 @@ impl EmbedSupervisor {
     /// slot is only taken briefly, so `terminate_worker` can kill mid-job.
     /// Transport failures leave the dead child in place for the caller to
     /// restart.
+    #[cfg(test)]
     fn transact(&self, req: EmbedRequest) -> Result<EmbedResponse, EmbedError> {
         let _conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
         {
@@ -993,6 +1001,7 @@ impl EmbedSupervisor {
     /// Used exactly once per job after a transport failure. The backoff wait
     /// lives in `ensure_worker_locked` below, so the retry path sleeps
     /// exactly once (single sleep, `backoff_for` shape).
+    #[cfg(test)]
     fn transact_after_restart(&self, req: EmbedRequest) -> Result<EmbedResponse, EmbedError> {
         let _conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
         {
@@ -1093,6 +1102,7 @@ impl EmbedSupervisor {
     /// Connect, handshake (health ping + version check + flag refresh), send
     /// the job, read the reply. Any IO/EOF problem is `Transport` (retryable);
     /// worker `Error` answers are definitive.
+    #[cfg(test)]
     fn round_trip(&self, req: &EmbedRequest) -> Result<EmbedResponse, EmbedError> {
         let generation = self.worker_gen.load(Ordering::Acquire);
         let mut pending = self.connect_and_send(req)?;
@@ -1911,7 +1921,11 @@ mod tests {
             "Header\nWINSEARCH_INVOICE_42 deferred genuine stage",
         )
         .unwrap();
-        let indexer = Indexer::open(IndexStore::open_in_memory().unwrap(), &[dir.clone()]).unwrap();
+        let indexer = Indexer::open(
+            IndexStore::open_in_memory().unwrap(),
+            std::slice::from_ref(&dir),
+        )
+        .unwrap();
         indexer.enqueue_initial_scan().unwrap();
         while indexer.scan_available(64) > 0 {}
         let parses = Arc::new(AtomicUsize::new(0));
@@ -2350,9 +2364,8 @@ mod tests {
             let outcome = rx.recv_timeout(Duration::from_secs(1));
             drop(slot);
             caller.join().unwrap();
-            assert_eq!(
+            assert!(
                 outcome.unwrap(),
-                true,
                 "caller outlived its deadline waiting for slot"
             );
         }

@@ -1,29 +1,38 @@
-use serde::{Deserialize, Serialize};
 use crate::{EntryReference, MatchLocation, ResolvedEntry};
+use serde::{Deserialize, Serialize};
 
 pub const MAX_PREVIEW_TEXT_BYTES: usize = 64 * 1024;
 pub const MAX_PREVIEW_TEXT_PARTS: usize = 64;
 pub const MAX_PREVIEW_EXTRACTIONS: usize = 8;
 
 /// Locations supported by the bounded cached-text capability.
-pub fn valid_preview_location(location:Option<MatchLocation>)->bool {
+pub fn valid_preview_location(location: Option<MatchLocation>) -> bool {
     match location {
-        None=>true,
-        Some(MatchLocation::Page {page})=>(1..=5000).contains(&page),
-        Some(MatchLocation::Line {line})=>(1..=64*1024*1024).contains(&line),
-        Some(MatchLocation::Timestamp {seconds,end_seconds})=>seconds.is_finite()
-            && end_seconds.is_finite() && seconds>=0.0 && end_seconds>=seconds
-            && end_seconds<=366.0*86400.0,
-        _=>false,
+        None => true,
+        Some(MatchLocation::Page { page }) => (1..=5000).contains(&page),
+        Some(MatchLocation::Line { line }) => (1..=64 * 1024 * 1024).contains(&line),
+        Some(MatchLocation::Timestamp {
+            seconds,
+            end_seconds,
+        }) => {
+            seconds.is_finite()
+                && end_seconds.is_finite()
+                && seconds >= 0.0
+                && end_seconds >= seconds
+                && end_seconds <= 366.0 * 86400.0
+        }
+        _ => false,
     }
 }
 
-pub fn valid_code_preview_location(location:Option<MatchLocation>)->bool {
+pub fn valid_code_preview_location(location: Option<MatchLocation>) -> bool {
     match location {
-        None=>true,
-        Some(MatchLocation::Line {line})=>(1..=64*1024*1024).contains(&line),
-        Some(MatchLocation::Notebook {line,end_line,..})=>line>0 && end_line>=line && end_line<=64*1024*1024,
-        _=>false,
+        None => true,
+        Some(MatchLocation::Line { line }) => (1..=64 * 1024 * 1024).contains(&line),
+        Some(MatchLocation::Notebook { line, end_line, .. }) => {
+            line > 0 && end_line >= line && end_line <= 64 * 1024 * 1024
+        }
+        _ => false,
     }
 }
 

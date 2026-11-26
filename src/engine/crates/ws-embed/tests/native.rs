@@ -83,8 +83,11 @@ fn embedding_is_deterministic_on_cpu() {
 /// Missing model file is a typed error, not a crash.
 #[test]
 fn missing_model_is_reported() {
-    let err = EmbedRuntime::load(&PathBuf::from("does-not-exist.gguf"), &LoadOptions::default())
-        .err()
-        .expect("must fail");
+    let err = EmbedRuntime::load(
+        &PathBuf::from("does-not-exist.gguf"),
+        &LoadOptions::default(),
+    )
+    .err()
+    .expect("must fail");
     assert!(matches!(err, ws_embed::EmbedError::ModelNotFound(_)));
 }

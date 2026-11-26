@@ -10,11 +10,13 @@ pub fn content_attributes_allowed(flags: u32) -> bool {
 /// may still be discovered by name. Recall/offline flags apply to the file;
 /// volume-root attributes are not a file's cloud residency state.
 pub fn metadata_path_allowed(path: &Path, content: bool) -> bool {
-    if path.components().any(|component|match component {
-        std::path::Component::ParentDir=>true,
-        std::path::Component::Normal(value)=>value.to_string_lossy().contains([':','\0']),
-        _=>false,
-    }) {return false;}
+    if path.components().any(|component| match component {
+        std::path::Component::ParentDir => true,
+        std::path::Component::Normal(value) => value.to_string_lossy().contains([':', '\0']),
+        _ => false,
+    }) {
+        return false;
+    }
     for (i, p) in path.ancestors().enumerate() {
         match std::fs::symlink_metadata(p) {
             Ok(m) => {
@@ -41,15 +43,27 @@ mod tests {
     use super::*;
     #[test]
     fn metadata_guard_rejects_parent_traversal_and_alternate_streams() {
-        let base=std::env::temp_dir().join(format!("winsearch-lexical-metadata-{}",std::process::id()));
-        let allowed=base.join("allowed");let private=base.join("private");
-        std::fs::create_dir_all(&allowed).unwrap();std::fs::create_dir_all(&private).unwrap();
-        std::fs::write(private.join("fixture.txt"),b"generated private fixture").unwrap();
-        let escape=allowed.join("..").join("private").join("fixture.txt");
-        assert!(std::fs::metadata(&escape).is_ok(),"fixture must resolve to a real escaped file");
-        for content in [false,true] {
-            assert!(!metadata_path_allowed(&escape,content),"parent components must not cross a consented lexical root");
-            assert!(!metadata_path_allowed(&allowed.join("fixture.txt:alternate"),content));
+        let base =
+            std::env::temp_dir().join(format!("winsearch-lexical-metadata-{}", std::process::id()));
+        let allowed = base.join("allowed");
+        let private = base.join("private");
+        std::fs::create_dir_all(&allowed).unwrap();
+        std::fs::create_dir_all(&private).unwrap();
+        std::fs::write(private.join("fixture.txt"), b"generated private fixture").unwrap();
+        let escape = allowed.join("..").join("private").join("fixture.txt");
+        assert!(
+            std::fs::metadata(&escape).is_ok(),
+            "fixture must resolve to a real escaped file"
+        );
+        for content in [false, true] {
+            assert!(
+                !metadata_path_allowed(&escape, content),
+                "parent components must not cross a consented lexical root"
+            );
+            assert!(!metadata_path_allowed(
+                &allowed.join("fixture.txt:alternate"),
+                content
+            ));
         }
         std::fs::remove_dir_all(base).unwrap();
     }

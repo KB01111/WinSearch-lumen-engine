@@ -132,7 +132,12 @@ pub fn combining(c: char) -> u8 {
 }
 
 fn ccc(cp: u32, hf: bool) -> u8 {
-    if cp < 0x300 || hf && data::CCC_AFTER_9.iter().any(|&(lo, hi)| (lo..=hi).contains(&cp)) {
+    if cp < 0x300
+        || hf
+            && data::CCC_AFTER_9
+                .iter()
+                .any(|&(lo, hi)| (lo..=hi).contains(&cp))
+    {
         return 0;
     }
     let t = data::CCC;
@@ -207,7 +212,9 @@ fn push_ordered(out: &mut Vec<(char, u8)>, c: char, class: u8) {
 fn compose(a: char, b: char, hf: bool) -> Option<char> {
     let (a, b) = (a as u32, b as u32);
     if (L_BASE..L_BASE + L_COUNT).contains(&a) && (V_BASE..V_BASE + V_COUNT).contains(&b) {
-        return Some(ch(S_BASE + ((a - L_BASE) * V_COUNT + (b - V_BASE)) * T_COUNT));
+        return Some(ch(
+            S_BASE + ((a - L_BASE) * V_COUNT + (b - V_BASE)) * T_COUNT
+        ));
     }
     if (S_BASE..S_BASE + S_COUNT).contains(&a)
         && (a - S_BASE) % T_COUNT == 0
@@ -215,9 +222,15 @@ fn compose(a: char, b: char, hf: bool) -> Option<char> {
     {
         return Some(ch(a + b - T_BASE));
     }
-    let i = data::COMPOSE.binary_search_by_key(&(a, b), |c| (c.0, c.1)).ok()?;
+    let i = data::COMPOSE
+        .binary_search_by_key(&(a, b), |c| (c.0, c.1))
+        .ok()?;
     let c = data::COMPOSE[i].2;
-    if hf && c == data::AFTER_9_COMPOSITE { None } else { Some(ch(c)) }
+    if hf && c == data::AFTER_9_COMPOSITE {
+        None
+    } else {
+        Some(ch(c))
+    }
 }
 
 fn nfc_with(s: &str, hf: bool) -> String {
@@ -236,8 +249,9 @@ fn nfc_with(s: &str, hf: bool) -> String {
     let mut starter: Option<usize> = None;
     let mut last: Option<u8> = None;
     for (c, class) in d {
-        let composed =
-            starter.filter(|_| last.is_none_or(|l| l < class)).and_then(|si| Some((si, compose(out[si], c, hf)?)));
+        let composed = starter
+            .filter(|_| last.is_none_or(|l| l < class))
+            .and_then(|si| Some((si, compose(out[si], c, hf)?)));
         if let Some((si, k)) = composed {
             out[si] = k;
             continue;
@@ -293,7 +307,11 @@ pub fn to_lower_py(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for (i, &c) in chars.iter().enumerate() {
         match c {
-            '\u{3A3}' => out.push(if final_sigma(&chars, i) { '\u{3C2}' } else { '\u{3C3}' }),
+            '\u{3A3}' => out.push(if final_sigma(&chars, i) {
+                '\u{3C2}'
+            } else {
+                '\u{3C3}'
+            }),
             '\u{130}' => out.push_str("i\u{307}"),
             _ => out.push(lower_char(c)),
         }
@@ -308,5 +326,8 @@ fn final_sigma(chars: &[char], i: usize) -> bool {
     if !before.is_some_and(|&c| cased(c)) {
         return false;
     }
-    chars[i + 1..].iter().find(|&&c| !ignorable(c)).is_none_or(|&c| !cased(c))
+    chars[i + 1..]
+        .iter()
+        .find(|&&c| !ignorable(c))
+        .is_none_or(|&c| !cased(c))
 }

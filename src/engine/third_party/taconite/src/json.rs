@@ -34,11 +34,19 @@ pub enum Value {
 
 impl Value {
     pub fn as_str(&self) -> Option<&str> {
-        if let Value::Str(s) = self { Some(s) } else { None }
+        if let Value::Str(s) = self {
+            Some(s)
+        } else {
+            None
+        }
     }
 
     pub fn as_bool(&self) -> Option<bool> {
-        if let Value::Bool(b) = self { Some(*b) } else { None }
+        if let Value::Bool(b) = self {
+            Some(*b)
+        } else {
+            None
+        }
     }
 
     /// An `Int` or a `Float` as f64.
@@ -52,15 +60,27 @@ impl Value {
 
     /// An `Int` that fits an i64.
     pub fn as_i64(&self) -> Option<i64> {
-        if let Value::Int(s) = self { s.parse().ok() } else { None }
+        if let Value::Int(s) = self {
+            s.parse().ok()
+        } else {
+            None
+        }
     }
 
     pub fn as_array(&self) -> Option<&[Value]> {
-        if let Value::Array(a) = self { Some(a) } else { None }
+        if let Value::Array(a) = self {
+            Some(a)
+        } else {
+            None
+        }
     }
 
     pub fn as_object(&self) -> Option<&[(String, Value)]> {
-        if let Value::Object(o) = self { Some(o) } else { None }
+        if let Value::Object(o) = self {
+            Some(o)
+        } else {
+            None
+        }
     }
 
     pub fn is_null(&self) -> bool {
@@ -69,7 +89,10 @@ impl Value {
 
     /// An object's value for `key`.
     pub fn get(&self, key: &str) -> Option<&Value> {
-        self.as_object()?.iter().find(|(k, _)| k == key).map(|(_, v)| v)
+        self.as_object()?
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v)
     }
 }
 
@@ -111,7 +134,10 @@ impl From<i64> for Value {
 /// `-Infinity`; whitespace is space, tab, CR and LF; control characters
 /// inside strings are errors (Python's `strict=True`).
 pub fn parse(s: &str) -> Result<Value, String> {
-    let mut p = Parser { s: s.as_bytes(), i: 0 };
+    let mut p = Parser {
+        s: s.as_bytes(),
+        i: 0,
+    };
     p.ws();
     let v = p.value(0)?;
     p.ws();
@@ -195,7 +221,12 @@ impl Parser<'_> {
             self.ws();
             let v = self.value(depth + 1)?;
             if index.is_none() && out.len() >= 16 {
-                index = Some(out.iter().enumerate().map(|(i, (k, _))| (k.clone(), i)).collect());
+                index = Some(
+                    out.iter()
+                        .enumerate()
+                        .map(|(i, (k, _))| (k.clone(), i))
+                        .collect(),
+                );
             }
             let seen = match &index {
                 Some(ix) => ix.get(&k).copied(),
@@ -281,15 +312,28 @@ impl Parser<'_> {
         if self.i == int_end {
             let neg = lex.starts_with('-');
             let digits = lex.trim_start_matches('-');
-            return Ok(Value::Int(if neg && digits != "0" { lex.to_string() } else { digits.to_string() }));
+            return Ok(Value::Int(if neg && digits != "0" {
+                lex.to_string()
+            } else {
+                digits.to_string()
+            }));
         }
-        lex.parse().map(Value::Float).map_err(|_| self.err("bad number"))
+        lex.parse()
+            .map(Value::Float)
+            .map_err(|_| self.err("bad number"))
     }
 
     fn hex4(&mut self) -> Result<u32, String> {
-        let h = self.s.get(self.i..self.i + 4).ok_or_else(|| self.err("invalid \\uXXXX escape"))?;
-        let v = std::str::from_utf8(h).ok().filter(|h| h.bytes().all(|b| b.is_ascii_hexdigit()));
-        let v = v.and_then(|h| u32::from_str_radix(h, 16).ok()).ok_or_else(|| self.err("invalid \\uXXXX escape"))?;
+        let h = self
+            .s
+            .get(self.i..self.i + 4)
+            .ok_or_else(|| self.err("invalid \\uXXXX escape"))?;
+        let v = std::str::from_utf8(h)
+            .ok()
+            .filter(|h| h.bytes().all(|b| b.is_ascii_hexdigit()));
+        let v = v
+            .and_then(|h| u32::from_str_radix(h, 16).ok())
+            .ok_or_else(|| self.err("invalid \\uXXXX escape"))?;
         self.i += 4;
         Ok(v)
     }
@@ -315,7 +359,10 @@ impl Parser<'_> {
                 }
                 Some(b'\\') => {
                     self.i += 1;
-                    let e = *self.s.get(self.i).ok_or_else(|| self.err("unterminated string"))?;
+                    let e = *self
+                        .s
+                        .get(self.i)
+                        .ok_or_else(|| self.err("unterminated string"))?;
                     self.i += 1;
                     match e {
                         b'"' => out.push('"'),
@@ -328,7 +375,9 @@ impl Parser<'_> {
                         b't' => out.push('\t'),
                         b'u' => {
                             let mut cp = self.hex4()?;
-                            if (0xD800..0xDC00).contains(&cp) && self.s[self.i..].starts_with(b"\\u") {
+                            if (0xD800..0xDC00).contains(&cp)
+                                && self.s[self.i..].starts_with(b"\\u")
+                            {
                                 let save = self.i;
                                 self.i += 2;
                                 let lo = self.hex4()?;
@@ -449,7 +498,11 @@ pub fn py_float_repr(f: f64) -> String {
     let sign = if f.is_sign_negative() { "-" } else { "" };
     if !(-4..16).contains(&exp) {
         let (d0, rest) = digits.split_at(1);
-        let frac = if rest.is_empty() { String::new() } else { format!(".{rest}") };
+        let frac = if rest.is_empty() {
+            String::new()
+        } else {
+            format!(".{rest}")
+        };
         let es = if exp < 0 { '-' } else { '+' };
         return format!("{sign}{d0}{frac}e{es}{:02}", exp.abs());
     }
@@ -480,7 +533,11 @@ pub fn py_round(x: f64, ndigits: i32) -> f64 {
         round_decimal(x, ndigits as usize)
     } else {
         let sign = if x < 0.0 { "-" } else { "" };
-        format!("{sign}{}e{}", round_decimal_scaled(x, (-ndigits) as usize), -ndigits)
+        format!(
+            "{sign}{}e{}",
+            round_decimal_scaled(x, (-ndigits) as usize),
+            -ndigits
+        )
     };
     let r: f64 = s.parse().expect("decimal string");
     // Python keeps the sign of a result that rounds to zero.
@@ -494,7 +551,11 @@ fn exact_decimal(x: f64) -> (bool, Vec<u8>, Vec<u8>) {
     let neg = bits >> 63 != 0;
     let exp = ((bits >> 52) & 0x7FF) as i32;
     let frac = bits & ((1u64 << 52) - 1);
-    let (mant, e2) = if exp == 0 { (frac, -1074) } else { (frac | 1 << 52, exp - 1075) };
+    let (mant, e2) = if exp == 0 {
+        (frac, -1074)
+    } else {
+        (frac | 1 << 52, exp - 1075)
+    };
     // value = mant * 2^e2, as a little-endian base-1e9 big integer divided
     // by 2^-e2 (when e2 < 0).
     let mut big: Vec<u32> = vec![(mant % 1_000_000_000) as u32, (mant / 1_000_000_000) as u32];
@@ -520,7 +581,11 @@ fn exact_decimal(x: f64) -> (bool, Vec<u8>, Vec<u8>) {
             }
         }
         let s = s.trim_start_matches('0');
-        if s.is_empty() { vec![b'0'] } else { s.bytes().collect() }
+        if s.is_empty() {
+            vec![b'0']
+        } else {
+            s.bytes().collect()
+        }
     };
     if e2 >= 0 {
         for _ in 0..e2 {
@@ -537,7 +602,12 @@ fn exact_decimal(x: f64) -> (bool, Vec<u8>, Vec<u8>) {
     let (int, frac): (Vec<u8>, Vec<u8>) = if all.len() > k {
         (all[..all.len() - k].to_vec(), all[all.len() - k..].to_vec())
     } else {
-        (vec![b'0'], std::iter::repeat_n(b'0', k - all.len()).chain(all).collect())
+        (
+            vec![b'0'],
+            std::iter::repeat_n(b'0', k - all.len())
+                .chain(all)
+                .collect(),
+        )
     };
     let mut frac = frac;
     while frac.last() == Some(&b'0') {
@@ -562,7 +632,11 @@ fn increment(d: &mut Vec<u8>) {
 /// `x` rounded half-to-even at `n` fraction digits, as a decimal string.
 fn round_decimal(x: f64, n: usize) -> String {
     let (neg, int, frac) = exact_decimal(x);
-    let mut digits: Vec<u8> = int.iter().chain(frac.iter().chain(std::iter::repeat(&b'0')).take(n)).copied().collect();
+    let mut digits: Vec<u8> = int
+        .iter()
+        .chain(frac.iter().chain(std::iter::repeat(&b'0')).take(n))
+        .copied()
+        .collect();
     let rest = frac.get(n..).unwrap_or(&[]);
     if round_up(rest, digits.last().copied()) {
         increment(&mut digits);
@@ -580,7 +654,9 @@ fn round_decimal(x: f64, n: usize) -> String {
 /// `|x| / 10^n` rounded half-to-even to an integer, as a decimal string.
 fn round_decimal_scaled(x: f64, n: usize) -> String {
     let (_, int, frac) = exact_decimal(x);
-    let int: Vec<u8> = std::iter::repeat_n(b'0', (n + 1).saturating_sub(int.len())).chain(int).collect();
+    let int: Vec<u8> = std::iter::repeat_n(b'0', (n + 1).saturating_sub(int.len()))
+        .chain(int)
+        .collect();
     let mut digits = int[..int.len() - n].to_vec();
     let rest: Vec<u8> = int[int.len() - n..].iter().chain(&frac).copied().collect();
     if round_up(&rest, digits.last().copied()) {
@@ -596,6 +672,8 @@ fn round_up(rest: &[u8], last: Option<u8>) -> bool {
         None => false,
         Some(&d) if d > b'5' => true,
         Some(&d) if d < b'5' => false,
-        Some(_) => rest[1..].iter().any(|&d| d != b'0') || last.is_some_and(|l| (l - b'0') % 2 == 1),
+        Some(_) => {
+            rest[1..].iter().any(|&d| d != b'0') || last.is_some_and(|l| (l - b'0') % 2 == 1)
+        }
     }
 }

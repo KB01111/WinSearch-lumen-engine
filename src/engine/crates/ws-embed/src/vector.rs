@@ -33,7 +33,11 @@ pub fn matches_reference(actual: &[f32], expected: &[f32]) -> bool {
 
 /// L2-normalize in place. A zero vector is left unchanged.
 pub fn l2_normalize(v: &mut [f32]) {
-    let norm = v.iter().map(|x| f64::from(*x) * f64::from(*x)).sum::<f64>().sqrt();
+    let norm = v
+        .iter()
+        .map(|x| f64::from(*x) * f64::from(*x))
+        .sum::<f64>()
+        .sqrt();
     if norm > 0.0 {
         for x in v.iter_mut() {
             *x = (f64::from(*x) / norm) as f32;

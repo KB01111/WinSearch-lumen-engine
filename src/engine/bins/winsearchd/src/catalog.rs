@@ -56,12 +56,13 @@ pub fn scan_catalog_full(roots: &[PathBuf]) -> CatalogScan {
             complete = false;
         }
     }
-    apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    apps.sort_by_key(|a| a.name.to_lowercase());
     apps.dedup_by(|a, b| a.path.eq_ignore_ascii_case(&b.path));
     CatalogScan { apps, complete }
 }
 
 /// Recursively scans catalog roots for application items.
+#[cfg(test)]
 pub fn scan_catalog(roots: &[PathBuf]) -> Vec<AppEntry> {
     scan_catalog_full(roots).apps
 }
@@ -124,7 +125,10 @@ fn scan_dir(dir: &Path, depth: usize, apps: &mut Vec<AppEntry>) -> bool {
             }
             "exe" => {
                 let name = clean_name(
-                    &path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+                    &path
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
                 );
                 apps.push(AppEntry {
                     name,
@@ -146,7 +150,9 @@ fn shortcut_entry(lnk: &Path) -> Option<AppEntry> {
         .file_stem()
         .map(|s| s.to_string_lossy().to_lowercase())
         .unwrap_or_default();
-    let keywords = format!("{target_stem} {}", args.to_lowercase()).trim().to_string();
+    let keywords = format!("{target_stem} {}", args.to_lowercase())
+        .trim()
+        .to_string();
     Some(AppEntry {
         name,
         path: lnk.to_string_lossy().into_owned(),
@@ -169,19 +175,20 @@ fn clean_name(stem: &str) -> String {
 /// Resolves a `.lnk` shortcut to `(target path, arguments)` using the shell's
 /// `IShellLinkW`. Returns `None` when the shortcut cannot be loaded.
 pub fn resolve_shortcut(lnk: &Path) -> Option<(String, String)> {
+    use windows::core::{Interface, PCWSTR};
     use windows::Win32::System::Com::{
-        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
-        IPersistFile, STGM,
+        CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER,
+        COINIT_MULTITHREADED, STGM,
     };
     use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
-    use windows::core::{Interface, PCWSTR};
 
     unsafe {
         // The crawler threads are MTA; RPC_E_CHANGED_MODE is fine too.
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
 
         let result = (|| {
-            let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
+            let link: IShellLinkW =
+                CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
             let persist: IPersistFile = link.cast().ok()?;
             let wide: Vec<u16> = lnk
                 .to_string_lossy()
@@ -191,12 +198,8 @@ pub fn resolve_shortcut(lnk: &Path) -> Option<(String, String)> {
             persist.Load(PCWSTR(wide.as_ptr()), STGM(0)).ok()?;
 
             let mut target_buf = [0u16; 32_768];
-            link.GetPath(
-                &mut target_buf,
-                std::ptr::null_mut(),
-                0,
-            )
-            .ok()?;
+            link.GetPath(&mut target_buf, std::ptr::null_mut(), 0)
+                .ok()?;
             let end = target_buf.iter().position(|&u| u == 0).unwrap_or(0);
             let target = String::from_utf16_lossy(&target_buf[..end]);
 
@@ -247,7 +250,7 @@ mod tests {
         fs::write(menu.join("Acme Editor.exe"), b"MZ").unwrap();
         fs::write(menu.join("notes.txt"), b"not an app").unwrap();
 
-        let apps = scan_catalog(&[tree.0.clone()]);
+        let apps = scan_catalog(std::slice::from_ref(&tree.0));
         assert_eq!(apps.len(), 1);
         assert_eq!(apps[0].name, "Acme Editor");
         assert!(apps[0].path.ends_with("Acme Editor.exe"));
@@ -263,12 +266,12 @@ mod tests {
 
     #[test]
     fn resolves_real_shortcuts_created_by_the_shell() {
+        use windows::core::{w, Interface, PCWSTR};
         use windows::Win32::System::Com::{
-            CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
-            COINIT_MULTITHREADED, IPersistFile,
+            CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER,
+            COINIT_MULTITHREADED,
         };
         use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
-        use windows::core::{w, Interface, PCWSTR};
 
         let tree = TempTree::new();
         let target = tree.0.join("Acme.exe");
@@ -277,7 +280,8 @@ mod tests {
 
         unsafe {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-            let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).unwrap();
+            let link: IShellLinkW =
+                CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).unwrap();
             let wide_target: Vec<u16> = target
                 .to_string_lossy()
                 .encode_utf16()
@@ -297,16 +301,22 @@ mod tests {
 
         let (resolved, args) = resolve_shortcut(&lnk).expect("shortcut should resolve");
         assert_eq!(
-            PathBuf::from(resolved),
-            target,
-            "resolved target should round-trip"
+            fs::canonicalize(resolved).unwrap(),
+            fs::canonicalize(&target).unwrap(),
+            "resolved target should identify the same file, including 8.3 aliases"
         );
         assert!(args.contains("--flag"));
 
         // Full catalog scan picks the shortcut up as an app entry.
-        let apps = scan_catalog(&[tree.0.clone()]);
-        let app = apps.iter().find(|a| a.name == "Acme App").expect("shortcut in catalog");
-        assert_eq!(app.target, target.to_string_lossy());
+        let apps = scan_catalog(std::slice::from_ref(&tree.0));
+        let app = apps
+            .iter()
+            .find(|a| a.name == "Acme App")
+            .expect("shortcut in catalog");
+        assert_eq!(
+            fs::canonicalize(&app.target).unwrap(),
+            fs::canonicalize(&target).unwrap()
+        );
     }
 
     #[test]

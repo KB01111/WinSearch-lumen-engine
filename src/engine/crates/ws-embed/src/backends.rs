@@ -127,7 +127,10 @@ mod tests {
             select_backend(BackendPreference::Auto, &[Cpu, Vulkan, Cuda]),
             Cuda
         );
-        assert_eq!(select_backend(BackendPreference::Auto, &[Cpu, Vulkan]), Vulkan);
+        assert_eq!(
+            select_backend(BackendPreference::Auto, &[Cpu, Vulkan]),
+            Vulkan
+        );
         assert_eq!(select_backend(BackendPreference::Auto, &[Cpu]), Cpu);
         assert_eq!(select_backend(BackendPreference::Auto, &[]), Cpu);
     }
@@ -137,14 +140,23 @@ mod tests {
         use BackendKind::*;
         assert_eq!(select_backend(BackendPreference::Cuda, &[Cpu, Vulkan]), Cpu);
         assert_eq!(select_backend(BackendPreference::Vulkan, &[Cpu]), Cpu);
-        assert_eq!(select_backend(BackendPreference::Vulkan, &[Cpu, Vulkan]), Vulkan);
+        assert_eq!(
+            select_backend(BackendPreference::Vulkan, &[Cpu, Vulkan]),
+            Vulkan
+        );
     }
 
     #[test]
     fn npu_preference_falls_back_to_gpu_then_cpu() {
         use BackendKind::*;
-        assert_eq!(select_backend(BackendPreference::Npu, &[Cpu, Vulkan, Cuda]), Cuda);
-        assert_eq!(select_backend(BackendPreference::Npu, &[Cpu, Vulkan]), Vulkan);
+        assert_eq!(
+            select_backend(BackendPreference::Npu, &[Cpu, Vulkan, Cuda]),
+            Cuda
+        );
+        assert_eq!(
+            select_backend(BackendPreference::Npu, &[Cpu, Vulkan]),
+            Vulkan
+        );
         assert_eq!(select_backend(BackendPreference::Npu, &[Cpu]), Cpu);
         assert!(BackendPreference::Npu.wants_npu());
         assert!(BackendPreference::Auto.wants_npu());
@@ -157,24 +169,51 @@ mod tests {
     #[test]
     fn cpu_preference_ignores_gpus() {
         use BackendKind::*;
-        assert_eq!(select_backend(BackendPreference::Cpu, &[Cuda, Vulkan, Cpu]), Cpu);
+        assert_eq!(
+            select_backend(BackendPreference::Cpu, &[Cuda, Vulkan, Cpu]),
+            Cpu
+        );
     }
 
     #[test]
     fn parses_preference_strings() {
-        assert_eq!("auto".parse::<BackendPreference>().unwrap(), BackendPreference::Auto);
-        assert_eq!(" CUDA ".parse::<BackendPreference>().unwrap(), BackendPreference::Cuda);
-        assert_eq!("vulkan".parse::<BackendPreference>().unwrap(), BackendPreference::Vulkan);
-        assert_eq!("cpu".parse::<BackendPreference>().unwrap(), BackendPreference::Cpu);
-        assert_eq!(" NPU ".parse::<BackendPreference>().unwrap(), BackendPreference::Npu);
+        assert_eq!(
+            "auto".parse::<BackendPreference>().unwrap(),
+            BackendPreference::Auto
+        );
+        assert_eq!(
+            " CUDA ".parse::<BackendPreference>().unwrap(),
+            BackendPreference::Cuda
+        );
+        assert_eq!(
+            "vulkan".parse::<BackendPreference>().unwrap(),
+            BackendPreference::Vulkan
+        );
+        assert_eq!(
+            "cpu".parse::<BackendPreference>().unwrap(),
+            BackendPreference::Cpu
+        );
+        assert_eq!(
+            " NPU ".parse::<BackendPreference>().unwrap(),
+            BackendPreference::Npu
+        );
         assert!("metal".parse::<BackendPreference>().is_err());
     }
 
     #[test]
     fn maps_registry_names() {
-        assert_eq!(BackendKind::from_registry_name("CUDA"), Some(BackendKind::Cuda));
-        assert_eq!(BackendKind::from_registry_name("Vulkan"), Some(BackendKind::Vulkan));
-        assert_eq!(BackendKind::from_registry_name("CPU"), Some(BackendKind::Cpu));
+        assert_eq!(
+            BackendKind::from_registry_name("CUDA"),
+            Some(BackendKind::Cuda)
+        );
+        assert_eq!(
+            BackendKind::from_registry_name("Vulkan"),
+            Some(BackendKind::Vulkan)
+        );
+        assert_eq!(
+            BackendKind::from_registry_name("CPU"),
+            Some(BackendKind::Cpu)
+        );
         assert_eq!(BackendKind::from_registry_name("BLAS"), None);
     }
 }

@@ -18,7 +18,9 @@ static THREADS: AtomicUsize = AtomicUsize::new(0);
 /// pool below has started.
 pub fn threads() -> usize {
     match THREADS.load(Ordering::Relaxed) {
-        0 => std::thread::available_parallelism().map_or(4, |n| n.get()).min(16),
+        0 => std::thread::available_parallelism()
+            .map_or(4, |n| n.get())
+            .min(16),
         n => n,
     }
 }
@@ -90,7 +92,10 @@ fn pool() -> &'static Pool {
 impl Pool {
     fn new(workers: usize) -> Pool {
         let shared = Arc::new(Shared {
-            state: Mutex::new(State { generation: 0, job: None }),
+            state: Mutex::new(State {
+                generation: 0,
+                job: None,
+            }),
             wake: Condvar::new(),
             next: AtomicUsize::new(0),
             remaining: AtomicUsize::new(0),
@@ -105,7 +110,11 @@ impl Pool {
                 .spawn(move || Self::work(&sh))
                 .expect("spawning a worker thread");
         }
-        Pool { shared, workers, submit: Mutex::new(()) }
+        Pool {
+            shared,
+            workers,
+            submit: Mutex::new(()),
+        }
     }
 
     fn work(sh: &Shared) {
@@ -120,7 +129,8 @@ impl Pool {
                 st.job.expect("a job with the generation")
             };
             let f: &Task<'static> = unsafe { &*task };
-            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Self::drain(sh, n, f)));
+            let r =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Self::drain(sh, n, f)));
             if r.is_err() {
                 sh.panicked.store(true, Ordering::Relaxed);
             }
@@ -225,7 +235,9 @@ fn fma<const F: bool>(a: f32, b: f32, c: f32) -> f32 {
 #[cfg(target_arch = "x86_64")]
 fn have_avx2() -> bool {
     static F: OnceLock<bool> = OnceLock::new();
-    *F.get_or_init(|| std::arch::is_x86_feature_detected!("avx2") && std::arch::is_x86_feature_detected!("fma"))
+    *F.get_or_init(|| {
+        std::arch::is_x86_feature_detected!("avx2") && std::arch::is_x86_feature_detected!("fma")
+    })
 }
 
 /// `$name(args)` -> `$imp::<true>` compiled for AVX2 + FMA when the CPU
@@ -313,7 +325,6 @@ impl W<'_> {
             W::Bf16(w) => w.len(),
         }
     }
-
 }
 
 impl W<'_> {
@@ -338,12 +349,22 @@ impl W<'_> {
 #[inline(always)]
 fn dot4_impl<const F: bool>(x: &[f32], n_in: usize, w: &[f32]) -> [f32; 4] {
     let n = n_in.min(w.len());
-    let (x0, x1, x2, x3) = (&x[..n], &x[n_in..n_in + n], &x[2 * n_in..2 * n_in + n], &x[3 * n_in..3 * n_in + n]);
+    let (x0, x1, x2, x3) = (
+        &x[..n],
+        &x[n_in..n_in + n],
+        &x[2 * n_in..2 * n_in + n],
+        &x[3 * n_in..3 * n_in + n],
+    );
     let mut acc = [[0f32; 8]; 4];
     let chunks = n / 8;
     for c in 0..chunks {
         let wv = &w[c * 8..c * 8 + 8];
-        let (a, b, cc, d) = (&x0[c * 8..c * 8 + 8], &x1[c * 8..c * 8 + 8], &x2[c * 8..c * 8 + 8], &x3[c * 8..c * 8 + 8]);
+        let (a, b, cc, d) = (
+            &x0[c * 8..c * 8 + 8],
+            &x1[c * 8..c * 8 + 8],
+            &x2[c * 8..c * 8 + 8],
+            &x3[c * 8..c * 8 + 8],
+        );
         for l in 0..8 {
             acc[0][l] = fma::<F>(a[l], wv[l], acc[0][l]);
             acc[1][l] = fma::<F>(b[l], wv[l], acc[1][l]);
@@ -482,17 +503,17 @@ pub fn ln_row(x: &[f32], y: &mut [f32], w: &[f32], b: &[f32], eps: f32) {
 pub fn erf(x: f32) -> f32 {
     let z = x.abs();
     let t = 1.0 / (1.0 + 0.5 * z);
-    let r = t
-        * fast_exp(
-            -z * z - 1.265_512_2
-                + t * (1.000_023_7
-                    + t * (0.374_091_96
-                        + t * (0.096_784_18
-                            + t * (-0.186_288_06
-                                + t * (0.278_868_07
-                                    + t * (-1.135_204
-                                        + t * (1.488_515_9 + t * (-0.822_152_23 + t * 0.170_872_77)))))))),
-        );
+    let r = t * fast_exp(
+        -z * z - 1.265_512_2
+            + t * (1.000_023_7
+                + t * (0.374_091_96
+                    + t * (0.096_784_18
+                        + t * (-0.186_288_06
+                            + t * (0.278_868_07
+                                + t * (-1.135_204
+                                    + t * (1.488_515_9
+                                        + t * (-0.822_152_23 + t * 0.170_872_77)))))))),
+    );
     // branch-free sign
     let pos = 1.0 - r;
     let neg = r - 1.0;
@@ -594,7 +615,8 @@ pub fn attention(q: &[f32], dim: usize, k: Rows, v: Rows, a: &Attn) -> Vec<f32> 
                     s[j] = if masked {
                         f32::NEG_INFINITY
                     } else {
-                        dot(qh, k.at(j, hh * hd, hd)) * scale + a.bias.map_or(0.0, |b| b[(hh * lq + i) * lk + j])
+                        dot(qh, k.at(j, hh * hd, hd)) * scale
+                            + a.bias.map_or(0.0, |b| b[(hh * lq + i) * lk + j])
                     };
                 }
                 softmax_(&mut s);
@@ -677,7 +699,18 @@ fn dec_block_impl<const F: bool>(
 
 #[inline]
 #[allow(clippy::too_many_arguments)]
-fn dec_block(qs: &[f32], hd: usize, nq: usize, k: &[f32], v: &[f32], by: &[f32], bx: &[f32], g: usize, s: &mut [f32], o: &mut [f32]) {
+fn dec_block(
+    qs: &[f32],
+    hd: usize,
+    nq: usize,
+    k: &[f32],
+    v: &[f32],
+    by: &[f32],
+    bx: &[f32],
+    g: usize,
+    s: &mut [f32],
+    o: &mut [f32],
+) {
     #[cfg(target_arch = "x86_64")]
     if have_avx2() {
         // SAFETY: the features were detected on this CPU
@@ -694,7 +727,14 @@ fn dec_block(qs: &[f32], hd: usize, nq: usize, k: &[f32], v: &[f32], by: &[f32],
 ///
 /// The decoder no longer uses this (see [`attention_dec`], several times
 /// faster for its separable box bias); kept for callers of 0.1.
-pub fn attention_hm(q: &[f32], dim: usize, heads: usize, kh: &[f32], vh: &[f32], bias: Option<&[f32]>) -> Vec<f32> {
+pub fn attention_hm(
+    q: &[f32],
+    dim: usize,
+    heads: usize,
+    kh: &[f32],
+    vh: &[f32],
+    bias: Option<&[f32]>,
+) -> Vec<f32> {
     let hd = dim / heads;
     let lk = kh.len() / dim;
     let lq = q.len() / dim;
@@ -780,7 +820,10 @@ pub fn attention_dec(
             }
             let k = &kt[h * hd * lk..(h + 1) * hd * lk];
             let v = &vh[h * lk * hd..(h + 1) * lk * hd];
-            let (byr, bxr) = (&by[(h * lq + i0) * g..][..nq * g], &bx[(h * lq + i0) * g..][..nq * g]);
+            let (byr, bxr) = (
+                &by[(h * lq + i0) * g..][..nq * g],
+                &bx[(h * lq + i0) * g..][..nq * g],
+            );
             dec_block(&qs, hd, nq, k, v, byr, bxr, g, &mut s, o);
         }
     });
@@ -805,7 +848,6 @@ dispatch!(
     /// `dst = bf16(gelu(src))`, exact (erf) GELU over bf16 rows.
     pub fn gelu_bf16(src: &[u16], dst: &mut [u16]) = gelu_bf16_impl
 );
-
 
 /// The hot kernels in AVX2 + FMA intrinsics: the portable versions above
 /// are written to vectorise, but the compiler leaves their 8-lane
@@ -836,7 +878,11 @@ mod avx {
         let mut i = 0;
         while i + 16 <= n {
             acc = _mm256_fmadd_ps(_mm256_loadu_ps(pa.add(i)), _mm256_loadu_ps(pb.add(i)), acc);
-            acc2 = _mm256_fmadd_ps(_mm256_loadu_ps(pa.add(i + 8)), _mm256_loadu_ps(pb.add(i + 8)), acc2);
+            acc2 = _mm256_fmadd_ps(
+                _mm256_loadu_ps(pa.add(i + 8)),
+                _mm256_loadu_ps(pb.add(i + 8)),
+                acc2,
+            );
             i += 16;
         }
         if i + 8 <= n {
@@ -858,8 +904,12 @@ mod avx {
         debug_assert!(x.len() >= 3 * n_in + n);
         let px = x.as_ptr();
         let pw = w.as_ptr();
-        let (mut a0, mut a1, mut a2, mut a3) =
-            (_mm256_setzero_ps(), _mm256_setzero_ps(), _mm256_setzero_ps(), _mm256_setzero_ps());
+        let (mut a0, mut a1, mut a2, mut a3) = (
+            _mm256_setzero_ps(),
+            _mm256_setzero_ps(),
+            _mm256_setzero_ps(),
+            _mm256_setzero_ps(),
+        );
         let mut i = 0;
         while i + 8 <= n {
             let wv = _mm256_loadu_ps(pw.add(i));
@@ -969,11 +1019,21 @@ pub struct Rows<'a> {
 
 impl<'a> Rows<'a> {
     pub fn f32(data: &'a [f32], stride: usize) -> Self {
-        Rows { data, rows: data.len() / stride, stride, off: 0 }
+        Rows {
+            data,
+            rows: data.len() / stride,
+            stride,
+            off: 0,
+        }
     }
 
     pub fn strided(data: &'a [f32], rows: usize, stride: usize, off: usize) -> Self {
-        Rows { data, rows, stride, off }
+        Rows {
+            data,
+            rows,
+            stride,
+            off,
+        }
     }
 
     #[inline]
@@ -999,34 +1059,123 @@ mod tests {
             for _ in 0..reps {
                 f();
             }
-            println!("{name:40} {:8.3} ms", t0.elapsed().as_secs_f64() * 1e3 / reps as f64);
+            println!(
+                "{name:40} {:8.3} ms",
+                t0.elapsed().as_secs_f64() * 1e3 / reps as f64
+            );
         };
-        let x = |n: usize| -> Vec<f32> { (0..n).map(|i| ((i * 7919) % 1000) as f32 / 500.0 - 1.0).collect() };
+        let x = |n: usize| -> Vec<f32> {
+            (0..n)
+                .map(|i| ((i * 7919) % 1000) as f32 / 500.0 - 1.0)
+                .collect()
+        };
         let (a, w1, w2) = (x(201 * 256), x(2048 * 256), x(256 * 2048));
-        time("linear 201x256 -> 2048", 20, Box::new(|| { linear(&a, 256, W::F32(&w1), None); }));
+        time(
+            "linear 201x256 -> 2048",
+            20,
+            Box::new(|| {
+                linear(&a, 256, W::F32(&w1), None);
+            }),
+        );
         let h = x(201 * 2048);
-        time("linear 201x2048 -> 256", 20, Box::new(|| { linear(&h, 2048, W::F32(&w2), None); }));
+        time(
+            "linear 201x2048 -> 256",
+            20,
+            Box::new(|| {
+                linear(&h, 2048, W::F32(&w2), None);
+            }),
+        );
         let (r2, wr1, wr2, hr) = (x(14472 * 2), x(256 * 2), x(8 * 256), x(14472 * 256));
-        time("linear 14472x2 -> 256", 20, Box::new(|| { linear(&r2, 2, W::F32(&wr1), None); }));
-        time("linear 14472x256 -> 8", 20, Box::new(|| { linear(&hr, 256, W::F32(&wr2), None); }));
+        time(
+            "linear 14472x2 -> 256",
+            20,
+            Box::new(|| {
+                linear(&r2, 2, W::F32(&wr1), None);
+            }),
+        );
+        time(
+            "linear 14472x256 -> 8",
+            20,
+            Box::new(|| {
+                linear(&hr, 256, W::F32(&wr2), None);
+            }),
+        );
         let mut row = x(5184);
-        time("softmax 5184 (x1000)", 5, Box::new(|| { for _ in 0..1000 { softmax_(&mut row); } }));
-        time("par_rows empty x100", 5, Box::new(|| { let mut buf = vec![0f32; 64 * 4096]; for _ in 0..100 { par_rows(&mut buf, 4096, |_, _| {}); } }));
-        time("par_rows touch x100", 5, Box::new(|| { let mut buf = vec![0f32; 64 * 4096]; for _ in 0..100 { par_rows(&mut buf, 4096, |_, p| p[0] += 1.0); } }));
-        let (q, kt, vh, by, bx) = (x(201 * 256), x(256 * 5184), x(256 * 5184), x(8 * 201 * 72), x(8 * 201 * 72));
-        time("attention_dec 201 q, 8 h, 5184 k", 10, Box::new(|| { attention_dec(&q, 256, 8, &kt, &vh, &by, &bx, 72); }));
+        time(
+            "softmax 5184 (x1000)",
+            5,
+            Box::new(|| {
+                for _ in 0..1000 {
+                    softmax_(&mut row);
+                }
+            }),
+        );
+        time(
+            "par_rows empty x100",
+            5,
+            Box::new(|| {
+                let mut buf = vec![0f32; 64 * 4096];
+                for _ in 0..100 {
+                    par_rows(&mut buf, 4096, |_, _| {});
+                }
+            }),
+        );
+        time(
+            "par_rows touch x100",
+            5,
+            Box::new(|| {
+                let mut buf = vec![0f32; 64 * 4096];
+                for _ in 0..100 {
+                    par_rows(&mut buf, 4096, |_, p| p[0] += 1.0);
+                }
+            }),
+        );
+        let (q, kt, vh, by, bx) = (
+            x(201 * 256),
+            x(256 * 5184),
+            x(256 * 5184),
+            x(8 * 201 * 72),
+            x(8 * 201 * 72),
+        );
+        time(
+            "attention_dec 201 q, 8 h, 5184 k",
+            10,
+            Box::new(|| {
+                attention_dec(&q, 256, 8, &kt, &vh, &by, &bx, 72);
+            }),
+        );
         let xr = x(4 * 256);
-        time("dot4 256 (x10000)", 10, Box::new(|| { let mut s = 0.0; for _ in 0..10000 { s += dot4(&xr, 256, &w1[..256])[0]; } std::hint::black_box(s); }));
+        time(
+            "dot4 256 (x10000)",
+            10,
+            Box::new(|| {
+                let mut s = 0.0;
+                for _ in 0..10000 {
+                    s += dot4(&xr, 256, &w1[..256])[0];
+                }
+                std::hint::black_box(s);
+            }),
+        );
         let ln_x = x(5184 * 256);
         let (lw, lb) = (x(256), x(256));
-        time("layer_norm 5184x256", 20, Box::new(|| { layer_norm(&ln_x, 256, &lw, &lb, 1e-5); }));
+        time(
+            "layer_norm 5184x256",
+            20,
+            Box::new(|| {
+                layer_norm(&ln_x, 256, &lw, &lb, 1e-5);
+            }),
+        );
     }
 
     #[test]
     fn erf_matches_known_values() {
-        for (x, e) in
-            [(0.0f32, 0.0f32), (0.5, 0.520_499_9), (1.0, 0.842_700_8), (-2.0, -0.995_322_3), (3.0, 0.999_977_9)]
-        {
+        for (x, e) in [
+            (0.0f32, 0.0f32),
+            (0.5, 0.520_499_9),
+            (1.0, 0.842_700_8),
+            (-2.0, -0.995_322_3),
+            (3.0, 0.999_977_9),
+        ] {
             // the documented ~1e-6 (fast_exp's f32; libm's f64 exp gave 1.2e-7)
             assert!((erf(x) - e).abs() < 1e-6, "erf({x}) = {} vs {e}", erf(x));
         }
@@ -1043,7 +1192,9 @@ mod tests {
                         let mut out = vec![0usize; 64 * 3];
                         par_rows(&mut out, 3, |r0, piece| {
                             let mut inner = vec![0usize; 8];
-                            par_rows(&mut inner, 1, |i0, p| p.iter_mut().enumerate().for_each(|(k, v)| *v = i0 + k));
+                            par_rows(&mut inner, 1, |i0, p| {
+                                p.iter_mut().enumerate().for_each(|(k, v)| *v = i0 + k)
+                            });
                             for (k, v) in piece.iter_mut().enumerate() {
                                 *v = t + r0 * 3 + k + inner.iter().sum::<usize>();
                             }
@@ -1058,14 +1209,21 @@ mod tests {
     #[test]
     fn linear_both_split_strategies_agree() {
         let n_in = 37;
-        let w: Vec<f32> = (0..n_in * 11).map(|i| ((i * 7) % 13) as f32 * 0.1 - 0.6).collect();
+        let w: Vec<f32> = (0..n_in * 11)
+            .map(|i| ((i * 7) % 13) as f32 * 0.1 - 0.6)
+            .collect();
         let b: Vec<f32> = (0..11).map(|i| i as f32 * 0.01).collect();
         for rows in [2usize, 200] {
-            let x: Vec<f32> = (0..rows * n_in).map(|i| ((i * 5) % 17) as f32 * 0.05).collect();
+            let x: Vec<f32> = (0..rows * n_in)
+                .map(|i| ((i * 5) % 17) as f32 * 0.05)
+                .collect();
             let y = linear(&x, n_in, W::F32(&w), Some(&b));
             for r in 0..rows {
                 for o in 0..11 {
-                    let e: f32 = (0..n_in).map(|i| x[r * n_in + i] * w[o * n_in + i]).sum::<f32>() + b[o];
+                    let e: f32 = (0..n_in)
+                        .map(|i| x[r * n_in + i] * w[o * n_in + i])
+                        .sum::<f32>()
+                        + b[o];
                     assert!((y[r * 11 + o] - e).abs() < 1e-4);
                 }
             }
@@ -1079,7 +1237,12 @@ mod tests {
         let k = vec![1.0, 0.0, 0.0, 1.0, 5.0, 5.0];
         let v = vec![1.0, 2.0, 3.0, 4.0, 100.0, 100.0];
         let valid = [true, true, false];
-        let a = Attn { heads: 1, valid: Some(&valid), causal: true, ..Default::default() };
+        let a = Attn {
+            heads: 1,
+            valid: Some(&valid),
+            causal: true,
+            ..Default::default()
+        };
         let o = attention(&q, 2, Rows::f32(&k, 2), Rows::f32(&v, 2), &a);
         assert_eq!(&o[..2], &[1.0, 2.0]); // query 0 sees key 0 only
         let s = 1.0 / 2f32.sqrt();

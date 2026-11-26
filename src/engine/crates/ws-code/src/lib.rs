@@ -29,8 +29,9 @@ pub use model::{
 };
 pub use notebook::{parse_notebook, NotebookCell, ParsedNotebook};
 pub use parse::{
-    parse_file, parse_file_with_sha256, parse_source, parse_source_with_offset, persist_parsed_file, ParsedCodeFile,
-    ParsedCodeUnit, FALLBACK_CHUNK_LINES, FALLBACK_CHUNK_OVERLAP,
+    parse_file, parse_file_with_sha256, parse_source, parse_source_with_offset,
+    persist_parsed_file, ParsedCodeFile, ParsedCodeUnit, FALLBACK_CHUNK_LINES,
+    FALLBACK_CHUNK_OVERLAP,
 };
 pub use store::{CodeIndexStats, CodeStore, CodeStoreError};
 pub use symbols::{extract_symbols, extract_symbols_with_offset, ExtractedSymbol, GrammarKind};

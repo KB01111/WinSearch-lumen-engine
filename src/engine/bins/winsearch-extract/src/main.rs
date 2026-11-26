@@ -23,7 +23,9 @@ fn run() -> Result<(), String> {
     .map_err(|e| e.to_string())?;
     let request = read_request(&mut std::io::stdin().lock())?;
     let response = if !SUPPORTED_KINDS.contains(&request.kind.as_str()) {
-        ws_extract::worker::ExtractResponse { source_sha256: None, code: None,
+        ws_extract::worker::ExtractResponse {
+            source_sha256: None,
+            code: None,
             output: ExtractOutput::unsupported(),
             next_cursor: None,
             total_units: None,
@@ -35,7 +37,9 @@ fn run() -> Result<(), String> {
         || !ws_platform::content::local_content_allowed(&request.path)
         || !ws_platform::content::local_content_allowed(&request.scratch_dir)
     {
-        ws_extract::worker::ExtractResponse { source_sha256: None, code: None,
+        ws_extract::worker::ExtractResponse {
+            source_sha256: None,
+            code: None,
             output: ExtractOutput {
                 status: ExtractionStatus::Failed("content policy changed".into()),
                 segments: Vec::new(),
@@ -49,26 +53,30 @@ fn run() -> Result<(), String> {
     } else {
         let mut budget = ExtractBudget::for_modality(&request.kind);
         budget.max_segments = if matches!(request.kind.as_str(), "pdf" | "video") {
-                ws_extract::worker::MAX_DRAFTS
-            } else {
-                request.max_units as usize
-            };
-        let result = ws_extract::source::with_source_sha256(&request,&budget,|| match request.kind.as_str() {
-            "doc" => DocumentExtractor.extract_batch(&request.path, &budget, request.cursor),
-            "pdf" => ws_extract::pdf::extract_pdf_batch(&request, &budget),
-            "audio" => ws_extract::audio::extract_audio_batch(&request, &budget),
-            "video" => ws_extract::video::extract_video_batch(&request, &budget),
-            "code" => ws_extract::code::extract_code_batch(&request, &budget),
-            "image" => ImageExtractor::default()
-                .with_thumb_dir(request.scratch_dir.clone())
-                .extract_batch(&request.path, &budget, request.cursor),
-            _ => unreachable!(),
+            ws_extract::worker::MAX_DRAFTS
+        } else {
+            request.max_units as usize
+        };
+        let result = ws_extract::source::with_source_sha256(&request, &budget, || {
+            match request.kind.as_str() {
+                "doc" => DocumentExtractor.extract_batch(&request.path, &budget, request.cursor),
+                "pdf" => ws_extract::pdf::extract_pdf_batch(&request, &budget),
+                "audio" => ws_extract::audio::extract_audio_batch(&request, &budget),
+                "video" => ws_extract::video::extract_video_batch(&request, &budget),
+                "code" => ws_extract::code::extract_code_batch(&request, &budget),
+                "image" => ImageExtractor::default()
+                    .with_thumb_dir(request.scratch_dir.clone())
+                    .extract_batch(&request.path, &budget, request.cursor),
+                _ => unreachable!(),
+            }
         });
-        result.unwrap_or_else(|error| ws_extract::worker::ExtractResponse { source_sha256: None, code: None,
+        result.unwrap_or_else(|error| ws_extract::worker::ExtractResponse {
+            source_sha256: None,
+            code: None,
             output: ExtractOutput {
                 status: match error {
-                    ws_extract::ExtractError::SourceChanged=>ExtractionStatus::SourceChanged,
-                    other=>ExtractionStatus::Failed(other.to_string()),
+                    ws_extract::ExtractError::SourceChanged => ExtractionStatus::SourceChanged,
+                    other => ExtractionStatus::Failed(other.to_string()),
                 },
                 segments: Vec::new(),
             },

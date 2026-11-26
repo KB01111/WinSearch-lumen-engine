@@ -8,6 +8,8 @@
 //! live in the `winsearchd` binary.
 
 pub mod calc;
+mod enrichment;
+pub use enrichment::{EnrichmentBatch, EnrichmentCommit};
 pub mod model;
 pub mod retrieval;
 pub mod search;
@@ -28,3 +30,4 @@ pub use model::{
 pub use settings::{search_settings, SettingsHit};
 pub use store::{EntryRow, IndexStats, IndexStore, Root, StoreError};
 pub use vectors::{VectorError, VectorHit, VectorIndex};
+mod query_cache;

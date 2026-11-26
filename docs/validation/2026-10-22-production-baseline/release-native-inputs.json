@@ -1,0 +1,552 @@
+{
+  "scope": "Unsigned CPU/NPU release runtime checkpoint; search performance fails and production/installed acceptance remains incomplete",
+  "source_commit": "9b7b01d86dce6c13abdfedc2c842d3095bbd796d",
+  "target": "x86_64-pc-windows-msvc",
+  "build_profile": "release",
+  "binary_sha256": {
+    "ffmpeg.exe": "24fdada9908f7a231e9dfcc9f462273d3ddb698f5071f04c61496819ce3cfef0",
+    "ffprobe.exe": "a77003c4628c7a414718623156280be47c1aaa2fa85c177d3d1d325d3d06358f",
+    "winsearchd.exe": "ded2248cb42b608ddca808a8f0e4e1900b7de6b70fc0a483f2f8e5be500e7278",
+    "winsearch-cli.exe": "fa1b2f18cdce0524f48305afc0cf55f3322d995baf1bb38dfc82816915c0f22a",
+    "winsearch-embed.exe": "bb5464692d4d91c90b943e66b65c075c03eebe8cdd964ddce0e35b60b23b9289",
+    "winsearch-extract.exe": "c2676e740960e11e4ea53d0c1b57ca224fbd6621ffdbb3146a80a7292188c85a"
+  },
+  "adjacent_native_dll_sha256": {
+    "avcodec-63.dll": "525060f60b3d0171bb9e0ea4b2074a2ff07f5d96b2483a82d9e08fe2ece58e9c",
+    "avdevice-63.dll": "e9e4306ac36778f2faceb1b3ee42152e9b16f10227d2315ae42d282d77c9105c",
+    "avfilter-12.dll": "df6f94c43a04be9f3cedcf94b9c5085ae4186339b6828271d42055723eccc060",
+    "avformat-63.dll": "7275053ebb1dfa708d45d8544ad94bf664e0cb534cd0f2ed979fdf024bc190b3",
+    "avutil-61.dll": "a34c7ef846a2d353c1a6a266b22a001ccd42f6654ab92631a7196e961bdedffd",
+    "swresample-7.dll": "1fbcea031ada11a15e609e209e1cd71a9c632f39bc4794190137b67351db677f",
+    "swscale-10.dll": "9ff8d80bc228f0e557553fd5cfcefc67b682098e9bd6ab08dc7a7d2dc8ad4699",
+    "pdfium.dll": "1f2aee4286b8cf0413ab4562b7121aa454f9cfd9afd6ca8609bcef80927b3f80",
+    "ggml-base.dll": "075cb331dc5155597ca1cd8645ba6839759d4cd3f25a8dabda3ec6cac4e7b768",
+    "ggml-cpu-alderlake.dll": "a542b3ec10a5add11ad61097bb5ca8866cfe60df0525fcb9c9278bae437c58f2",
+    "ggml-cpu-cannonlake.dll": "3568d83c771180a3bf52ca1ae77a4ddf7514d2d199d33e38ebacbdae7b6b1b4f",
+    "ggml-cpu-cascadelake.dll": "3af8e61915d44156355534dd4524ab67d98cce05f4c54c27c77876fb9e7c6bd2",
+    "ggml-cpu-haswell.dll": "1128031edf2a14fb3f3d383a8d6584986a70a0bf672e458831b678655c4f4f25",
+    "ggml-cpu-icelake.dll": "0cc32ef6bebc2e6eaf08ac91a56195634c5e21a59da97639cb5d3e9d6011dabf",
+    "ggml-cpu-sandybridge.dll": "b31213e7fc35c8653988b3b621306ec4b3cd90510f27b288170e4b3d4c27981b",
+    "ggml-cpu-skylakex.dll": "63a27f632f0e1a584c0808aa00701884ae9b6735ad5d9d5f93557766a7c5fa29",
+    "ggml-cpu-sse42.dll": "5d3050b731b7c9ffc6b1dc7419a4a2c8c293cc91a11be6448c85b551fa5a3eeb",
+    "ggml-cpu-x64.dll": "60b7ccb69f0017228fc5b54a2352701a43651d9378294008abe2ed7b743d877d",
+    "ggml.dll": "297965c7526cd8420f30d436b41c6a72f7f326e5c331197f0b23a2bb0b70825a",
+    "iron_xrt_shim.dll": "bac3f5f0451ed87da800a70b9cb1eb13f4f58561ba7b2355859711f9dc0deb95",
+    "llama.dll": "9b793ed08fba5361368e60d70bef02069b082ab2fc450ff2c18b8431227918b7",
+    "mtmd.dll": "952598de5b74aa4de5c16259187aa9c1c227d3b10e7ea79aa9110db1cd90d2fd"
+  },
+  "native_source_sha256": {
+    "src/engine/Cargo.lock": "fab47521126f6e3fdd1f92e750afdeb264350d64d49fd87e3f22a3e95b4e0850",
+    "src/engine/Cargo.toml": "d4c72f0f5949098c5d34d6e7847aaf89d6a8bf01958680d33d82b87d4eefecd2",
+    "src/engine/bins/winsearch-cli/Cargo.toml": "4d199f71e705a318302634b901ac7e2d00ec2cc7bdaf9028139e6960851ea2ce",
+    "src/engine/bins/winsearch-cli/examples/native-eval-parity.rs": "38e69d5f90e1330fd9c5244adb42ffc7c40df2c697d8b3e25f9de53e771a5ef1",
+    "src/engine/bins/winsearch-cli/src/diagnostics.rs": "465a8e93dcd05521d0555b5bfbb1d5c763e0a8231502e626eae8fa135519e3a6",
+    "src/engine/bins/winsearch-cli/src/eval.rs": "84e7bca68a1c8e025e2dc3f0f8aad24f8435adf14f9f324fabbd8e2b6a2fd146",
+    "src/engine/bins/winsearch-cli/src/ipc.rs": "bd34a54797bbda83b567968e52baf68d8a42fc052e9ab98831869619fd8600f0",
+    "src/engine/bins/winsearch-cli/src/main.rs": "d5bd13de3f7838a2140840dcf297233b80ce3da853c6f856b070a7e4e6b3cea8",
+    "src/engine/bins/winsearch-cli/tests/eval_provenance.rs": "14d18f11a14f276571dce6acfb0e965e50cf2c7ab9908a1e39fe2891f3ebb5b9",
+    "src/engine/bins/winsearch-cli/tests/search_json.rs": "10e45e3b23865c6dadcad35ad1bfe5db61f1a32ee0773a964eefaeb7e7810280",
+    "src/engine/bins/winsearch-embed/Cargo.toml": "09d2b129ed390b39a6825de14f114104c7a3091df25c912de6f1c9d7c8e4d0c5",
+    "src/engine/bins/winsearch-embed/build.rs": "ac49befb9adf810c856c6c9fce178da7a56822ee4669873bcccc154ba3e063fe",
+    "src/engine/bins/winsearch-embed/src/main.rs": "aa2e33081f3f14cf8c3450579d7b34b99d04d0be458b4b04dd174f6422c865d5",
+    "src/engine/bins/winsearch-embed/src/server.rs": "32a4f743af6b54bdc89d1ffdf55b0e1a1bb4ca3eff1b742e9e7b5aaa3310c99c",
+    "src/engine/bins/winsearch-embed/src/wav.rs": "fe1ca2c5db6881817077d36725ff8bcd28dbc14669fd0b9a8f31d2639ffcbb7b",
+    "src/engine/bins/winsearch-extract/Cargo.toml": "4a1cbec47884d54973b00b8c032c2d1016223eccdca155f9b79d37b84685b210",
+    "src/engine/bins/winsearch-extract/src/main.rs": "5eb453912a7e5d10373159b757b505728517a604252ed43d87b93e8f1d6ffb5e",
+    "src/engine/bins/winsearch-extract/tests/media_native.rs": "bb8e4e5f95b5caaa17e9453f27aeb768f90f7c9fb21c50aa48ea3a5fe2f8f5b2",
+    "src/engine/bins/winsearch-extract/tests/pdf_native.rs": "6eaba5a5d3af00441fcdaafef21902034bdb9c80c3ecfd2fe127d9c878eb4857",
+    "src/engine/bins/winsearchd/Cargo.toml": "352d49142cb0d99f931d9463c44a47fd64938bd0f70c7d27cdeae288dba007fc",
+    "src/engine/bins/winsearchd/src/catalog.rs": "1e8aa90d23e7aa37ad31b69c849aa54c60c383940ab4b37f0e8a89c2ae115084",
+    "src/engine/bins/winsearchd/src/code.rs": "fa6f016426453ea449ff116c86bd930f7941bc89f8723abe50de5c661ee52288",
+    "src/engine/bins/winsearchd/src/crawl.rs": "3570990b1f139d03c8707cf8883dc14d4267671b6af31a43ac996700e6aabdf9",
+    "src/engine/bins/winsearchd/src/embed_client.rs": "bdac8e8e5f7506047ef7bb09fae712f9dcd2b06dbe408c6fed26d1713556a0ce",
+    "src/engine/bins/winsearchd/src/engine.rs": "34ba19409eae36d1a8faffcb4a009790df3b06ec06aa444a2e488a7c7d5a2e2c",
+    "src/engine/bins/winsearchd/src/enrichment.rs": "c1f339f69f9a957a6ac5d22f8e423c94daae864d89ffdc333b3ca27622d0d227",
+    "src/engine/bins/winsearchd/src/extract.rs": "6f6028f0147f1e8d504ca3f691a5309260a4c7a0c487f0fb922646de505ba2fe",
+    "src/engine/bins/winsearchd/src/extract_client.rs": "00bd95a3f85b3e5d932cdea72175660f001d589031307e885a06b551cf084641",
+    "src/engine/bins/winsearchd/src/indexer.rs": "9a98194df65ea2f76cf715cf76a87a990eafaa1b0322bc4488ecea274c3a39d6",
+    "src/engine/bins/winsearchd/src/ipc_writer_tests.rs": "f217ee339929f22bbe5c8237e10eedfb04139ab04f77ae967abb0e5340e9e8d6",
+    "src/engine/bins/winsearchd/src/logging.rs": "d7cf3348f9f7297600715b563a7228b8380228a7b409cf99f3e565631b630718",
+    "src/engine/bins/winsearchd/src/main.rs": "c85a81b07a5d74cb7b1c153c6c8dbb834feaf5346b25eff3541ec410aa1ada9d",
+    "src/engine/bins/winsearchd/src/model.rs": "2af07c0b07bcbc2e8bf237038b8a51416e9c1cbcb781e39f55dd99718500a8aa",
+    "src/engine/bins/winsearchd/src/policy.rs": "c84660ac1e51dc7ee430dfef7fa1dc1211ac9d921225bd35f000e246fb194947",
+    "src/engine/bins/winsearchd/src/reset.rs": "176006b656f33ab0f6240f7d8734ad06293a6c05961816c53d61d9dea71663a8",
+    "src/engine/bins/winsearchd/src/root_policy_tests.rs": "37b08040356def4737e0256baf641b5ce27e4e14ed995604c34bea320d37137e",
+    "src/engine/bins/winsearchd/src/root_rules.rs": "cabf7a13439b878525e07270e22d8348cf1adf240f7f9991d981ed5e12e92ee2",
+    "src/engine/bins/winsearchd/src/search_budget.rs": "97e7082df27a79112480be3494c7df099178f07d0bb1cdc3b98acdf82238dc0b",
+    "src/engine/bins/winsearchd/src/server.rs": "a896a9ae95010925795abe7958495aedc8247c46fc221a4cdd5df12e6c074e39",
+    "src/engine/bins/winsearchd/src/watcher.rs": "e4da6ce1af158774f86ab5c2198c7815ef72a5ffef6fd811436f1b2a36c828ae",
+    "src/engine/bins/winsearchd/tests/fixtures/extract_transport.rs": "a15d16ed17ee646764d8dc824bf0ef10220507c4336fdaef8567fad5dbbf14e5",
+    "src/engine/crates/ws-client/Cargo.toml": "4728e591aee1b64ebe26f62ec3532ef1104fe8ad67746556606d34b103d60f96",
+    "src/engine/crates/ws-client/examples/native-client-smoke.rs": "f3164c9731a9d184c63158c076874cd71b1d28a8c97790834f3d41ba0151c42a",
+    "src/engine/crates/ws-client/src/client.rs": "6911b0f88a0b340f4e89de820877fc87d3545d13ef5c6b7ead0e2b13320577b1",
+    "src/engine/crates/ws-client/src/lib.rs": "df9ccfad1a3b131b45e4ed329c235608eb424a7f94cad9b4ee9d75adb2df1cce",
+    "src/engine/crates/ws-client/src/transport.rs": "f1c3808bf968950179e916eeb843e1c258780d20c0af626ea059be7009d14169",
+    "src/engine/crates/ws-code/Cargo.toml": "c30c057f1c5cecaf02b6439a68952211f7dc0edaab11955ee160cc98bfecdb65",
+    "src/engine/crates/ws-code/src/crawl.rs": "0d2c8efb89d2e75612b523af8dd6774f1e641b86938ad0d49d9a9030ce667dc2",
+    "src/engine/crates/ws-code/src/lib.rs": "f4aba7e99d7d4571ca4eb7f88199ed077fffc0d4da331379dc0c49cc9656839f",
+    "src/engine/crates/ws-code/src/model.rs": "50106a921aa2ae0b9e9f0ac0f1cc7ef8567b1abb14d9de13ab63add6a2ba8992",
+    "src/engine/crates/ws-code/src/notebook.rs": "c2c966317badbbb08aaee72b7740920a8f765fdeb5e0b1ff31214145fcbab05b",
+    "src/engine/crates/ws-code/src/parse.rs": "7e78ef93f9d921a85d5be2228996ba1f92b3c0e33bb39f98ab1a3517301c305f",
+    "src/engine/crates/ws-code/src/store.rs": "d112981143a01b8d91096fd06a67b0e319bd98bbf50b665e1027bedc1fb488a2",
+    "src/engine/crates/ws-code/src/symbols.rs": "0b7fa2167e55c7c58e62169a6a34fc666ebfaf5c0beaa61eabd412f3d323ebc6",
+    "src/engine/crates/ws-code/src/syntax.rs": "cb3b77812ebd3fb4d79ead1421b6dc9dcbfe1fd4b994d1aa7a25f791c2b96111",
+    "src/engine/crates/ws-embed-protocol/Cargo.toml": "ca4be39c48332156c89ad890c183355bee25893efa4f5955611a5ed82daffe7e",
+    "src/engine/crates/ws-embed-protocol/src/lib.rs": "4d629839b658b27900a51f5862d09e552f38d94819cd32c8f4b1682f6cae7881",
+    "src/engine/crates/ws-embed/Cargo.toml": "ea846379e40fe22440e15fb7fc640a0983c24779cf0b52e4e3e39b8c1d5887af",
+    "src/engine/crates/ws-embed/build.rs": "a8bddfbccadb1e410e17d6fb04c8cb75a329246f99909387966b86f78c94dc62",
+    "src/engine/crates/ws-embed/examples/media-throughput.rs": "a74144ca7040759daea4960ab2777cca9dcda12925c04b4ab97a980a9a30ccae",
+    "src/engine/crates/ws-embed/shim/ws_embed_shim.cpp": "06472068b2e857294e29d4e4688ff69665c85fef45378dd763f5bdf732b91148",
+    "src/engine/crates/ws-embed/src/backends.rs": "3b762784952fa84d3c196eaa5aa7105abf968bea49e1966d3ed4de1492c9ef15",
+    "src/engine/crates/ws-embed/src/ffi.rs": "a731982af4f47e7e9c2155066ff5194b158f5dee859de5a00f87bfb2968f9cb3",
+    "src/engine/crates/ws-embed/src/image.rs": "e87300ff1ba79dd00a51328021d2b3265ed9f1afedd72e62b854350e0e7d18cc",
+    "src/engine/crates/ws-embed/src/lib.rs": "85795cf19f9ca3fbf849f58db1e5faa8aa2c160ee04a7604ce3e51da019cd1a1",
+    "src/engine/crates/ws-embed/src/npu.rs": "ee1a1ba361f6102d702c692742173dc7e52500248405a5c4162ea888f7ecc0a1",
+    "src/engine/crates/ws-embed/src/runtime.rs": "9a13c9c54e3fcf0cf1de9f59883c5bea237b436bc8cc4ba2cefa7a99ed590eae",
+    "src/engine/crates/ws-embed/src/vector.rs": "f818c9ef6ccf1379b3bc9e6742473f3e49d586f664c0ad3694f5d31f3544fe90",
+    "src/engine/crates/ws-embed/tests/fixtures/embeddinggemma2-reference.json": "fbf4df37b305dd9a11bf5001d811c93c60eb373f8dd2361cb7b761a2a7bced27",
+    "src/engine/crates/ws-embed/tests/fixtures/media/reference-media-vectors.json": "0ec9336aa53fb0d5bafa074cd56122e2fd914cb73f080b4f98332872089f6dd8",
+    "src/engine/crates/ws-embed/tests/media.rs": "73ab2f861e8d5cef0cee6ba60427b98173348594d9babc59b6ed03b1741f068b",
+    "src/engine/crates/ws-embed/tests/native.rs": "2ff44cb7944ab61b3abc25704fc4cda28acd6ee72f8f3f685f39246e267b4fe4",
+    "src/engine/crates/ws-embed/tests/reference.rs": "682c9004633bc18959577cbd41272fc51c89f79a88051143e20a8b088d2294c8",
+    "src/engine/crates/ws-extract/Cargo.toml": "4ac3edc1f9cb855135ad6299061dee5b250d1abe35ff3076027f93518f86f754",
+    "src/engine/crates/ws-extract/src/audio.rs": "5ce2949a9496b1afd1d42c6d3226009f18bee5243b7e66f692d16f6e0782067b",
+    "src/engine/crates/ws-extract/src/budget.rs": "572b90415195d3b508c915f0f73a1cb21a9a75f61861429f5078a9950b164129",
+    "src/engine/crates/ws-extract/src/chunk.rs": "c26732b9e941dd3ec404ee3f588f02df9274edcff340207abcf78cc000c37c37",
+    "src/engine/crates/ws-extract/src/code.rs": "797ed89158523c9d5a55c280f5ef007823bb4e9547b0ecac95da08646cedd7d8",
+    "src/engine/crates/ws-extract/src/decoder.rs": "29822ef0f0c831ed1eb2abccc1774f152ba6ec4abf0723a012e718a13be074bb",
+    "src/engine/crates/ws-extract/src/docs.rs": "c2e5e061bf448dc8e37a9bcc4cec6dc23f6c143e0f1fc5c27a656e7300006065",
+    "src/engine/crates/ws-extract/src/image.rs": "7bf5b3b30ea317be12e17771193c9d3a11dbc9520b2825a86b772416cd0c2d51",
+    "src/engine/crates/ws-extract/src/lib.rs": "f441d23f6b02743eabd26108a6c77fd5e86d807e0dae2a27491af5d8c32ea55c",
+    "src/engine/crates/ws-extract/src/ocr.rs": "7dd487673776a40292caae22c00dbaf8ea4aef5aae8cfed66073a0e348cd1da1",
+    "src/engine/crates/ws-extract/src/pdf.rs": "0fcbfab2fe540820d91704569ec8e56ff2df694aeb7f7f1460c0c7c36c2cda7c",
+    "src/engine/crates/ws-extract/src/source.rs": "74baa769561d49f5dbd78693a4d8be8f217af87509e1e582c38c73af36f6cba2",
+    "src/engine/crates/ws-extract/src/video.rs": "97ebf9b1eff88bc75b2776dce6160942c12454aa3c58e3e4dfb969a51d73a83b",
+    "src/engine/crates/ws-extract/src/worker.rs": "8cb7d8e46282bfa6b7aa6153f02bd128dbfe5d45511ddbf3efe78a4dcfcf10df",
+    "src/engine/crates/ws-index/Cargo.toml": "f5875728bb3047f122443d33db77d7f37c01006f3de4237b8035664c69b3545d",
+    "src/engine/crates/ws-index/examples/bench.rs": "9ff495e69982023d708e4ffe1b5de1a96f624a6d7da55edbb7d68d1891d311c2",
+    "src/engine/crates/ws-index/src/calc.rs": "c6f7d14b7552b421826ce6e033948360287b4b5b1d4b22308531a245112d1f44",
+    "src/engine/crates/ws-index/src/enrichment.rs": "4e63daec80cee771731f624a330733a391379958a897bef0eeebc36730f8d62a",
+    "src/engine/crates/ws-index/src/lib.rs": "621144ac20a0ee233f53712e7a2daef0c29fdf46dfdf2c7064c56cae6be4bc5c",
+    "src/engine/crates/ws-index/src/model.rs": "3c11890a172f2580a5c9a387789508cdf226121bdb45f1dd00b0bef64ae606e6",
+    "src/engine/crates/ws-index/src/query_cache.rs": "61dd5bfeea8aabd932c4ad21c8c24b025dd7cb61d0a1f216583b2d069cec59b0",
+    "src/engine/crates/ws-index/src/retrieval.rs": "d66c65de91ee936ddfc5adfa14c06a2c4c6a175820749b79f49643dfd02fcf6c",
+    "src/engine/crates/ws-index/src/search.rs": "bbb65fd11f43e1027ff02949c3224a58f725e3b99aaf520b02a565a0cf63cf36",
+    "src/engine/crates/ws-index/src/settings.rs": "c0a2c522ef332d05c8c8a43382f7d92b31ff792c1112e5e4cc1fc79fb9833955",
+    "src/engine/crates/ws-index/src/store.rs": "be42d81c3e4ce64566287cba4b399478bf6a34de4c1ba6360ca76b57eebb794e",
+    "src/engine/crates/ws-index/src/vectors.rs": "5fabe4fffd6f7e586fee8d3eff2c03be1f8ac48b380740732d2ecf0f6ecdeac5",
+    "src/engine/crates/ws-modelmgr/Cargo.toml": "85db86327be1e4bfa68a5b8059b2eed8a6553d66c82aa9687d3281e299009af5",
+    "src/engine/crates/ws-modelmgr/src/download.rs": "f96f1787a62cb77ff30e7dedbcb82c79a676263fbcdb1607294412cf7a9f6df0",
+    "src/engine/crates/ws-modelmgr/src/download_transport.rs": "04b57970ec82b10b0cee3c806fadd608922b4f78af9a7cd12691050c1f4d6dc7",
+    "src/engine/crates/ws-modelmgr/src/lib.rs": "5966361dfc687f3cd02846dd8aacfb6ba03c3a2faa07e5dcb8ce9a0ad45ad31e",
+    "src/engine/crates/ws-modelmgr/src/manager.rs": "d351be22203386ec7551fa5e49f7a7176608f5637d74ef6cf8ff9535f3bbb734",
+    "src/engine/crates/ws-modelmgr/src/manifest.rs": "63410533aab879e9a5c8d2aaf0a4d57e1890291276cb0fcf6de073f32408eb6e",
+    "src/engine/crates/ws-modelmgr/src/npu_bundle_files.rs": "a900bd35f7452b8159817f2204634ac5d56b18afae96f3f2010eb5bdc827ca50",
+    "src/engine/crates/ws-modelmgr/src/recipe.rs": "0ff98d83c01276804d7203cfb0acfedbe30d9823f0546f77f5cd499cb860eb7d",
+    "src/engine/crates/ws-platform/Cargo.toml": "f55c97e22a9c68fbe14a319eb25dbdd5a6262abad863e0beb34ff257d9cd13f5",
+    "src/engine/crates/ws-platform/src/child_job.rs": "acc8d89285402ed0482d7cf8ca5b9c0df89c8fa01e0e8665fc54e436eeceff76",
+    "src/engine/crates/ws-platform/src/content.rs": "daa8add9b9cdcc31d700670a7400d884f60141ab45ee7fb59dfe7d818bde1eeb",
+    "src/engine/crates/ws-platform/src/directory_guard.rs": "8f6c4ae46c8a3543e87359f61f67a4d358a1e734aa38bdba2ba04ba52e4ef4e9",
+    "src/engine/crates/ws-platform/src/identity.rs": "af077853dad6f3fa4a33e1a741fecba8c9dafe8b2e88f08fe8302a95afdb6056",
+    "src/engine/crates/ws-platform/src/ifilter.rs": "f2e5f9b4d24550d7fd2a872026862461ab8deee80393a11698143ad6d2c26289",
+    "src/engine/crates/ws-platform/src/lib.rs": "ee691b2b87f5bc2baee6a3ae6a3b6cb5a234f18e3d6d05ec367b77b674b7a0dc",
+    "src/engine/crates/ws-platform/src/npu.rs": "810d38bc2c4a464daad64d0ad64821c93297d9841d18943cfbb74b0890a85ac0",
+    "src/engine/crates/ws-platform/src/ocr.rs": "742868fd6e6f34b6ddbfc635ddafd9c798751fba5c6070a6b5dfc71dfd49baff",
+    "src/engine/crates/ws-platform/src/paths.rs": "836d4aded0d0960c449d197ce0711427ed9add4c428c11941c1b89064ece3de4",
+    "src/engine/crates/ws-platform/src/pdfium.rs": "96e22bf9fa5a76278d2605e1ab19937a3699d3926b91410579829ab6cee8aebc",
+    "src/engine/crates/ws-platform/src/pipe.rs": "fdf1b51be49840d34f3bc10f89646eac22d03d0e02218d9435f7e81dceff03f9",
+    "src/engine/crates/ws-platform/src/pipe_tests.rs": "762962c40e26638a1e42d7d95d29c2c3ed52c1be221c4ae5dd5f341ad426981d",
+    "src/engine/crates/ws-platform/src/single_instance.rs": "e7e5138f51415f72ab91335fea0afd8077eba62afe983d63033d76b13a9fec0c",
+    "src/engine/crates/ws-platform/src/source_guard.rs": "bdefcd3c3bb0cb279b9a0462c90c31191145c9e76ba460b56fe986bddb053a17",
+    "src/engine/crates/ws-platform/src/wic.rs": "ac852029016325c63739dc67641c8d4b6d45a3171e6eb8e1ff48d1e94c7ea2ff",
+    "src/engine/crates/ws-protocol/Cargo.toml": "e514800b5fea68a70ee1bf0066d4b3d32c5fa38f594640fe7182abfe14db20e5",
+    "src/engine/crates/ws-protocol/src/enrichment.rs": "e5569e781f709a0eb505574756192983d54fff3eac533cd9a55072c4ec9cd0be",
+    "src/engine/crates/ws-protocol/src/entry.rs": "57135faab6428856982c1929241d98e15378f88652a0f040e2896c16e4ac51e4",
+    "src/engine/crates/ws-protocol/src/file_kind.rs": "8ea2abc5ae577d5161554b24c49bb91760e89fe39fa7708998e7506cf68da50b",
+    "src/engine/crates/ws-protocol/src/framing.rs": "89c5246ba4e541f8928ddd1320ee55912cffd418c5080a0c87c94d8188304d5c",
+    "src/engine/crates/ws-protocol/src/lib.rs": "72169bb986f7b972b5b65804dfcd699711575c791f8efab0cfa939a29e4cf5b1",
+    "src/engine/crates/ws-protocol/src/limits.rs": "dbf887ba20531dd63a8240a9addbfa3308bf445daf599b78c2bd27f72edb46ee",
+    "src/engine/crates/ws-protocol/src/messages.rs": "6e614e6164e7d77c0d76a0abe137212494ea4e374d1de315e4b56c0857bd8124",
+    "src/engine/crates/ws-protocol/src/outcome.rs": "0d19dd6feeb60b335d6be3ff7f3cf1933f05b227a7ec3c14cb46ce167a9cdfb9",
+    "src/engine/crates/ws-protocol/src/preview.rs": "7d86e5a3edb547c1844f5ee896577708406c4a9c0e6bc48c23de706289576070",
+    "src/engine/crates/ws-protocol/src/related.rs": "d8c670debab54826d59fc8e04f5e7b3c511cec5256afb387c145d33081a0e0b9",
+    "src/engine/crates/ws-protocol/src/reset.rs": "e503de68dd5f2c48b04f3fec393f3bdb1f815873357693212f0401451df0b3f4",
+    "src/engine/crates/ws-protocol/tests/entry_resolution.rs": "d85a1ed3a392c10a66f77242b011de2394a25514dfd255c34cfbc89638fa6895",
+    "src/engine/crates/ws-protocol/tests/indexing_config.rs": "861bcdf7824ba384355303c0ec833d9256dbf8924858b1e2d20f3fa4735ff7ed",
+    "src/engine/crates/ws-protocol/tests/preview.rs": "d51bbf2b61635ff322d50e69c7c6c00125d27ee61dafd8375760f24899ecf10e",
+    "src/engine/rust-toolchain.toml": "24ef3b9d3edbd850aa386cb0a98e10450b0030991a4537cb359f54d49dbbb33a",
+    "src/engine/third_party/ffmpeg.json": "b9c90ddc08a272a00aab23a5a45096576c79a4bf4b3f34427e7f76df84949a43",
+    "src/engine/third_party/msvc-runtime.json": "eab9d5c1cd8b7a5a309258e0e22f1240ae254b27c3c2684b79cd84674629565e",
+    "src/engine/third_party/pdfium.json": "3fb0c17fc08e51dd399e851a39e6290469884737a78ce965dcd3af6d496ea450",
+    "src/engine/third_party/taconite/Cargo.toml": "20b9b599abdbc90d6ced721a2a5b78bb0acc2584812b1ec0100b89a4c86561bf",
+    "src/engine/third_party/taconite/build.rs": "c6af3f8ca0d22012c1be2a603c43dd10a59d2857dcc68b342d68cebd0e373005",
+    "src/engine/third_party/taconite/shim/iron_run_guard.h": "cb149b4e1d2ab35cabca612c97d94d894fb79296a51c0c985c1a13ea378ab2eb",
+    "src/engine/third_party/taconite/shim/iron_xrt_shim.cpp": "97b6beffdc7018a66bbb25a80dcfe2f094872eeb4730083d0ffc0e68cf655286",
+    "src/engine/third_party/taconite/shim/iron_xrt_shim.h": "f081710bac5ee9fe05c6243f23011f25a526170e9860a5cf47cc63e7e5005604",
+    "src/engine/third_party/taconite/src/compile.rs": "06942774b8f14a53b6f6d3b9cab278fe6e18214f1a7729bdb05cfe7cbb6878cf",
+    "src/engine/third_party/taconite/src/cpu.rs": "456467ce793b872caa538f9c3f2bc571db048ac2f9f77b67732b0b4b7c4360ae",
+    "src/engine/third_party/taconite/src/direct.rs": "7d7bde997754f8b42618b1b7489d8b29ea2012519e6428a0447191ec426c2c93",
+    "src/engine/third_party/taconite/src/json.rs": "976a9a9081a7608e6c376c08485352986c42a071552e5c16bdd73f2a65a95c4d",
+    "src/engine/third_party/taconite/src/lib.rs": "4cd3810f3b1d7494d148899ef3cf65096e15fb4d38f464b450ce74386c04acce",
+    "src/engine/third_party/taconite/src/pyre.rs": "da5f0222f3afb98f2cc63e220860c842f90efa57310d4827822453701c9b8f6d",
+    "src/engine/third_party/taconite/src/timing.rs": "d56f93f1644da04de6b87ec5332dd5e66276aec4d5750c815174f1ddf534d24b",
+    "src/engine/third_party/taconite/src/unicode.rs": "9ec42dd956ac2e53483c6f40818080fbafd2e0c4e7b9d787546d39c685a8f3e2",
+    "src/engine/third_party/taconite/src/unicode_data.rs": "e59e97865900572d6a24b763abbc9ba17ee6ec52f6b688e74e5adc789612f399",
+    "src/engine/third_party/taconite/src/winload.rs": "3706a820f30db873eb0d6a20f8061393ff4deb7e8e41ebdbe2344288a9af099f",
+    "src/engine/third_party/taconite/src/xrt.rs": "3491db701aa05f9acc26f7d636a906467c5c3fff8a77330455c89b0540c7b103",
+    "src/engine/third_party/xrt-sdk.json": "b6b7ebdcfa5908aac45c582a786102c61afd0547d260bfb22d158513286dc721"
+  },
+  "npu_runtime_compiled": true,
+  "build_dependencies": {
+    "llama_commit": "4fbc76dec51d0add466f0210855c0596589b60d4",
+    "xrt_archive_sha256": "ccc244c2c423588972ade76142cdc01049477aaa39a35be97e782b97eb7c5295",
+    "decoder_archive_sha256": {
+      "ffmpeg": "7157177b8a6cb2174c1650ba8c71b363f2c78cba5330f88c4c02cf5b2b880646",
+      "pdfium": "1fd8af952832dbb0eb16d9249f68fe09e5f5ebf7c3dd9f6066ea2720cc28487d"
+    }
+  },
+  "npu_driver_version": "32.0.20102.4480",
+  "driver_scope": "Win32_PnPSignedDriver NPU Compute Accelerator Device; firmware not verified",
+  "independent_npu_reference": {
+    "source_commit": "9b7b01d86dce6c13abdfedc2c842d3095bbd796d",
+    "test_sha256": "3a438e157a44efa6ad4a469e8865bd1e99e2332d0be44c27bb0a6da233df0834",
+    "reference_gate": "18 tokenizer cases, independent embeddings, CPU/NPU text and 140/280 images; cosine >= .999",
+    "passed": true,
+    "timed_out": false,
+    "exit_code": 0,
+    "owned_job_empty": true,
+    "elapsed_seconds": 40.769614300001194,
+    "log_sha256": "7837bb454f00cef83a38bdf0e2a6366ca7338b79b3d7092f12da151a727a194a"
+  },
+  "media": {
+    "cpu": {
+      "references": {
+        "screen-280": 0.9999420467524335,
+        "photo-140": 0.9998148075830819,
+        "frame-70": 0.9996982675196524,
+        "speech": 0.999750500695376
+      },
+      "retrieval": [
+        {
+          "query": "a computer application screenshot with a red warning and a blue button",
+          "expected": 0,
+          "scores": [
+            0.6436432766475132,
+            0.5363543207245405
+          ]
+        },
+        {
+          "query": "a landscape with a tree and green hills under a blue sky",
+          "expected": 1,
+          "scores": [
+            0.5778621252715366,
+            0.7589841728360176
+          ]
+        },
+        {
+          "query": "a train to Stockholm leaves the railway station from platform five",
+          "expected": 0,
+          "scores": [
+            0.8444276691966782,
+            0.5048316051466761
+          ]
+        },
+        {
+          "query": "baking a chocolate cake in the kitchen with flour butter eggs and sugar",
+          "expected": 1,
+          "scores": [
+            0.5019086504886976,
+            0.8135445491469359
+          ]
+        }
+      ],
+      "actual_job_backends": [
+        {
+          "kind": "embed_texts",
+          "backend": "cpu"
+        },
+        {
+          "kind": "embed_image",
+          "backend": "cpu"
+        },
+        {
+          "kind": "embed_image",
+          "backend": "cpu"
+        },
+        {
+          "kind": "embed_image",
+          "backend": "cpu"
+        },
+        {
+          "kind": "embed_audio",
+          "backend": "cpu"
+        },
+        {
+          "kind": "embed_audio",
+          "backend": "cpu"
+        },
+        {
+          "kind": "embed_audio",
+          "backend": "cpu"
+        },
+        {
+          "kind": "embed_audio",
+          "backend": "cpu"
+        },
+        {
+          "kind": "embed_audio",
+          "backend": "cpu"
+        },
+        {
+          "kind": "embed_texts",
+          "backend": "cpu"
+        }
+      ],
+      "owned_job_empty": true
+    },
+    "npu": {
+      "references": {
+        "screen-280": 0.9997516189631351,
+        "photo-140": 0.9996640968214123,
+        "frame-70": 0.9996982675196524,
+        "speech": 0.999750500695376
+      },
+      "retrieval": [
+        {
+          "query": "a computer application screenshot with a red warning and a blue button",
+          "expected": 0,
+          "scores": [
+            0.641884259410923,
+            0.5387084771798466
+          ]
+        },
+        {
+          "query": "a landscape with a tree and green hills under a blue sky",
+          "expected": 1,
+          "scores": [
+            0.5783118437596405,
+            0.7600055201763001
+          ]
+        },
+        {
+          "query": "a train to Stockholm leaves the railway station from platform five",
+          "expected": 0,
+          "scores": [
+            0.8448965525614505,
+            0.5059362468822063
+          ]
+        },
+        {
+          "query": "baking a chocolate cake in the kitchen with flour butter eggs and sugar",
+          "expected": 1,
+          "scores": [
+            0.5021241649189765,
+            0.8138406571216164
+          ]
+        }
+      ],
+      "actual_job_backends": [
+        {
+          "kind": "embed_texts",
+          "backend": "npu"
+        },
+        {
+          "kind": "embed_image",
+          "backend": "npu"
+        },
+        {
+          "kind": "embed_image",
+          "backend": "npu"
+        },
+        {
+          "kind": "embed_image",
+          "backend": "cpu"
+        },
+        {
+          "kind": "embed_audio",
+          "backend": "cpu"
+        },
+        {
+          "kind": "embed_audio",
+          "backend": "cpu"
+        },
+        {
+          "kind": "embed_audio",
+          "backend": "cpu"
+        },
+        {
+          "kind": "embed_audio",
+          "backend": "cpu"
+        },
+        {
+          "kind": "embed_audio",
+          "backend": "cpu"
+        },
+        {
+          "kind": "embed_texts",
+          "backend": "npu"
+        }
+      ],
+      "owned_job_empty": true
+    }
+  },
+  "retrieval": [
+    {
+      "backend": "npu",
+      "suite": "names",
+      "recall_at_5": 0.933,
+      "mrr": 0.933,
+      "negative_fp_rate": 0.0,
+      "actual_backend_responses": {
+        "npu": 19
+      }
+    },
+    {
+      "backend": "npu",
+      "suite": "code-development",
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "negative_fp_rate": 0.0,
+      "actual_backend_responses": {
+        "npu": 32
+      }
+    },
+    {
+      "backend": "npu",
+      "suite": "code-held-out",
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "negative_fp_rate": 0.0,
+      "actual_backend_responses": {
+        "npu": 32
+      }
+    },
+    {
+      "backend": "npu",
+      "suite": "retrieval-development",
+      "recall_at_5": 0.938,
+      "mrr": 0.938,
+      "negative_fp_rate": 0.0,
+      "actual_backend_responses": {
+        "npu": 31,
+        "cpu": 2
+      }
+    },
+    {
+      "backend": "npu",
+      "suite": "retrieval-held-out",
+      "recall_at_5": 0.938,
+      "mrr": 0.906,
+      "negative_fp_rate": 0.0,
+      "actual_backend_responses": {
+        "npu": 31,
+        "cpu": 2
+      }
+    },
+    {
+      "backend": "mixed",
+      "suite": "names",
+      "recall_at_5": 0.933,
+      "mrr": 0.933,
+      "negative_fp_rate": 0.0,
+      "actual_backend_responses": {
+        "npu": 10,
+        "cpu": 9
+      }
+    },
+    {
+      "backend": "mixed",
+      "suite": "code-development",
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "negative_fp_rate": 0.0,
+      "actual_backend_responses": {
+        "cpu": 16,
+        "npu": 16
+      }
+    },
+    {
+      "backend": "mixed",
+      "suite": "code-held-out",
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "negative_fp_rate": 0.0,
+      "actual_backend_responses": {
+        "cpu": 16,
+        "npu": 16
+      }
+    },
+    {
+      "backend": "mixed",
+      "suite": "retrieval-development",
+      "recall_at_5": 0.938,
+      "mrr": 0.938,
+      "negative_fp_rate": 0.0,
+      "actual_backend_responses": {
+        "npu": 16,
+        "cpu": 17
+      }
+    },
+    {
+      "backend": "mixed",
+      "suite": "retrieval-held-out",
+      "recall_at_5": 0.938,
+      "mrr": 0.906,
+      "negative_fp_rate": 0.0,
+      "actual_backend_responses": {
+        "npu": 16,
+        "cpu": 17
+      }
+    }
+  ],
+  "recovery": {
+    "checks": [
+      "blocked logging permits actual native search; two owned profiles admit independent roots",
+      "reset changes both namespaces, rejects stale references/replay and preserves policy/models/other profile",
+      "post-reset restart retains namespace and requires fresh root admission; independent Stop leaves profile B searchable",
+      "actual CLI exports only sanitized status fields",
+      "both ordinary/code stores pass integrity_check after Stop/restart"
+    ],
+    "independent_stop_ms": 24.94520000072953,
+    "owned_jobs_empty": true
+  },
+  "evidence_sha256": {
+    "artifacts/candidate-query-cache-9b7b01d/cpu-media/results.json": "8881ebc488de3a92d2f51a876bfeab7e787f261c8b8ca510a81f78187ab122a6",
+    "artifacts/candidate-query-cache-9b7b01d/npu-media/results.json": "2c052fd11a5c403335171d7e37cc1ec6e5ea4e04bd31bb4f585de8d004119438",
+    "artifacts/candidate-query-cache-9b7b01d/independent-npu-reference/results.json": "ee6db8c2df3aa17f1f960da59e3a59d0530a1cfd8042505dfb04f444d421ba10",
+    "artifacts/candidate-query-cache-9b7b01d/retrieval-npu-names/results.json": "5b36f42f627d4d6d751e7dafc7486d8477667610758b85242460e75290aef157",
+    "artifacts/candidate-query-cache-9b7b01d/retrieval-npu-code-development/results.json": "58ebebec5f3184508e31028f7202c84d4c744f42a620a69544465f40a47940a3",
+    "artifacts/candidate-query-cache-9b7b01d/retrieval-npu-code-held-out/results.json": "bee41495cf7200362a9a8e574fe5805b8fcb4ddf4343a89b708db5c7fa3a760d",
+    "artifacts/candidate-query-cache-9b7b01d/retrieval-npu-retrieval-development/results.json": "e1206d69fb95888007145cb1fd5edf4c08e99fbd5190597cf9152a218629fa7f",
+    "artifacts/candidate-query-cache-9b7b01d/retrieval-npu-retrieval-held-out/results.json": "f904bbf57a59fa492aec6fca1eec58820135c615503d319a6ab93f7ae3ebee1e",
+    "artifacts/candidate-query-cache-9b7b01d/retrieval-mixed-names/results.json": "3e252eba97fdfebd974bbfe235f1648727c76d121ba53818ea12f21805e69bc5",
+    "artifacts/candidate-query-cache-9b7b01d/retrieval-mixed-code-development/results.json": "9b3f89928e969b41eb98f7e0ec70f62b6e4d8db4c259664cab5c0980f95edd35",
+    "artifacts/candidate-query-cache-9b7b01d/retrieval-mixed-code-held-out/results.json": "0cd705bf9221c52397635e5b56d3dd181d8e5ac064dc8ea9bcfe4937fc094e80",
+    "artifacts/candidate-query-cache-9b7b01d/retrieval-mixed-retrieval-development/results.json": "2e57bcbc923370174990e3683dd8274c8598fcb02c29c3d3f6e6411e50a12742",
+    "artifacts/candidate-query-cache-9b7b01d/retrieval-mixed-retrieval-held-out/results.json": "435e01bd2dc68730cc2658e50074f33e35cfe00b06e267204a04ae4903e20936",
+    "artifacts/candidate-query-cache-9b7b01d/recovery/checks.json": "57362f9878b2d47001434bc1dfae595647fae42943638a7a0d5b4f4cd4dd6be5",
+    "artifacts/candidate-query-cache-9b7b01d/build-inputs.json": "080bc5d719b25040f191db59a9f9c7d2fb3229b2f3fdce50721964d9086466a1"
+  },
+  "performance_acceptance": false,
+  "installed_acceptance": false,
+  "unverified": [
+    "performance targets and larger corpora",
+    "signed payload",
+    "copied final package outside both checkouts",
+    "corresponding-source delivery",
+    "Lumen cutover/migration",
+    "installed upgrade/rollback",
+    "hardware loss/power/sleep",
+    "CUDA/Vulkan"
+  ],
+  "qualified_routes": {
+    "text": true,
+    "imageTokenBudgets": [
+      140,
+      280
+    ],
+    "cosineThreshold": 0.999,
+    "retrievalPassed": true
+  },
+  "performance_report": "exact-scale-query-cache-release-failure.json"
+}

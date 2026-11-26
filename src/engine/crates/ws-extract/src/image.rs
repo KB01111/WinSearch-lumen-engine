@@ -214,16 +214,15 @@ impl Extractor for ImageExtractor {
         let thumb_path = match stat_thumbnail_key(path) {
             Ok((vol, fid, mtime)) => {
                 let candidate = thumbnail_cache_path(&self.thumb_dir, vol, fid, mtime);
-                if candidate.is_file() {
-                    Some(candidate)
-                } else if write_bgra_thumbnail_png(
-                    &wic.bgra8,
-                    wic.scaled_width,
-                    wic.scaled_height,
-                    self.thumb_max_edge,
-                    &candidate,
-                )
-                .is_ok()
+                if candidate.is_file()
+                    || write_bgra_thumbnail_png(
+                        &wic.bgra8,
+                        wic.scaled_width,
+                        wic.scaled_height,
+                        self.thumb_max_edge,
+                        &candidate,
+                    )
+                    .is_ok()
                 {
                     Some(candidate)
                 } else {
@@ -291,9 +290,7 @@ pub fn parse_exif_from_bytes(bytes: &[u8]) -> Option<ExifMetadata> {
 
 fn find_tiff_header(bytes: &[u8]) -> Option<&[u8]> {
     // 1. Raw TIFF header (`II\x2A\x00` or `MM\x00\x2A`)
-    if bytes.len() >= 8
-        && (&bytes[0..4] == b"II*\0" || &bytes[0..4] == b"MM\0*")
-    {
+    if bytes.len() >= 8 && (&bytes[0..4] == b"II*\0" || &bytes[0..4] == b"MM\0*") {
         return Some(bytes);
     }
     // 2. JPEG (`\xFF\xD8`) -> scan markers for APP1 (`\xFF\xE1`) with `"Exif\0\0"`
@@ -332,7 +329,8 @@ fn find_tiff_header(bytes: &[u8]) -> Option<&[u8]> {
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         let mut i = 8usize;
         while i + 8 <= bytes.len() {
-            let len = u32::from_be_bytes([bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]]) as usize;
+            let len =
+                u32::from_be_bytes([bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]]) as usize;
             let chunk_type = &bytes[i + 4..i + 8];
             let data_start = i + 8;
             let data_end = data_start.saturating_add(len);
@@ -677,11 +675,16 @@ mod tests {
         assert_eq!(out.segments.len(), 1);
         let text = &out.segments[0].text;
         assert!(text.contains("640x480"), "expected dimensions in {text:?}");
-        assert!(text.contains("Canon EOS R5"), "expected camera model in {text:?}");
+        assert!(
+            text.contains("Canon EOS R5"),
+            "expected camera model in {text:?}"
+        );
         assert!(text.contains("2026-10-15"), "expected date in {text:?}");
         // Privacy verification: GPS coordinates must never be indexed.
         assert!(
-            !text.contains("37.7749") && !text.contains("122.4194") && !text.contains("SECRET_GPS_LOC"),
+            !text.contains("37.7749")
+                && !text.contains("122.4194")
+                && !text.contains("SECRET_GPS_LOC"),
             "GPS geotag leaked into indexed text: {text:?}"
         );
     }
@@ -717,10 +720,8 @@ mod tests {
             language_tag: Some("en-US".into()),
         };
 
-        let extractor = ImageExtractor::new(
-            tmp.0.join("thumbs"),
-            Arc::new(StaticOcrProvider(ocr_data)),
-        );
+        let extractor =
+            ImageExtractor::new(tmp.0.join("thumbs"), Arc::new(StaticOcrProvider(ocr_data)));
         let out = extractor
             .extract(&shot_path, &ExtractBudget::default())
             .unwrap();
@@ -766,4 +767,3 @@ mod tests {
         );
     }
 }
-

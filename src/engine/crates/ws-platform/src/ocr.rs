@@ -199,10 +199,7 @@ fn run_engine(engine: &OcrEngine, bitmap: &SoftwareBitmap) -> Result<OcrExtracti
                 let w_count = line_words.Size().unwrap_or(0);
                 for w_idx in 0..w_count {
                     if let Ok(word) = line_words.GetAt(w_idx) {
-                        let w_text = word
-                            .Text()
-                            .map(|h| h.to_string_lossy())
-                            .unwrap_or_default();
+                        let w_text = word.Text().map(|h| h.to_string_lossy()).unwrap_or_default();
                         let rect = word.BoundingRect().unwrap_or_default();
                         if !w_text.trim().is_empty() {
                             words.push(OcrWordBox {

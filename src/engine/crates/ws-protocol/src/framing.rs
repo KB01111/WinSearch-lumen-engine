@@ -40,9 +40,8 @@ pub fn write_message<W: Write, T: Serialize>(w: &mut W, msg: &T) -> Result<(), F
 /// end-of-stream (peer disconnected).
 pub fn read_message<R: Read, T: DeserializeOwned>(r: &mut R) -> Result<Option<T>, FrameError> {
     let mut len_buf = [0u8; 4];
-    match read_exact_or_eof(r, &mut len_buf)? {
-        false => return Ok(None),
-        true => {}
+    if !read_exact_or_eof(r, &mut len_buf)? {
+        return Ok(None);
     }
     let len = u32::from_le_bytes(len_buf);
     if len > MAX_FRAME_BYTES {
