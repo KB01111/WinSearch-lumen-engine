@@ -1,0 +1,18 @@
+{
+  "scope": "Corrected unsigned release and copied no-model package; no installed or latency acceptance",
+  "source_commit": "accd7071fc5822e14df68877d0834ab2b83ae72c",
+  "build_passed": true,
+  "manifest_sha256": "630813959c03e58c55a7f3f290bfdc99c017ba270617b3adee89a85543411323",
+  "package_elapsed_seconds": 44.576,
+  "package_owned_job_empty": true,
+  "excluded_event_code_result_found": true,
+  "excluded_event_owned_job_empty": true,
+  "runtime_proof": "release-native-inputs-accd707.json",
+  "evidence_sha256": {
+    "artifacts/candidate-code-events-accd707/build-inputs.json": "731b17c704a0c5d3c295b00157dce067ae0937bca0e0e8a05031148e626fd380",
+    "artifacts/excluded-code-release-green/results.json": "fb0d2dcdbd09f6d013afb7f149e459b4c8e2ea6486a4b141ebbd9687fe11b096",
+    "artifacts/payload-native-accd707.json": "45f2505e5e58b36025edc28edea1af3fa42b4803373f241adb1a8a5f43bf192b"
+  },
+  "performance_acceptance": false,
+  "installed_acceptance": false
+}

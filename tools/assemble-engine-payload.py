@@ -14,10 +14,10 @@ import tempfile
 import time
 import zipfile
 
-ENGINE_COMMIT = "9b7b01d86dce6c13abdfedc2c842d3095bbd796d"
+ENGINE_COMMIT = "accd7071fc5822e14df68877d0834ab2b83ae72c"
 MAX_FILE_BYTES = 256 * 1024 * 1024
 ROOT = Path(__file__).resolve().parents[1]
-NATIVE_PROOF = Path('docs/validation/2026-10-22-production-baseline/release-native-inputs.json')
+NATIVE_PROOF = Path('docs/validation/2026-10-22-production-baseline/release-native-inputs-accd707.json')
 REQUIRED_NPU_SOURCES = {
     'src/engine/third_party/taconite/shim/iron_run_guard.h',
     'src/engine/third_party/taconite/shim/iron_xrt_shim.cpp',

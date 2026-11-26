@@ -158,18 +158,17 @@ host runs, so they do not isolate a causal speedup. Bulk-result and larger-corpu
 acceptance remain unmeasured. This candidate's separate copied recovery fixture
 passed with independent Stop in 24.95 ms.
 
-The [updated native-input proof](release-native-inputs.json) records independent
+The [9b native-input proof](release-native-inputs.json) records independent
 CPU/NPU references, all ten frozen retrieval suites and copied recovery for the
-`9b7b01d` candidate. The assembler now pins that source and those bytes. Its
+`9b7b01d` candidate. The prior assembler pinned that source and those bytes. Its
 unsigned model-free manifest is
 `059bea49c03e889de604dbd2c29af2deb410c2694c6d19099309295387fbce9b`.
 The [copied package fixture](payload-native-9b7b01d.json) passed in 33.39 seconds
 under the unchanged 90-second watchdog, outside the checkout with System32-only
 PATH. It checked native text/PDF extraction, per-folder admission and bounded
 1,000/1,100-result delivery. These functional checks do not override the failed
-latency gate. Lumen's local development pins/staging match this manifest; its
-expanded native adapter test still fails on queued code work and is under
-investigation. Default cutover remains disabled.
+latency gate. Lumen's expanded native adapter test failed on queued code work
+with this candidate. Default cutover remains disabled.
 
 The [code-event checkpoint](code-event-checkpoint.json) identifies that failure:
 a notification on the explicitly excluded `private` folder retired the initial
@@ -179,14 +178,30 @@ overflow and governing crawl controls still invalidate; even explicitly denied
 controls must retire previously captured rules for an admitted directory. Both
 regressions failed before their fixes. All 17 code tests, strict daemon Clippy and
 build pass, and a controlled native diagnostic changes from no result on the old
-release to a result on the corrected debug daemon. The corrected release and its
-Lumen integration still need revalidation; these diagnostics do not qualify them.
+release to a result on the corrected debug daemon.
+
+The clean `accd707` release build then passed. Only the daemon executable changed
+against `9b7b01d`; workers and native DLLs are byte-identical. Nevertheless, the
+[new native-input proof](release-native-inputs-accd707.json) records fresh actual
+NPU references, CPU/NPU media and all ten frozen retrieval suites against this
+candidate. Every owned job emptied. Copied reset/restart recovery passed with
+independent Stop in 22.35 ms, and the excluded-event diagnostic found admitted code.
+The [release checkpoint](release-code-event-checkpoint.json) binds those bytes.
+
+The assembler now pins `accd707` and manifest
+`630813959c03e58c55a7f3f290bfdc99c017ba270617b3adee89a85543411323`.
+Its [copied package fixture](payload-native-accd707.json) passed in 44.58 seconds
+under the original 90-second watchdog, including bounded 1,000/1,100-result
+delivery and System32-only PATH. Lumen's local pins/archive/staging match it;
+its native adapter rerun is pending. This source change addresses code-event
+admission, and has no new latency measurement. The failing `9b7b01d` performance
+baseline remains open; functional package success does not satisfy latency.
 
 ## Remaining acceptance
 
 Tasks 5-11 remain open. The Task 6 opt-in Lumen adapter has source regressions,
-but its expanded native code-search test currently fails against the historical
-85a915d payload. Default cutover remains disabled. The scale harness has retained
+but final native integration still needs validation. Default cutover remains
+disabled. The scale harness has retained
 debug and release failures; neither passes production latency. Final source,
 hosted, backend/model quality, package recovery, signing, installed upgrade/rollback
 and strict UI/resource acceptance still need evidence on the final pinned candidate.
